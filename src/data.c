@@ -11,6 +11,7 @@ static const char *baked(int which) {
     if (which == DATA_RECIPES) return ASSET_RECIPES;
     if (which == DATA_SOUNDS)  return ASSET_SOUNDS;
     if (which == DATA_MESHES)  return ASSET_MESHES;
+    if (which == DATA_SPRITES) return ASSET_SPRITES;
     return ASSET_LEVELS;
 }
 
@@ -40,8 +41,18 @@ static const char *FILENAMES[DATA_COUNT] = {
     "assets\\textures.txt",
     "assets\\sounds.txt",
     0,                        /* 메시는 .obj 파일에서 구워지므로 파일 없음 */
-    "assets\\levels.txt"
+    "assets\\levels.txt",
+    0                         /* 스프라이트는 .png에서 구워지므로 파일 없음 */
 };
+
+/* Indexed by DataAsset, so a missing entry would silently shift every path
+   after it onto the wrong asset -- textures would be watched as sounds. The
+   length is checked here rather than trusted to whoever adds the next one.
+   DataAsset로 인덱싱되므로, 항목이 누락되면 그 뒤의 모든 경로가 조용히 다른 에셋으로
+   밀려납니다. 텍스처가 사운드로 감시되는 식입니다. 다음에 항목을 추가하는 사람에게
+   맡기지 않고 이곳에서 길이를 검사합니다. */
+_Static_assert(sizeof(FILENAMES) / sizeof(FILENAMES[0]) == DATA_COUNT,
+               "FILENAMES needs exactly one entry per DataAsset");
 
 /**
  * @struct Slot

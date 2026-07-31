@@ -88,9 +88,13 @@
  * @note Costs the square of this in fill rate: 2 means a framebuffer four
  *       times the area and four texture fetches per output pixel. 1 disables
  *       supersampling entirely and restores the single-sample behaviour.
- * @warning Must match SUPERSAMPLE in post.c's fragment shader. A constant
- *          cannot be shared with GLSL, so the two are kept in step by hand --
- *          the same arrangement PROC_* already has with render.c.
+ * @note This is the ONLY definition. post.c stringifies it straight into the
+ *       shader source, so there is no second copy in GLSL to keep in step --
+ *       unlike PROC_*, which still pairs by hand with render.c. An earlier
+ *       version did duplicate it, and the two went out of sync once: the C
+ *       side allocated a buffer of one size while the shader averaged blocks
+ *       of another, which tore the image into misaligned tiles without naming
+ *       its cause.
  *
  * 한국어
  * ------
@@ -103,9 +107,12 @@
  * @note 픽셀 채우기 비용이 이 값의 제곱만큼 듭니다. 2이면 프레임버퍼 면적이 4배가
  *       되고 출력 픽셀당 텍스처 페치가 4회입니다. 1이면 슈퍼샘플링이 완전히
  *       비활성화되어 단일 샘플 동작으로 되돌아갑니다.
- * @warning post.c 프래그먼트 셰이더의 SUPERSAMPLE과 반드시 일치해야 합니다. GLSL과
- *          상수를 공유할 수 없으므로 두 값을 수동으로 동기화합니다. render.c와
- *          PROC_*가 이미 갖고 있는 것과 동일한 방식입니다.
+ * @note 이것이 *유일한* 정의입니다. post.c가 이 값을 셰이더 소스에 그대로 문자열로
+ *       삽입하므로 GLSL에 동기화를 유지해야 할 두 번째 사본이 없습니다. 여전히
+ *       render.c와 수동으로 짝을 이루는 PROC_*와는 다릅니다. 이전 버전은 값을
+ *       중복해서 두었고 실제로 한 번 어긋났습니다. C 쪽은 한 크기로 버퍼를 할당하는데
+ *       셰이더는 다른 크기로 블록을 평균 내어, 원인을 알려 주지 않은 채 화면이 어긋난
+ *       타일로 찢어졌습니다.
  */
 #define POST_SUPERSAMPLE 2
 

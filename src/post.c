@@ -31,6 +31,34 @@
 #include "render.h"   /* rd_use -- this pass binds its own program and must
                          put the renderer's back before returning. */
 
+/* --- Shader source generation / 셰이더 소스 생성 --- */
+
+/**
+ * @def POST_STR
+ * @brief Stringifies a macro's VALUE for injection into the shader source.
+ *
+ * ENGLISH
+ * -------
+ * The two-level expansion is required, not decoration: `#x` in a single-level
+ * macro stringifies the argument's spelling, so it would produce the text
+ * "POST_SUPERSAMPLE" rather than "2". The outer macro forces one expansion
+ * before the inner one stringifies.
+ *
+ * This is what lets a constant be defined once in C and used in GLSL, which
+ * removes the hand-kept pairing that went out of sync once already.
+ *
+ * 한국어
+ * ------
+ * 2단계 확장은 장식이 아니라 필수입니다. 단일 단계 매크로에서 `#x`는 인자의 *철자*를
+ * 문자열화하므로 "2"가 아니라 "POST_SUPERSAMPLE"이라는 텍스트가 만들어집니다. 바깥
+ * 매크로가 먼저 한 번 확장을 강제한 뒤 안쪽 매크로가 문자열화합니다.
+ *
+ * 이 덕분에 상수를 C에서 한 번만 정의하고 GLSL에서 사용할 수 있으며, 이미 한 번
+ * 어긋난 적이 있는 수동 동기화 관계가 제거됩니다.
+ */
+#define POST_STR_(x) #x
+#define POST_STR(x)  POST_STR_(x)
+
 /* --- Static variable definitions / 정적 변수 정의 --- */
 
 /** @brief The offscreen framebuffer, its colour texture and its depth buffer. / 오프스크린 프레임버퍼와 그 색상 텍스처 및 깊이 버퍼. */
@@ -199,23 +227,33 @@ static const char *FS =
  * 겉보기 크기는 유지되면서 월드 자체는 선명해집니다. */
 "const float DITHER_SCALE = 1.0;\n"
 
-/* Rendered samples per art pixel, per axis. 2.0 means each art pixel is the
-   average of a 2x2 block, so the framebuffer is four times the area and the
-   loop below does four texture fetches.
+/* Rendered samples per art pixel, per axis, GENERATED from the C constant.
  *
- * Must match POST_SUPERSAMPLE in post.h -- the C side allocates the larger
- * buffer, this side averages it back down, and the two have to agree or the
- * block boundaries land in the wrong place. There is no way to share a
- * constant with GLSL, which is the same hand-kept pairing PROC_* already has.
+ * This used to be a literal `2.0` with a comment asking whoever edited
+ * POST_SUPERSAMPLE to remember to change it here too. That is exactly the
+ * arrangement PROC_* has with the fragment shader in render.c, and it is
+ * tolerable there because a mismatch draws the wrong pattern. Here a mismatch
+ * puts the block boundaries in the wrong place: the C side allocates a buffer
+ * of one size and this side averages blocks of another, so the image tears
+ * into misaligned tiles. It went out of sync once during development and the
+ * symptom did not name its cause.
  *
- * 아트 픽셀당 렌더링 샘플 수이며 축별 값입니다. 2.0이면 각 아트 픽셀이 2x2 블록의
- * 평균이므로 프레임버퍼 면적은 4배가 되고 아래 루프는 텍스처를 4회 페치합니다.
+ * The shader is assembled from C string literals, so the preprocessor can
+ * simply write the number in. One definition, no pairing to keep.
  *
- * post.h의 POST_SUPERSAMPLE과 반드시 일치해야 합니다. C 쪽이 더 큰 버퍼를 할당하고
- * 이쪽이 그것을 다시 평균 내므로, 두 값이 어긋나면 블록 경계가 엉뚱한 곳에 놓입니다.
- * GLSL과 상수를 공유할 방법이 없으며, 이는 PROC_*가 이미 갖고 있는 것과 동일한 수동
- * 동기화 관계입니다. */
-"const float SUPERSAMPLE = 2.0;\n"
+ * 아트 픽셀당 렌더링 샘플 수이며 축별 값으로, C 상수로부터 *생성*됩니다.
+ *
+ * 이전에는 리터럴 `2.0`을 두고, POST_SUPERSAMPLE을 수정하는 사람이 이곳도 함께 바꾸기를
+ * 당부하는 주석이 붙어 있었습니다. 이는 render.c의 프래그먼트 셰이더와 PROC_*가 맺고
+ * 있는 것과 동일한 관계이며, 그쪽에서는 불일치가 잘못된 패턴을 그리는 데 그치므로
+ * 감수할 만합니다. 그러나 이곳에서 불일치는 블록 경계를 엉뚱한 위치에 놓습니다. C 쪽은
+ * 한 가지 크기로 버퍼를 할당하는데 이쪽은 다른 크기로 블록을 평균 내므로, 화면이
+ * 어긋난 타일로 찢어집니다. 개발 중 실제로 한 번 어긋났으며, 그 증상은 원인을 알려
+ * 주지 않았습니다.
+ *
+ * 셰이더는 C 문자열 리터럴로 조립되므로 전처리기가 숫자를 그대로 써넣을 수 있습니다.
+ * 정의는 하나뿐이며, 유지해야 할 짝이 없습니다. */
+"const float SUPERSAMPLE = " POST_STR(POST_SUPERSAMPLE) ".0;\n"
 
 /* sRGB <-> linear. The cheap pow(2.2) approximation rather than the exact
    piecewise curve: this is a stylised 4-level output, and the difference
@@ -461,9 +499,37 @@ int post_init(int width, int height) {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     if (st != GL_FRAMEBUFFER_COMPLETE) { post_shutdown(); return 0; }
 
+    /* Both stages, then one failure check that cleans up whichever survived.
+     *
+     * The obvious form -- `if (!vs || !fs) { post_shutdown(); return 0; }` --
+     * leaks. post_shutdown only knows about g_prog, and g_prog does not exist
+     * yet at this point, so a vertex shader that compiled while the fragment
+     * shader failed is never deleted. The shaders belong to this function
+     * until glCreateProgram takes them, and this is the window where that
+     * ownership has to be discharged by hand.
+     *
+     * mesh.c's scratch allocation does the same thing for the same reason:
+     * two acquisitions, either of which can fail, and a cleanup that has to
+     * release whichever half succeeded.
+     *
+     * 두 단계를 모두 컴파일한 뒤, 살아남은 쪽을 정리하는 실패 검사를 한 번 수행합니다.
+     *
+     * 명백해 보이는 형태(`if (!vs || !fs) { post_shutdown(); return 0; }`)는
+     * 누수를 일으킵니다. post_shutdown은 g_prog만 알고 있는데 이 시점에는 g_prog가
+     * 아직 존재하지 않으므로, 프래그먼트 셰이더가 실패하는 동안 컴파일에 성공한 정점
+     * 셰이더가 결코 삭제되지 않습니다. 셰이더는 glCreateProgram이 가져가기 전까지 이
+     * 함수의 소유이며, 이곳이 그 소유권을 직접 해제해야 하는 구간입니다.
+     *
+     * mesh.c의 임시 메모리 할당도 동일한 이유로 동일한 처리를 합니다. 각각 실패할 수
+     * 있는 두 번의 획득과, 성공한 쪽을 해제해야 하는 정리 과정입니다. */
     GLuint vs = compile(GL_VERTEX_SHADER,   VS);
     GLuint fs = compile(GL_FRAGMENT_SHADER, FS);
-    if (!vs || !fs) { post_shutdown(); return 0; }
+    if (!vs || !fs) {
+        if (vs) glDeleteShader(vs);
+        if (fs) glDeleteShader(fs);
+        post_shutdown();
+        return 0;
+    }
 
     g_prog = glCreateProgram();
     glAttachShader(g_prog, vs);

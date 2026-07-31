@@ -1,0 +1,818 @@
+/**
+ * @file render.h
+ * @brief Geometry building, GPU upload, and the single shader everything draws with.
+ *
+ * ENGLISH
+ * -------
+ * One program with a mode switch beats three programs: fewer GLSL strings in
+ * .rdata, fewer uniform lookups, less code.
+ *
+ * Drawing anything follows the same three steps: build vertices into a
+ * ::MeshBuf on the CPU, upload it into a ::Mesh on the GPU, then select a
+ * draw mode and issue the draw. The mb_* builders are pure maths and touch no
+ * GL at all, which is what lets headless tools verify geometry by reading the
+ * vertices back out.
+ *
+ * 한국어
+ * ------
+ * 모드 전환이 가능한 하나의 프로그램이 세 개의 프로그램보다 낫습니다. .rdata에
+ * 들어가는 GLSL 문자열이 줄고, 유니폼 조회가 줄고, 코드도 줄어듭니다.
+ *
+ * 무엇을 그리든 동일한 세 단계를 따릅니다. CPU에서 정점을 ::MeshBuf에 생성하고,
+ * 이를 GPU의 ::Mesh로 업로드한 뒤, 그리기 모드를 선택하고 그리기 명령을 내립니다.
+ * mb_* 계열 빌더는 순수한 수학 연산이며 GL을 전혀 사용하지 않습니다. 덕분에
+ * 헤드리스 도구가 정점을 다시 읽어 지오메트리를 검증할 수 있습니다.
+ */
+#ifndef RENDER_H
+#define RENDER_H
+
+#include "gl.h"
+#include "m.h"
+
+/* --- Capacity limits / 용량 제한 --- */
+
+#define MB_MAX_SILHOUETTE 64   ///< @brief Maximum points in an extruded silhouette. / 압출 실루엣이 가질 수 있는 최대 점의 수.
+
+/* --- Type definitions: geometry / 타입 정의: 지오메트리 --- */
+
+/**
+ * @struct Box
+ * @brief The universal primitive: a centre, half-extents and a facing flag.
+ *
+ * ENGLISH
+ * -------
+ * A level is boxes, a gun is boxes, an enemy will be boxes.
+ * @note `inward` flips winding and normals to turn a box into a room.
+ *
+ * 한국어
+ * ------
+ * 범용 기본 도형입니다. 중심, 절반 크기, 방향 플래그로 구성됩니다.
+ *
+ * 레벨도 상자이고, 총기도 상자이며, 적도 상자가 될 것입니다.
+ * @note `inward`는 감기 순서와 법선을 뒤집어 상자를 방으로 바꿉니다.
+ */
+typedef struct {
+    v3 c;        /**< Centre position. / 중심 위치. */
+    v3 h;        /**< Half-extents along each axis. / 각 축 방향의 절반 크기. */
+    int inward;  /**< Non-zero to face inward, making a room instead of a solid. / 0이 아니면 안쪽을 향하게 되어 고체가 아닌 방이 됩니다. */
+} Box;
+
+/**
+ * @struct Vtx
+ * @brief One vertex: position, normal and UV -- 32 bytes.
+ *
+ * ENGLISH
+ * -------
+ * @note The UV costs nothing on disk: meshes are generated at startup from
+ *       the Box and silhouette tables, so only those tables are stored and
+ *       the vertices are built in RAM. The earlier no-UV format saved ~6KB of
+ *       RAM out of a 1.4MB surplus while costing all mapping control, which
+ *       was a bad trade.
+ *
+ * 한국어
+ * ------
+ * 정점 하나입니다. 위치, 법선, UV로 구성되며 32바이트입니다.
+ * @note UV는 디스크 용량을 전혀 소모하지 않습니다. 메시는 시작 시점에 Box와 실루엣
+ *       테이블로부터 생성되므로 해당 테이블만 저장되고 정점은 RAM에서 만들어집니다.
+ *       이전의 UV 없는 형식은 1.4MB의 여유 중 약 6KB의 RAM을 절약하면서 매핑 제어
+ *       능력을 전부 잃었는데, 이는 손해 보는 거래였습니다.
+ */
+typedef struct { float px, py, pz, nx, ny, nz, u, v; } Vtx;
+
+/**
+ * @struct MeshBuf
+ * @brief A growable CPU-side vertex buffer.
+ *
+ * ENGLISH
+ * -------
+ * @warning Owns heap memory: pair every ::mb_init with an ::mb_free.
+ *
+ * 한국어
+ * ------
+ * 크기가 늘어날 수 있는 CPU 측 정점 버퍼입니다.
+ * @warning 힙 메모리를 소유합니다. 모든 ::mb_init은 ::mb_free와 짝을 이루어야 합니다.
+ * @note The `struct MeshBuf` tag is deliberate, not decoration: it is what
+ *       lets level.h forward-declare this type instead of including render.h,
+ *       which is what keeps the whole GL stack out of the simulation headers.
+ *       An anonymous typedef cannot be forward-declared in C.
+ * @note `struct MeshBuf` 태그는 장식이 아니라 의도적인 것입니다. 이 태그 덕분에
+ *       level.h가 render.h를 포함하는 대신 이 타입을 전방 선언할 수 있으며, 그것이
+ *       GL 스택 전체를 시뮬레이션 헤더에서 배제하는 방법입니다. C에서 익명 typedef는
+ *       전방 선언할 수 없습니다.
+ */
+typedef struct MeshBuf {
+    Vtx *v;              /**< Vertex array, owned by this buffer. / 이 버퍼가 소유한 정점 배열. */
+    int  count, cap;     /**< Vertices in use, and allocated capacity. / 사용 중인 정점 수와 할당된 용량. */
+} MeshBuf;
+
+/**
+ * @struct Mesh
+ * @brief A GPU-side vertex buffer and its vertex array object.
+ *
+ * ENGLISH
+ * -------
+ * @warning Owns GL objects. Zero-initialise before first ::mesh_upload.
+ *
+ * 한국어
+ * ------
+ * GPU 측 정점 버퍼와 그 정점 배열 객체입니다.
+ * @warning GL 객체를 소유합니다. 최초 ::mesh_upload 이전에 0으로 초기화하십시오.
+ */
+typedef struct {
+    GLuint vao, vbo;     /**< Vertex array and buffer names. / 정점 배열과 버퍼의 이름. */
+    int    count, cap;   /**< Vertices uploaded, and allocated capacity. / 업로드된 정점 수와 할당된 용량. */
+} Mesh;
+
+/* --- Enumerations / 열거형 --- */
+
+/**
+ * @brief Draw modes selected by ::rd_mode.
+ *
+ * ENGLISH
+ * -------
+ * Draw modes selected by ::rd_mode.
+ *
+ * 한국어
+ * ------
+ * ::rd_mode로 선택하는 그리기 모드입니다.
+ */
+enum {
+    RD_WORLD     = 0, /**< Textured, lit, distance fog. / 텍스처 적용, 조명 있음, 거리 안개 있음. */
+    RD_VIEWMODEL = 1, /**< Textured, lit by a fixed gun-space light, no fog. / 텍스처 적용, 총기 공간의 고정 조명 사용, 안개 없음. */
+    RD_FLAT      = 2, /**< Uniform colour, unlit -- tracers, flash, crosshair. / 단일 색상, 조명 없음. 예광탄, 화염, 조준점에 사용됩니다. */
+    RD_TEXT      = 3, /**< uColor masked by the texture's alpha -- font atlas. / 텍스처 알파로 마스킹된 uColor. 폰트 아틀라스에 사용됩니다. */
+    RD_SWATCH    = 4, /**< The raw material, unlit and unfogged -- editor palette. / 조명과 안개가 없는 원본 재질. 에디터 팔레트에 사용됩니다. */
+    RD_SPRITE    = 5  /**< Alpha-tested billboard, fogged; uColor tints and flashes. / 알파 테스트된 빌보드, 안개 적용. uColor가 색조와 점멸을 담당합니다. */
+};
+
+/**
+ * @brief Procedural surface shaders, evaluated per pixel from the UV.
+ *
+ * ENGLISH
+ * -------
+ * Infinite resolution -- a brick wall stays crisp with your nose against it --
+ * and no texture memory at all.
+ *
+ * @warning Keep this list in step with the switch in the fragment shader and
+ *          with the name table in tex.c; there is no way to share an enum with
+ *          GLSL. Adding a value here without updating both leaves the new
+ *          shader silently drawing as PROC_TEXTURE.
+ *
+ * 한국어
+ * ------
+ * 텍스처에서 샘플링하지 않고 UV로부터 픽셀 단위로 계산되는 절차적 표면 셰이더입니다.
+ *
+ * 해상도가 무한하며(벽돌 벽에 코를 들이대도 선명하게 유지됩니다) 텍스처 메모리를
+ * 전혀 사용하지 않습니다.
+ *
+ * @warning 이 목록은 프래그먼트 셰이더의 switch문 및 tex.c의 이름 테이블과 항상
+ *          동기화되어야 합니다. GLSL과 열거형을 공유할 방법이 없기 때문입니다. 양쪽을
+ *          갱신하지 않고 여기에 값을 추가하면, 새 셰이더는 조용히 PROC_TEXTURE로
+ *          그려집니다.
+ */
+enum {
+    PROC_TEXTURE = 0,   /**< Sample uTex, the original behaviour. / uTex를 샘플링하는 기존 동작. */
+    PROC_BRICK,         /**< Brick lattice. / 벽돌 격자. */
+    PROC_TILE,          /**< Tiled surface. / 타일 표면. */
+    PROC_PANEL,         /**< Riveted metal plate. / 리벳이 박힌 금속판. */
+    PROC_WOOD,          /**< Wood grain. / 나뭇결. */
+    PROC_HEX,           /**< Hexagonal pattern. / 육각형 패턴. */
+    PROC_MARBLE,        /**< Marble veining. / 대리석 무늬. */
+    PROC_RUST,          /**< Rusted metal. / 녹슨 금속. */
+    PROC_GRID,          /**< Emissive tech grid. / 발광하는 기술 격자. */
+    PROC_COUNT          /**< Total number of procedural shaders. / 절차적 셰이더의 총 개수. */
+};
+
+/* --- Public function prototypes: CPU-side builder lifecycle / 공개 함수 프로토타입: CPU 측 빌더 수명 주기 --- */
+
+/**
+ * @brief Allocates a vertex buffer with an initial capacity.
+ *
+ * ENGLISH
+ * -------
+ * @param[out] b   Buffer to initialise.
+ * @param[in]  cap Initial capacity in vertices; the buffer grows as needed.
+ * @warning Allocates heap memory the caller owns; pair with ::mb_free.
+ *
+ * 한국어
+ * ------
+ * @brief 초기 용량을 지정하여 정점 버퍼를 할당합니다.
+ * @param[out] b   초기화할 버퍼.
+ * @param[in]  cap 정점 단위의 초기 용량. 버퍼는 필요에 따라 확장됩니다.
+ * @warning 호출자가 소유하는 힙 메모리를 할당합니다. ::mb_free와 짝을 이루어야 합니다.
+ */
+void mb_init (MeshBuf *b, int cap);
+
+/**
+ * @brief Releases a vertex buffer's memory.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] b Buffer to free. Safe to call on an already-freed buffer.
+ *
+ * 한국어
+ * ------
+ * @brief 정점 버퍼의 메모리를 해제합니다.
+ * @param[in,out] b 해제할 버퍼. 이미 해제된 버퍼에 호출해도 안전합니다.
+ */
+void mb_free (MeshBuf *b);
+
+/**
+ * @brief Empties a buffer without releasing its memory.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] b Buffer to clear.
+ * @note This is how a per-frame effect buffer is reused without reallocating.
+ *
+ * 한국어
+ * ------
+ * @brief 메모리를 해제하지 않고 버퍼를 비웁니다.
+ * @param[in,out] b 비울 버퍼.
+ * @note 프레임마다 사용하는 효과 버퍼를 재할당 없이 재사용하는 방식입니다.
+ */
+void mb_reset(MeshBuf *b);
+
+/**
+ * @brief Appends one vertex.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] b Buffer to append to.
+ * @param[in]     p Position.
+ * @param[in]     n Normal.
+ * @param[in]     u Texture coordinate u.
+ * @param[in]     v Texture coordinate v.
+ *
+ * 한국어
+ * ------
+ * @brief 정점 하나를 추가합니다.
+ * @param[in,out] b 추가 대상 버퍼.
+ * @param[in]     p 위치.
+ * @param[in]     n 법선.
+ * @param[in]     u 텍스처 좌표 u.
+ * @param[in]     v 텍스처 좌표 v.
+ */
+void mb_vtx  (MeshBuf *b, v3 p, v3 n, float u, float v);
+
+/* --- Public function prototypes: primitives / 공개 함수 프로토타입: 기본 도형 --- */
+
+/**
+ * @brief Appends a quad as two triangles.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] b   Buffer to append to.
+ * @param[in]     a   First corner.
+ * @param[in]     bb  Second corner.
+ * @param[in]     c   Third corner.
+ * @param[in]     d   Fourth corner.
+ * @param[in]     n   Face normal.
+ * @param[in]     uvs Texels per world unit.
+ * @note `uvs` is applied by projecting the position onto the plane the normal
+ *       points out of. Baking the scale in here means the shader just reads
+ *       the UV, and different meshes can use different densities without a
+ *       uniform or a second draw call.
+ *
+ * 한국어
+ * ------
+ * @brief 사각형을 두 개의 삼각형으로 추가합니다.
+ * @param[in,out] b   추가 대상 버퍼.
+ * @param[in]     a   첫 번째 모서리.
+ * @param[in]     bb  두 번째 모서리.
+ * @param[in]     c   세 번째 모서리.
+ * @param[in]     d   네 번째 모서리.
+ * @param[in]     n   면 법선.
+ * @param[in]     uvs 월드 단위당 텍셀 수.
+ * @note `uvs`는 법선이 향하는 평면에 위치를 투영하는 방식으로 적용됩니다. 배율을
+ *       여기서 미리 반영해 두면 셰이더는 UV를 읽기만 하면 되고, 서로 다른 메시가
+ *       유니폼이나 추가 그리기 호출 없이 각기 다른 밀도를 사용할 수 있습니다.
+ */
+void mb_quad (MeshBuf *b, v3 a, v3 bb, v3 c, v3 d, v3 n, float uvs);
+
+/**
+ * @brief Appends a box as six quads.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] b   Buffer to append to.
+ * @param[in]     box Box to emit; its `inward` flag selects room or solid.
+ * @param[in]     uvs Texels per world unit.
+ *
+ * 한국어
+ * ------
+ * @brief 상자를 여섯 개의 사각형으로 추가합니다.
+ * @param[in,out] b   추가 대상 버퍼.
+ * @param[in]     box 생성할 상자. `inward` 플래그가 방과 고체를 구분합니다.
+ * @param[in]     uvs 월드 단위당 텍셀 수.
+ */
+void mb_box  (MeshBuf *b, Box box, float uvs);
+
+/**
+ * @brief Emits a box twice, the second mirrored across x=0.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] b   Buffer to append to.
+ * @param[in]     box Box to emit and mirror.
+ * @param[in]     uvs Texels per world unit.
+ * @note Storing one side and letting the engine reflect it halves the vertex
+ *       data for anything symmetric -- the single biggest saving on
+ *       hand-authored models.
+ *
+ * 한국어
+ * ------
+ * @brief 상자를 두 번 생성하며, 두 번째는 x=0을 기준으로 대칭 복사합니다.
+ * @param[in,out] b   추가 대상 버퍼.
+ * @param[in]     box 생성하고 대칭 복사할 상자.
+ * @param[in]     uvs 월드 단위당 텍셀 수.
+ * @note 한쪽만 저장하고 엔진이 반사하도록 하면 대칭인 모든 것의 정점 데이터가
+ *       절반으로 줄어듭니다. 직접 제작한 모델에서 가장 큰 절약 효과입니다.
+ */
+void mb_box_mirror(MeshBuf *b, Box box, float uvs);
+
+/**
+ * @brief Extrudes a closed 2D silhouette into a solid.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] b      Buffer to append to.
+ * @param[in]     pts    z,y pairs in 1/100 units -- a side-on profile.
+ * @param[in]     n      Point count, up to ::MB_MAX_SILHOUETTE.
+ * @param[in]     half_x Half thickness to extrude to, in world units.
+ * @param[in]     uvs    Texels per world unit.
+ * @note This is the primitive weapons and props are built from: an 18-point
+ *       shotgun outline is 36 integers, where the same shape as axis-aligned
+ *       boxes took fifteen 28-byte structs and still looked like a pile of
+ *       blocks.
+ * @note UVs come out of the extrusion for free -- along the skirt, u follows
+ *       the perimeter and v follows the thickness; on the flat caps, u,v are
+ *       just the silhouette coordinates. Nothing has to be unwrapped or stored.
+ * @note Winding is normalised internally, so points may be given either way
+ *       round.
+ * @warning The caps are ear-clipped, so the outline may be concave (a trigger
+ *          guard, a pump) but must NOT self-intersect.
+ *
+ * 한국어
+ * ------
+ * @brief 닫힌 2D 실루엣을 압출하여 입체로 만듭니다.
+ * @param[in,out] b      추가 대상 버퍼.
+ * @param[in]     pts    1/100 단위의 z,y 좌표 쌍. 측면 단면입니다.
+ * @param[in]     n      점의 개수. 최대 ::MB_MAX_SILHOUETTE까지 가능합니다.
+ * @param[in]     half_x 압출할 절반 두께 (월드 단위).
+ * @param[in]     uvs    월드 단위당 텍셀 수.
+ * @note 무기와 소품을 만드는 기본 도형입니다. 18개 점으로 이루어진 샷건 외곽선은
+ *       정수 36개인 반면, 동일한 형상을 축 정렬 상자로 만들면 28바이트 구조체
+ *       15개를 쓰고도 블록 더미처럼 보였습니다.
+ * @note UV는 압출 과정에서 자동으로 생성됩니다. 옆면에서는 u가 둘레를, v가 두께를
+ *       따르며, 평평한 마개면에서는 u,v가 곧 실루엣 좌표입니다. UV를 펼치거나 저장할
+ *       필요가 전혀 없습니다.
+ * @note 감기 순서는 내부에서 정규화되므로, 점을 어느 방향으로 주어도 됩니다.
+ * @warning 마개면은 귀 자르기(ear clipping)로 처리되므로 외곽선이 오목해도 되지만
+ *          (방아쇠울, 펌프 등) 자기 자신과 교차해서는 안 됩니다.
+ */
+void mb_extrude(MeshBuf *b, const short *pts, int n, float half_x, float uvs);
+
+/**
+ * @brief Extrudes a silhouette with a per-point thickness.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] b      Buffer to append to.
+ * @param[in]     pts    z,y pairs in 1/100 units.
+ * @param[in]     thick  Per-point half thickness in 1/100 units. Pass NULL
+ *                       for a constant thickness.
+ * @param[in]     n      Point count.
+ * @param[in]     half_x Half thickness used when `thick` is NULL.
+ * @param[in]     uvs    Texels per world unit.
+ * @note A constant thickness makes every part a flat slab; varying it along
+ *       the outline is what gives tapered muzzles, wedged stocks and anything
+ *       that narrows toward one end.
+ *
+ * 한국어
+ * ------
+ * @brief 점마다 다른 두께를 적용하여 실루엣을 압출합니다.
+ * @param[in,out] b      추가 대상 버퍼.
+ * @param[in]     pts    1/100 단위의 z,y 좌표 쌍.
+ * @param[in]     thick  1/100 단위의 점별 절반 두께. 일정한 두께를 원하면 NULL을
+ *                       전달하십시오.
+ * @param[in]     n      점의 개수.
+ * @param[in]     half_x `thick`이 NULL일 때 사용되는 절반 두께.
+ * @param[in]     uvs    월드 단위당 텍셀 수.
+ * @note 두께가 일정하면 모든 부품이 평평한 판이 됩니다. 외곽선을 따라 두께를 변화시키는
+ *       것이 끝이 좁아지는 총구, 쐐기 모양 개머리판 등 한쪽으로 가늘어지는 모든 형태를
+ *       만들어 냅니다.
+ */
+void mb_extrude_taper(MeshBuf *b, const short *pts, const short *thick,
+                      int n, float half_x, float uvs);
+
+/**
+ * @brief Triangulates a closed polygon lying flat at a given height.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] b   Buffer to append to.
+ * @param[in]     pts x,z pairs in 1/100 units.
+ * @param[in]     n   Point count.
+ * @param[in]     y   Height to place the polygon at, in world units.
+ * @param[in]     up  Non-zero to face upward, zero to face down, so the same
+ *                    call serves a sector floor and its ceiling.
+ * @param[in]     uvs Texels per world unit.
+ * @note Winding is normalised, so an outline may be authored either way round.
+ * @note Shares the ear clipper with ::mb_extrude's caps -- a second
+ *       triangulator for level floors would be the same code with a different
+ *       bug.
+ *
+ * 한국어
+ * ------
+ * @brief 주어진 높이에 평평하게 놓인 닫힌 다각형을 삼각형으로 분할합니다.
+ * @param[in,out] b   추가 대상 버퍼.
+ * @param[in]     pts 1/100 단위의 x,z 좌표 쌍.
+ * @param[in]     n   점의 개수.
+ * @param[in]     y   다각형을 배치할 높이 (월드 단위).
+ * @param[in]     up  0이 아니면 위를, 0이면 아래를 향합니다. 덕분에 동일한 호출이
+ *                    섹터의 바닥과 천장 모두에 사용됩니다.
+ * @param[in]     uvs 월드 단위당 텍셀 수.
+ * @note 감기 순서가 정규화되므로 외곽선을 어느 방향으로 제작해도 됩니다.
+ * @note ::mb_extrude의 마개면과 동일한 귀 자르기 알고리즘을 공유합니다. 레벨 바닥을
+ *       위한 별도의 삼각분할기를 만든다면 같은 코드에 다른 버그가 생길 뿐입니다.
+ */
+void mb_polygon(MeshBuf *b, const short *pts, int n, float y, int up, float uvs);
+
+/**
+ * @brief Revolves an open profile around the z axis.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] b        Buffer to append to.
+ * @param[in]     pts      z,r pairs in 1/100 units, r being radius from the axis.
+ * @param[in]     n        Point count.
+ * @param[in]     segments Number of revolution steps; more is rounder.
+ * @param[in]     uvs      Texels per world unit.
+ * @note This is what extrusion cannot do at any thickness: round barrels,
+ *       rocket tubes, drums.
+ *
+ * 한국어
+ * ------
+ * @brief 열린 단면을 z축을 중심으로 회전시킵니다.
+ * @param[in,out] b        추가 대상 버퍼.
+ * @param[in]     pts      1/100 단위의 z,r 좌표 쌍. r은 축으로부터의 반지름입니다.
+ * @param[in]     n        점의 개수.
+ * @param[in]     segments 회전 분할 수. 클수록 둥글어집니다.
+ * @param[in]     uvs      월드 단위당 텍셀 수.
+ * @note 압출로는 두께를 아무리 조절해도 만들 수 없는 형태를 담당합니다. 둥근 총열,
+ *       로켓 튜브, 드럼 등이 해당합니다.
+ */
+void mb_lathe(MeshBuf *b, const short *pts, int n, int segments, float uvs);
+
+/* --- Public function prototypes: billboards and lines / 공개 함수 프로토타입: 빌보드 및 선 --- */
+
+/**
+ * @brief Appends a camera-facing quad, for muzzle flashes and impact marks.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] b      Buffer to append to.
+ * @param[in]     centre Centre of the quad in world space.
+ * @param[in]     right  Camera right basis vector.
+ * @param[in]     up     Camera up basis vector.
+ * @param[in]     w      Width in world units.
+ * @param[in]     h      Height in world units.
+ *
+ * 한국어
+ * ------
+ * @brief 카메라를 향하는 사각형을 추가합니다. 총구 화염과 탄착 자국에 사용됩니다.
+ * @param[in,out] b      추가 대상 버퍼.
+ * @param[in]     centre 월드 공간에서 사각형의 중심.
+ * @param[in]     right  카메라의 우측 기저 벡터.
+ * @param[in]     up     카메라의 상향 기저 벡터.
+ * @param[in]     w      월드 단위의 너비.
+ * @param[in]     h      월드 단위의 높이.
+ */
+void mb_billboard(MeshBuf *b, v3 centre, v3 right, v3 up, float w, float h);
+
+/**
+ * @brief Appends a camera-facing quad with an explicit UV rectangle.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] b      Buffer to append to.
+ * @param[in]     centre Centre of the quad in world space.
+ * @param[in]     right  Camera right basis vector.
+ * @param[in]     up     Camera up basis vector.
+ * @param[in]     w      Width in world units.
+ * @param[in]     h      Height in world units.
+ * @param[in]     u0     Left texture coordinate.
+ * @param[in]     v0     Bottom texture coordinate.
+ * @param[in]     u1     Right texture coordinate.
+ * @param[in]     v1     Top texture coordinate.
+ * @note The explicit UV rect is what lets one sprite atlas serve many frames
+ *       -- the caller passes the sub-rect of the frame it wants.
+ *
+ * 한국어
+ * ------
+ * @brief 명시적인 UV 사각 영역을 지정하여 카메라를 향하는 사각형을 추가합니다.
+ * @param[in,out] b      추가 대상 버퍼.
+ * @param[in]     centre 월드 공간에서 사각형의 중심.
+ * @param[in]     right  카메라의 우측 기저 벡터.
+ * @param[in]     up     카메라의 상향 기저 벡터.
+ * @param[in]     w      월드 단위의 너비.
+ * @param[in]     h      월드 단위의 높이.
+ * @param[in]     u0     좌측 텍스처 좌표.
+ * @param[in]     v0     하단 텍스처 좌표.
+ * @param[in]     u1     우측 텍스처 좌표.
+ * @param[in]     v1     상단 텍스처 좌표.
+ * @note UV 영역을 명시할 수 있기에 하나의 스프라이트 아틀라스가 여러 프레임을 담당할
+ *       수 있습니다. 호출자가 원하는 프레임의 부분 영역을 전달합니다.
+ */
+void mb_billboard_uv(MeshBuf *b, v3 centre, v3 right, v3 up, float w, float h,
+                     float u0, float v0, float u1, float v1);
+
+/**
+ * @brief Appends a quad strip running along a 3D segment, facing the camera.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] b       Buffer to append to.
+ * @param[in]     a       Segment start.
+ * @param[in]     bpt     Segment end.
+ * @param[in]     cam_pos Camera position, used to orient the strip.
+ * @param[in]     width   Strip width in world units.
+ * @param[in]     utile   How many times the texture repeats along the segment.
+ * @note Rotated only around that segment's own axis -- the laser-beam/rope
+ *       idiom, as opposed to ::mb_billboard's full spherical rotation, which
+ *       would twist a taut line out of alignment with itself as the camera
+ *       moved.
+ * @note UVs run u:0..utile along the segment and v:0..1 across the width, so
+ *       a tiling rope or chain texture repeats `utile` times over the
+ *       segment's length. This is what lets a line be upgraded to a textured,
+ *       tileable rope later by doing nothing but binding a material -- the
+ *       geometry and its UVs do not change.
+ * @note Degenerates gracefully (falls back to an arbitrary side axis) when
+ *       the view looks straight down the segment, where no flat strip can
+ *       face the camera at all. A zero-length segment emits nothing.
+ *
+ * 한국어
+ * ------
+ * @brief 3D 선분을 따라 이어지며 카메라를 향하는 사각형 띠를 추가합니다.
+ * @param[in,out] b       추가 대상 버퍼.
+ * @param[in]     a       선분의 시작점.
+ * @param[in]     bpt     선분의 끝점.
+ * @param[in]     cam_pos 띠의 방향을 결정하는 데 사용되는 카메라 위치.
+ * @param[in]     width   월드 단위의 띠 폭.
+ * @param[in]     utile   선분을 따라 텍스처가 반복되는 횟수.
+ * @note 해당 선분 자체의 축을 중심으로만 회전합니다. 레이저 빔이나 로프에 쓰이는
+ *       방식이며, ::mb_billboard의 완전한 구면 회전과는 다릅니다. 구면 회전을 쓰면
+ *       카메라가 움직일 때 팽팽한 선이 자기 자신과 어긋나며 뒤틀립니다.
+ * @note UV는 선분을 따라 u:0..utile, 폭을 가로질러 v:0..1로 진행되므로, 반복 가능한
+ *       로프나 사슬 텍스처가 선분 길이에 걸쳐 `utile`번 반복됩니다. 덕분에 나중에
+ *       재질을 바인딩하는 것만으로 단순한 선을 텍스처가 적용된 반복 가능한 로프로
+ *       업그레이드할 수 있으며, 지오메트리와 UV는 그대로 유지됩니다.
+ * @note 시선이 선분과 정확히 일치하여 어떤 평평한 띠도 카메라를 향할 수 없는 경우,
+ *       임의의 측면 축으로 대체하여 무리 없이 처리합니다. 길이가 0인 선분은 아무것도
+ *       생성하지 않습니다.
+ */
+void mb_ribbon(MeshBuf *b, v3 a, v3 bpt, v3 cam_pos, float width, float utile);
+
+/**
+ * @brief Appends a single line segment (two vertices, for GL_LINES).
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] b  Buffer to append to.
+ * @param[in]     a  Segment start.
+ * @param[in]     bb Segment end.
+ * @warning Produces GL_LINES data; draw with ::mesh_draw_lines, not ::mesh_draw.
+ *
+ * 한국어
+ * ------
+ * @brief 하나의 선분을 추가합니다 (GL_LINES용 정점 2개).
+ * @param[in,out] b  추가 대상 버퍼.
+ * @param[in]     a  선분의 시작점.
+ * @param[in]     bb 선분의 끝점.
+ * @warning GL_LINES 데이터를 생성합니다. ::mesh_draw가 아닌 ::mesh_draw_lines로
+ *          그리십시오.
+ */
+void mb_line(MeshBuf *b, v3 a, v3 bb);
+
+/* --- Public function prototypes: GPU meshes / 공개 함수 프로토타입: GPU 메시 --- */
+
+/**
+ * @brief Uploads a CPU buffer's vertices to the GPU.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] m       Mesh to upload into. Created on first use.
+ * @param[in]     b       Source buffer.
+ * @param[in]     dynamic Non-zero for data that changes every frame, which
+ *                        selects a streaming usage hint and reuses the
+ *                        existing allocation when it is large enough.
+ * @warning Requires a current GL context. The mesh owns GL objects from this
+ *          point on.
+ *
+ * 한국어
+ * ------
+ * @brief CPU 버퍼의 정점을 GPU로 업로드합니다.
+ * @param[in,out] m       업로드 대상 메시. 최초 사용 시 생성됩니다.
+ * @param[in]     b       원본 버퍼.
+ * @param[in]     dynamic 매 프레임 변경되는 데이터이면 0이 아닌 값을 전달합니다.
+ *                        스트리밍 사용 힌트가 선택되며, 기존 할당이 충분히 크면
+ *                        재사용됩니다.
+ * @warning 활성 GL 컨텍스트가 필요합니다. 이 시점부터 메시가 GL 객체를 소유합니다.
+ */
+void mesh_upload    (Mesh *m, const MeshBuf *b, int dynamic);
+
+/**
+ * @brief Draws a mesh as triangles.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] m Mesh to draw. An empty mesh draws nothing.
+ * @warning Requires a current GL context and an active shader program.
+ *
+ * 한국어
+ * ------
+ * @brief 메시를 삼각형으로 그립니다.
+ * @param[in] m 그릴 메시. 비어 있는 메시는 아무것도 그리지 않습니다.
+ * @warning 활성 GL 컨텍스트와 활성화된 셰이더 프로그램이 필요합니다.
+ */
+void mesh_draw      (const Mesh *m);
+
+/**
+ * @brief Draws a mesh as lines.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] m Mesh to draw; its vertices must have been built by ::mb_line.
+ * @warning Requires a current GL context and an active shader program.
+ *
+ * 한국어
+ * ------
+ * @brief 메시를 선으로 그립니다.
+ * @param[in] m 그릴 메시. 정점이 ::mb_line으로 생성된 것이어야 합니다.
+ * @warning 활성 GL 컨텍스트와 활성화된 셰이더 프로그램이 필요합니다.
+ */
+void mesh_draw_lines(const Mesh *m);
+
+/**
+ * @brief Draws a vertex range, for meshes split into per-material runs.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] m     Mesh to draw from.
+ * @param[in] first First vertex index in the range.
+ * @param[in] count How many vertices to draw.
+ * @note This is what lets one upload serve a model whose parts use different
+ *       materials: bind a material, draw its range, repeat.
+ *
+ * 한국어
+ * ------
+ * @brief 재질별 구간으로 나뉜 메시에서 특정 정점 범위를 그립니다.
+ * @param[in] m     그리기 대상 메시.
+ * @param[in] first 범위의 첫 정점 인덱스.
+ * @param[in] count 그릴 정점의 개수.
+ * @note 부품마다 다른 재질을 사용하는 모델을 한 번의 업로드로 처리할 수 있게 하는
+ *       기능입니다. 재질을 바인딩하고 해당 구간을 그리는 과정을 반복합니다.
+ */
+void mesh_draw_range(const Mesh *m, int first, int count);
+
+/* --- Public function prototypes: the shader / 공개 함수 프로토타입: 셰이더 --- */
+
+/**
+ * @brief Compiles and links the single shader program everything draws with.
+ *
+ * ENGLISH
+ * -------
+ * @warning Requires a current GL context. Must run before any rd_* or
+ *          mesh_draw* call.
+ *
+ * 한국어
+ * ------
+ * @brief 모든 그리기에 사용되는 단일 셰이더 프로그램을 컴파일하고 링크합니다.
+ * @warning 활성 GL 컨텍스트가 필요합니다. 모든 rd_* 또는 mesh_draw* 호출보다 먼저
+ *          실행되어야 합니다.
+ */
+void rd_init (void);
+
+/**
+ * @brief Re-binds the renderer's shader program.
+ *
+ * ENGLISH
+ * -------
+ * @note ::rd_init binds the program once and everything after it assumes the
+ *       binding is still current -- rd_mode, rd_color and rd_mvp only set
+ *       uniforms, they do not bind. That held for as long as this was the
+ *       only program in the process.
+ *
+ *       It stopped holding when post.c introduced a second one. A pass that
+ *       binds its own program must call this before handing control back, or
+ *       every later rd_* call writes uniforms into a program that is not the
+ *       one drawing: the symptom is the whole screen filling with whatever
+ *       texture happened to be bound last, stretched across a full-screen
+ *       triangle.
+ *
+ * 한국어
+ * ------
+ * @brief 렌더러의 셰이더 프로그램을 다시 바인딩합니다.
+ * @note ::rd_init이 프로그램을 한 번 바인딩하면 이후의 모든 코드가 그 바인딩이
+ *       유효하다고 가정합니다. rd_mode, rd_color, rd_mvp는 유니폼만 설정할 뿐
+ *       바인딩하지 않습니다. 이 가정은 프로세스에 프로그램이 하나뿐인 동안에는
+ *       유효했습니다.
+ *
+ *       post.c가 두 번째 프로그램을 도입하면서 그 가정이 깨졌습니다. 자체 프로그램을
+ *       바인딩하는 패스는 제어를 돌려주기 전에 반드시 이 함수를 호출해야 합니다.
+ *       그렇지 않으면 이후의 모든 rd_* 호출이 실제로 그리는 프로그램이 아닌 다른
+ *       프로그램에 유니폼을 씁니다. 증상은 마지막으로 바인딩된 텍스처가 전체 화면
+ *       삼각형에 늘어난 채 화면 전체를 뒤덮는 것입니다.
+ */
+void rd_use  (void);
+
+/**
+ * @brief Selects the draw mode for subsequent draws.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] mode One of the RD_* constants.
+ * @warning Sets a uniform only. The renderer's program must be current --
+ *          see ::rd_use.
+ *
+ * 한국어
+ * ------
+ * @brief 이후 그리기에 적용될 그리기 모드를 선택합니다.
+ * @param[in] mode RD_* 상수 중 하나.
+ * @warning 유니폼만 설정합니다. 렌더러의 프로그램이 현재 바인딩되어 있어야 합니다.
+ *          ::rd_use를 참조하십시오.
+ */
+void rd_mode (int mode);
+
+/**
+ * @brief Sets the model-view-projection matrix for subsequent draws.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] mvp Combined transform.
+ *
+ * 한국어
+ * ------
+ * @brief 이후 그리기에 적용될 모델-뷰-투영 행렬을 설정합니다.
+ * @param[in] mvp 결합된 변환 행렬.
+ */
+void rd_mvp  (mat4 mvp);
+
+/**
+ * @brief Sets the eye position, used for lighting and fog.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] eye Camera position in world space.
+ *
+ * 한국어
+ * ------
+ * @brief 조명과 안개 계산에 사용되는 시점 위치를 설정합니다.
+ * @param[in] eye 월드 공간에서의 카메라 위치.
+ */
+void rd_eye  (v3 eye);
+
+/**
+ * @brief Sets the uniform colour used by the flat, text and sprite modes.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] r Red component, 0..1.
+ * @param[in] g Green component, 0..1.
+ * @param[in] b Blue component, 0..1.
+ * @param[in] a Alpha component, 0..1.
+ *
+ * 한국어
+ * ------
+ * @brief 평면, 텍스트, 스프라이트 모드에서 사용되는 단일 색상을 설정합니다.
+ * @param[in] r 빨강 성분 (0..1).
+ * @param[in] g 초록 성분 (0..1).
+ * @param[in] b 파랑 성분 (0..1).
+ * @param[in] a 알파 성분 (0..1).
+ */
+void rd_color(float r, float g, float b, float a);
+
+/**
+ * @brief Selects the procedural shader and its parameters for the next draw.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] proc   One of the PROC_* constants. ::PROC_TEXTURE restores
+ *                   plain texture sampling.
+ * @param[in] rgb    Base colour, three floats.
+ * @param[in] scale  Pattern cells per UV unit.
+ * @param[in] params Three spare parameters; `params[0]` is gloss.
+ *
+ * 한국어
+ * ------
+ * @brief 다음 그리기에 사용할 절차적 셰이더와 그 매개변수를 선택합니다.
+ * @param[in] proc   PROC_* 상수 중 하나. ::PROC_TEXTURE는 일반 텍스처 샘플링으로
+ *                   되돌립니다.
+ * @param[in] rgb    기본 색상. float 3개입니다.
+ * @param[in] scale  UV 단위당 패턴 셀의 수.
+ * @param[in] params 예비 매개변수 3개. `params[0]`은 광택입니다.
+ */
+void rd_proc (int proc, const float rgb[3], float scale, const float params[3]);
+
+#endif

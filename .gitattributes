@@ -1,0 +1,24 @@
+# Normalise line endings in the repository, check out native.
+#
+# Without this, Git warns on every add and the working tree ends up mixed --
+# some files LF, some CRLF -- which shows up as whole-file diffs the first time
+# anyone on another machine touches them.
+#
+# `text=auto` stores everything Git detects as text with LF and hands it back
+# with the platform's own endings. The toolchain here is w64devkit, whose gcc
+# reads either, and the asset parsers in txt.h skip \r explicitly, so nothing
+# in this project depends on which one lands on disk.
+* text=auto
+
+# The one exception. .bat is executed by cmd.exe, which needs CRLF on the
+# label and goto lines to behave; checking one out with LF endings can break
+# it in ways that look like a corrupt file rather than a line-ending problem.
+*.bat text eol=crlf
+
+# Binary: never normalised, never diffed as text.
+#
+# NOT *.obj -- in most C projects that means a compiled object file, but here
+# assets/crate.obj is a hand-commented Wavefront mesh and wants to diff as the
+# text it is. Compiled objects are excluded by .gitignore instead.
+*.ppm  binary
+*.png  binary

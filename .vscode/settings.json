@@ -1,0 +1,23 @@
+{
+    // Every source file in this project is UTF-8, including the Korean half of
+    // the Doxygen comments. Without this, an editor whose global
+    // "files.encoding" is a legacy Korean codepage (euckr / cp949 -- the
+    // Windows default in a ko-KR locale) decodes those comments as mojibake:
+    // "발에서 눈까지의 높이" reads as "�߿��� �������� ����".
+    //
+    // Set per-project rather than globally so a machine configured for EUC-KR
+    // elsewhere keeps that default for its other work and still reads this
+    // repository correctly.
+    "files.encoding": "utf8",
+
+    // Turned OFF deliberately. Encoding detection is a heuristic, and on short
+    // or mostly-ASCII files it guesses wrong -- which is exactly how some files
+    // here rendered correctly while others did not, despite all of them being
+    // identical UTF-8 on disk. An explicit encoding is not a guess.
+    "files.autoGuessEncoding": false,
+
+    // No BOM. GCC accepts one, but the project's PowerShell scripts and the
+    // bake step read these files as plain text, and a stray BOM shows up as a
+    // phantom character at the start of the first token.
+    "files.eol": "\n"
+}

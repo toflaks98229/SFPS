@@ -238,6 +238,38 @@ float post_begin(void);
 void post_end(int win_w, int win_h);
 
 /**
+ * @brief Which side of the pass boundary the frame is currently on.
+ *
+ * ENGLISH
+ * -------
+ * @return 1 between ::post_begin and ::post_end (the WORLD pass, which is
+ *         pixelised and dithered), 0 outside it (the UI pass, at native
+ *         resolution).
+ * @note Exists so the boundary can be asserted rather than only commented.
+ *       Which side a draw belongs on is a real decision -- the view model is
+ *       deliberately in the world pass because it shares the scene's
+ *       lighting, while 5x7 glyphs must not be, because magnified four times
+ *       and dithered they are unreadable. Getting it wrong produces a
+ *       cosmetic bug with no error, which is the kind that survives review.
+ * @note Cheap: reads one flag. Intended for a POST_ASSERT_WORLD_PASS /
+ *       POST_ASSERT_UI_PASS check at the top of a draw routine in dev builds.
+ *
+ * 한국어
+ * ------
+ * @brief 현재 프레임이 패스 경계의 어느 쪽에 있는지를 나타냅니다.
+ * @return ::post_begin과 ::post_end 사이(픽셀화·디더링되는 *월드* 패스)이면 1,
+ *         그 바깥(원해상도 UI 패스)이면 0.
+ * @note 경계를 주석으로만 두지 않고 단언할 수 있도록 존재합니다. 어떤 그리기가 어느
+ *       쪽에 속하는지는 실제 판단이 필요한 문제입니다. 뷰 모델은 장면의 조명을
+ *       공유하므로 의도적으로 월드 패스에 두는 반면, 5x7 글리프는 4배 확대되어
+ *       디더링되면 읽을 수 없으므로 그쪽에 있어서는 안 됩니다. 잘못 두면 오류 없이
+ *       외관상 버그만 발생하는데, 이런 종류가 리뷰를 통과해 살아남습니다.
+ * @note 플래그 하나를 읽을 뿐이라 저렴합니다. 개발 빌드에서 그리기 루틴 상단에
+ *       POST_ASSERT_WORLD_PASS / POST_ASSERT_UI_PASS 검사를 두는 용도입니다.
+ */
+int post_in_world_pass(void);
+
+/**
  * @brief Releases the offscreen target and the blit shader.
  *
  * ENGLISH

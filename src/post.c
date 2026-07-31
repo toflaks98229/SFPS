@@ -74,6 +74,23 @@ static int    g_w, g_h;
 static int    g_ready;
 /** @brief Runtime on/off, independent of whether the path exists. / 경로 존재 여부와 무관한 런타임 on/off. */
 static int    g_on = 1;
+/**
+ * @brief Set between post_begin and post_end: the frame is in the world pass.
+ *
+ * Tracked even when the effect is OFF. The boundary is a property of the
+ * frame's structure, not of whether the pixelisation happens to be enabled --
+ * a draw that belongs in the UI pass is misplaced either way, and a guard
+ * that only fires with the effect on would miss it exactly when the developer
+ * had toggled it off to see something clearly.
+ *
+ * post_begin과 post_end 사이에 설정되며, 프레임이 월드 패스에 있음을 뜻합니다.
+ *
+ * 효과가 *꺼져* 있어도 추적합니다. 경계는 픽셀화 활성화 여부가 아니라 프레임 구조의
+ * 속성입니다. UI 패스에 속해야 할 그리기는 어느 쪽이든 잘못 놓인 것이며, 효과가 켜져
+ * 있을 때만 발동하는 가드는 개발자가 무언가를 명확히 보려고 효과를 꺼 둔 바로 그
+ * 순간에 이를 놓치게 됩니다.
+ */
+static int    g_in_world;
 
 /* --- Shaders / 셰이더 --- */
 
@@ -557,9 +574,13 @@ int post_init(int width, int height) {
 
 int post_enabled(void) { return g_ready && g_on; }
 
+int post_in_world_pass(void) { return g_in_world; }
+
 void post_set_enabled(int on) { g_on = on ? 1 : 0; }
 
 float post_begin(void) {
+    /* Set regardless of whether the effect is on -- see g_in_world. */
+    g_in_world = 1;
     if (!post_enabled()) return 0.0f;
     glBindFramebuffer(GL_FRAMEBUFFER, g_fbo);
     /* The world is rasterised at the FULL framebuffer size; the shader
@@ -572,6 +593,7 @@ float post_begin(void) {
 }
 
 void post_end(int win_w, int win_h) {
+    g_in_world = 0;
     if (!post_enabled()) return;
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);

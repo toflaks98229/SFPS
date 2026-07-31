@@ -72,7 +72,8 @@ static const char *const DIAG_NAMES[DIAG_COUNT] = {
     "texop",    /* DIAG_TEX_OPS      */
     "enemy",    /* DIAG_ENEMY_CAP    */
     "pickup",   /* DIAG_PICKUP_CAP   */
-    "sound"     /* DIAG_SOUND_CAP    */
+    "sound",    /* DIAG_SOUND_CAP    */
+    "pass"      /* DIAG_PASS_ORDER   */
 };
 
 /* A name table shorter than the enum would read past its end the first time

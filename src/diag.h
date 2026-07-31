@@ -110,6 +110,7 @@ typedef enum {
     DIAG_ENEMY_CAP,     /**< Level wanted more monsters than ENEMY_MAX. / 레벨이 ENEMY_MAX보다 많은 몬스터를 요구했습니다. */
     DIAG_PICKUP_CAP,    /**< Level wanted more pickups than PICKUP_MAX. / 레벨이 PICKUP_MAX보다 많은 아이템을 요구했습니다. */
     DIAG_SOUND_CAP,     /**< Recipe text exceeded MAX_SOUNDS or MAX_LAYERS. / 레시피 텍스트가 MAX_SOUNDS 또는 MAX_LAYERS를 초과했습니다. */
+    DIAG_PASS_ORDER,    /**< A draw was made on the wrong side of the world/UI pass boundary. / 월드/UI 패스 경계의 잘못된 쪽에서 그리기가 수행되었습니다. */
     DIAG_COUNT          /**< Number of counters. / 카운터의 개수. */
 } DiagKind;
 
@@ -214,6 +215,41 @@ int diag_summary(char *out, int cap);
  */
 #define DIAG(kind) diag_report(kind)
 
+/**
+ * @brief Records a misplaced draw: one made on the wrong side of the pass boundary.
+ *
+ * ENGLISH
+ * -------
+ * The frame has two halves. Everything before post_end is the WORLD pass and
+ * gets pixelised and dithered; everything after is UI at native resolution.
+ * Which side a draw belongs on is a real decision -- the view model is
+ * deliberately in the world pass because it shares the scene's lighting,
+ * while 5x7 glyphs must not be, because magnified and dithered they are
+ * unreadable.
+ *
+ * Getting it wrong produces no error and no crash, just a cosmetic oddity, so
+ * it is the kind of mistake that survives review and ships. These record it
+ * instead. The counter shows up in the HUD like any other, and costs nothing
+ * in release.
+ *
+ * 한국어
+ * ------
+ * @brief 잘못된 패스에서 수행된 그리기를 기록합니다.
+ *
+ * 프레임은 두 부분으로 나뉩니다. post_end 이전은 *월드* 패스로 픽셀화와 디더링을
+ * 거치고, 이후는 원해상도 UI입니다. 어떤 그리기가 어느 쪽에 속하는지는 실제 판단이
+ * 필요한 문제입니다. 뷰 모델은 장면의 조명을 공유하므로 의도적으로 월드 패스에 두는
+ * 반면, 5x7 글리프는 확대되고 디더링되면 읽을 수 없으므로 그쪽에 있어서는 안 됩니다.
+ *
+ * 잘못 두어도 오류나 충돌이 발생하지 않고 외관상 어색함만 남으므로, 리뷰를 통과해
+ * 출시까지 살아남는 종류의 실수입니다. 이 매크로들이 대신 그것을 기록합니다. 카운터는
+ * 다른 것들과 마찬가지로 HUD에 표시되며 릴리스에서는 비용이 없습니다.
+ */
+#define DIAG_WANT_WORLD_PASS(in_world) \
+    do { if (!(in_world)) diag_report(DIAG_PASS_ORDER); } while (0)
+#define DIAG_WANT_UI_PASS(in_world) \
+    do { if  ((in_world)) diag_report(DIAG_PASS_ORDER); } while (0)
+
 #else  /* release: every trace of this module disappears */
 
 /* The cast to void keeps `DIAG(x);` a valid statement and silences any
@@ -224,6 +260,15 @@ int diag_summary(char *out, int cap);
    코드를 전혀 생성하지 않습니다. 인자는 평가되지 않으므로, 보고 지점이 해당 빌드에
    존재하지 않는 DiagKind 상수를 참조해도 무방합니다. */
 #define DIAG(kind) ((void)0)
+
+/* The pass-boundary guards, likewise. The argument is a function call at the
+   call sites, so it is cast to void rather than dropped -- that keeps it from
+   looking unused to a reader without evaluating it.
+   패스 경계 가드도 마찬가지입니다. 호출 지점에서 인자가 함수 호출이므로, 버리지 않고
+   void로 캐스트합니다. 평가하지 않으면서도 읽는 사람에게 미사용으로 보이지 않게 하기
+   위함입니다. */
+#define DIAG_WANT_WORLD_PASS(in_world) ((void)0)
+#define DIAG_WANT_UI_PASS(in_world)    ((void)0)
 
 #endif /* DIAG_ENABLED */
 

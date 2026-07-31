@@ -25,6 +25,8 @@
  */
 
 #include "sprite.h"
+#include "data.h"
+#include "txt.h"
 #include "enemy.h"        /* MON_* -- the atlas row order */
 #include "pickup.h"       /* PK_* -- the pickup atlas order */
 #include "tex.h"          /* tex_hashf, for a little surface grain */
@@ -481,6 +483,238 @@ void pickup_uv(int kind, float *u0, float *v0, float *u1, float *v1) {
 
 static GLuint g_atlas;
 
+/**
+ * @brief Reads one hex digit, or -1 if the character is not one.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] c Character to convert.
+ * @return 0..15, or -1 for anything else.
+ * @note The sprite data is a flat hex stream rather than the space-separated
+ *       integers every other asset language here uses. At one character per
+ *       pixel the separators would be half the payload, and there is nothing
+ *       to read them for -- every value is exactly one digit wide.
+ *
+ * 한국어
+ * ------
+ * @brief 16진수 한 자리를 읽습니다. 해당하지 않는 문자면 -1을 반환합니다.
+ * @param[in] c 변환할 문자.
+ * @return 0..15, 그 외에는 -1.
+ * @note 스프라이트 데이터는 이 프로젝트의 다른 에셋 언어들이 쓰는 공백 구분 정수가
+ *       아니라 평면 16진 스트림입니다. 픽셀당 한 문자인 상황에서 구분자는 전체
+ *       데이터의 절반을 차지하게 되며, 모든 값이 정확히 한 자리이므로 구분자를 읽을
+ *       이유도 없습니다.
+ */
+/**
+ * @brief Maps a sprite-name prefix to a monster type index.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] s   Name characters, not null-terminated.
+ * @param[in] len How many of them form the prefix (the trailing frame digit
+ *                is excluded by the caller).
+ * @return The MON_* index, or -1 when the prefix names no monster.
+ * @note Compared character by character rather than with strncmp, for the
+ *       same reason pickup.c does: pulling the C string functions into a
+ *       size-bound build to save four comparisons is a bad trade.
+ * @note An unknown prefix returns -1 and the sprite is skipped, so a stray
+ *       PNG in assets/sprites/ is ignored rather than painted over whichever
+ *       monster happened to be at index 0.
+ *
+ * 한국어
+ * ------
+ * @brief 스프라이트 이름의 접두사를 몬스터 종류 인덱스로 변환합니다.
+ * @param[in] s   이름 문자들. 널로 끝나지 않습니다.
+ * @param[in] len 접두사를 이루는 문자 수. 끝의 프레임 숫자는 호출자가 제외합니다.
+ * @return MON_* 인덱스. 접두사가 어떤 몬스터도 가리키지 않으면 -1.
+ * @note pickup.c와 같은 이유로 strncmp가 아니라 문자 단위로 비교합니다. 비교 네 번을
+ *       줄이려고 크기가 제한된 빌드에 C 문자열 함수를 끌어들이는 것은 손해입니다.
+ * @note 알 수 없는 접두사는 -1을 반환하여 해당 스프라이트를 건너뜁니다. 따라서
+ *       assets/sprites/에 잘못 들어온 PNG는 0번 인덱스의 몬스터 위에 덧그려지는 대신
+ *       무시됩니다.
+ */
+static int mon_type_for_prefix(const char *s, int len) {
+    if (len == 3 && s[0]=='i' && s[1]=='m' && s[2]=='p')                     return MON_IMP;
+    if (len == 5 && s[0]=='b' && s[1]=='r' && s[2]=='u' && s[3]=='t' && s[4]=='e') return MON_BRUTE;
+    if (len == 5 && s[0]=='h' && s[1]=='o' && s[2]=='u' && s[3]=='n' && s[4]=='d') return MON_HOUND;
+    if (len == 6 && s[0]=='c' && s[1]=='a' && s[2]=='s' && s[3]=='t' && s[4]=='e' && s[5]=='r') return MON_CASTER;
+    return -1;
+}
+
+static int hexval(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+/**
+ * @brief Paints hand-drawn PNG sprites over the generated atlas.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] buf Atlas pixels, RGBA, already filled by the SDF path.
+ * @param[in]     W   Atlas width in pixels.
+ * @param[in]     H   Atlas height in pixels.
+ *
+ * @note Overlays rather than replaces, which is the whole point. The SDF
+ *       creatures stay as the fallback, so a monster with no drawing keeps
+ *       the one the code generates and the art can be replaced one sprite at
+ *       a time instead of all at once. Deleting sprite.c's generators would
+ *       mean drawing every frame of every monster before the game runs again.
+ *
+ * @note A sprite is placed by NAME: "imp0" is monster type 0, frame 0. The
+ *       name carries the position rather than a separate table, so adding a
+ *       drawing is dropping a file into assets/sprites/ and nothing else.
+ *
+ * @note Index 0 is transparent and is skipped, so a sprite smaller than the
+ *       cell leaves the generated pixels showing around it rather than
+ *       punching a hole. That also means a half-finished drawing composites
+ *       over its SDF version, which is usually what you want while working.
+ *
+ * @warning Requires the baked ASSET_SPRITES text. Silently does nothing when
+ *          there are no sprites, which is the state this project ships in
+ *          until drawings exist.
+ *
+ * 한국어
+ * ------
+ * @brief 손으로 그린 PNG 스프라이트를 생성된 아틀라스 위에 덧그립니다.
+ * @param[in,out] buf 아틀라스 픽셀(RGBA). SDF 경로가 이미 채워 둔 상태입니다.
+ * @param[in]     W   아틀라스 너비(픽셀).
+ * @param[in]     H   아틀라스 높이(픽셀).
+ *
+ * @note 교체가 아니라 *덧그리기*이며, 이것이 핵심입니다. SDF 생물체가 폴백으로 남으므로
+ *       그림이 없는 몬스터는 코드가 생성한 모습을 유지하고, 아트를 한 번에 전부가
+ *       아니라 스프라이트 하나씩 교체할 수 있습니다. sprite.c의 생성기를 지우면 게임을
+ *       다시 실행하기 전에 모든 몬스터의 모든 프레임을 그려야 합니다.
+ *
+ * @note 스프라이트는 *이름*으로 배치됩니다. "imp0"은 몬스터 종류 0의 프레임 0입니다.
+ *       별도의 테이블이 아니라 이름이 위치 정보를 담고 있으므로, 그림을 추가하는 것은
+ *       assets/sprites/에 파일을 넣는 것이 전부입니다.
+ *
+ * @note 인덱스 0은 투명이며 건너뜁니다. 따라서 셀보다 작은 스프라이트는 구멍을 뚫는
+ *       대신 주변에 생성된 픽셀이 그대로 보이게 됩니다. 덕분에 미완성 그림도 SDF
+ *       버전 위에 합성되는데, 작업 중에는 대개 그편이 유용합니다.
+ *
+ * @warning 구워진 ASSET_SPRITES 텍스트가 필요합니다. 스프라이트가 없으면 조용히 아무
+ *          동작도 하지 않으며, 그림이 존재하기 전까지 이 프로젝트가 배포되는 상태가
+ *          바로 그것입니다.
+ */
+static void overlay_drawn_sprites(unsigned char *buf, int W, int H) {
+    const char *p = data_text(DATA_SPRITES);
+    if (!p || !*p) return;
+
+    unsigned char pal[16][3] = {{0,0,0}};
+    int n_pal = 0;
+
+    for (;;) {
+        int len;
+        const char *t = txt_token(p, &len);
+        if (!t) break;
+        p = t + len;
+
+        /* The shared palette, once, before any sprite. */
+        if (txt_is(t, len, "pal")) {
+            int ok = 1;
+            p = txt_read_int(p, &n_pal, &ok);
+            if (!ok) break;
+            if (n_pal > 16) n_pal = 16;
+            for (int i = 0; i < n_pal; i++) {
+                const char *h = txt_token(p, &len);
+                if (!h || len < 6) { i = n_pal; break; }
+                p = h + len;
+                for (int k = 0; k < 3; k++) {
+                    int hi = hexval(h[k*2]), lo = hexval(h[k*2+1]);
+                    pal[i][k] = (unsigned char)((hi < 0 ? 0 : hi) * 16 + (lo < 0 ? 0 : lo));
+                }
+            }
+            continue;
+        }
+
+        if (!txt_is(t, len, "s")) continue;
+
+        /* s <name> <w> <h> */
+        const char *nm = txt_token(p, &len);
+        if (!nm) break;
+        int nm_len = len;
+        p = nm + len;
+
+        int sw = 0, sh = 0, ok = 1;
+        p = txt_read_int(p, &sw, &ok);
+        p = txt_read_int(p, &sh, &ok);
+        if (!ok || sw <= 0 || sh <= 0) continue;
+
+        /* The name is "<monster><frame>": the trailing digit is the frame and
+           what precedes it selects the row. Parsed here rather than looked up
+           in a table so a new drawing needs no code change.
+           이름은 "<몬스터><프레임>" 형식입니다. 끝의 숫자가 프레임이고 그 앞부분이
+           행을 결정합니다. 새 그림에 코드 수정이 필요 없도록 테이블 조회 대신 이곳에서
+           해석합니다. */
+        int frame = nm[nm_len - 1] - '0';
+        if (frame < 0 || frame >= SPR_FRAMES) frame = 0;
+
+        int type = mon_type_for_prefix(nm, nm_len - 1);
+
+        /* The data line: 'd' run-length, 'f' one digit per pixel. */
+        const char *op = txt_token(p, &len);
+        if (!op) break;
+        int is_rle = txt_is(op, len, "d");
+        p = op + len;
+
+        const char *data = txt_token(p, &len);
+        if (!data) break;
+        p = data + len;
+
+        /* Decode straight into the atlas cell. Out-of-range types still
+           consume their data so the stream stays in sync -- the same reason
+           mesh.c keeps parsing faces of meshes it is not building.
+           아틀라스 셀에 바로 디코딩합니다. 범위를 벗어난 종류도 데이터를 소비하여
+           스트림 동기화를 유지하는데, 이는 mesh.c가 생성하지 않는 메시의 면도 계속
+           파싱하는 것과 같은 이유입니다. */
+        if (type < 0) continue;
+
+        int ox = frame * SPR_CW, oy = type * SPR_CH;
+        int px_i = 0, total = sw * sh;
+
+        for (int i = 0; i < len && px_i < total; ) {
+            int count, index;
+            if (is_rle) {
+                if (i + 1 >= len) break;
+                count = hexval(data[i]);
+                index = hexval(data[i+1]);
+                i += 2;
+                if (count < 0 || index < 0) break;
+            } else {
+                index = hexval(data[i]);
+                i += 1;
+                count = 1;
+                if (index < 0) break;
+            }
+
+            for (int r = 0; r < count && px_i < total; r++, px_i++) {
+                if (index == 0) continue;          /* transparent: leave the SDF pixel */
+
+                int sx = px_i % sw, sy = px_i / sw;
+                /* Centre the drawing in its cell horizontally and sit it on
+                   the cell's bottom, so a 32x32 sprite in a 64x96 cell stands
+                   on the ground rather than floating at the top.
+                   그림을 셀 안에서 가로로 가운데 맞추고 셀 바닥에 놓습니다. 그래야
+                   64x96 셀 안의 32x32 스프라이트가 위쪽에 떠 있지 않고 지면에
+                   섭니다. */
+                int ax = ox + (SPR_CW - sw) / 2 + sx;
+                int ay = oy + (SPR_CH - sh)     + sy;
+                if (ax < 0 || ax >= W || ay < 0 || ay >= H) continue;
+
+                unsigned char *q = &buf[(ay * W + ax) * 4];
+                q[0] = pal[index][0];
+                q[1] = pal[index][1];
+                q[2] = pal[index][2];
+                q[3] = 255;
+            }
+        }
+    }
+}
+
 GLuint sprite_atlas(void) {
     if (g_atlas) return g_atlas;
 
@@ -516,6 +750,12 @@ GLuint sprite_atlas(void) {
         }
     }
 
+    /* Hand-drawn sprites go on last, over the generated ones. See
+       overlay_drawn_sprites for why this composites rather than replaces.
+       손으로 그린 스프라이트를 마지막에 생성된 것 위에 덧그립니다. 교체가 아니라
+       합성인 이유는 overlay_drawn_sprites를 참조하십시오. */
+    overlay_drawn_sprites(buf, W, H);
+
     glGenTextures(1, &g_atlas);
     glBindTexture(GL_TEXTURE_2D, g_atlas);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, W, H, 0, GL_RGBA, GL_UNSIGNED_BYTE, buf);
@@ -540,21 +780,52 @@ int sprite_dump_ppm(const char *path) {
     if (!f) return 0;
     fprintf(f, "P6\n%d %d\n255\n", W, H);
 
+    /* Build the SAME buffer sprite_atlas builds, rather than calling
+       creature_pixel again here.
+       This used to re-derive the image from the SDF generators directly,
+       which quietly made it a picture of only half the atlas: hand-drawn
+       sprites are composited on afterward, so a drawing could be correctly
+       decoded and placed and still be invisible in the dump. That cost real
+       debugging time -- the first PNG overlay looked broken when what was
+       broken was the tool looking at it.
+       여기서 creature_pixel을 다시 호출하지 않고 sprite_atlas가 만드는 것과 *동일한*
+       버퍼를 만듭니다.
+       이전에는 SDF 생성기로부터 이미지를 다시 유도했는데, 그 탓에 이 도구가 조용히
+       아틀라스의 절반만 보여 주게 되었습니다. 손으로 그린 스프라이트는 이후에 합성되므로,
+       그림이 올바르게 디코딩되어 배치되었는데도 덤프에서는 보이지 않을 수 있었습니다.
+       실제로 디버깅 시간을 소모했습니다. 첫 PNG 오버레이가 고장 난 것처럼 보였지만
+       고장 난 것은 그것을 들여다보는 도구였습니다. */
+    unsigned char *buf = HeapAlloc(GetProcessHeap(), 0, (SIZE_T)W * H * 4);
+    if (!buf) { fclose(f); return 0; }
+
     for (int type = 0; type < MON_TYPES; type++)
-      for (int y = 0; y < SPR_CH; y++) {
-        float ny = (1.0f - (y + 0.5f) / SPR_CH) * 1.15f;
-        for (int fr = 0; fr < SPR_FRAMES; fr++)
+      for (int fr = 0; fr < SPR_FRAMES; fr++)
+        for (int y = 0; y < SPR_CH; y++) {
+          float ny = (1.0f - (y + 0.5f) / SPR_CH) * 1.15f;
           for (int x = 0; x < SPR_CW; x++) {
             float nx = ((x + 0.5f) / SPR_CW - 0.5f) * 2.0f;
             unsigned char rgb[3] = {0,0,0};
             int a = creature_pixel(type, fr, nx, ny, rgb);
-            if (!a) {                       /* checkerboard behind the cutout */
-                int c = (((x >> 3) ^ (y >> 3)) & 1) ? 60 : 40;
-                rgb[0] = rgb[1] = rgb[2] = (unsigned char)c;
-            }
-            fwrite(rgb, 1, 3, f);
+            unsigned char *p = &buf[((type * SPR_CH + y) * W + fr * SPR_CW + x) * 4];
+            p[0] = rgb[0]; p[1] = rgb[1]; p[2] = rgb[2];
+            p[3] = (unsigned char)a;
           }
+        }
+
+    overlay_drawn_sprites(buf, W, H);
+
+    for (int y = 0; y < H; y++)
+      for (int x = 0; x < W; x++) {
+        unsigned char *p = &buf[(y * W + x) * 4];
+        unsigned char rgb[3] = { p[0], p[1], p[2] };
+        if (!p[3]) {                        /* checkerboard behind the cutout */
+            int c = (((x >> 3) ^ (y >> 3)) & 1) ? 60 : 40;
+            rgb[0] = rgb[1] = rgb[2] = (unsigned char)c;
+        }
+        fwrite(rgb, 1, 3, f);
       }
+
+    HeapFree(GetProcessHeap(), 0, buf);
     fclose(f);
     return 1;
 }

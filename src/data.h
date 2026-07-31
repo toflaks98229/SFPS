@@ -28,6 +28,7 @@ enum DataAsset {
     DATA_SOUNDS,      /**< 사운드 합성 레시피 */
     DATA_MESHES,      /**< .obj에서 변환된 정점 데이터 */
     DATA_LEVELS,      /**< 레벨 레이아웃 및 엔티티 */
+    DATA_SPRITES,     /**< PNG에서 변환된 팔레트 인덱스 스프라이트. DATA_MESHES와 마찬가지로 감시할 파일이 없습니다. */
     DATA_COUNT        /**< 총 데이터 에셋 수 */
 };
 

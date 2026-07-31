@@ -150,6 +150,125 @@ foreach ($s in $sets) {
     }
 }
 
+# PNG -> palette-indexed RLE text.
+#
+# Aseprite is the authoring tool, and its output is not what should be shipped
+# for the same reason Blender's is not: a 32x32 sprite is 4096 bytes of raw
+# RGBA, and shipping the PNG instead would mean carrying a PNG decoder --
+# roughly 15KB of inflate and filter reconstruction -- to save 3KB of pixels.
+# Converting here means the game contains no image decoder at all.
+#
+# The format is a shared palette plus one data line per sprite:
+#
+#   pal <n> <rrggbb> ...     one palette for every sprite in the set
+#   s <name> <w> <h>         begin a sprite
+#   d <hex run pairs>        RLE: one hex digit count, one hex digit index
+#   f <hex digits>           flat: one hex digit per pixel
+#
+# Two encodings because neither wins everywhere. RLE exploits the horizontal
+# runs that separate pixel art from a photograph, and on flat art it is a
+# large win -- a measured 32x32 went from 4096 bytes raw to 227. But it costs
+# two characters per RUN, so heavy dithering, which breaks runs down to one or
+# two pixels, makes it worse than storing the indices directly: the same size
+# sprite drawn with dithering came out 1048 as RLE and 1024 flat. Both are
+# encoded and the smaller is kept, per sprite.
+#
+# A SHARED palette rather than one per sprite. Two reasons, and the second
+# matters more: it removes a palette header from every sprite, and it forces
+# the art to a common set of colours, which is most of what makes a set of
+# sprites look like they belong to the same game. Aseprite can export an
+# indexed PNG, but this does not require it -- any RGB image is quantised to
+# the nearest palette entry, so a sprite drawn without thinking about the
+# palette still lands in it.
+function ConvertFrom-Png([string]$path, [string]$name, [System.Collections.ArrayList]$pal) {
+    Add-Type -AssemblyName System.Drawing
+    $bmp = New-Object System.Drawing.Bitmap $path
+    try {
+        $w = $bmp.Width; $h = $bmp.Height
+
+        # Index every pixel against the shared palette, growing it as new
+        # colours appear and snapping to the nearest entry once it is full.
+        $idx = New-Object int[] ($w * $h)
+        for ($y = 0; $y -lt $h; $y++) {
+            for ($x = 0; $x -lt $w; $x++) {
+                $c = $bmp.GetPixel($x, $y)
+
+                # Fully transparent pixels are all the same pixel regardless
+                # of what RGB Aseprite left under them, and they must share
+                # index 0 so the decoder can treat it as "draw nothing".
+                if ($c.A -lt 128) { $idx[$y * $w + $x] = 0; continue }
+
+                $key = '{0:x2}{1:x2}{2:x2}' -f $c.R, $c.G, $c.B
+                $at  = $pal.IndexOf($key)
+                if ($at -lt 0) {
+                    if ($pal.Count -lt 16) {
+                        $at = $pal.Add($key)
+                    } else {
+                        # Full: snap to the nearest entry. Squared distance in
+                        # RGB is not perceptually ideal, but at 16 colours the
+                        # entries are far apart and a fancier metric would pick
+                        # the same one.
+                        $best = 1; $bestD = [int]::MaxValue
+                        for ($p = 1; $p -lt $pal.Count; $p++) {
+                            $pr = [Convert]::ToInt32($pal[$p].Substring(0,2),16)
+                            $pg = [Convert]::ToInt32($pal[$p].Substring(2,2),16)
+                            $pb = [Convert]::ToInt32($pal[$p].Substring(4,2),16)
+                            $d  = ($pr-$c.R)*($pr-$c.R) + ($pg-$c.G)*($pg-$c.G) + ($pb-$c.B)*($pb-$c.B)
+                            if ($d -lt $bestD) { $bestD = $d; $best = $p }
+                        }
+                        $at = $best
+                    }
+                }
+                $idx[$y * $w + $x] = $at
+            }
+        }
+
+        # Two encodings, and the smaller one wins per sprite.
+        #
+        # RLE is the obvious choice for pixel art and is usually right, but it
+        # is not always: it stores two characters per RUN, so it only beats a
+        # flat index stream when runs average longer than two pixels. Heavy
+        # dithering -- which is a legitimate pixel-art technique, and one this
+        # game's own renderer leans on -- breaks runs down to 1-2 px and makes
+        # RLE actively worse than storing the indices directly. Measured on
+        # two test sprites: a flat one averaged 15.3 px per run, a dithered
+        # one 2.1.
+        #
+        # Rather than forcing a choice on the artist, encode both and keep the
+        # shorter. The decoder reads whichever opcode it finds, so a sprite
+        # that changes character between edits changes encoding with it and
+        # nobody has to think about which to use.
+        $rle = New-Object System.Text.StringBuilder
+        $i = 0
+        while ($i -lt $idx.Length) {
+            $j = $i
+            while ($j -lt $idx.Length -and $idx[$j] -eq $idx[$i] -and ($j - $i) -lt 15) { $j++ }
+            [void]$rle.Append(('{0:x}{1:x}' -f ($j - $i), $idx[$i]))
+            $i = $j
+        }
+
+        # Flat: one hex digit per pixel. Caps the palette at 16 entries, which
+        # is the same limit the RLE index nibble already imposes.
+        $flat = New-Object System.Text.StringBuilder
+        foreach ($v in $idx) { [void]$flat.Append(('{0:x}' -f $v)) }
+
+        if ($rle.Length -le $flat.Length) {
+            $op = 'd'; $data = $rle.ToString()
+        } else {
+            $op = 'f'; $data = $flat.ToString()
+        }
+
+        return [pscustomobject]@{
+            Text = "s $name $w $h`n$op $data`n"
+            W    = $w
+            H    = $h
+            Enc  = $op
+        }
+    } finally {
+        $bmp.Dispose()
+    }
+}
+
 # Every .obj in assets\ becomes one entry in a single mesh library, so the
 # game has one text blob to parse rather than a file table to manage.
 $meshText = ''
@@ -176,6 +295,50 @@ if ($escMesh.Length -eq 0) {
     for ($i = 0; $i -lt $escMesh.Length; $i += 76) {
         $len = [Math]::Min(76, $escMesh.Length - $i)
         [void]$sb.AppendLine("    `"$($escMesh.Substring($i, $len))`"")
+    }
+}
+[void]$sb.AppendLine('    ;')
+[void]$sb.AppendLine()
+
+# Every .png under assets\sprites\ becomes one entry in a single sprite
+# library, sharing one palette. Sorted by name so the baked output is stable:
+# a set that reordered itself between builds would produce a different palette
+# and a needless recompile of everything that reads it.
+$palette   = New-Object System.Collections.ArrayList
+[void]$palette.Add('000000')     # index 0 is always transparent -- see below
+$spriteText = ''
+$spriteDir  = Join-Path $root 'assets\sprites'
+
+if (Test-Path $spriteDir) {
+    foreach ($png in (Get-ChildItem $spriteDir -Filter *.png | Sort-Object Name)) {
+        $name = [System.IO.Path]::GetFileNameWithoutExtension($png.Name)
+        $conv = ConvertFrom-Png $png.FullName $name $palette
+        $spriteText += $conv.Text
+        $report += [pscustomobject]@{
+            Asset  = "sprites\$($png.Name)"
+            Source = $png.Length
+            Baked  = $conv.Text.Length
+            Saved  = "$([math]::Round((1 - $conv.Text.Length / ($conv.W * $conv.H * 4)) * 100))% vs raw ($($conv.W)x$($conv.H) $($conv.Enc))"
+        }
+    }
+}
+
+# The palette goes in front, so the decoder has it before the first sprite.
+# Index 0 is reserved for transparent and is never drawn, which is why the
+# colour stored for it is arbitrary.
+if ($spriteText) {
+    $spriteText = "pal $($palette.Count) $($palette -join ' ')`n" + $spriteText
+}
+
+$escSpr = $spriteText.Replace('\', '\\').Replace('"', '\"').
+                      Replace("`r", '').Replace("`n", ' ')
+[void]$sb.AppendLine('static const char ASSET_SPRITES[] =')
+if ($escSpr.Length -eq 0) {
+    [void]$sb.AppendLine('    ""')
+} else {
+    for ($i = 0; $i -lt $escSpr.Length; $i += 76) {
+        $len = [Math]::Min(76, $escSpr.Length - $i)
+        [void]$sb.AppendLine("    `"$($escSpr.Substring($i, $len))`"")
     }
 }
 [void]$sb.AppendLine('    ;')

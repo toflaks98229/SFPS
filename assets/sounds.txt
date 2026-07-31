@@ -1,0 +1,112 @@
+# SFPS sound library -- edit freely, the dev build reloads this on save.
+#
+# No samples are stored. A sound is a handful of integers describing how to
+# synthesise it, and the mixer builds the waveform as it plays. Same idea as
+# the texture recipes: keep the instructions, not the result.
+#
+# Grammar (integers only, as everywhere else in this project):
+#   s <name>                              begin a sound
+#   l <wave> <ms> <f0> <f1> <atk> <dec> <vol>    add one layer
+#
+#   wave  0 square   1 saw   2 sine   3 noise
+#   ms    how long this layer lasts
+#   f0    starting frequency in Hz   (ignored by noise)
+#   f1    ending frequency in Hz     -- the sweep is what gives a shot its
+#                                       "pew" and an impact its "thud"
+#   atk   attack in ms, from silence to full
+#   dec   decay in ms, back to silence
+#   vol   0-100
+#
+# Layers of one sound play together. Real weapon sounds are almost never a
+# single oscillator: a shotgun is a noise burst for the crack plus a low
+# square for the body, and leaving either one out sounds like a toy.
+
+s shot
+l 3 320 1400   60   0 300  90     # noise crack, falling fast
+l 0 200  150   40   2 190  55     # low square body
+l 1  90  420  110   0  90  35     # short saw bite up front
+
+s impact
+l 3 130  900  120   0 120  55     # short gritty tick
+l 0  70  260   70   0  70  30     # small thump underneath
+
+s pump
+l 3  90 2200  700   0  85  40     # mechanical rasp
+l 0  60  520  180   2  55  25
+
+# --- monsters ------------------------------------------------------------
+# Voiced with a saw for a growl and noise for breath. The imp is meant to
+# read as an animal, so its calls sweep downward (a threat) rather than up.
+
+s sight
+l 1 260  180  260   6 240  70     # a rising snarl as it spots you
+l 3 180  400  180  10 170  30     # breath under it
+
+s eatt
+l 1 150  320  120   0 140  75     # downward swipe growl
+l 3 110  700  200   0 100  45     # claw-swish noise
+
+s epain
+l 1 120  520  200   0 110  70     # short yelp, falling
+l 3  70  900  300   0  70  35
+
+s edie
+l 1 420  300   70   4 400  80     # long descending death groan
+l 0 300  120   45  10 280  45     # low body
+l 3 260  500  120   0 240  35     # rattle
+
+s phurt
+l 0  90  180  120   0  85  70     # a blunt grunt -- the player, not a monster
+l 3  70  600  200   0  70  40
+
+# --- pickups and the empty gun ------------------------------------------
+
+s pammo
+l 0 90  520  760   0  85  55     # a bright mechanical clack, rising
+l 1 70  900 1300   0  65  30
+
+s pmed
+l 2 220 660  990   4 210  55     # a warm ascending chime
+l 2 180 990 1320  10 170  40
+
+s dry
+l 0 40  180  150   0  38  45     # a small dead click, no body
+l 3 30  600  300   0  28  25
+
+# --- level exit ----------------------------------------------------------
+
+s exit
+l 1 320 300 1400   4 300  70    # a rising saw sweep -- you made it out
+l 2 260 700 1600   8 240  45    # a sine over it for a chime
+l 3 120 900  400   0 110  30    # a short zap
+
+# --- game won --------------------------------------------------------------
+
+s win
+l 2 260 440  660   4 240  60     # a rising sine fanfare, first note
+l 2 300 660  990   8 280  65     # second note, a fifth up
+l 2 460 990 1320  14 440  60     # third, resolving up an octave
+l 0 700 220  110   0 650  20     # a long warm pad underneath
+
+# --- the caster ------------------------------------------------------------
+# Cold and tonal where the melee monsters are all growl and noise, so the sound
+# of a bolt being readied is distinguishable from a claw swipe without looking.
+
+s ecast
+l 2 380 180  880   8 360  65     # a rising sine whine -- the wind-up you dodge
+l 1 260 440 1320  20 240  40     # a saw over it for bite
+l 3 120 300  900   0 110  25     # a breath of noise as it releases
+
+s ehit
+l 3 140 1200 260   0 130  60     # the bolt bursting
+l 2 180  660 180   0 170  45     # a low tonal thump under it
+
+# --- the grapple hook -------------------------------------------------------
+# A sharp metallic snap and a clunk landing in the same instant, since the
+# claw travels and lands on the same frame -- there is no separate "in flight"
+# sound to write.
+
+s hook
+l 0 55  2400  650   0  50  55     # a fast metallic snap -- the claw leaving
+l 3 45  1600  300   0  40  35     # a scrape of noise riding it
+l 0 90   180  110   4  85  40     # a low clunk as it bites in

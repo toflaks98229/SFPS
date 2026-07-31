@@ -1,0 +1,210 @@
+# SFPS material library -- edit freely, the dev build reloads this on save.
+#
+# A material is a list of ops run per pixel. Every number is an INTEGER with
+# a fixed implied scale, so the parser needs no float handling at all.
+# Whitespace and newlines are interchangeable: each opcode has a known arity,
+# so the parser just reads that many integers and moves on.
+#
+#   t <name>              begin a material
+#   base   r g b          fill colour, 0-255
+#   brick  w h m          brick lattice: cell w x h, m px mortar joint
+#   tint   r g b          per-brick colour spread, /255
+#   grain  n              per-pixel noise, +-n/200
+#   bevel  w lit shade    w px edge, lit%/100 top-left, shade%/100 bottom-right
+#   mortar r g b n        joint colour 0-255 plus its own noise n/255
+#   brush  sx sy amp      noise stretched by sx/100, sy/100, amplitude amp/100
+#   blotch f amp          broad noise at frequency f/100
+#   scratch thr gain      bright streaks above threshold thr/100
+#   seam   p dark light   panel edges every p px
+#   wood   r g b grain    sawn timber: warped bands, grain strength /100
+#   check  size depth     diamond checkering, as cut into a grip
+#   ribs   period depth   cooling ribs along a barrel
+#   blue   n              pull toward blue-black gun bluing, 0-100
+#   gloss  n              specular strength, 0-100 -- see below
+#   proc   k s            no pixels at all: fragment shader k computes the
+#                         surface from the UV, s/100 cells per unit -- see the
+#                         procedural section at the end of this file
+#
+# Ops that follow `brick` know which pixels are mortar, which is how a flat
+# op list expresses "only inside a brick".
+#
+# GLOSS lives in the texture's alpha channel. Alpha was already there and
+# unused, so per-pixel specular costs no extra texture, sampler or uniform.
+# Anything without a `gloss` op stays matte, which is why brick needs no
+# change and wood looks like wood. `check` also drops gloss in its cut
+# grooves, so one material shines on the diamonds and not between them.
+
+t brick
+base 107 51 38          # clay body
+brick 64 32 3           # course 64x32, 3px mortar joint
+tint 56 26 18           # per-brick colour spread
+grain 18                # +-0.09 per pixel
+bevel 3 118 80          # lit 1.18 top-left, 0.80 bottom-right
+mortar 107 107 112 26   # joint colour + its own noise
+
+t metal
+base 59 61 67           # dark gunmetal, faintly blue
+brush 50 3 26           # grain stretched hard along x
+brush 12 1 15           # second, coarser octave
+blotch 2 15             # broad unevenness across panels
+scratch 93 220          # sparse bright scratches
+seam 64 50 110          # machined panel edges every 64px
+gloss 55
+
+# --- gun materials -------------------------------------------------------
+#
+# What makes a weapon read as a weapon is the contrast between these, not
+# detail inside any one of them. A single material across the whole gun looks
+# like a prop no matter how good that material is.
+
+t blued                 # barrel: dark, tight, high shine
+#
+# Ops run in order and each one sees what the last left behind, so this reads
+# top to bottom as a manufacturing sequence: rough stock, then the machining
+# marks, then the bluing, then the wear that happened after.
+base 52 54 60
+brush 60 2 18           # sx 0.60 sy 0.02: noise stretched almost to a line,
+                        # which is what makes it read as drawn-out machining
+                        # rather than as dirt
+ribs 34 22              # a vented rib along the barrel. `ribs` bands on x,
+                        # and on the extrusion's skirt u runs ALONG the
+                        # barrel, so the bands cross it the way a real rib
+                        # does. This op existed and nothing used it.
+blotch 3 10             # slow, broad variation so the bluing is not uniform
+scratch 96 160          # sparser than bare steel -- bluing hides less wear
+blue 70
+gloss 85
+
+t gunmetal              # the muzzle face: deliberately FLAT, not a pattern
+#
+# Darker than `blued` and almost featureless on purpose. This material exists
+# to be UV-independent: it sits on the end face of the barrel, which the
+# extruder textures as part of the perimeter skirt, so any pattern here would
+# land at an arbitrary offset and read as a smear of barrel across the muzzle.
+# A near-solid colour cannot be misplaced.
+#
+# `grain` is the one exception, and it is kept tiny. Absolutely flat colour
+# reads as a hole cut in the gun rather than as metal -- a little noise gives
+# the eye something to catch without being a pattern that can be mis-mapped.
+base 30 31 35
+grain 5                 # +-2.5/255, just enough to not look like a decal
+blue 45                 # same bluing family as the barrel, a shade deeper
+gloss 55                # duller than the barrel: a worn, powder-fouled crown
+
+t steel                 # receiver: lighter, machined, visible panel edges
+#
+# The receiver is the part the eye actually rests on -- it is the widest flat
+# face and it sits nearest the camera -- so it carries the most detail. Kept
+# LIGHTER than the barrel on purpose: the contrast between the two is what
+# separates them at a glance, and a receiver as dark as the bluing makes the
+# whole gun read as one undifferentiated lump.
+base 76 78 84
+brush 40 3 22           # coarser and less stretched than the barrel: a
+                        # machined block, not a drawn tube
+blotch 2 14
+seam 40 52 118          # panel edges. Tightened from 48px to 40px so a seam
+                        # actually falls on the receiver at this UV scale
+                        # instead of straddling it -- at uv 300 a 48px period
+                        # put barely one edge across the visible face.
+scratch 92 240          # bare steel wears brightly; this is the top layer,
+                        # after the seams, so scratches cross the panel edges
+                        # rather than being interrupted by them
+gloss 70
+
+t walnut                # stock and fore-end
+#
+# Warmer and lighter than `grip`, and deliberately so: the fore-end catches
+# more light than the grip in the hand, and the two woods reading slightly
+# differently sells them as separate pieces of timber rather than one
+# extrusion that happens to bend.
+wood 92 54 28 45
+blotch 4 8              # broad tonal drift across the blank -- real timber is
+                        # never one colour end to end, and this is what stops
+                        # the grain looking printed on
+scratch 97 90           # handling marks: high threshold, low gain, so they
+                        # are a few faint scuffs and not a scoured surface
+gloss 18                # oiled, not polished
+
+t grip                  # walnut with checkering cut into it
+#
+# Darker stock than the fore-end, and the checkering is cut INTO it: `check`
+# drops gloss to a quarter inside the grooves, so the diamonds catch light and
+# the cuts between them stay dull. That gloss split is most of why real
+# checkering reads as cut rather than as printed diamonds -- see the note at
+# the top of this file.
+wood 78 44 22 40
+blotch 4 6              # subtler than the fore-end; the checkering is already
+                        # busy and broad drift underneath it turns to mush
+check 8 62              # tighter (9 -> 8) and deeper (55 -> 62). At uv 300 the
+                        # old spacing was coarse enough on the small grip face
+                        # to read as a lattice laid over the wood; tighter
+                        # diamonds read as cut checkering at this size.
+gloss 22
+
+# --- procedural materials ------------------------------------------------
+#
+#   proc   k s          hand the surface to fragment shader k, s/100 pattern
+#                       cells per UV unit
+#
+# These have NO pixels. The shader computes the surface from the UV, so it
+# stays sharp with the player's nose against it, needs no mipmaps, and costs
+# four uniforms instead of a 256x256 RGBA texture. `base` gives the shader its
+# colour and `gloss` its specular strength -- the same two ops the pixel path
+# already uses, so a material can be moved between the two by editing one line.
+#
+# Shader k:  1 brick   2 tile    3 panel   4 wood
+#            5 hex     6 marble  7 rust    8 grid
+#
+# Keep this list in step with the PROC_* enum in src/render.h and the switch
+# in procColour(); there is no way to share an enum with GLSL.
+
+t pbrick
+base 148 72 54
+proc 1 120              # 1.2 courses per unit
+
+t ptile
+base 132 138 146
+proc 2 200
+gloss 45
+
+t ppanel
+base 92 96 105
+proc 3 100
+gloss 65
+
+t pwood
+base 122 78 40
+proc 4 90
+gloss 20
+
+t phex
+base 84 104 120
+proc 5 160
+gloss 50
+
+t pmarble
+base 176 176 182
+proc 6 70
+gloss 75
+
+t prust
+base 122 62 30
+proc 7 110
+gloss 25
+
+t pgrid
+base 40 180 210
+proc 8 150
+
+# --- the grapple's tether -------------------------------------------------
+# A twisted hemp rope. `ribs` stripes along the recipe's local x axis, and the
+# tether's ribbon UV runs its u (0..utile) along the rope's own length -- so
+# the bands wrap around the rope as it stretches, the same way a real twisted
+# rope's strands do. Drawn unlit (RD_SWATCH): a cable a metre from your face
+# should not need to be lit to read as a cable.
+
+t rope
+base 168 128 74          # tan hemp
+ribs 10 35                # the twist -- period 10px, 35% light/dark
+grain 12                  # fibre noise
+gloss 8                   # faint sheen, mostly matte

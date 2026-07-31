@@ -1,0 +1,104 @@
+# SFPS level library -- edit freely, the dev build reloads this on save.
+#
+# Easiest way to edit this: build\mapedit.exe <level>. Draw sectors in the
+# plan view, fly the 3D view to check them, CTRL+S. Editing by hand works too.
+#
+# A sector is a 2D floor plan polygon plus a floor and ceiling height; walls
+# are vertical. Coordinates are 1/100 units (cm), so 1600 is 16 metres.
+#
+#   l <name>              begin a level
+#   start <x> <z> <yaw>   player spawn, yaw in millidegrees
+#   s                     begin a sector
+#   floor <n>  ceil <n>   heights
+#   mat floor|wall|ceil <name> ...   materials, from assets/textures.txt
+#   p <x z> ...           the floor plan, read until the next word
+#   next <name>           level the `exit` entity leads to
+#   e <kind> <x> <z>      an entity
+#
+# Entity kinds: imp/brute/hound spawn monsters (legacy "spawn" = imp),
+# ammo/health are pickups, and `exit` ends the level -- walk onto it and the
+# game loads `next`, carrying your health and ammo across. A level with no
+# `next` is the end of the game: its exit shows the win screen instead.
+#
+# SECTORS MAY OVERLAP, and the LAST one declared wins at any point. Doom tiles
+# the plane and defines edges with linedefs, which is fiddly to author; here a
+# platform inside a room is just a small sector laid on top of the big one, and
+# no polygon has to be cut to make room for it. Last-wins rather than
+# highest-floor-wins, because the latter makes a pit impossible: the room's
+# floor would always beat the lower one dug into it.
+#
+# Walls are generated per edge: where another sector lies just outside, only
+# the difference in floor and ceiling height is solid -- that is what makes a
+# shared boundary a step you can walk over rather than a wall.
+
+l arena
+start 0 1200 0
+next vault
+
+s
+floor -50  ceil 600
+mat floor ptile  wall pbrick  ceil ppanel
+p
+   -2000 -1400   1650 -1400   2850 450   1650 2150
+   -2000 2150   -3000 450
+
+s
+floor 45  ceil 600
+mat floor ppanel  wall ppanel  ceil ppanel
+p
+   -800 -600   -400 -600   -400 -200   -800 -200
+
+s
+floor 90  ceil 600
+mat floor phex  wall phex  ceil ppanel
+p
+   400 -900   1000 -900   1000 -500   400 -500
+
+s
+floor 135  ceil 600
+mat floor pmarble  wall pmarble  ceil ppanel
+p
+   400 -500   1000 -500   1000 -100   400 -100
+
+s
+floor 390  ceil 600
+mat floor pgrid  wall pgrid  ceil ppanel
+p
+   -1500 900   -1000 900   -1000 1400   -1500 1400
+
+s
+floor -120  ceil 600
+mat floor prust  wall prust  ceil ppanel
+p
+   -300 950   300 950   300 1550   -300 1550
+
+e spawn -600 -900
+e spawn 900 400
+e caster 0 -400          # holds the middle of the room and shoots across it
+e ammo 0 0
+e exit 0 -1200
+
+l vault
+start 0 700 0
+# No `next`: this is the last level. Reaching its exit ends the game instead
+# of loading anywhere -- see level_exit_at() / the g_won path in main.c.
+
+s
+floor 0  ceil 450
+mat floor pmarble  wall phex  ceil pgrid
+p
+   -900 -900   900 -900   900 900   -900 900
+
+s                        # a raised dais in the middle
+floor 90  ceil 450
+mat floor pgrid  wall pgrid  ceil pgrid
+p
+   -300 -300   300 -300   300 300   -300 300
+
+e brute 0 -200
+e hound 500 400
+e caster -600 -600       # shooting from the far corner while the brute closes
+e ammo -600 0
+e health 600 -600
+e exit 0 800             # the end of the game
+

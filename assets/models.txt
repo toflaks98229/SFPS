@@ -1,0 +1,91 @@
+# SFPS model library -- edit freely, the dev build reloads this on save.
+#
+# Easiest way to edit this: build\modeledit.exe <model>. Drag the points with
+# the mouse, watch the 3D preview, CTRL+S. It writes this file back and keeps
+# these comments. Editing by hand works too -- the grammar is below.
+#
+# Grammar (every number is an integer, there is no float parser):
+#   m <name>          begin a model
+#   uv <n>            texels per unit x100        (300 = 3.00)
+#   th <n>            half thickness, 1/100 units (7 = 0.07, so 0.14 across)
+#   p  <z y> ...      part: closed outline, extruded +-th
+#   pt <z y th> ...   same, but each point sets its own half thickness
+#   rev <z r> ...     part: open profile revolved around the z axis (y = radius)
+#   seg <n>           segments used by the next rev
+#   at <x y z>        offset applied to the parts that follow
+#   rot <millideg>    rotation about x applied to the parts that follow
+#   mat <name>        material for the parts that follow
+#   mesh <name>       an authored mesh from assets/<name>.obj
+#   muzzle <x y z>    where shots and the flash leave the barrel
+#
+# `mesh` is the escape hatch: model in Blender, unwrap there, export .obj, and
+# bake.ps1 converts it into the integer mesh text the game reads. Use it when
+# a shape genuinely cannot be an extrusion or a lathe -- those two generate
+# their own UVs and cost a fraction of the bytes, so they stay the default.
+# A mesh part obeys the same at/rot placement as any other part.
+#
+# The muzzle belongs to the model, not to the weapon code: redraw the gun and
+# the flash and tracers follow it. Drag the cyan crosshair in modeledit to
+# move it. Left out, it defaults just past the front-most point, mid-bore.
+# Note that the hitscan still traces from the eye -- only the visible tracer
+# starts here, which is what keeps the crosshair honest about what you hit.
+#
+# Coordinates are a side-on profile in 1/100 units:
+#   -z is forward (the muzzle), +z is back (the stock)
+#   +y is up
+# Outlines may be concave and wound either way round; winding is normalised
+# and the caps are triangulated automatically.
+#
+# A model is a LIST of parts, each with its own th. One thickness for the
+# whole gun cannot serve both a thin barrel and a chunky receiver -- the
+# first attempt was 0.18 across with a 0.12-tall barrel, so the barrel came
+# out wider than it was tall and the whole thing read as a slab.
+#
+# `pt` gives tapers -- muzzles that narrow, stocks that wedge. `rev` gives
+# the one thing extrusion cannot do at any thickness: round barrels, rocket
+# tubes, drums. `at`/`rot` place parts relative to each other, which is how
+# limbs get assembled without authoring every outline in world coordinates.
+
+m shotgun
+uv 300
+muzzle 0 5 -92
+mat blued
+th 5
+p
+   -81 9   47 9   47 0   -81 0
+# The muzzle end, split off as its own part.
+#
+# The barrel used to run all the way to -86 as one piece, which put the front
+# face on the SKIRT of the extrusion -- the strip whose u runs along the
+# perimeter and whose v is just the thickness. That strip is built to wrap a
+# long silhouette, so on the 9-unit face at the end of the barrel it arrives
+# with a large accumulated u and paints a slice of continuing barrel pattern
+# across it. The face gets whatever the wrap happened to be carrying, which is
+# the wrong texture for a muzzle no matter how good `blued` looks elsewhere.
+#
+# Splitting the last 5 units into a part with a flat material sidesteps the
+# problem rather than solving it: a single colour has no pattern to misplace,
+# so the UV can be anything at all and the face still reads correctly. Doing
+# this needed no engine change, because a model can already name a material
+# per part.
+mat gunmetal
+th 5
+p
+   -86 9   -81 9   -81 0   -86 0
+mat steel
+th 7
+p
+   3 12   50 12   50 -6   3 -6
+mat walnut
+th 11
+p
+   -80 4   -15 4   -15 -10   -80 -10
+mat grip
+th 6
+p
+   8 -3   31 -3   34 -38   16 -38
+
+m crate
+uv 100
+mesh crate
+

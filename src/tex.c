@@ -51,14 +51,15 @@
 enum {
     OP_BASE, OP_BRICK, OP_TINT, OP_GRAIN, OP_BEVEL, OP_MORTAR,
     OP_BRUSH, OP_BLOTCH, OP_SCRATCH, OP_SEAM,
-    OP_WOOD, OP_CHECK, OP_RIBS, OP_BLUE, OP_GLOSS, OP_PROC, OP_COUNT
+    OP_WOOD, OP_CHECK, OP_RIBS, OP_BLUE, OP_GLOSS, OP_PROC, OP_BUMP, OP_COUNT
 };
 
 static const struct { const char *name; unsigned char arity; } OPS[OP_COUNT] = {
     {"base",    3}, {"brick",   3}, {"tint",    3}, {"grain",   1},
     {"bevel",   3}, {"mortar",  4}, {"brush",   3}, {"blotch",  2},
     {"scratch", 2}, {"seam",    3}, {"wood",    4}, {"check",   2},
-    {"ribs",    2}, {"blue",    1}, {"gloss",   1}, {"proc",    2}
+    {"ribs",    2}, {"blue",    1}, {"gloss",   1}, {"proc",    2},
+    {"bump",    1}
 };
 
 typedef struct { unsigned char op; short a[4]; } Op;
@@ -301,8 +302,11 @@ static void run_op(const Op *o, Px *px, int x, int y, unsigned seed) {
         break;
 
     /* No per-pixel work: OP_PROC hands the surface to the fragment shader
-       instead, and is read by tex_mat rather than by the interpreter. */
+       instead, and is read by tex_mat rather than by the interpreter. OP_BUMP
+       is the same -- a strength the shader uses, not pixels to draw.
+       OP_BUMP도 마찬가지입니다. 그릴 픽셀이 아니라 셰이더가 사용하는 강도입니다. */
     case OP_PROC:
+    case OP_BUMP:
         break;
     }
 }
@@ -420,6 +424,11 @@ static Mat mat_make(const char *name) {
             m.rgb[2] = a[2] / 255.0f;
             break;
         case OP_GLOSS: m.params[0] = a[0] / 100.0f; break;
+        /* Normal-map strength. Only the procedural path reads it -- a pixel
+           material's relief is painted into the image already.
+           노멀 맵 강도입니다. 절차적 경로만 이 값을 읽습니다. 픽셀 재질의 요철은
+           이미 이미지에 칠해져 있습니다. */
+        case OP_BUMP:  m.params[1] = a[0] / 100.0f; break;
         case OP_PROC:
             m.proc  = a[0];
             m.scale = a[1] / 100.0f;
@@ -438,9 +447,60 @@ void tex_use(const Mat *m) {
 
 /* ------------------------------------------------------------------ cache */
 
-#define MAX_CACHED 24
+/* Sized against what actually asks for materials, not against a guess.
+   tools/mapedit.c offers a palette of MAX_MATS (32) recipes and calls tex_mat
+   on every one, so 24 was already short of the editor's own ceiling. 48 leaves
+   room for the palette plus whatever a level names beyond it. This lives in
+   .bss and is zero-filled, so it costs nothing on disk -- the same reasoning
+   LVL_MAX_RANGES is sized by.
 
-static struct { char name[24]; Mat mat; } g_cache[MAX_CACHED];
+   무엇이 실제로 재질을 요청하는지를 기준으로 정했으며, 추측으로 정하지 않았습니다.
+   tools/mapedit.c는 MAX_MATS(32)개의 레시피로 팔레트를 구성하고 그 전부에 대해
+   tex_mat을 호출하므로, 24는 이미 에디터 자체의 상한에도 미치지 못했습니다. 48은
+   팔레트와 그 너머로 레벨이 명명하는 것까지 감당할 여유를 남깁니다. 이 배열은 0으로
+   채워진 .bss에 위치하므로 디스크 용량을 소모하지 않습니다. LVL_MAX_RANGES의 크기를
+   정한 것과 동일한 근거입니다. */
+/* Overridable so a test can force the overflow path. With the real value the
+   cache comfortably holds every material the project defines, which means the
+   reclaim below would never execute and would rot untested -- the branch only
+   runs when something has gone wrong, which is precisely when it must work.
+   tools/textest.c builds a second binary with a tiny value to exercise it.
+
+   테스트가 초과 경로를 강제할 수 있도록 재정의 가능하게 두었습니다. 실제 값에서는 캐시가
+   프로젝트가 정의하는 모든 재질을 여유롭게 담으므로, 아래의 회수 처리는 결코 실행되지
+   않아 검증되지 않은 채 썩게 됩니다. 이 분기는 무언가 잘못되었을 때만 실행되며, 바로 그
+   때 반드시 동작해야 합니다. tools/textest.c가 작은 값으로 두 번째 바이너리를 빌드하여
+   이를 실행시킵니다. */
+#ifndef MAX_CACHED
+#define MAX_CACHED 48
+#endif
+
+/* The name field must hold any material name in full. A name longer than this
+   would be TRUNCATED on store but compared in FULL on lookup, so it could
+   never match its own entry: every call would miss, rebuild the texture, and
+   -- before the reclaim below existed -- leak it. LVL_MAT is the authoring
+   limit for a material name, so sizing from it makes that unreachable by
+   construction rather than by luck.
+
+   이름 필드는 어떤 재질 이름이든 온전히 담아야 합니다. 이보다 긴 이름은 저장 시에는
+   *잘리고* 조회 시에는 *전체가* 비교되므로, 자기 자신의 항목과 결코 일치할 수 없습니다.
+   매 호출이 캐시 미스가 되어 텍스처를 재생성하고, 아래의 회수 처리가 있기 전에는 그것을
+   누수시켰습니다. LVL_MAT이 재질 이름의 제작 상한이므로, 이를 기준으로 크기를 정하면
+   그 상황이 우연이 아니라 구조적으로 불가능해집니다.
+
+   The bound is TEX_NAME_MAX in tex.h rather than a local constant, because it
+   constrains callers and not just this file. It is tied to level.h's LVL_MAT
+   by a static assert in weapon.c -- a file that already includes both headers
+   and passes level-authored names to tex_mat, so the check costs no new
+   dependency here.
+
+   이 상한은 지역 상수가 아니라 tex.h의 TEX_NAME_MAX입니다. 이 파일만이 아니라 호출자를
+   제약하는 값이기 때문입니다. level.c의 정적 검사가 이를 level.h의 LVL_MAT과 묶어
+   줍니다. 두 헤더를 모두 정당하게 참조하는 유일한 파일이므로, 이곳에 새로운 의존성을
+   추가하지 않고도 검사가 가능합니다. */
+#define CACHE_NAME_LEN TEX_NAME_MAX
+
+static struct { char name[CACHE_NAME_LEN]; Mat mat; } g_cache[MAX_CACHED];
 static int g_cached;
 
 Mat tex_mat(const char *name) {
@@ -451,14 +511,47 @@ Mat tex_mat(const char *name) {
     }
 
     Mat m = mat_make(name);
-    if ((m.tex || m.proc) && g_cached < MAX_CACHED) {
-        int i = 0;
-        for (; name[i] && i < (int)sizeof(g_cache[0].name) - 1; i++)
-            g_cache[g_cached].name[i] = name[i];
-        g_cache[g_cached].name[i] = 0;
-        g_cache[g_cached].mat = m;
-        g_cached++;
+    if (!m.tex && !m.proc) return m;        /* no such recipe; nothing to own */
+
+    /* Measure before storing: a name that will not fit cannot be cached at
+       all, because the truncated copy would never match the full name on
+       lookup. Treated as a cache failure rather than stored half-written.
+       저장 전에 길이를 확인합니다. 들어가지 않는 이름은 아예 캐시할 수 없습니다.
+       잘린 사본은 조회 시 전체 이름과 결코 일치하지 않기 때문입니다. 절반만 기록된 채로
+       저장하는 대신 캐시 실패로 처리합니다. */
+    int len = 0;
+    while (name[len]) len++;
+
+    if (g_cached >= MAX_CACHED || len >= CACHE_NAME_LEN) {
+        /* Cannot take ownership, so do not leave a texture behind. tex_flush
+           only walks the cache, so a handle that never reached it would be
+           unreachable for the rest of the process -- and this path runs on
+           every level load and every hot reload, so it accumulates.
+
+           Reported because the visible symptom is nothing at all: the material
+           still draws correctly, it is just rebuilt from its recipe on every
+           call. Silent, gradual, and exactly what diag.h exists for.
+
+           소유권을 가질 수 없으므로 텍스처를 남겨 두지 않습니다. tex_flush는 캐시만
+           순회하므로, 캐시에 도달하지 못한 핸들은 프로세스가 끝날 때까지 회수할 수 없게
+           됩니다. 그리고 이 경로는 레벨 로드와 핫 리로드마다 실행되므로 누적됩니다.
+
+           보고하는 이유는 눈에 보이는 증상이 전혀 없기 때문입니다. 해당 재질은 여전히
+           올바르게 그려지며, 다만 호출할 때마다 레시피로부터 재생성될 뿐입니다. 조용하고
+           점진적이며, 정확히 diag.h가 존재하는 이유입니다. */
+        DIAG(DIAG_TEX_CACHE);
+        if (m.tex) {
+            glDeleteTextures(1, &m.tex);
+            m.tex = 0;
+        }
+        return m;
     }
+
+    int i = 0;
+    for (; i < len; i++) g_cache[g_cached].name[i] = name[i];
+    g_cache[g_cached].name[i] = 0;
+    g_cache[g_cached].mat = m;
+    g_cached++;
     return m;
 }
 

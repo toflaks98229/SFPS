@@ -140,6 +140,60 @@ extern GunPose g_gun_pose;
 #define HOOK_RANGE          40.0f  ///< @brief Metres the claw can reach before giving up. / 클로가 포기하기 전까지 도달할 수 있는 거리 (미터).
 #define HOOK_ARRIVE_DIST     1.6f  ///< @brief Distance at which the pull counts as arrival. / 견인이 도달로 인정되는 거리.
 
+/* --- arriving when the anchor cannot physically be reached ---
+ *
+ * ENGLISH
+ * -------
+ * A hook fired at the FLOOR never satisfies HOOK_ARRIVE_DIST, and the reason
+ * is geometric rather than a tuning mistake. The pull measures from the
+ * player's EYE, but the player stands on the floor, so the eye can never get
+ * closer to a floor anchor than PLAYER_EYE -- 1.70m, which is larger than the
+ * 1.60m arrival radius. Measured on a straight-down hook: the distance falls
+ * to exactly 1.70m within 0.75s and then stops changing for the remaining
+ * 2.25s until HOOK_PULL_TIMEOUT gives up. The player has visibly arrived and
+ * the hook refuses to admit it.
+ *
+ * Raising HOOK_ARRIVE_DIST past PLAYER_EYE would "fix" it and break the rest:
+ * every wall hook would then complete nearly two metres early, which is where
+ * the launch comes from, so every hook would end short.
+ *
+ * The honest condition is not "am I close enough" but "am I still getting
+ * closer". A pull that has stopped closing has finished, wherever it stopped:
+ * against the floor, against a ledge the player is wedged under, or against a
+ * monster backed into a corner. STALL_DIST is how much progress counts as
+ * progress, and STALL_TIME is how long a lack of it is tolerated before the
+ * hook accepts that this is as close as it gets.
+ *
+ * Deliberately NOT a velocity test. The winch keeps accelerating into the
+ * floor for as long as it is running, so the player's speed stays high while
+ * they go nowhere -- the thing that has stalled is the distance, so the
+ * distance is what is watched.
+ *
+ * 한국어
+ * ------
+ * *바닥*을 향해 쏜 훅은 HOOK_ARRIVE_DIST를 결코 만족하지 못하며, 이는 튜닝 실수가 아니라
+ * 기하학적 문제입니다. 견인은 플레이어의 *눈*에서 거리를 재는데 플레이어는 바닥 위에
+ * 서므로, 눈은 바닥 앵커에 PLAYER_EYE(1.70m)보다 가까워질 수 없고 이는 도달 반경
+ * 1.60m보다 큽니다. 수직 하향 훅에서 측정한 결과, 거리는 0.75초 만에 정확히 1.70m로
+ * 떨어진 뒤 HOOK_PULL_TIMEOUT이 포기할 때까지 남은 2.25초 동안 전혀 변하지 않았습니다.
+ * 플레이어는 눈에 보이게 도착했는데 훅이 그것을 인정하지 않는 것입니다.
+ *
+ * HOOK_ARRIVE_DIST를 PLAYER_EYE보다 크게 올리면 이 문제는 "해결"되지만 나머지가
+ * 망가집니다. 그러면 모든 벽 훅이 2미터 가까이 일찍 완료되는데, 도약이 바로 그 지점에서
+ * 나오므로 모든 훅이 짧게 끝나게 됩니다.
+ *
+ * 정직한 조건은 "충분히 가까운가"가 아니라 "아직도 가까워지고 있는가"입니다. 더 이상
+ * 좁혀지지 않는 견인은 어디서 멈췄든 끝난 것입니다. 바닥이든, 플레이어가 끼어 버린 선반
+ * 아래든, 구석에 몰린 몬스터든 마찬가지입니다. STALL_DIST는 얼마만큼의 진전을 진전으로
+ * 인정할지이고, STALL_TIME은 진전이 없는 상태를 얼마나 참아 준 뒤 이것이 도달할 수 있는
+ * 최선이라고 받아들일지입니다.
+ *
+ * 의도적으로 *속도* 판정이 아닙니다. 윈치는 작동하는 한 계속 바닥을 향해 가속하므로
+ * 플레이어가 제자리에 있어도 속도는 높게 유지됩니다. 멈춘 것은 거리이므로 거리를
+ * 감시합니다. */
+#define HOOK_STALL_DIST      0.05f ///< @brief Metres of progress that still counts as closing. / 좁혀지는 것으로 인정되는 진전 거리 (미터).
+#define HOOK_STALL_TIME      0.18f ///< @brief Seconds without progress before the pull counts as arrived. / 진전 없이 이 시간이 지나면 도달로 간주합니다 (초).
+
 /* --- 1. the claw in flight ---
  * A projectile, so the throw reads as a throw. Fast enough that it never
  * feels like waiting -- at 90 m/s the full 40 m range takes under half a
@@ -187,6 +241,76 @@ extern GunPose g_gun_pose;
    완료될 수 없는 견인이 영원히 지속되어서는 안 됩니다. 대상이 멀어지고 있거나,
    플레이어가 도달할 수 없는 지오메트리 뒤에 끼어 있을 수 있습니다. */
 #define HOOK_PULL_TIMEOUT    3.0f  ///< @brief Seconds before an unfinished pull gives up. / 완료되지 않은 견인을 포기하기까지의 시간 (초).
+
+/* How often the winch loop restarts while reeling.
+ *
+ * Slightly SHORTER than the `hreel` recipe is long (110ms), so each repeat
+ * begins a hair before the last has faded and the loop has no gap in it. A
+ * longer interval than the sound leaves a stutter; a much shorter one stacks
+ * voices and the winch gets louder the longer the pull lasts.
+ *
+ * 감기 중 윈치 루프가 재시작되는 간격입니다.
+ *
+ * `hreel` 레시피의 길이(110ms)보다 약간 *짧게* 잡아, 각 반복이 이전 소리가 사라지기
+ * 직전에 시작되어 루프에 빈틈이 생기지 않습니다. 소리보다 긴 간격은 끊김을 남기고,
+ * 훨씬 짧은 간격은 보이스를 겹쳐 쌓아 견인이 길어질수록 윈치가 커집니다. */
+#define HOOK_REEL_INTERVAL   0.09f ///< @brief Seconds between winch loop retriggers. / 윈치 루프 재시작 간격 (초).
+
+/* How fast momentum ACROSS the hook bleeds away while reeling.
+ *
+ * ENGLISH
+ * -------
+ * The winch accelerates along the hook and caps that component, but for a long
+ * time it did nothing at all to the component across it. Momentum carried into
+ * the throw therefore survived the entire pull, and the player flew a curve
+ * instead of a line: measured on a 20 m hook, entering at 12 m/s sideways swung
+ * the player 5.4 m wide and landed them 3.6 m from the anchor. Entering at
+ * 30 m/s -- which a chained hook reaches easily, since HOOK_LAUNCH_MAX is 30
+ * and MOMENTUM_DRAG_AIR keeps airborne speed almost in full -- swung 14.3 m
+ * wide, missed by 8.5 m, and took 30% longer to arrive.
+ *
+ * That is not a winch. A Meat Hook is supposed to put you AT the thing you hit,
+ * and arriving eight metres to one side of it reads as the hook being broken
+ * rather than as physics.
+ *
+ * Expressed as a per-second decay rather than a hard zero, deliberately. Wiping
+ * the perpendicular component outright would make the pull a rail: every hook
+ * would arrive along the same line whatever the player was doing, and the
+ * momentum they built up would vanish the instant the claw bit. Bleeding it
+ * lets the first moments of a pull still curve -- the approach reads as being
+ * yanked, and a fast entry still feels different from a standing one -- while
+ * guaranteeing the line is straight by the time it matters.
+ *
+ * At 8.0 the component is down to ~2% of its entry value after half a second,
+ * which is shorter than every pull that is not nearly at HOOK_RANGE. Lower it
+ * for wider, more preserved arcs; raise it for a pull that snaps to the line
+ * almost at once. Zero restores the old behaviour exactly.
+ *
+ * 한국어
+ * ------
+ * 견인 중 훅을 *가로지르는* 방향의 운동량이 감쇠하는 속도입니다.
+ *
+ * 윈치는 훅 방향으로 가속하고 그 성분을 제한하지만, 오랫동안 그것을 가로지르는 성분에는
+ * 아무 조치도 하지 않았습니다. 따라서 투척 시점에 가지고 있던 운동량이 견인 내내
+ * 유지되었고, 플레이어는 직선이 아니라 곡선을 그리며 날아갔습니다. 20m 훅에서 측정한
+ * 결과, 측면 12m/s로 진입하면 5.4m 옆으로 휘어져 목표에서 3.6m 떨어진 곳에 도달했습니다.
+ * 30m/s로 진입하면(HOOK_LAUNCH_MAX가 30이고 MOMENTUM_DRAG_AIR가 공중 속도를 거의 온전히
+ * 유지하므로 연속 훅에서 쉽게 도달합니다) 14.3m 옆으로 휘어져 8.5m를 빗나갔고 도달까지
+ * 30% 더 걸렸습니다.
+ *
+ * 그것은 윈치가 아닙니다. 미트 훅은 자신이 맞힌 대상 *에게* 데려다 놓아야 하며, 그
+ * 8미터 옆에 도착하는 것은 물리 현상이 아니라 훅이 고장 난 것으로 읽힙니다.
+ *
+ * 즉시 0으로 만들지 않고 초당 감쇠율로 표현한 것은 의도적입니다. 수직 성분을 그대로
+ * 지워 버리면 견인이 레일이 됩니다. 플레이어가 무엇을 하고 있었든 모든 훅이 동일한 직선을
+ * 따라 도달하게 되고, 쌓아 올린 운동량이 클로가 무는 순간 사라집니다. 감쇠시키면 견인
+ * 초반에는 여전히 곡선을 그리므로 접근이 "끌려가는 것"으로 읽히고 빠른 진입이 정지
+ * 상태와 다르게 느껴지면서도, 정작 중요한 시점에는 직선이 보장됩니다.
+ *
+ * 8.0에서는 0.5초 후 성분이 진입값의 약 2%까지 떨어지며, 이는 HOOK_RANGE에 가까운 경우를
+ * 제외한 모든 견인보다 짧습니다. 값을 낮추면 더 넓고 운동량이 보존되는 궤적이 되고, 높이면
+ * 거의 즉시 직선에 붙는 견인이 됩니다. 0이면 이전 동작과 정확히 같아집니다. */
+#define HOOK_PULL_STRAIGHTEN 8.0f  ///< @brief Per-second decay of velocity across the hook. 0 keeps the old curving pull. / 훅을 가로지르는 속도의 초당 감쇠율. 0이면 이전의 휘어지는 견인이 유지됩니다.
 
 /* --- 3. the impact ---
  * Hooking a monster is an attack. The damage is deliberately modest -- this
@@ -345,6 +469,65 @@ typedef struct {
     v3    hook_pos;       /**< The claw's current position while in flight. / 비행 중인 클로의 현재 위치. */
     float hook_cooldown;  /**< Seconds until the launcher can fire again. / 발사기가 다시 발사할 수 있기까지의 시간 (초). */
     float hook_timer;     /**< Time spent in the current state, for the pull timeout. / 현재 상태에서 경과한 시간. 견인 시간 초과 판정에 사용됩니다. */
+
+    /**
+     * @brief Seconds until the winch loop is retriggered.
+     *
+     * ENGLISH
+     * -------
+     * The reel is the only sustained sound in the game, and the mixer has no
+     * concept of a loop -- ::audio_play starts a voice and it runs to the end
+     * of its recipe. A sustained sound is therefore a short one restarted on a
+     * timer, which is what this counts down.
+     *
+     * It has to be a timer rather than a per-frame call: firing every frame
+     * would start sixty voices a second into a twelve-voice mixer, evicting
+     * every other sound in the game for as long as the pull lasted.
+     *
+     * 한국어
+     * ------
+     * @brief 윈치 루프를 재시작하기까지 남은 시간 (초).
+     *
+     * 감기 소리는 이 게임에서 유일하게 지속되는 사운드인데, 믹서에는 루프 개념이
+     * 없습니다. ::audio_play는 보이스를 시작하고 그 레시피의 끝까지 재생할 뿐입니다.
+     * 따라서 지속음은 짧은 소리를 타이머로 재시작하는 것으로 구현되며, 이 필드가 그
+     * 카운트다운입니다.
+     *
+     * 프레임마다 호출하지 않고 타이머를 쓰는 것은 필수입니다. 매 프레임 재생하면 12개
+     * 보이스짜리 믹서에 초당 60개의 보이스를 밀어 넣게 되어, 견인이 지속되는 동안 게임의
+     * 다른 모든 소리가 밀려납니다.
+     */
+    float hook_reel_timer;
+
+    /**
+     * @brief Closest the player has come to the anchor, and how long ago.
+     *
+     * ENGLISH
+     * -------
+     * The pair is what makes "the pull has stopped closing" answerable. Only
+     * the BEST distance so far is kept, not the previous frame's: comparing
+     * against the last frame would read the small oscillation of a winch
+     * fighting gravity as progress and never trigger, where comparing against
+     * the best keeps the bar rising and only resets when real ground is gained.
+     *
+     * `hook_best` is initialised on the first pull frame rather than at the
+     * throw, because the claw is still flying then and the distance to the
+     * target is not yet the distance to an anchor.
+     *
+     * 한국어
+     * ------
+     * @brief 플레이어가 앵커에 도달한 최단 거리와 그 이후 경과 시간입니다.
+     *
+     * 이 한 쌍이 "견인이 더 이상 좁혀지지 않는다"를 판정 가능하게 만듭니다. 직전
+     * 프레임이 아니라 *지금까지의 최단* 거리만 보관합니다. 직전 프레임과 비교하면 중력에
+     * 맞서는 윈치의 미세한 진동을 진전으로 읽어 영원히 발동하지 않지만, 최단 거리와
+     * 비교하면 기준이 계속 낮아지며 실제로 전진했을 때만 초기화됩니다.
+     *
+     * `hook_best`는 발사 시점이 아니라 첫 견인 프레임에 초기화됩니다. 발사 시점에는
+     * 클로가 아직 비행 중이므로 목표까지의 거리가 앵커까지의 거리가 아니기 때문입니다.
+     */
+    float hook_best;
+    float hook_stall;
 
     /**
      * @brief Index of the hooked monster, or -1 when hooked to geometry.

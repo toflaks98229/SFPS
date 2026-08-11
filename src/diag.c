@@ -70,8 +70,12 @@ static const char *const DIAG_NAMES[DIAG_COUNT] = {
     "mdlpt",    /* DIAG_MODEL_POINTS */
     "range",    /* DIAG_MAT_RANGES   */
     "texop",    /* DIAG_TEX_OPS      */
+    "texcache", /* DIAG_TEX_CACHE    */
+    "fx",       /* DIAG_FX_CAP       */
+    "light",    /* DIAG_LIGHT_CAP    */
     "enemy",    /* DIAG_ENEMY_CAP    */
     "pickup",   /* DIAG_PICKUP_CAP   */
+    "shot",     /* DIAG_SHOT_CAP     */
     "sound",    /* DIAG_SOUND_CAP    */
     "pass"      /* DIAG_PASS_ORDER   */
 };

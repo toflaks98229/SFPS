@@ -94,6 +94,26 @@ typedef struct MdlRange MdlRange;
 #define LVL_MAX_SECTORS 64     ///< @brief Maximum sectors per level. / 레벨당 최대 섹터 수.
 #define LVL_MAX_PTS     32     ///< @brief Maximum vertices per sector. / 섹터당 최대 정점 수.
 #define LVL_MAX_ENTS    64     ///< @brief Maximum entities per level. / 레벨당 최대 엔티티 수.
+
+/**
+ * @brief Maximum point lights per level.
+ *
+ * ENGLISH
+ * -------
+ * Every light is evaluated for every fragment -- there is no culling and no
+ * tiling, because at this resolution and this light count a loop of eight is
+ * cheaper than the machinery to avoid it. Raising this raises the per-pixel
+ * cost linearly, so it is a real budget rather than a formality.
+ *
+ * 한국어
+ * ------
+ * @brief 레벨당 최대 점광원 수.
+ *
+ * 모든 광원은 모든 프래그먼트에 대해 계산됩니다. 컬링도 타일링도 없는데, 이 해상도와
+ * 이 광원 수에서는 8회 루프가 그것을 피하기 위한 장치보다 저렴하기 때문입니다. 이 값을
+ * 올리면 픽셀당 비용이 선형으로 증가하므로 형식적인 상한이 아니라 실제 예산입니다.
+ */
+#define LVL_MAX_LIGHTS  8
 #define LVL_MAT         16     ///< @brief Maximum length of a material or entity kind name. / 재질 또는 엔티티 종류 이름의 최대 길이.
 
 /**
@@ -136,6 +156,194 @@ typedef struct MdlRange MdlRange;
 
 #define LVL_EXIT_RADIUS 0.9f   ///< @brief How close to an `exit` entity ends the level, metres. / `exit` 엔티티에 이만큼 가까워지면 레벨이 종료됩니다 (미터).
 
+/* --- Sector lookup grid / 섹터 조회 격자 --- */
+
+/**
+ * @brief Cells per axis in the sector lookup grid.
+ *
+ * ENGLISH
+ * -------
+ * ::level_trace samples ::level_ground every 5cm of ray, and each sample asked
+ * every sector whether it contains the point -- so the cost of a trace scaled
+ * with the sector count times the edges per sector. Measured with
+ * tools/levelbench.c: 2.87us on a 2-sector level (8 edges) against 8.50us on a
+ * 6-sector one (26 edges), which is linear in the edge count and extrapolates
+ * to roughly 65us at ::LVL_MAX_SECTORS -- about 44% of a 60fps frame under the
+ * `capped` trace load.
+ *
+ * The grid answers "which sectors could possibly contain this point" in one
+ * indexing operation instead. 16x16 is chosen so the whole table stays small
+ * enough to sit in cache while still emptying most cells on a typical map.
+ *
+ * @note The entire structure lives in .bss, so it costs nothing on disk. See
+ *       the size rules in README.md -- a zero-filled static that reaches .bss
+ *       is free, and only one that lands in .data is not.
+ *
+ * 한국어
+ * ------
+ * @brief 섹터 조회 격자의 축당 셀 수.
+ *
+ * ::level_trace는 광선 5cm마다 ::level_ground를 샘플링하고, 각 샘플이 모든 섹터에 해당
+ * 점을 포함하는지 물었습니다. 따라서 판정 비용이 섹터 수 × 섹터당 모서리 수에 비례해
+ * 증가했습니다. tools/levelbench.c로 측정한 결과, 섹터 2개(모서리 8개) 레벨에서
+ * 2.87us, 6개(모서리 26개) 레벨에서 8.50us로 모서리 수에 선형이며,
+ * ::LVL_MAX_SECTORS에서는 약 65us로 외삽됩니다. 이는 `capped` 판정 부하에서 60fps
+ * 프레임의 약 44%에 해당합니다.
+ *
+ * 격자는 대신 "이 점을 포함할 수 있는 섹터는 무엇인가"에 인덱싱 한 번으로 답합니다.
+ * 16x16은 전체 테이블이 캐시에 들어갈 만큼 작으면서도 일반적인 맵에서 대부분의 셀을
+ * 비울 수 있는 값입니다.
+ *
+ * @note 구조체 전체가 .bss에 위치하므로 디스크 용량을 소모하지 않습니다. README.md의
+ *       크기 규칙을 참조하십시오. .bss에 도달하는 0으로 채워진 정적 변수는 무료이며,
+ *       .data에 놓이는 것만이 비용을 발생시킵니다.
+ */
+#define LVL_GRID_DIM 16
+
+/**
+ * @brief Maximum sectors recorded per grid cell.
+ *
+ * ENGLISH
+ * -------
+ * A cell that overflows is marked as UNUSABLE rather than truncated, and every
+ * query against it falls back to the full sector scan. That distinction is the
+ * whole safety argument: a truncated cell would silently forget a sector, and
+ * forgetting a sector is a floor that vanishes or a wall the player walks
+ * through. Falling back is merely slow, and slow is recoverable.
+ *
+ * 한국어
+ * ------
+ * @brief 격자 셀당 기록되는 최대 섹터 수.
+ *
+ * 초과한 셀은 잘라 내지 않고 *사용 불가*로 표시되며, 그 셀에 대한 모든 질의는 전체
+ * 섹터 순회로 되돌아갑니다. 이 구분이 안전성의 핵심 논거입니다. 잘라 낸 셀은 섹터를
+ * 조용히 잊어버리는데, 섹터를 잊는다는 것은 사라진 바닥이거나 플레이어가 통과하는
+ * 벽입니다. 되돌아가는 것은 그저 느릴 뿐이며, 느린 것은 복구 가능합니다.
+ */
+#define LVL_GRID_MAX_PER_CELL 16
+
+/**
+ * @brief Sector count below which the grid is not built at all.
+ *
+ * ENGLISH
+ * -------
+ * The grid is not free. Every ::level_ground pays two integer divisions and a
+ * bounds check to find its cell, and on a small level that is pure added cost:
+ * the bounding-box reject in ::point_in_sector already discards nearly every
+ * sector in four compares, so there is almost nothing left for the grid to
+ * save. Measured with tools/levelbench.c:
+ *
+ *      level                     scan      grid
+ *      vault      ( 2 sectors)   2.87us    4.97us   grid 1.7x SLOWER
+ *      arena      ( 6 sectors)   8.50us   10.49us   grid 1.2x slower
+ *      synthetic  (64 sectors)  24.68us    7.45us   grid 3.3x faster
+ *
+ * So the grid is built only where it pays. The threshold sits above both
+ * shipped maps and well below the cap; the crossover is somewhere in the teens
+ * and the exact point does not matter, because the curves are shallow on
+ * either side of it.
+ *
+ * @note This is also why the full-scan path in ::sector_at is not dead code.
+ *       It is what every level in the game currently runs.
+ *
+ * 한국어
+ * ------
+ * @brief 격자를 아예 생성하지 않는 섹터 수 하한.
+ *
+ * 격자는 공짜가 아닙니다. 모든 ::level_ground가 셀을 찾기 위해 정수 나눗셈 두 번과
+ * 범위 검사를 치르는데, 작은 레벨에서는 이것이 순수한 추가 비용입니다.
+ * ::point_in_sector의 바운딩 박스 기각이 이미 비교 4번으로 거의 모든 섹터를 걸러 내므로
+ * 격자가 아낄 것이 거의 남아 있지 않습니다. tools/levelbench.c로 측정한 결과는 위의
+ * 표와 같습니다.
+ *
+ * 따라서 격자는 이득이 되는 곳에서만 생성됩니다. 임계값은 배포되는 두 맵보다 위이고
+ * 상한보다는 충분히 아래입니다. 교차점은 십몇 개 부근이며 정확한 지점은 중요하지
+ * 않은데, 양쪽 모두 곡선이 완만하기 때문입니다.
+ *
+ * @note 이것이 ::sector_at의 전체 순회 경로가 죽은 코드가 아닌 이유이기도 합니다.
+ *       현재 게임의 모든 레벨이 실제로 실행하는 경로입니다.
+ */
+#define LVL_GRID_MIN_SECTORS 16
+
+/**
+ * @struct SectorGrid
+ * @brief A uniform grid over the level's plan, mapping a cell to its sectors.
+ *
+ * ENGLISH
+ * -------
+ * Purely an acceleration structure, never a second source of truth about where
+ * a sector is -- exactly the contract ::Sector's cached bounding box follows.
+ * The rules that make it safe:
+ *
+ *   - `built` zero means "not computed", which is what `Level l = {0}` gives.
+ *     Every query then takes the full-scan path and is correct but slower. A
+ *     Level assembled field by field -- which every headless fixture in tools/
+ *     does -- therefore needs no knowledge that this exists.
+ *   - A cell that overflowed is marked unusable and falls back per query, so
+ *     no sector can ever be dropped from an answer.
+ *   - A sector is recorded in every cell its bounding box touches, not just
+ *     the cell of its centre, so a large sector is found from anywhere inside
+ *     it.
+ *
+ * @warning Written by ::level_load. Anything that edits sector points
+ *          afterward -- the map editor does -- must call ::level_grid_build to
+ *          refresh it, exactly as it must call ::level_bounds. A STALE grid is
+ *          the one genuinely dangerous state: it can omit a sector that now
+ *          covers a point, which reads as a wall you can see and walk through.
+ *
+ * 한국어
+ * ------
+ * 레벨 평면도 위의 균일 격자로, 셀을 그 셀의 섹터들에 대응시킵니다.
+ *
+ * 순수한 가속 구조이며 섹터 위치에 대한 두 번째 진실 공급원이 아닙니다. ::Sector의
+ * 캐시된 바운딩 박스가 따르는 것과 정확히 동일한 계약입니다. 안전을 보장하는 규칙은
+ * 다음과 같습니다.
+ *
+ *   - `built`가 0이면 "계산되지 않음"이며, 이는 `Level l = {0}`이 주는 값입니다. 그러면
+ *     모든 질의가 전체 순회 경로를 택하여 올바르되 느려집니다. 따라서 필드를 하나씩 채워
+ *     만든 Level은(tools/의 모든 헤드리스 픽스처가 그렇습니다) 이것의 존재를 몰라도
+ *     됩니다.
+ *   - 초과한 셀은 사용 불가로 표시되어 질의마다 되돌아가므로, 어떤 섹터도 답에서
+ *     누락될 수 없습니다.
+ *   - 섹터는 중심이 속한 셀뿐 아니라 바운딩 박스가 닿는 *모든* 셀에 기록되므로, 큰
+ *     섹터도 그 내부 어디에서나 발견됩니다.
+ *
+ * @warning ::level_load가 기록합니다. 이후 섹터의 점을 수정하는 쪽은(맵 에디터가
+ *          그렇습니다) ::level_bounds를 호출해야 하는 것과 똑같이
+ *          ::level_grid_build를 호출해 갱신해야 합니다. *갱신되지 않은* 격자는 진짜로
+ *          위험한 유일한 상태입니다. 이제 어떤 점을 덮는 섹터를 누락시킬 수 있으며,
+ *          이는 보이지만 통과할 수 있는 벽으로 나타납니다.
+ */
+typedef struct {
+    short min_x, min_z;                  /**< Grid origin in file units. / 파일 단위의 격자 원점. */
+    short cell_w, cell_h;                /**< Cell size in file units; never 0. / 파일 단위의 셀 크기. 0이 되지 않습니다. */
+    unsigned char count[LVL_GRID_DIM * LVL_GRID_DIM];  /**< Sectors per cell. / 셀당 섹터 수. */
+    /**
+     * @brief Non-zero where a cell overflowed and must fall back to the scan.
+     *
+     * Separate from a sentinel in `count`, so the fallback is a decision this
+     * structure records rather than one a reader has to infer from a count
+     * that happens to equal the cap.
+     *
+     * `count`의 특별한 값이 아닌 별도 플래그입니다. 되돌아가기가, 우연히 상한과 같아진
+     * 개수로부터 읽는 사람이 추론해야 하는 것이 아니라 이 구조체가 기록하는 결정이
+     * 되도록 합니다.
+     */
+    unsigned char overflow[LVL_GRID_DIM * LVL_GRID_DIM];
+    unsigned char sect[LVL_GRID_DIM * LVL_GRID_DIM][LVL_GRID_MAX_PER_CELL]; /**< Sector indices. / 섹터 인덱스. */
+    short built;                         /**< Non-zero once populated. / 채워졌으면 0이 아닙니다. */
+} SectorGrid;
+
+/* LVL_MAX_SECTORS must fit in the unsigned char the grid stores indices in.
+   Raising the sector cap past 256 without widening `sect` would wrap every
+   index above it onto a different sector -- collision against the wrong
+   polygon, with nothing to say why.
+   LVL_MAX_SECTORS는 격자가 인덱스를 저장하는 unsigned char에 들어가야 합니다. `sect`를
+   넓히지 않고 섹터 상한을 256 너머로 올리면 그 이상의 모든 인덱스가 다른 섹터로
+   순환하게 되며, 이유를 알 수 없는 잘못된 다각형과의 충돌이 발생합니다. */
+_Static_assert(LVL_MAX_SECTORS <= 256,
+               "grid stores sector indices in an unsigned char");
+
 /* --- Type definitions / 타입 정의 --- */
 
 /**
@@ -160,6 +368,131 @@ typedef struct {
     char  mat_floor[LVL_MAT];     /**< Floor material name. / 바닥 재질 이름. */
     char  mat_wall[LVL_MAT];      /**< Wall material name. / 벽 재질 이름. */
     char  mat_ceil[LVL_MAT];      /**< Ceiling material name. / 천장 재질 이름. */
+
+    /**
+     * @brief Bounding box of `pts`, in file units. Derived, not authored.
+     *
+     * ENGLISH
+     * -------
+     * A point outside this box cannot be inside the polygon, so the crossing
+     * test can be skipped entirely -- four integer compares instead of walking
+     * every edge. That matters because it sits in the innermost loop of the
+     * simulation: ::level_trace samples ::level_ground every 5cm of ray, and
+     * each sample asks every sector whether it contains the point.
+     *
+     * Computed once by ::level_load rather than per query, which is the whole
+     * point: deriving it on each call costs the same scan it is trying to
+     * avoid, and measured barely better than not having it at all.
+     *
+     * @note Purely an optimisation, never a second source of truth. A box that
+     *       is INVALID (min > max), which is what zeroed memory and a
+     *       hand-assembled Level both leave behind, is ignored and the full
+     *       crossing test runs -- so a Level built field by field is correct
+     *       without knowing this field exists. Only the speed is lost.
+     * @warning Written by ::level_load. Anything that edits `pts` afterward --
+     *          the map editor does -- should call ::level_bounds to refresh
+     *          it. A STALE box (computed, then invalidated by an edit) is the
+     *          one case that is genuinely wrong: it can reject a point the
+     *          polygon now contains, which reads as a wall you can see and
+     *          walk through.
+     *
+     * 한국어
+     * ------
+     * @brief 파일 단위로 표현된 `pts`의 바운딩 박스입니다. 제작값이 아니라 파생값입니다.
+     *
+     * 이 박스 바깥의 점은 다각형 내부일 수 없으므로 교차 판정을 완전히 건너뛸 수
+     * 있습니다. 모든 모서리를 순회하는 대신 정수 비교 4번이면 됩니다. 이것이 중요한
+     * 이유는 이 검사가 시뮬레이션의 가장 안쪽 루프에 있기 때문입니다. ::level_trace는
+     * 광선 5cm마다 ::level_ground를 샘플링하고, 각 샘플은 모든 섹터에 해당 점을
+     * 포함하는지 묻습니다.
+     *
+     * 질의마다가 아니라 ::level_load가 한 번만 계산하며, 그것이 핵심입니다. 호출할
+     * 때마다 유도하면 회피하려던 바로 그 순회와 같은 비용이 들며, 측정 결과 아예 없는
+     * 것보다 거의 나아지지 않았습니다.
+     *
+     * @note 이는 순전히 최적화이며 두 번째 진실 공급원이 아닙니다. *유효하지 않은*
+     *       박스(min > max)는 무시되고 전체 교차 판정이 수행됩니다. 0으로 초기화된
+     *       메모리와 손으로 조립한 Level이 모두 그 상태이므로, 필드를 하나씩 채워 만든
+     *       Level은 이 필드의 존재를 몰라도 올바르게 동작합니다. 잃는 것은 속도뿐입니다.
+     * @warning ::level_load가 기록합니다. 이후 `pts`를 수정하는 쪽은(맵 에디터가
+     *          그렇습니다) ::level_bounds를 호출해 갱신해야 합니다. 진짜 문제가 되는
+     *          경우는 *갱신되지 않은* 박스(계산된 뒤 편집으로 무효가 된 경우) 하나뿐이며,
+     *          이제는 다각형이 포함하는 점을 기각할 수 있어 보이지만 통과할 수 있는 벽으로
+     *          나타납니다.
+     */
+    short min_x, min_z, max_x, max_z;
+
+    /**
+     * @brief Non-zero once ::level_bounds has filled the box above.
+     *
+     * ENGLISH
+     * -------
+     * A separate flag rather than a sentinel inside the box itself, because
+     * there is no box value that zeroed memory cannot also produce: `{0}`
+     * leaves a box of (0,0)-(0,0), which is perfectly VALID and rejects
+     * everything except the origin. That is not a hypothetical -- it is what
+     * every headless fixture in tools/ builds, and it made the whole level
+     * solid.
+     *
+     * Zero means "not computed", which is exactly what `Level l = {0}` gives,
+     * so a Level assembled field by field is correct by default and merely
+     * slower. Being wrong has to require an explicit act; being right must be
+     * the thing that happens when nobody thought about it.
+     *
+     * 한국어
+     * ------
+     * @brief ::level_bounds가 위의 박스를 채웠으면 0이 아닙니다.
+     *
+     * 박스 안에 특별한 값을 두는 대신 별도의 플래그를 사용합니다. 0으로 초기화된 메모리가
+     * 만들어 낼 수 없는 박스 값이 존재하지 않기 때문입니다. `{0}`은 (0,0)-(0,0) 박스를
+     * 남기는데, 이는 완벽히 *유효하며* 원점을 제외한 모든 것을 기각합니다. 이는 가상의
+     * 상황이 아니라 tools/의 모든 헤드리스 픽스처가 만들어 내는 상태이며, 레벨 전체를
+     * 막힌 것으로 만들었습니다.
+     *
+     * 0은 "계산되지 않음"을 뜻하고 이는 `Level l = {0}`이 주는 값 그대로이므로, 필드를
+     * 하나씩 채워 만든 Level은 기본적으로 올바르며 다만 느릴 뿐입니다. 틀리려면 명시적인
+     * 행위가 필요해야 하고, 아무도 생각하지 않았을 때 일어나는 일이 옳은 쪽이어야 합니다.
+     */
+    short has_bounds;
+
+    /**
+     * @brief Damage per second dealt to anything standing on this floor. 0 is safe.
+     *
+     * ENGLISH
+     * -------
+     * Lava, acid, a burning grate -- authored as `hurt <dps>` inside a sector.
+     * A rate rather than a flat amount per touch, because the player can walk
+     * across a corner of it or stand in the middle, and those should not cost
+     * the same. Multiplying by the frame time also makes the damage the same
+     * on any machine, which a per-frame amount would not be.
+     *
+     * @note Stored on the SECTOR rather than inferred from the floor material.
+     *       Inferring it would mean a material named "lava" was hazardous and
+     *       one named "lava2" was not, and the first person to retexture a pit
+     *       would make it safe without knowing they had. The two are
+     *       independent on purpose: a level may use the lava material as
+     *       decoration on a wall, or make an innocuous-looking floor lethal.
+     * @note A short rather than a float, like every other authored number
+     *       here, so the parser needs no float handling.
+     *
+     * 한국어
+     * ------
+     * @brief 이 바닥 위에 선 대상에게 초당 가하는 피해량입니다. 0이면 안전합니다.
+     *
+     * 용암, 산성 웅덩이, 불타는 격자 등이며 섹터 안에 `hurt <dps>`로 제작합니다. 접촉당
+     * 고정량이 아니라 비율인 이유는, 플레이어가 모서리만 스쳐 지나갈 수도 있고 한가운데
+     * 서 있을 수도 있는데 그 둘의 대가가 같아서는 안 되기 때문입니다. 프레임 시간을
+     * 곱하면 어떤 기기에서도 피해량이 같아지는데, 프레임당 고정량은 그렇지 않습니다.
+     *
+     * @note 바닥 재질에서 유추하지 않고 *섹터*에 저장합니다. 유추하면 "lava"라는 이름의
+     *       재질은 위험하고 "lava2"는 안전해지며, 구덩이의 텍스처를 바꾸는 첫 번째
+     *       사람이 자기도 모르게 그곳을 안전하게 만들게 됩니다. 둘은 의도적으로
+     *       독립적입니다. 레벨이 용암 재질을 벽 장식으로 쓸 수도 있고, 멀쩡해 보이는
+     *       바닥을 치명적으로 만들 수도 있습니다.
+     * @note 이곳의 다른 모든 제작 수치와 마찬가지로 float가 아닌 short이므로 파서에
+     *       부동소수점 처리가 필요 없습니다.
+     */
+    short hurt;
 } Sector;
 
 /**
@@ -186,6 +519,39 @@ typedef struct {
 } Entity;
 
 /**
+ * @struct Light
+ * @brief A point light: where it is, how far it reaches, and what colour it is.
+ *
+ * ENGLISH
+ * -------
+ * Declared separately from ::Entity rather than as another `kind`, because an
+ * entity is a point on the floor plan -- x and z only -- and a light needs a
+ * height, a radius and a colour. Bolting four more fields onto Entity would
+ * cost every spawn and pickup marker the same bytes for fields they never use.
+ *
+ * @note There is no direction. These are omnidirectional, which is what a
+ *       torch or a strip in a ceiling actually is, and a cone would need an
+ *       axis and two angles for a look this project does not use.
+ *
+ * 한국어
+ * ------
+ * 점광원입니다. 위치, 도달 거리, 색상으로 구성됩니다.
+ *
+ * 또 다른 `kind`가 아니라 ::Entity와 별도로 선언합니다. 엔티티는 평면도상의 한 점(x와 z
+ * 뿐)인 반면 광원은 높이, 반경, 색상이 필요하기 때문입니다. Entity에 필드 네 개를 더
+ * 붙이면 모든 스폰·아이템 표식이 쓰지도 않는 필드에 같은 바이트를 지불하게 됩니다.
+ *
+ * @note 방향이 없습니다. 전방향 광원이며, 횃불이나 천장의 조명등이 실제로 그렇습니다.
+ *       원뿔형은 축과 두 개의 각도가 필요한데 이 프로젝트가 쓰지 않는 룩입니다.
+ */
+typedef struct {
+    short x, y, z;                /**< Position in 1/100 units. / 위치 (1/100 단위). */
+    short radius;                 /**< Reach in 1/100 units; nothing past this is lit. / 도달 거리 (1/100 단위). 이를 넘으면 비추지 않습니다. */
+    short r, g, b;                /**< Colour, 0..255. / 색상 (0..255). */
+    short power;                  /**< Brightness, percent. 100 is the reference. / 밝기 (퍼센트). 100이 기준입니다. */
+} Light;
+
+/**
  * @struct Level
  * @brief One complete level: its sectors, entities, start point and exit target.
  *
@@ -204,7 +570,23 @@ typedef struct {
     int     n_sectors;                    /**< Number of sectors in use. / 사용 중인 섹터의 수. */
     Entity  ents[LVL_MAX_ENTS];           /**< Entity markers. / 엔티티 표식. */
     int     n_ents;                       /**< Number of entities in use. / 사용 중인 엔티티의 수. */
+    Light   lights[LVL_MAX_LIGHTS];       /**< Point lights. / 점광원. */
+    int     n_lights;                     /**< Number of lights in use. / 사용 중인 광원의 수. */
     short   start[3];                     /**< x, z, and yaw in millidegrees. / x, z 좌표와 밀리도 단위의 yaw. */
+
+    /**
+     * @brief Sector lookup acceleration. Derived, not authored.
+     *
+     * Filled by ::level_load and refreshed by ::level_grid_build. Zeroed means
+     * "not built", which every query handles by falling back to the full
+     * sector scan -- so this field can be ignored entirely by anything that
+     * assembles a Level by hand. See ::SectorGrid.
+     *
+     * ::level_load가 채우고 ::level_grid_build가 갱신합니다. 0이면 "생성되지 않음"이며,
+     * 모든 질의가 전체 섹터 순회로 되돌아가 이를 처리합니다. 따라서 Level을 손으로
+     * 조립하는 쪽은 이 필드를 완전히 무시해도 됩니다. ::SectorGrid를 참조하십시오.
+     */
+    SectorGrid grid;
 } Level;
 
 /**
@@ -273,6 +655,65 @@ typedef struct {
  *          지역 변수로 사용해서는 안 됩니다.
  */
 int level_load(const char *name, Level *out);
+
+/**
+ * @brief Recomputes one sector's cached bounding box from its points.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] s Sector whose `min_x`/`min_z`/`max_x`/`max_z` are refreshed.
+ * @note ::level_load calls this for every sector it parses, so a level read
+ *       from disk needs nothing further. It is exposed for the map editor,
+ *       which moves vertices after loading: the bounds are what collision
+ *       rejects against, so a stale box makes a sector unenterable or lets the
+ *       player walk into a wall, with no other symptom.
+ * @note Safe on a degenerate sector: fewer than three points leaves an empty
+ *       box, which rejects everything -- the same answer the crossing test
+ *       gives for a polygon with no area.
+ *
+ * 한국어
+ * ------
+ * @brief 섹터의 캐시된 바운딩 박스를 점들로부터 다시 계산합니다.
+ * @param[in,out] s `min_x`/`min_z`/`max_x`/`max_z`를 갱신할 섹터.
+ * @note ::level_load가 파싱하는 모든 섹터에 대해 이 함수를 호출하므로, 디스크에서 읽은
+ *       레벨에는 추가 작업이 필요 없습니다. 이 함수는 로드 이후 정점을 옮기는 맵
+ *       에디터를 위해 공개되어 있습니다. 충돌 판정이 이 경계값으로 기각을 수행하므로,
+ *       갱신되지 않은 박스는 섹터에 들어갈 수 없게 만들거나 플레이어가 벽을 통과하게
+ *       만들며, 다른 증상은 나타나지 않습니다.
+ * @note 축퇴된 섹터에도 안전합니다. 점이 3개 미만이면 빈 박스가 되어 모든 것을
+ *       기각하는데, 이는 넓이가 없는 다각형에 대해 교차 판정이 내리는 답과 같습니다.
+ */
+void level_bounds(Sector *s);
+
+/**
+ * @brief Rebuilds the level's sector lookup grid from its sectors.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] l Level whose ::SectorGrid is refreshed.
+ * @note ::level_load calls this after computing every sector's bounds, so a
+ *       level read from the text needs nothing further. It is exposed for the
+ *       map editor, which moves vertices after loading.
+ * @note Requires each sector's bounding box to be current, so call
+ *       ::level_bounds on every edited sector FIRST -- the grid is built from
+ *       those boxes, and a stale box puts a sector in the wrong cells.
+ * @note Safe on a level with no sectors: the grid is marked unbuilt and every
+ *       query takes the scan path, which is correct and merely slower.
+ *
+ * 한국어
+ * ------
+ * @brief 레벨의 섹터 조회 격자를 섹터들로부터 다시 생성합니다.
+ * @param[in,out] l ::SectorGrid를 갱신할 레벨.
+ * @note ::level_load가 모든 섹터의 경계값을 계산한 뒤 이 함수를 호출하므로, 텍스트에서
+ *       읽은 레벨에는 추가 작업이 필요 없습니다. 로드 이후 정점을 옮기는 맵 에디터를
+ *       위해 공개되어 있습니다.
+ * @note 각 섹터의 바운딩 박스가 최신이어야 하므로, 편집된 모든 섹터에 대해
+ *       ::level_bounds를 *먼저* 호출하십시오. 격자는 그 박스들로부터 생성되며, 갱신되지
+ *       않은 박스는 섹터를 엉뚱한 셀에 넣습니다.
+ * @note 섹터가 없는 레벨에도 안전합니다. 격자가 미생성으로 표시되고 모든 질의가 순회
+ *       경로를 택하며, 이는 올바르되 다만 느립니다.
+ */
+void level_grid_build(Level *l);
 
 /**
  * @brief Builds floors, ceilings and walls into a vertex buffer.
@@ -377,6 +818,57 @@ int level_trace(const Level *l, v3 origin, v3 dir, float max_dist,
                 float *out_t, v3 *out_normal);
 
 /**
+ * @brief Whether anything solid lies along a ray. The visibility question only.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] l        Level to trace against.
+ * @param[in] origin   Ray origin in world units.
+ * @param[in] dir      Ray direction; expected to be unit length.
+ * @param[in] max_dist Maximum distance to search.
+ * @return 1 when something blocks the ray within `max_dist`, 0 when it is clear.
+ *
+ * @note Answers exactly what a line-of-sight test asks and nothing more.
+ *       ::level_trace also bisects the last open interval to find WHERE the hit
+ *       was and derives the surface normal there -- ten extra samples plus, for
+ *       a wall, a scan of every edge of every sector in ::nearest_edge_normal.
+ *       A caller that discards both was paying for them, and the monster
+ *       visibility test is called once per monster per frame where a shot is
+ *       fired twice a second.
+ * @note Marches with the same step as ::level_trace, from the same constant, so
+ *       the two cannot disagree about whether a given wall is solid. A
+ *       visibility test that found a gap the shot test would not is a monster
+ *       shooting through a wall.
+ * @warning An origin outside the map reports blocked, matching ::level_trace's
+ *          immediate hit at distance zero. A fixture placed above the ceiling
+ *          therefore sees nothing at all, which is easy to mistake for an AI
+ *          bug.
+ *
+ * 한국어
+ * ------
+ * @brief 광선을 따라 막는 것이 있는지 여부입니다. 가시성 질문만을 다룹니다.
+ * @param[in] l        판정 대상 레벨.
+ * @param[in] origin   월드 단위의 광선 시작점.
+ * @param[in] dir      광선 방향. 단위 길이여야 합니다.
+ * @param[in] max_dist 탐색할 최대 거리.
+ * @return `max_dist` 이내에서 광선을 막는 것이 있으면 1, 뚫려 있으면 0.
+ *
+ * @note 시야 판정이 묻는 것을 정확히, 그리고 그 이상은 답하지 않습니다.
+ *       ::level_trace는 충돌 *지점*을 찾기 위해 마지막 열린 구간을 이분 탐색하고 그곳의
+ *       표면 법선을 유도합니다. 추가 샘플 10회에 더해, 벽인 경우
+ *       ::nearest_edge_normal이 모든 섹터의 모든 모서리를 순회합니다. 이 둘을 모두 버리는
+ *       호출자는 그 비용을 지불하고 있었으며, 몬스터 가시성 판정은 몬스터마다 매 프레임
+ *       호출되는 반면 사격은 초당 두 번입니다.
+ * @note ::level_trace와 동일한 상수에서 나온 동일한 간격으로 전진하므로, 특정 벽이
+ *       막혀 있는지에 대해 둘이 어긋날 수 없습니다. 사격 판정은 찾지 못했을 틈을 가시성
+ *       판정이 찾아낸다면, 그것은 벽을 관통해 쏘는 몬스터입니다.
+ * @warning 맵 바깥의 시작점은 막힘으로 보고되며, 이는 거리 0에서 즉시 충돌하는
+ *          ::level_trace의 동작과 일치합니다. 따라서 천장 위에 배치된 픽스처는 아무것도
+ *          보지 못하며, 이를 AI 버그로 오해하기 쉽습니다.
+ */
+int level_blocked(const Level *l, v3 origin, v3 dir, float max_dist);
+
+/**
  * @brief Returns the sector governing a point.
  *
  * ENGLISH
@@ -400,6 +892,40 @@ int level_trace(const Level *l, v3 origin, v3 dir, float max_dist,
  *       새 섹터가 놓인 위치의 속성을 물려받도록 하기 위해 이 함수를 필요로 합니다.
  */
 int level_sector_at(const Level *l, float x, float z);
+
+/**
+ * @brief Damage per second the floor at a point deals.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] l Level to query.
+ * @param[in] x X coordinate in world units.
+ * @param[in] z Z coordinate in world units.
+ * @return The governing sector's ::Sector::hurt, or 0 outside the map and on
+ *         any safe floor.
+ * @note Uses the same last-declared-wins rule as ::level_ground, so a safe
+ *       platform laid over a lava pit is safe to stand on -- which is what
+ *       makes a lava room playable rather than merely lethal.
+ * @note Answers only "how dangerous is the floor here". Whether the player is
+ *       actually touching it is the caller's question, because the answer
+ *       differs for a player standing on it, a monster wading through it and
+ *       a projectile passing over it.
+ *
+ * 한국어
+ * ------
+ * @brief 특정 지점의 바닥이 가하는 초당 피해량입니다.
+ * @param[in] l 조회할 레벨.
+ * @param[in] x 월드 단위의 X 좌표.
+ * @param[in] z 월드 단위의 Z 좌표.
+ * @return 해당 지점을 지배하는 섹터의 ::Sector::hurt. 맵 바깥이거나 안전한 바닥이면 0.
+ * @note ::level_ground와 동일한 "마지막 선언 우선" 규칙을 사용하므로, 용암 구덩이 위에
+ *       놓인 안전한 발판은 밟고 설 수 있습니다. 그것이 용암 방을 단순히 치명적인 곳이
+ *       아니라 플레이 가능한 곳으로 만듭니다.
+ * @note "이곳의 바닥이 얼마나 위험한가"에만 답합니다. 플레이어가 실제로 닿아 있는지는
+ *       호출자의 질문입니다. 그 답이 바닥에 선 플레이어, 그곳을 지나는 몬스터, 위를
+ *       스치는 발사체마다 다르기 때문입니다.
+ */
+int level_hazard_at(const Level *l, float x, float z);
 
 /**
  * @brief Tests whether a point is within ::LVL_EXIT_RADIUS of an `exit` entity.

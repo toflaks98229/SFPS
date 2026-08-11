@@ -10,6 +10,7 @@
 #   start <x> <z> <yaw>   player spawn, yaw in millidegrees
 #   s                     begin a sector
 #   floor <n>  ceil <n>   heights
+#   hurt <dps>            damage per second to anything standing on this floor
 #   mat floor|wall|ceil <name> ...   materials, from assets/textures.txt
 #   p <x z> ...           the floor plan, read until the next word
 #   next <name>           level the `exit` entity leads to
@@ -19,6 +20,20 @@
 # ammo/health are pickups, and `exit` ends the level -- walk onto it and the
 # game loads `next`, carrying your health and ammo across. A level with no
 # `next` is the end of the game: its exit shows the win screen instead.
+#
+# `hurt` is charged only while GROUNDED, so a lava channel is something to jump
+# or grapple across rather than a wall. It is independent of the floor material
+# on purpose: retexturing a pit must not silently make it safe, and a level may
+# want the lava material as decoration or an innocuous floor that kills.
+# Because last-wins applies here too, a safe platform laid over a lava sector
+# is safe to stand on -- which is what makes a lava room playable.
+#
+# `hurt`는 *지면에 있을 때만* 적용되므로, 용암 수로는 벽이 아니라 뛰어넘거나 훅으로
+# 건너는 대상입니다. 바닥 재질과 독립적인 것은 의도적입니다. 구덩이의 텍스처를 바꾸는 것이
+# 조용히 그곳을 안전하게 만들어서는 안 되며, 레벨이 용암 재질을 장식으로 쓰거나 멀쩡해
+# 보이는 바닥을 치명적으로 만들고 싶을 수도 있습니다. 이곳에도 마지막 선언 우선 규칙이
+# 적용되므로, 용암 섹터 위에 놓인 안전한 발판은 밟고 설 수 있습니다. 그것이 용암 방을
+# 플레이 가능하게 만듭니다.
 #
 # SECTORS MAY OVERLAP, and the LAST one declared wins at any point. Doom tiles
 # the plane and defines edges with linedefs, which is fiddly to author; here a
@@ -78,6 +93,17 @@ e caster 0 -400          # holds the middle of the room and shoots across it
 e ammo 0 0
 e exit 0 -1200
 
+# Point lights: light <x> <y> <z> <radius> <r> <g> <b> <power>
+#
+# The illumination is quantised into bands before the material is applied, so
+# a light does not smear into a gradient -- it lays down a pool with an edge.
+# That is deliberate: the resolve pass dithers to four levels, and smooth
+# falloff at that budget reads as noise rather than as light.
+light     0  380 -1100  900  255 190 110  115   # warm lamp over the exit
+light  -1500 300   200  800  120 170 255   90   # cold fill in the west corner
+light   1400 300   900  750  120 170 255   85   # and its counterpart east
+light      0 300  -400  600  255 140  70   70   # low ember at the caster's post
+
 l vault
 start 0 700 0
 # No `next`: this is the last level. Reaching its exit ends the game instead
@@ -89,7 +115,32 @@ mat floor pmarble  wall phex  ceil pgrid
 p
    -900 -900   900 -900   900 900   -900 900
 
-s                        # a raised dais in the middle
+# A lava moat, sunk into the room. Declared BEFORE the dais so the dais wins
+# where they overlap -- last-wins is what lets the safe platform sit in the
+# middle of the hazard without cutting either polygon.
+#
+# 20 dps is five seconds of standing in it from full health: long enough to
+# cross deliberately and take the hit, short enough that lingering is a real
+# mistake. The floor is dropped 40cm so it reads as a pit rather than as a
+# painted-on texture, and the step back out is inside PLAYER_STEP so falling in
+# is recoverable.
+#
+# 방에 파인 용암 해자입니다. 겹치는 곳에서 단상이 이기도록 단상보다 *먼저* 선언합니다.
+# 마지막 선언 우선 규칙 덕분에, 어느 다각형도 잘라 내지 않고 위험 지형 한가운데에 안전한
+# 발판을 둘 수 있습니다.
+#
+# 초당 20이면 만체력에서 5초간 서 있을 수 있습니다. 의도적으로 건너며 피해를 감수하기에는
+# 충분히 길고, 머무는 것이 실제 실수가 될 만큼은 짧습니다. 바닥을 40cm 낮춰 덧칠한
+# 텍스처가 아니라 구덩이로 읽히게 했고, 다시 올라오는 단차는 PLAYER_STEP 안에 있으므로
+# 빠져도 복구할 수 있습니다.
+s
+floor -40  ceil 450
+hurt 20
+mat floor plava  wall plava  ceil pgrid
+p
+   -560 -560   560 -560   560 560   -560 560
+
+s                        # a raised dais in the middle, safe above the lava
 floor 90  ceil 450
 mat floor pgrid  wall pgrid  ceil pgrid
 p
@@ -101,4 +152,3 @@ e caster -600 -600       # shooting from the far corner while the brute closes
 e ammo -600 0
 e health 600 -600
 e exit 0 800             # the end of the game
-

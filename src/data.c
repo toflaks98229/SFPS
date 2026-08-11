@@ -1,4 +1,5 @@
 #include "data.h"
+#include "txt.h"          /* txt_copy -- 핫 리로드 경로 조립 */
 #include "gen_assets.h"   /* bake.ps1에 의해 에셋 디렉토리에서 생성됨 */
 
 /**
@@ -12,6 +13,7 @@ static const char *baked(int which) {
     if (which == DATA_SOUNDS)  return ASSET_SOUNDS;
     if (which == DATA_MESHES)  return ASSET_MESHES;
     if (which == DATA_SPRITES) return ASSET_SPRITES;
+    if (which == DATA_EFFECTS) return ASSET_EFFECTS;
     return ASSET_LEVELS;
 }
 
@@ -42,7 +44,8 @@ static const char *FILENAMES[DATA_COUNT] = {
     "assets\\sounds.txt",
     0,                        /* 메시는 .obj 파일에서 구워지므로 파일 없음 */
     "assets\\levels.txt",
-    0                         /* 스프라이트는 .png에서 구워지므로 파일 없음 */
+    0,                        /* 스프라이트는 .png에서 구워지므로 파일 없음 */
+    "assets\\effects.txt"
 };
 
 /* Indexed by DataAsset, so a missing entry would silently shift every path
@@ -84,10 +87,15 @@ static void resolve(Slot *s, const char *rel) {
     if (n > 1) n--;                                    /* 마지막 '\' 제거 */
     while (n > 0 && exe[n - 1] != '\\') n--;          /* build\ 디렉토리 제거 */
 
-    int i = 0;
-    for (; i < (int)n && i < MAX_PATH - 1; i++) s->path[i] = exe[i];
-    for (int k = 0; rel[k] && i < MAX_PATH - 1; k++)  s->path[i++] = rel[k];
-    s->path[i] = 0;
+    /* Directory then relative path. txt_copy returns what it wrote, so the
+       second call starts where the first stopped and the remaining capacity is
+       whatever is left -- a concatenation that cannot overrun even if the exe
+       path is long enough to fill the buffer on its own.
+       디렉토리 다음에 상대 경로입니다. txt_copy가 기록한 길이를 반환하므로 두 번째
+       호출은 첫 번째가 멈춘 곳에서 시작하고 남은 용량만큼만 씁니다. exe 경로만으로
+       버퍼가 가득 차더라도 넘칠 수 없는 연결입니다. */
+    int i = txt_copy(s->path, MAX_PATH, exe, (int)n);
+    txt_copy(s->path + i, MAX_PATH - i, rel, -1);
     s->resolved = 1;
 }
 

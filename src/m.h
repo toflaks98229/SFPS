@@ -623,6 +623,72 @@ static inline mat4 mat4_perspective(float fov_y, float aspect, float zn, float z
  *       `pitch`를 +/-pi/2 미만으로 제한해야 합니다. 정확히 수직이 되면 전방
  *       벡터와 월드 상향 벡터가 평행해져 기저가 퇴화됩니다.
  */
+/**
+ * @brief An FPS view that may also ROLL about the view axis.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] eye   Camera position.
+ * @param[in] yaw   Yaw in radians.
+ * @param[in] pitch Pitch in radians.
+ * @param[in] roll  Roll in radians. 0 gives exactly ::mat4_fps_view.
+ *
+ * @note Separate from ::mat4_fps_view rather than replacing it. That function
+ *       refuses to roll on purpose -- a first-person camera that tilts while
+ *       the player is steering it is nauseating, and every caller that steers
+ *       one wants the guarantee. This exists for the cases where the player is
+ *       NOT steering: the death collapse, and anything else that takes the
+ *       camera away from them.
+ * @note At roll 0 the basis is identical to ::mat4_fps_view's, not merely
+ *       equivalent, so switching between them mid-frame cannot pop.
+ *
+ * 한국어
+ * ------
+ * @brief 시선 축을 중심으로 *롤링*할 수 있는 1인칭 뷰입니다.
+ * @param[in] eye   카메라 위치.
+ * @param[in] yaw   요 (라디안).
+ * @param[in] pitch 피치 (라디안).
+ * @param[in] roll  롤 (라디안). 0이면 ::mat4_fps_view와 정확히 같습니다.
+ *
+ * @note ::mat4_fps_view를 대체하지 않고 별도로 둡니다. 그 함수가 롤링을 거부하는 것은
+ *       의도적입니다. 플레이어가 조종하는 중에 기울어지는 1인칭 카메라는 멀미를
+ *       유발하며, 카메라를 조종하는 모든 호출자가 그 보장을 원합니다. 이 함수는
+ *       플레이어가 조종하지 *않는* 경우를 위한 것입니다. 사망 시의 쓰러짐, 그리고
+ *       카메라를 플레이어에게서 가져가는 그 밖의 모든 경우입니다.
+ * @note 롤이 0이면 기저가 ::mat4_fps_view의 것과 동등한 정도가 아니라 *동일*하므로,
+ *       프레임 도중에 둘을 전환해도 화면이 튀지 않습니다.
+ */
+static inline mat4 mat4_fps_view_roll(v3 eye, float yaw, float pitch, float roll) {
+    float cy = cosf(yaw), sy = sinf(yaw);
+    float cp = cosf(pitch), sp = sinf(pitch);
+    v3 fwd   = v3f(-sy * cp, sp, -cy * cp);
+    v3 right = v3f(cy, 0, -sy);
+    v3 up    = v3cross(right, fwd);
+
+    /* Rotate the right/up pair about the forward axis. Forward is untouched,
+       so the camera keeps looking where it was looking and only the horizon
+       tilts -- which is what a head falling sideways does.
+       전방 축을 중심으로 우측/상향 쌍을 회전시킵니다. 전방은 그대로이므로 카메라는
+       보던 곳을 계속 보고 수평선만 기울어집니다. 머리가 옆으로 쓰러질 때 일어나는
+       일이 그것입니다. */
+    if (roll != 0.0f) {
+        float cr = cosf(roll), sr = sinf(roll);
+        v3 r2 = v3add(v3scale(right, cr), v3scale(up, sr));
+        v3 u2 = v3add(v3scale(right, -sr), v3scale(up, cr));
+        right = r2;
+        up    = u2;
+    }
+
+    mat4 r = mat4_identity();
+    r.m[0] = right.x; r.m[4] = right.y; r.m[8]  = right.z;
+    r.m[1] = up.x;    r.m[5] = up.y;    r.m[9]  = up.z;
+    r.m[2] = -fwd.x;  r.m[6] = -fwd.y;  r.m[10] = -fwd.z;
+    r.m[12] = -v3dot(right, eye);
+    r.m[13] = -v3dot(up, eye);
+    r.m[14] =  v3dot(fwd, eye);
+    return r;
+}
+
 static inline mat4 mat4_fps_view(v3 eye, float yaw, float pitch) {
     float cy = cosf(yaw), sy = sinf(yaw);
     float cp = cosf(pitch), sp = sinf(pitch);

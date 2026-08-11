@@ -35,6 +35,37 @@
 
 #include "gl.h"
 
+/* --- Capacity limits / 용량 제한 --- */
+
+/**
+ * @brief Longest material name ::tex_mat can cache, including the terminator.
+ *
+ * ENGLISH
+ * -------
+ * Published because it is a real constraint on callers, not an internal
+ * detail: a longer name is rebuilt from its recipe on every lookup instead of
+ * being cached, because a truncated copy could never match the full name.
+ *
+ * @note Must be at least `LVL_MAT`, the authoring limit for a material name.
+ *       weapon.c asserts that at compile time -- it already includes both this
+ *       header and level.h and passes level-authored names here, so the check
+ *       lives there rather than dragging the simulation header in.
+ *
+ * 한국어
+ * ------
+ * @brief ::tex_mat이 캐시할 수 있는 재질 이름의 최대 길이입니다. 종료 문자를 포함합니다.
+ *
+ * 내부 구현이 아니라 호출자에 대한 실제 제약이므로 공개합니다. 이보다 긴 이름은
+ * 캐시되지 않고 조회할 때마다 레시피로부터 재생성됩니다. 잘린 사본은 전체 이름과 결코
+ * 일치할 수 없기 때문입니다.
+ *
+ * @note 재질 이름의 제작 상한인 `LVL_MAT` 이상이어야 합니다. weapon.c가 이를 컴파일
+ *       시점에 검사합니다. 그 파일은 이 헤더와 level.h를 모두 포함하며 레벨에서 제작된
+ *       이름을 이곳에 전달하므로, 시뮬레이션 헤더를 이곳으로 끌어들이는 대신 그곳에
+ *       검사를 두었습니다.
+ */
+#define TEX_NAME_MAX 16
+
 /* --- Type definitions / 타입 정의 --- */
 
 /**
@@ -64,7 +95,29 @@ typedef struct {
     int    proc;       /**< Procedural shader id; PROC_TEXTURE (0) means "sample tex". / 절차적 셰이더 id. PROC_TEXTURE(0)는 "텍스처를 샘플링하라"는 의미입니다. */
     float  rgb[3];     /**< Base colour the shader tints with. / 셰이더가 색조로 사용하는 기본 색상. */
     float  scale;      /**< Pattern cells per UV unit. / UV 단위당 패턴 셀의 수. */
-    float  params[3];  /**< x = gloss; y, z spare for per-shader tweaks. / x는 광택. y, z는 셰이더별 조정을 위한 예비 값입니다. */
+    /**
+     * @brief x = gloss, y = normal-map strength, z spare.
+     *
+     * ENGLISH
+     * -------
+     * `y` is set by the `bump` op and read only on the procedural path. The
+     * shader differences the material's own luminance a texel apart to get a
+     * surface gradient and tilts the shading normal by it, so relief costs no
+     * second texture and no per-vertex tangent -- see procNormal in render.c.
+     * Zero leaves the surface flat, which is what every material that does not
+     * mention `bump` gets.
+     *
+     * 한국어
+     * ------
+     * @brief x는 광택, y는 노멀 맵 강도, z는 예비 값입니다.
+     *
+     * `y`는 `bump` 명령이 설정하며 절차적 경로에서만 읽습니다. 셰이더가 재질 자신의
+     * 휘도를 텍셀 간격으로 차분해 표면 기울기를 구하고 그만큼 셰이딩 법선을 기울이므로,
+     * 요철에 두 번째 텍스처도 정점별 탄젠트도 들지 않습니다. render.c의 procNormal을
+     * 참조하십시오. 0이면 표면이 평평하게 유지되며, `bump`를 언급하지 않는 모든 재질이
+     * 그 값을 갖습니다.
+     */
+    float  params[3];
 } Mat;
 
 /* --- Public function prototypes: materials / 공개 함수 프로토타입: 재질 --- */
@@ -79,6 +132,12 @@ typedef struct {
  *         an error, so a typo shows up as a wrong-looking surface instead of
  *         a crash.
  * @warning Requires a current GL context: a cache miss uploads a texture.
+ * @note The returned ::Mat is always owned by the cache, never by the caller:
+ *       do not delete its texture. When the material cannot be cached -- the
+ *       cache is full, or the name is longer than ::TEX_NAME_MAX -- the
+ *       texture is released before returning rather than handed over, so the
+ *       result is a valid procedural material with `tex` of 0. Draws stay
+ *       correct; only the caching is lost, and DIAG_TEX_CACHE records it.
  *
  * 한국어
  * ------
@@ -88,6 +147,11 @@ typedef struct {
  *         오타는 충돌이 아니라 잘못 보이는 표면으로 나타납니다.
  * @warning 활성 GL 컨텍스트가 필요합니다. 캐시에 없으면 텍스처를 업로드하기
  *          때문입니다.
+ * @note 반환된 ::Mat은 항상 캐시가 소유하며 호출자가 소유하지 않습니다. 해당 텍스처를
+ *       삭제하지 마십시오. 재질을 캐시할 수 없는 경우(캐시가 가득 찼거나 이름이
+ *       ::TEX_NAME_MAX보다 긴 경우)에는 텍스처를 넘겨주지 않고 반환 전에 해제하므로,
+ *       결과는 `tex`가 0인 유효한 절차적 재질이 됩니다. 그리기는 계속 올바르며 캐싱만
+ *       사라집니다. 그 사실은 DIAG_TEX_CACHE에 기록됩니다.
  */
 Mat  tex_mat(const char *name);
 

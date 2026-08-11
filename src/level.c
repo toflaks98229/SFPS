@@ -43,12 +43,198 @@
 #define U       0.01f    /* file units (cm) -> world units (m) */
 #define LEVEL_UV 0.5f    /* texels per world unit, matching the old box level */
 
+/* How far apart the ray marcher samples, in world units.
+ *
+ * ENGLISH
+ * -------
+ * Named rather than left as a literal because ::level_trace and ::level_blocked
+ * both march with it and MUST agree: the visibility test deciding a wall is
+ * clear at a spacing the shot test would have caught is a monster that shoots
+ * through geometry. One constant, shared by ::march, is what makes that
+ * impossible rather than merely unlikely.
+ *
+ * 5cm is the thinnest geometry the marcher can be trusted to notice. Raising it
+ * is the obvious way to make a trace cheaper and it is the wrong dial: the cost
+ * is dominated by how OFTEN a trace runs, not by how many samples one takes,
+ * and a coarser step buys speed by silently losing thin walls.
+ *
+ * 한국어
+ * ------
+ * 광선 마처가 샘플링하는 간격(월드 단위)입니다.
+ *
+ * 리터럴로 두지 않고 이름을 붙인 이유는 ::level_trace와 ::level_blocked가 모두 이 값으로
+ * 전진하며 반드시 일치해야 하기 때문입니다. 사격 판정이라면 잡아냈을 간격에서 가시성
+ * 판정이 벽을 뚫려 있다고 결론 내리면, 그것은 지오메트리를 관통해 쏘는 몬스터입니다.
+ * ::march가 공유하는 하나의 상수가, 그 일을 단지 일어나기 어렵게 만드는 대신 불가능하게
+ * 만듭니다.
+ *
+ * 5cm는 마처가 놓치지 않는다고 신뢰할 수 있는 가장 얇은 지오메트리입니다. 이 값을 올리는
+ * 것은 판정을 싸게 만드는 뻔한 방법이지만 잘못된 조정입니다. 비용을 지배하는 것은 한 번의
+ * 판정이 몇 개의 샘플을 취하는지가 아니라 판정이 *얼마나 자주* 실행되는지이며, 성긴
+ * 간격은 얇은 벽을 조용히 잃는 대가로 속도를 삽니다.
+ */
+#define TRACE_STEP 0.05f
+
+/* A level may declare more lights than the shader can evaluate only if someone
+   raises one cap without the other. The excess would be parsed, stored, and
+   then silently ignored at draw time -- a room darker than its author wrote,
+   with nothing to say why. This file is the one that sees both headers, so the
+   check lives here.
+   셰이더가 계산할 수 있는 것보다 레벨이 더 많은 광원을 선언할 수 있으려면, 누군가 한쪽
+   상한만 올려야 합니다. 초과분은 파싱되고 저장된 뒤 그리기 시점에 조용히 무시됩니다.
+   제작자가 작성한 것보다 어두운 방이 되며 그 이유를 알려 주는 것은 없습니다. 이 파일이
+   두 헤더를 모두 참조하므로 검사를 이곳에 둡니다. */
+_Static_assert(RD_MAX_LIGHTS >= LVL_MAX_LIGHTS,
+               "the shader must be able to evaluate every light a level can declare");
+
 /* ----------------------------------------------------------------- parser */
 
+/* txt_copy with this file's argument order. Kept as a name rather than
+   replaced at each of its call sites, because "copy this token into that
+   field" reads better here than the general helper's four arguments do.
+   이 파일의 인자 순서를 따르는 txt_copy입니다. 호출 지점마다 교체하지 않고 이름을
+   유지하는 이유는, 이곳에서는 "이 토큰을 저 필드에 복사한다"가 범용 헬퍼의 인자 네 개
+   보다 잘 읽히기 때문입니다. */
 static void copy_name(char *dst, int cap, const char *src, int len) {
-    int i = 0;
-    for (; i < len && i < cap - 1; i++) dst[i] = src[i];
-    dst[i] = 0;
+    txt_copy(dst, cap, src, len);
+}
+
+void level_bounds(Sector *s) {
+    if (s->n < 1) {
+        /* No outline: leave the box unmarked. point_in_sector then falls
+           through to the crossing test, which returns 0 for a sector with no
+           points anyway -- the same answer, reached by the path that cannot be
+           wrong.
+           외곽선이 없는 경우: 박스를 표시하지 않은 채로 둡니다. 그러면 point_in_sector가
+           교차 판정으로 넘어가며, 점이 없는 섹터에 대해 어차피 0을 반환합니다. 결과는
+           같으면서도 틀릴 수 없는 경로를 거치게 됩니다. */
+        s->has_bounds = 0;
+        return;
+    }
+
+    short lo_x = s->pts[0], hi_x = s->pts[0];
+    short lo_z = s->pts[1], hi_z = s->pts[1];
+    for (int i = 1; i < s->n; i++) {
+        short px = s->pts[i*2], pz = s->pts[i*2+1];
+        if (px < lo_x) lo_x = px;
+        if (px > hi_x) hi_x = px;
+        if (pz < lo_z) lo_z = pz;
+        if (pz > hi_z) hi_z = pz;
+    }
+    s->min_x = lo_x; s->max_x = hi_x;
+    s->min_z = lo_z; s->max_z = hi_z;
+    s->has_bounds = 1;
+}
+
+/* ------------------------------------------------------- sector lookup grid */
+
+void level_grid_build(Level *l) {
+    SectorGrid *g = &l->grid;
+
+    /* Cleared first and marked unbuilt, so an early return at any point below
+       leaves a grid every query safely falls back from rather than a
+       half-populated one that would omit sectors.
+       먼저 비우고 미생성으로 표시합니다. 아래 어느 지점에서 조기 반환하더라도, 섹터를
+       누락시킬 절반만 채워진 격자가 아니라 모든 질의가 안전하게 되돌아갈 수 있는 격자가
+       남도록 하기 위함입니다. */
+    g->built = 0;
+    for (int i = 0; i < LVL_GRID_DIM * LVL_GRID_DIM; i++) {
+        g->count[i] = 0;
+        g->overflow[i] = 0;
+    }
+
+    /* Below the threshold the grid costs more than the scan it replaces, so
+       none is built and every query takes the scan path -- see
+       LVL_GRID_MIN_SECTORS for the measurements. Leaving it unbuilt is exactly
+       the same state a hand-assembled Level is in, so this needs no separate
+       handling anywhere: the fallback already exists and is already correct.
+       임계값 미만에서는 격자가 대체하려는 순회보다 비용이 크므로 생성하지 않고, 모든
+       질의가 순회 경로를 택합니다. 측정값은 LVL_GRID_MIN_SECTORS를 참조하십시오.
+       생성하지 않은 상태는 손으로 조립한 Level과 정확히 같은 상태이므로 별도의 처리가
+       필요 없습니다. 폴백이 이미 존재하며 이미 올바릅니다. */
+    if (l->n_sectors < LVL_GRID_MIN_SECTORS) return;
+
+    /* The grid spans every sector's bounds. Built from the cached boxes rather
+       than by rescanning the points: level_load has just computed them, and the
+       editor's contract is to refresh them before calling here.
+       격자는 모든 섹터의 경계를 포괄합니다. 점을 다시 순회하지 않고 캐시된 박스로부터
+       생성합니다. level_load가 방금 그것을 계산했고, 에디터의 계약은 이 함수를 호출하기
+       전에 그것을 갱신하는 것입니다. */
+    int lo_x = 0, lo_z = 0, hi_x = 0, hi_z = 0, any = 0;
+    for (int i = 0; i < l->n_sectors; i++) {
+        const Sector *s = &l->sectors[i];
+        if (!s->has_bounds) continue;
+        if (!any) {
+            lo_x = s->min_x; hi_x = s->max_x;
+            lo_z = s->min_z; hi_z = s->max_z;
+            any = 1;
+        } else {
+            if (s->min_x < lo_x) lo_x = s->min_x;
+            if (s->max_x > hi_x) hi_x = s->max_x;
+            if (s->min_z < lo_z) lo_z = s->min_z;
+            if (s->max_z > hi_z) hi_z = s->max_z;
+        }
+    }
+    if (!any) return;              /* no usable bounds: stay unbuilt */
+
+    /* Round the cell size up, so DIM cells always cover the whole extent. The
+       +1 guarantees a non-zero size even for a zero-extent level, which would
+       otherwise divide by zero in the cell lookup.
+       셀 크기를 올림합니다. 그래야 DIM개의 셀이 항상 전체 범위를 덮습니다. +1은 범위가
+       0인 레벨에서도 크기가 0이 되지 않도록 보장하며, 그렇지 않으면 셀 조회에서 0으로
+       나누게 됩니다. */
+    int span_x = hi_x - lo_x, span_z = hi_z - lo_z;
+    int cw = span_x / LVL_GRID_DIM + 1;
+    int ch = span_z / LVL_GRID_DIM + 1;
+
+    g->min_x  = (short)lo_x;  g->min_z  = (short)lo_z;
+    g->cell_w = (short)cw;    g->cell_h = (short)ch;
+
+    /* A sector goes into every cell its bounding box touches, not just the one
+       its centre falls in: a sector larger than a cell must be found from
+       anywhere inside it.
+       섹터는 중심이 속한 셀이 아니라 바운딩 박스가 닿는 모든 셀에 들어갑니다. 셀보다 큰
+       섹터도 그 내부 어디에서나 발견되어야 하기 때문입니다. */
+    for (int i = 0; i < l->n_sectors; i++) {
+        const Sector *s = &l->sectors[i];
+
+        /* Without bounds there is no box to place, and guessing would risk
+           omitting the sector from a cell that needs it. Mark every cell
+           unusable instead: correctness before speed.
+           경계값이 없으면 배치할 박스가 없으며, 추측하면 그 섹터가 필요한 셀에서
+           누락될 위험이 있습니다. 대신 모든 셀을 사용 불가로 표시합니다. 속도보다
+           정확성입니다. */
+        if (!s->has_bounds) {
+            for (int k = 0; k < LVL_GRID_DIM * LVL_GRID_DIM; k++) g->overflow[k] = 1;
+            continue;
+        }
+
+        int cx0 = (s->min_x - lo_x) / cw, cx1 = (s->max_x - lo_x) / cw;
+        int cz0 = (s->min_z - lo_z) / ch, cz1 = (s->max_z - lo_z) / ch;
+        if (cx0 < 0) cx0 = 0;
+        if (cz0 < 0) cz0 = 0;
+        if (cx1 >= LVL_GRID_DIM) cx1 = LVL_GRID_DIM - 1;
+        if (cz1 >= LVL_GRID_DIM) cz1 = LVL_GRID_DIM - 1;
+
+        for (int cz = cz0; cz <= cz1; cz++) {
+            for (int cx = cx0; cx <= cx1; cx++) {
+                int c = cz * LVL_GRID_DIM + cx;
+                if (g->count[c] >= LVL_GRID_MAX_PER_CELL) {
+                    /* Full: mark the cell unusable rather than dropping the
+                       sector. A dropped sector is a floor that vanishes; a
+                       fallback is merely the scan this grid exists to avoid.
+                       가득 참: 섹터를 버리는 대신 셀을 사용 불가로 표시합니다. 버려진
+                       섹터는 사라진 바닥이지만, 되돌아가기는 이 격자가 피하려던 순회일
+                       뿐입니다. */
+                    g->overflow[c] = 1;
+                    continue;
+                }
+                g->sect[c][g->count[c]++] = (unsigned char)i;
+            }
+        }
+    }
+
+    g->built = 1;
 }
 
 int level_load(const char *name, Level *out) {
@@ -58,6 +244,7 @@ int level_load(const char *name, Level *out) {
 
     out->n_sectors = 0;
     out->n_ents = 0;
+    out->n_lights = 0;
     out->name[0] = 0;
     out->next[0] = 0;
     out->start[0] = out->start[1] = out->start[2] = 0;
@@ -103,6 +290,7 @@ int level_load(const char *name, Level *out) {
                 cur->n = 0;
                 cur->floor = 0;
                 cur->ceil = 300;
+                cur->hurt = 0;      /* safe unless the file says otherwise */
                 copy_name(cur->mat_floor, LVL_MAT, "brick", 5);
                 copy_name(cur->mat_wall,  LVL_MAT, "brick", 5);
                 copy_name(cur->mat_ceil,  LVL_MAT, "brick", 5);
@@ -116,6 +304,19 @@ int level_load(const char *name, Level *out) {
             p = txt_read_int(p, &v, &ok);
             if (ok && cur) { if (is_floor) cur->floor = (short)v;
                              else          cur->ceil  = (short)v; }
+            continue;
+        }
+
+        /* `hurt <dps>` -- lava, acid, a burning grate. Damage per SECOND, so
+           crossing a corner costs less than standing in the middle and the
+           rate is the same on any machine.
+           `hurt <dps>`이며 용암, 산성 웅덩이, 불타는 격자 등입니다. *초당* 피해량이므로
+           모서리를 스쳐 지나가는 것이 한가운데 서 있는 것보다 덜 들고, 어떤 기기에서도
+           비율이 같습니다. */
+        if (txt_is(t, len, "hurt")) {
+            int v, ok;
+            p = txt_read_int(p, &v, &ok);
+            if (ok && cur) cur->hurt = (short)v;
             continue;
         }
 
@@ -185,6 +386,42 @@ int level_load(const char *name, Level *out) {
             }
             continue;
         }
+
+        /* A point light: position, reach, colour and brightness.
+         *
+         *   light <x> <y> <z> <radius> <r> <g> <b> <power>
+         *
+         * Eight integers on one line rather than a block, because a light has
+         * no optional parts -- every field is needed for it to appear at all,
+         * so there is nothing for a multi-line form to make optional.
+         *
+         * Past LVL_MAX_LIGHTS the light is parsed and dropped, which is
+         * reported: a room that is darker than the author intended gives no
+         * hint that a cap was the cause.
+         *
+         * 점광원입니다. 위치, 도달 거리, 색상, 밝기로 구성됩니다.
+         *
+         * 블록이 아니라 한 줄에 정수 여덟 개인 이유는, 광원에 선택적인 부분이 없기
+         * 때문입니다. 모든 필드가 있어야 광원이 나타나므로 여러 줄 형식이 선택적으로
+         * 만들 것이 없습니다.
+         *
+         * LVL_MAX_LIGHTS를 넘으면 파싱되되 버려지며 이는 보고됩니다. 제작자의 의도보다
+         * 어두운 방은 용량 한계가 원인이라는 단서를 주지 않기 때문입니다. */
+        if (txt_is(t, len, "light")) {
+            int v[8], ok = 1;
+            for (int i = 0; i < 8 && ok; i++) p = txt_read_int(p, &v[i], &ok);
+            if (!ok) continue;
+
+            if (found && out->n_lights >= LVL_MAX_LIGHTS) DIAG(DIAG_LIGHT_CAP);
+            if (found && out->n_lights < LVL_MAX_LIGHTS) {
+                Light *L = &out->lights[out->n_lights++];
+                L->x = (short)v[0]; L->y = (short)v[1]; L->z = (short)v[2];
+                L->radius = (short)v[3];
+                L->r = (short)v[4]; L->g = (short)v[5]; L->b = (short)v[6];
+                L->power = (short)v[7];
+            }
+            continue;
+        }
     }
 
     /* A sector with fewer than three points cannot be triangulated; drop it
@@ -194,12 +431,104 @@ int level_load(const char *name, Level *out) {
         if (out->sectors[i].n >= 3) out->sectors[w++] = out->sectors[i];
     out->n_sectors = w;
 
+    /* Cache each surviving sector's bounding box. After the compaction above,
+       so the dropped sectors are not walked, and before anything can query the
+       level -- point_in_sector rejects against these, so a level whose bounds
+       were never computed would collide as if every sector were empty.
+       살아남은 각 섹터의 바운딩 박스를 캐시합니다. 위의 압축 이후에 수행하여 버려진
+       섹터를 순회하지 않으며, 레벨에 대한 질의가 가능해지기 전에 수행합니다.
+       point_in_sector가 이 값으로 기각하므로, 경계값이 계산되지 않은 레벨은 모든 섹터가
+       비어 있는 것처럼 충돌 판정됩니다. */
+    for (int i = 0; i < out->n_sectors; i++)
+        level_bounds(&out->sectors[i]);
+
+    /* And the lookup grid, which is built FROM those boxes -- so it has to
+       follow them, and both have to precede any query.
+       그리고 조회 격자입니다. 그 박스들로부터 생성되므로 반드시 그 뒤에 와야 하며, 둘
+       모두 어떤 질의보다도 앞서야 합니다. */
+    level_grid_build(out);
+
     return found;
 }
 
 /* -------------------------------------------------------------- 2D helpers */
 
+/* Reject a point against the sector's bounding box before walking its edges.
+ *
+ * ENGLISH
+ * -------
+ * sector_at asks this of EVERY sector, and level_trace asks sector_at once per
+ * 0.05m of ray, so this is the innermost loop in the whole simulation: a 40m
+ * hook trace is ~800 steps, each walking every edge of every sector. Measured
+ * with tools/levelbench.c, that is 13us per trace on the arena and 27us on a
+ * level at LVL_MAX_SECTORS -- up to 18% of a frame at full monster load.
+ *
+ * The box test is four compares against integers the sector already stores.
+ * Most sectors are nowhere near any given point, so most calls stop here
+ * instead of doing the crossing test on every edge.
+ *
+ * Deliberately computed rather than cached: the bounds live in the Sector's
+ * own points, so nothing has to be kept in sync when the editor moves a vertex
+ * and nothing is added to the Level struct that would have to be parsed,
+ * stored or embedded. The scan is the same one point_in_sector was already
+ * about to do, and it stops early on a miss.
+ *
+ * Comparison is in FILE units (the raw shorts), not world units: it saves the
+ * multiply per point, and the answer is identical because U is positive.
+ *
+ * 한국어
+ * ------
+ * 모서리를 순회하기 전에 섹터의 바운딩 박스로 점을 먼저 기각합니다.
+ *
+ * sector_at은 *모든* 섹터에 이 질문을 하고, level_trace는 광선 0.05m마다 sector_at을
+ * 호출하므로, 이곳이 시뮬레이션 전체에서 가장 안쪽 루프입니다. 40m 훅 판정은 약 800
+ * 스텝이며 각 스텝이 모든 섹터의 모든 모서리를 순회합니다. tools/levelbench.c로
+ * 측정한 결과 아레나에서 판정당 13us, LVL_MAX_SECTORS 규모의 레벨에서 27us이며, 몬스터가
+ * 가득 찬 상태에서 프레임의 최대 18%에 해당합니다.
+ *
+ * 박스 검사는 섹터가 이미 저장하고 있는 정수에 대한 비교 4번입니다. 대부분의 섹터는
+ * 주어진 점에서 멀리 떨어져 있으므로, 대부분의 호출이 모든 모서리에 교차 판정을 수행하지
+ * 않고 이곳에서 멈춥니다.
+ *
+ * 캐시하지 않고 매번 계산하는 것은 의도적입니다. 경계값은 섹터 자신의 점에 들어 있으므로
+ * 에디터가 정점을 옮겨도 동기화할 것이 없고, 파싱·저장·내장해야 할 필드가 Level 구조체에
+ * 추가되지도 않습니다. 이 순회는 point_in_sector가 어차피 수행하려던 것과 동일하며,
+ * 벗어나는 경우 일찍 중단됩니다.
+ *
+ * 비교는 월드 단위가 아니라 *파일 단위*(원본 short)로 수행합니다. 점마다 곱셈을 아낄 수
+ * 있고, U가 양수이므로 결과는 동일합니다.
+ */
 static int point_in_sector(const Sector *s, float x, float z) {
+    if (s->n < 3) return 0;
+
+    /* Bounding-box reject. Comparison is in FILE units (the raw shorts): it
+       saves a multiply per bound and the answer is identical because U is
+       positive.
+
+       An INVALID box (min > max) means the bounds were never computed, and the
+       test is skipped rather than trusted. That case is not hypothetical: a
+       Level assembled field by field -- which every headless fixture in tools/
+       does -- has zeroed bounds, and honouring a zero box would reject every
+       point and make the whole level solid. Skipping costs one compare on a
+       path that is already walking the edges, and it is what keeps this an
+       optimisation rather than a second source of truth about where a sector
+       is.
+
+       기각용 바운딩 박스입니다. 비교는 *파일 단위*(원본 short)로 수행합니다. 경계마다
+       곱셈을 아낄 수 있고, U가 양수이므로 결과는 동일합니다.
+
+       *유효하지 않은* 박스(min > max)는 경계값이 계산된 적이 없다는 뜻이며, 그 경우 이
+       검사를 신뢰하지 않고 건너뜁니다. 이는 가상의 상황이 아닙니다. 필드를 하나씩
+       채워서 만든 Level은(tools/의 모든 헤드리스 픽스처가 그렇게 합니다) 경계값이 0이며,
+       0인 박스를 그대로 따르면 모든 점이 기각되어 레벨 전체가 막힌 것이 됩니다. 건너뛰는
+       비용은 어차피 모서리를 순회하려던 경로에서 비교 한 번이며, 이것이 이 코드를 섹터
+       위치에 대한 두 번째 진실 공급원이 아니라 최적화로 유지하는 방법입니다. */
+    if (s->has_bounds) {
+        const float fx = x / U, fz = z / U;
+        if (fx < s->min_x || fx > s->max_x || fz < s->min_z || fz > s->max_z)
+            return 0;
+    }
+
     int inside = 0;
     for (int i = 0, j = s->n - 1; i < s->n; j = i++) {
         float xi = s->pts[i*2] * U, zi = s->pts[i*2+1] * U;
@@ -228,8 +557,70 @@ static v3 edge_normal(const Sector *s, int i) {
 
 /* The sector governing a point: the last one declared that contains it.
    One place decides this, so geometry, collision and tracing cannot disagree
-   about where a floor is. */
+   about where a floor is.
+ *
+ * ENGLISH
+ * -------
+ * Two paths that must agree exactly. The grid path visits only the sectors
+ * whose bounding boxes touch the point's cell; the scan path visits all of
+ * them. Both keep the LAST match in index order, because declaration order is
+ * what decides a platform from a pit -- the grid stores its indices ascending
+ * (level_grid_build appends sector 0 first), so walking a cell in storage
+ * order is walking it in declaration order, and "last wins" survives.
+ *
+ * The scan is not dead code kept for reference. It runs whenever the grid is
+ * unbuilt -- which is what a hand-assembled Level gives, and every headless
+ * fixture in tools/ builds one -- and whenever a cell overflowed. Both cases
+ * are correct and merely slower, which is the property that lets the grid be
+ * an optimisation rather than a second source of truth.
+ *
+ * 한국어
+ * ------
+ * 정확히 일치해야 하는 두 경로입니다. 격자 경로는 바운딩 박스가 해당 점의 셀에 닿는
+ * 섹터만 방문하고, 순회 경로는 전부 방문합니다. 양쪽 모두 인덱스 순서상 *마지막*
+ * 일치를 유지하는데, 단상과 구덩이를 가르는 것이 선언 순서이기 때문입니다. 격자는
+ * 인덱스를 오름차순으로 저장하므로(level_grid_build가 0번 섹터를 먼저 추가합니다) 셀을
+ * 저장 순서로 순회하는 것이 곧 선언 순서로 순회하는 것이며, "마지막이 우선"이
+ * 유지됩니다.
+ *
+ * 순회 경로는 참고용으로 남겨 둔 죽은 코드가 아닙니다. 격자가 생성되지 않은 모든
+ * 경우(손으로 조립한 Level이 그러하며, tools/의 모든 헤드리스 픽스처가 그런 것을
+ * 만듭니다)와 셀이 초과한 모든 경우에 실행됩니다. 두 경우 모두 올바르되 다만 느릴
+ * 뿐이며, 이 성질이 격자를 두 번째 진실 공급원이 아닌 최적화로 만듭니다.
+ */
 static const Sector *sector_at(const Level *l, float x, float z) {
+    const SectorGrid *g = &l->grid;
+
+    if (g->built) {
+        /* File units, matching how the grid was built and how point_in_sector
+           compares -- no multiply per lookup.
+           격자가 생성된 방식 및 point_in_sector가 비교하는 방식과 동일하게 파일
+           단위입니다. 조회마다 곱셈이 필요 없습니다. */
+        int fx = (int)(x / U), fz = (int)(z / U);
+        int cx = (fx - g->min_x) / g->cell_w;
+        int cz = (fz - g->min_z) / g->cell_h;
+
+        /* Outside the grid's extent is outside every sector's bounding box, so
+           no sector can contain the point and the answer is "none" without
+           looking at any of them.
+           격자 범위 바깥은 모든 섹터의 바운딩 박스 바깥이므로, 어떤 섹터도 그 점을
+           포함할 수 없으며 섹터를 하나도 보지 않고 "없음"이 답이 됩니다. */
+        if (fx < g->min_x || fz < g->min_z ||
+            cx < 0 || cx >= LVL_GRID_DIM || cz < 0 || cz >= LVL_GRID_DIM)
+            return 0;
+
+        int c = cz * LVL_GRID_DIM + cx;
+        if (!g->overflow[c]) {
+            const Sector *found = 0;
+            for (int k = 0; k < g->count[c]; k++) {
+                const Sector *s = &l->sectors[g->sect[c][k]];
+                if (point_in_sector(s, x, z)) found = s;
+            }
+            return found;
+        }
+        /* Overflowed cell: fall through to the scan. */
+    }
+
     const Sector *found = 0;
     for (int i = 0; i < l->n_sectors; i++)
         if (point_in_sector(&l->sectors[i], x, z)) found = &l->sectors[i];
@@ -669,6 +1060,11 @@ int level_ground(const Level *l, float x, float z, float feet, float step,
     return 1;
 }
 
+int level_hazard_at(const Level *l, float x, float z) {
+    const Sector *s = sector_at(l, x, z);
+    return s ? s->hurt : 0;
+}
+
 /* Is this point in open space? True when some sector contains it in plan and
    its floor/ceiling straddle the height. Overlapping sectors make this the
    whole of solidity: walls, floors, ceilings and platform sides all fall out
@@ -701,26 +1097,72 @@ static v3 nearest_edge_normal(const Level *l, v3 p) {
     return n;
 }
 
-int level_trace(const Level *l, v3 origin, v3 dir, float max_dist,
-                float *out_t, v3 *out_normal) {
-    const float STEP = 0.05f;
-
-    if (!open_at(l, origin)) { *out_t = 0.0f; *out_normal = v3f(0,1,0); return 1; }
-
+/* The marching half of level_trace, shared with level_blocked.
+ *
+ * ENGLISH
+ * -------
+ * Walks the ray in STEP increments and reports the last OPEN distance before
+ * the first solid sample, which is what both callers need and all that
+ * level_blocked needs. Splitting it out is what lets the visibility test skip
+ * the bisection and the normal derivation below without keeping a second copy
+ * of the marcher -- and a second copy is exactly the thing that would drift,
+ * because "how far apart are the samples" is a property of the level's
+ * geometry rather than of who is asking.
+ *
+ * @param[out] out_last Distance of the last sample that was still open. Only
+ *                      written when a hit is reported.
+ * @return 1 when a solid sample was found within `max_dist`, 0 otherwise.
+ *
+ * 한국어
+ * ------
+ * level_trace의 마칭 부분이며 level_blocked와 공유합니다.
+ *
+ * 광선을 STEP 간격으로 전진시키며 첫 번째 solid 샘플 직전의 마지막 *열린* 거리를
+ * 보고합니다. 두 호출자 모두 이 값을 필요로 하며, level_blocked에는 이것으로
+ * 충분합니다. 이 부분을 분리한 덕분에 가시성 판정이 아래의 이분 탐색과 법선 유도를
+ * 건너뛰면서도 마처의 사본을 두 개 두지 않아도 됩니다. 사본이 두 개면 반드시
+ * 어긋나는데, "샘플 간격을 얼마로 하는가"는 묻는 쪽의 성질이 아니라 레벨 지오메트리의
+ * 성질이기 때문입니다.
+ */
+static int march(const Level *l, v3 origin, v3 dir, float max_dist,
+                 float *out_last) {
     float t = 0.0f, last = 0.0f;
-    int hit = 0;
 
     /* Marching rather than intersecting every wall quad: with overlapping
        sectors the solid set is awkward to express as surfaces, but trivial to
-       sample. A shot is a few thousand cheap tests, twice a second. */
+       sample. */
     while (t < max_dist) {
-        float next = t + STEP;
+        float next = t + TRACE_STEP;
         if (next > max_dist) next = max_dist;
-        if (!open_at(l, v3add(origin, v3scale(dir, next)))) { hit = 1; break; }
+        if (!open_at(l, v3add(origin, v3scale(dir, next)))) {
+            *out_last = last;
+            return 1;
+        }
         last = next;
         t = next;
     }
-    if (!hit) return 0;
+    return 0;
+}
+
+int level_blocked(const Level *l, v3 origin, v3 dir, float max_dist) {
+    /* An origin outside the map is solid, so nothing can be seen from it --
+       the same answer level_trace gives by reporting a hit at distance zero.
+       맵 바깥의 시작점은 막힌 것이므로 그곳에서는 아무것도 볼 수 없습니다. 거리 0에서
+       충돌을 보고하는 level_trace의 답과 동일합니다. */
+    if (!open_at(l, origin)) return 1;
+
+    float last;
+    return march(l, origin, dir, max_dist, &last);
+}
+
+int level_trace(const Level *l, v3 origin, v3 dir, float max_dist,
+                float *out_t, v3 *out_normal) {
+    const float STEP = TRACE_STEP;
+
+    if (!open_at(l, origin)) { *out_t = 0.0f; *out_normal = v3f(0,1,0); return 1; }
+
+    float last;
+    if (!march(l, origin, dir, max_dist, &last)) return 0;
 
     /* Bisect the last open/solid interval down to well under a millimetre. */
     float lo = last, hi = last + STEP;
@@ -737,6 +1179,43 @@ int level_trace(const Level *l, v3 origin, v3 dir, float max_dist,
     v3 vert = v3f(p.x, q.y, p.z);
     if (!open_at(l, vert)) *out_normal = v3f(0.0f, dir.y < 0.0f ? 1.0f : -1.0f, 0.0f);
     else                   *out_normal = nearest_edge_normal(l, p);
+
+    /* Face the normal back along the ray.
+     *
+     * nearest_edge_normal returns the sector's OUTWARD normal, which is what
+     * the geometry builder wants -- it is building the outside of a solid. A
+     * ray hitting a wall wants the opposite: the player is INSIDE the room, so
+     * the surface they struck faces them, and outward points into the wall.
+     *
+     * The floor and ceiling case above never had this problem because it picks
+     * its normal from the ray's own direction rather than from the polygon, so
+     * only the four walls were wrong -- which is exactly the symptom: impact
+     * particles were thrown into the wall and never seen, while shooting the
+     * floor sparked correctly.
+     *
+     * Done here rather than in nearest_edge_normal because "outward" is the
+     * right answer for that function and for level_geometry, which also calls
+     * edge_normal. This is the one place the question is "which way does the
+     * surface I just hit face", and that is a property of the ray as well as
+     * of the polygon.
+     *
+     * 법선을 광선 쪽으로 되돌립니다.
+     *
+     * nearest_edge_normal은 섹터의 *바깥* 법선을 반환하며, 이는 고체의 바깥면을 만드는
+     * 지오메트리 생성기가 원하는 값입니다. 그러나 벽에 맞은 광선은 그 반대를 원합니다.
+     * 플레이어는 방 *안에* 있으므로 자신이 맞힌 표면은 자신을 향하고 있고, 바깥 방향은
+     * 벽 속을 가리킵니다.
+     *
+     * 위의 바닥·천장 처리는 다각형이 아니라 광선 자체의 방향으로 법선을 정하므로 이
+     * 문제가 없었습니다. 그래서 네 벽만 틀렸고, 이것이 정확히 관측된 증상입니다. 피격
+     * 파티클이 벽 속으로 던져져 보이지 않았던 반면 바닥을 쏘면 정상적으로 튀었습니다.
+     *
+     * nearest_edge_normal이 아니라 이곳에서 처리하는 이유는, 그 함수와 edge_normal을
+     * 함께 쓰는 level_geometry에게는 "바깥"이 옳은 답이기 때문입니다. "방금 맞힌 표면이
+     * 어느 쪽을 향하는가"를 묻는 곳은 여기뿐이며, 그 답은 다각형만이 아니라 광선에도
+     * 달려 있습니다. */
+    if (v3dot(*out_normal, dir) > 0.0f)
+        *out_normal = v3scale(*out_normal, -1.0f);
 
     *out_t = lo;
     return 1;

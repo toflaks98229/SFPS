@@ -33,6 +33,27 @@
 
 #define MB_MAX_SILHOUETTE 64   ///< @brief Maximum points in an extruded silhouette. / 압출 실루엣이 가질 수 있는 최대 점의 수.
 
+/**
+ * @brief Point lights the shader can evaluate in one draw.
+ *
+ * ENGLISH
+ * -------
+ * Must be at least ::LVL_MAX_LIGHTS. Kept as its own constant rather than
+ * including level.h here, for the same reason tex.h keeps TEX_NAME_MAX: this
+ * is the rendering half and level.h is the root of the simulation half. The
+ * two are tied by a static assert in level.c, which sees both.
+ *
+ * 한국어
+ * ------
+ * @brief 셰이더가 한 번의 그리기에서 계산할 수 있는 점광원 수.
+ *
+ * ::LVL_MAX_LIGHTS 이상이어야 합니다. tex.h가 TEX_NAME_MAX를 유지하는 것과 같은 이유로
+ * level.h를 포함하지 않고 자체 상수로 둡니다. 이곳은 렌더링 영역이고 level.h는
+ * 시뮬레이션 영역의 뿌리입니다. 둘은 양쪽을 모두 참조하는 level.c의 정적 검사로
+ * 묶여 있습니다.
+ */
+#define RD_MAX_LIGHTS 8
+
 /* --- Type definitions: geometry / 타입 정의: 지오메트리 --- */
 
 /**
@@ -142,16 +163,137 @@ enum {
     RD_FLAT      = 2, /**< Uniform colour, unlit -- tracers, flash, crosshair. / 단일 색상, 조명 없음. 예광탄, 화염, 조준점에 사용됩니다. */
     RD_TEXT      = 3, /**< uColor masked by the texture's alpha -- font atlas. / 텍스처 알파로 마스킹된 uColor. 폰트 아틀라스에 사용됩니다. */
     RD_SWATCH    = 4, /**< The raw material, unlit and unfogged -- editor palette. / 조명과 안개가 없는 원본 재질. 에디터 팔레트에 사용됩니다. */
-    RD_SPRITE    = 5  /**< Alpha-tested billboard, fogged; uColor tints and flashes. / 알파 테스트된 빌보드, 안개 적용. uColor가 색조와 점멸을 담당합니다. */
+    RD_SPRITE    = 5, /**< Alpha-tested billboard, fogged; uColor tints and flashes. / 알파 테스트된 빌보드, 안개 적용. uColor가 색조와 점멸을 담당합니다. */
+    /**
+     * @brief Alpha-tested sprite with no fog and no flash: the hand-drawn viewmodel.
+     *
+     * ENGLISH
+     * -------
+     * ::RD_SPRITE is for a sprite that stands somewhere in the world, and both
+     * of the things it adds are wrong for one that is part of the FRAME. Its
+     * fog is a function of the distance from the eye to the vertex, which for
+     * screen coordinates is not a distance; and its `uColor.a` is a monster's
+     * white hit-flash, so a viewmodel passing a reasonable-looking 1.0 asks
+     * for a fully white gun.
+     *
+     * 한국어
+     * ------
+     * @brief 안개와 섬광이 없는 알파 테스트 스프라이트. 손으로 그린 뷰 모델용입니다.
+     *
+     * ::RD_SPRITE는 월드 어딘가에 *서 있는* 스프라이트를 위한 것이며, 그것이 추가하는
+     * 두 가지 모두 *프레임의 일부*인 스프라이트에는 틀립니다. 안개는 눈에서 정점까지의
+     * 거리의 함수인데 화면 좌표에서 그것은 거리가 아니고, `uColor.a`는 몬스터의 흰색
+     * 피격 섬광이므로 뷰 모델이 그럴듯해 보이는 1.0을 넘기면 완전히 하얀 총기를
+     * 요청하게 됩니다.
+     */
+    RD_SPRITE2D  = 6
 };
+
+/**
+ * @brief Texels per UV unit a procedural material is quantised to.
+ *
+ * ENGLISH
+ * -------
+ * The procedural shaders' selling point was that they have NO resolution: a
+ * brick wall stays crisp with the player's nose against it, where the 256x256
+ * pixel recipes visibly blur. That is a real advantage, and against a
+ * pixel-art presentation it is the wrong one.
+ *
+ * The whole look here is built on a small number of large pixels -- the world
+ * is rendered at an art resolution, magnified with GL_NEAREST, and dithered to
+ * four levels. A material with unlimited detail fights all of that: it keeps
+ * resolving finer as the player walks toward it, so a wall reads as a
+ * high-resolution photograph seen through a pixel filter rather than as
+ * something drawn at the same scale as everything else. The pixel-path
+ * materials, being 256x256, already agree with the presentation. The
+ * procedural ones did not.
+ *
+ * So the UV is snapped to a grid of this many cells per unit BEFORE the
+ * pattern is evaluated. The pattern then holds one colour across each cell,
+ * which is what a texel is.
+ *
+ * 32 rather than the pixel path's 256. Matching the baked recipes was the
+ * first choice and it was too timid: at 256 a texel is smaller than a screen
+ * pixel at any normal viewing distance, so the quantisation is real but
+ * invisible and the materials still read as smooth. A tileset drawn by hand
+ * for a game that looks like this would be 32x32 -- that is the resolution the
+ * era's artists actually worked at, and it is coarse enough that a player can
+ * see the individual texels of a wall, which is the entire point.
+ *
+ * The baked 256x256 recipes are unaffected: they are authored pixel data and
+ * their detail is drawn rather than computed, so there is nothing to quantise.
+ * The two paths no longer match in density, and that is correct -- a
+ * hand-painted texture and a generated tile are different kinds of surface and
+ * always were.
+ *
+ * @note Costs nothing. It is a floor() and a multiply on the UV, and it runs
+ *       once per fragment in place of nothing -- the pattern functions
+ *       downstream are unchanged and do not know it happened.
+ * @note Set to 0 to disable the snap entirely and restore the original
+ *       infinite-resolution behaviour, which is still the right choice for a
+ *       project that is not pixelated.
+ * @warning The snap happens in the SCALED UV space, after uPScale has been
+ *          applied, so a material's `proc` scale changes how many world
+ *          metres a texel covers -- exactly as it changes how many metres a
+ *          brick covers. A material tuned to look right will keep looking
+ *          right; one that relied on sub-texel detail will lose it, which is
+ *          the intended outcome.
+ * @note Written as a plain decimal with no `f` suffix. render.c stringifies
+ *       this straight into the shader source, where `32.0f` is a syntax
+ *       error -- the same rule post.h's duotone constants follow, and for the
+ *       same reason: one definition, used from both languages, so there is no
+ *       second copy in GLSL to fall out of step.
+ *
+ * 한국어
+ * ------
+ * @brief 절차적 재질이 양자화되는 UV 단위당 텍셀 수입니다.
+ *
+ * 절차적 셰이더의 장점은 해상도가 *없다*는 것이었습니다. 256x256 픽셀 레시피가 눈에 띄게
+ * 흐려지는 거리에서도 벽돌 벽이 선명하게 유지됩니다. 이는 실제 장점이지만, 픽셀 아트
+ * 표현 방식에서는 잘못된 장점입니다.
+ *
+ * 이곳의 룩 전체가 적은 수의 큰 픽셀 위에 세워져 있습니다. 월드는 아트 해상도로
+ * 렌더링되고, GL_NEAREST로 확대되며, 4단계로 디더링됩니다. 무한한 디테일을 가진 재질은
+ * 그 모든 것과 충돌합니다. 플레이어가 다가갈수록 계속 더 세밀해지므로, 벽이 다른 모든
+ * 것과 같은 크기로 그려진 무언가가 아니라 픽셀 필터를 거쳐 본 고해상도 사진처럼
+ * 읽힙니다. 픽셀 경로의 재질들은 256x256이므로 이미 표현 방식과 일치합니다. 절차적
+ * 재질들은 그렇지 않았습니다.
+ *
+ * 그래서 패턴을 계산하기 *전에* UV를 단위당 이만큼의 셀을 가진 격자에 맞춥니다. 그러면
+ * 패턴이 각 셀 전체에 하나의 색을 유지하는데, 그것이 곧 텍셀입니다.
+ *
+ * 픽셀 경로의 256이 아니라 32입니다. 구워진 레시피에 맞추는 것이 첫 선택이었고 너무
+ * 소심했습니다. 256에서는 일반적인 시야 거리에서 텍셀이 화면 픽셀보다 작으므로, 양자화가
+ * 실제로 일어나되 보이지 않고 재질은 여전히 매끄럽게 읽힙니다. 이런 화면의 게임을 위해
+ * 사람이 그린 타일셋은 32x32입니다. 그것이 그 시대의 아티스트들이 실제로 작업하던
+ * 해상도이며, 플레이어가 벽의 개별 텍셀을 볼 수 있을 만큼 거친데 그것이 요점 전부입니다.
+ *
+ * 구워진 256x256 레시피는 영향을 받지 않습니다. 제작된 픽셀 데이터이며 그 디테일은
+ * 계산된 것이 아니라 그려진 것이므로 양자화할 것이 없습니다. 이제 두 경로의 밀도가
+ * 일치하지 않으며 그것이 옳습니다. 손으로 칠한 텍스처와 생성된 타일은 서로 다른 종류의
+ * 표면이고 처음부터 그랬습니다.
+ *
+ * @note 비용이 없습니다. UV에 대한 floor()와 곱셈이며, 아무것도 없던 자리에서 프래그먼트당
+ *       한 번 실행됩니다. 하위의 패턴 함수들은 변경되지 않았고 이 일이 일어났다는 것조차
+ *       모릅니다.
+ * @note 0으로 설정하면 스냅이 완전히 비활성화되어 원래의 무한 해상도 동작으로 돌아갑니다.
+ *       픽셀화되지 않은 프로젝트에서는 여전히 그쪽이 옳은 선택입니다.
+ * @warning 스냅은 uPScale이 적용된 뒤인 *배율 조정된* UV 공간에서 일어나므로, 재질의
+ *          `proc` 배율이 텍셀 하나가 덮는 월드 거리를 바꿉니다. 벽돌 하나가 덮는 거리를
+ *          바꾸는 것과 정확히 같습니다. 보기 좋게 조정된 재질은 계속 보기 좋게 유지되지만,
+ *          텍셀보다 작은 디테일에 의존하던 재질은 그것을 잃게 되며 그것이 의도된
+ *          결과입니다.
+ */
+#define RD_PROC_TEXELS 32.0
 
 /**
  * @brief Procedural surface shaders, evaluated per pixel from the UV.
  *
  * ENGLISH
  * -------
- * Infinite resolution -- a brick wall stays crisp with your nose against it --
- * and no texture memory at all.
+ * Quantised to ::RD_PROC_TEXELS cells per UV unit, so they carry the same
+ * texel density as the baked pixel recipes and read as part of the same
+ * pixel-art presentation.
  *
  * @warning Keep this list in step with the switch in the fragment shader and
  *          with the name table in tex.c; there is no way to share an enum with
@@ -180,6 +322,7 @@ enum {
     PROC_MARBLE,        /**< Marble veining. / 대리석 무늬. */
     PROC_RUST,          /**< Rusted metal. / 녹슨 금속. */
     PROC_GRID,          /**< Emissive tech grid. / 발광하는 기술 격자. */
+    PROC_LAVA,          /**< Molten rock: dark crust broken by glowing cracks. / 녹은 암석. 어두운 껍질이 빛나는 균열로 갈라져 있습니다. */
     PROC_COUNT          /**< Total number of procedural shaders. / 절차적 셰이더의 총 개수. */
 };
 
@@ -772,6 +915,115 @@ void rd_mvp  (mat4 mvp);
  * @param[in] eye 월드 공간에서의 카메라 위치.
  */
 void rd_eye  (v3 eye);
+
+/**
+ * @brief Uploads the point lights the world pass shades with.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] pos_radius `n` vec4s: xyz world position, w reach in world units.
+ * @param[in] col_power  `n` vec4s: rgb colour 0..1, a brightness multiplier.
+ * @param[in] n          How many lights; clamped to ::RD_MAX_LIGHTS.
+ * @note Affects ::RD_WORLD only. The view model is lit in its own space so it
+ *       stays readable in a dark corner, and sprites have no normal to light.
+ * @note The illumination is quantised into bands before the material is
+ *       applied. That is the whole reason lights are worth having here: the
+ *       resolve pass dithers to four levels, so smooth falloff would only
+ *       shuffle pixels between two of them and read as noise rather than as
+ *       light. Banding first gives each level an edge, and an edge reads as a
+ *       layer.
+ * @note Set once per frame before drawing the level; the values persist in the
+ *       program until changed.
+ *
+ * 한국어
+ * ------
+ * @brief 월드 패스가 셰이딩에 사용할 점광원을 업로드합니다.
+ * @param[in] pos_radius vec4 `n`개. xyz는 월드 위치, w는 도달 거리(월드 단위).
+ * @param[in] col_power  vec4 `n`개. rgb는 0..1 색상, a는 밝기 배율.
+ * @param[in] n          광원 개수. ::RD_MAX_LIGHTS로 제한됩니다.
+ * @note ::RD_WORLD에만 영향을 줍니다. 뷰 모델은 어두운 구석에서도 읽히도록 자체
+ *       공간에서 조명되며, 스프라이트에는 조명할 법선이 없습니다.
+ * @note 조도는 재질이 적용되기 전에 단계로 양자화됩니다. 이것이 이곳에서 광원이 의미를
+ *       갖는 이유입니다. 해상 패스가 4단계로 디더링하므로, 부드러운 감쇠는 그중 두
+ *       단계 사이에서 픽셀을 섞을 뿐이며 빛이 아니라 잡음으로 읽힙니다. 먼저 단계로
+ *       나누면 각 단계가 경계를 갖고, 경계는 레이어로 읽힙니다.
+ * @note 레벨을 그리기 전 프레임당 한 번 설정합니다. 값은 변경 전까지 프로그램에
+ *       유지됩니다.
+ */
+void rd_lights(const float *pos_radius, const float *col_power, int n);
+
+/**
+ * @brief Sets the pixel grid vertices snap to, reproducing the PSX wobble.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] grid_w Grid width in pixels; pass the offscreen buffer's width.
+ * @param[in] grid_h Grid height in pixels.
+ * @note Pass 0 for either to disable snapping entirely, which is what the UI
+ *       pass and any tool that wants exact geometry should do.
+ * @note The grid is the OFFSCREEN buffer, not the window: the snap has to
+ *       quantise to the pixels the image is actually rasterised on. Snapping
+ *       to the window's resolution puts the steps at a finer spacing than the
+ *       player can see and produces no visible wobble.
+ * @note A COARSER grid than the buffer is the dial for "more PSX". Matching
+ *       the buffer is the honest amount and is nearly invisible at 640x360,
+ *       because the artefact is a whole-pixel jump and those pixels are small.
+ * @warning Applies to every draw until changed, including the view model.
+ *          ::wp_draw_view disables it for exactly that reason -- the gun sits
+ *          at a fixed distance in the centre of the screen, where a constant
+ *          vibration is least forgivable.
+ *
+ * 한국어
+ * ------
+ * @brief 정점이 스냅되는 픽셀 격자를 설정하여 PSX의 흔들림을 재현합니다.
+ * @param[in] grid_w 격자 너비(픽셀). 오프스크린 버퍼의 너비를 전달하십시오.
+ * @param[in] grid_h 격자 높이(픽셀).
+ * @note 어느 쪽이든 0을 전달하면 스냅이 완전히 비활성화됩니다. UI 패스와 정확한
+ *       지오메트리가 필요한 도구가 그렇게 해야 합니다.
+ * @note 격자는 창이 아니라 *오프스크린* 버퍼입니다. 스냅은 이미지가 실제로 래스터화되는
+ *       픽셀에 맞춰 양자화해야 합니다. 창 해상도에 맞추면 플레이어가 볼 수 있는 것보다
+ *       촘촘한 간격에 단계가 놓여 흔들림이 보이지 않습니다.
+ * @note 버퍼보다 *성긴* 격자가 "더 PSX답게"를 위한 조정값입니다. 버퍼와 일치시키는 것이
+ *       정직한 양이지만 640x360에서는 거의 보이지 않습니다. 이 아티팩트는 픽셀 단위
+ *       도약인데 그 픽셀이 작기 때문입니다.
+ * @warning 변경 전까지 뷰 모델을 포함한 모든 그리기에 적용됩니다. ::wp_draw_view가 바로
+ *          그 이유로 이를 비활성화합니다. 총기는 화면 중앙의 고정된 거리에 있으며,
+ *          그곳에서의 지속적인 진동이 가장 용납하기 어렵습니다.
+ */
+void rd_snap(float grid_w, float grid_h);
+
+/**
+ * @brief Sets the clock procedural materials animate against, in seconds.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] t Seconds since startup. Wrapped by the caller so it never grows
+ *              large enough to lose float precision.
+ *
+ * @note Only ::PROC_LAVA reads it. Every other procedural material is a
+ *       function of the UV alone and is deliberately still -- a wall that
+ *       breathes reads as a rendering fault, and stone does not move.
+ * @note Wrapping is the caller's job because the period has to be a multiple
+ *       of the animation's own period, or the surface jumps when the clock
+ *       resets. A float holds whole seconds exactly to about 16 million, but
+ *       the fractional precision that a sine needs is gone long before that:
+ *       by an hour of runtime the flow visibly steps rather than flows.
+ *
+ * 한국어
+ * ------
+ * @brief 절차적 재질이 애니메이션에 사용할 시계를 초 단위로 설정합니다.
+ * @param[in] t 시작 이후 경과 시간(초). float 정밀도를 잃을 만큼 커지지 않도록 호출자가
+ *              순환시킵니다.
+ *
+ * @note ::PROC_LAVA만 이 값을 읽습니다. 다른 모든 절차적 재질은 UV만의 함수이며
+ *       의도적으로 정지해 있습니다. 숨 쉬는 벽은 렌더링 결함으로 읽히고, 돌은 움직이지
+ *       않습니다.
+ * @note 순환은 호출자의 몫입니다. 주기가 애니메이션 자체 주기의 배수여야 하며, 그렇지
+ *       않으면 시계가 초기화될 때 표면이 튑니다. float는 약 1600만까지 정수 초를 정확히
+ *       담지만, 사인 함수에 필요한 소수부 정밀도는 그보다 훨씬 먼저 사라집니다. 한 시간쯤
+ *       실행하면 흐름이 흐르는 것이 아니라 눈에 띄게 계단처럼 끊깁니다.
+ */
+void rd_time(float t);
 
 /**
  * @brief Sets the uniform colour used by the flat, text and sprite modes.

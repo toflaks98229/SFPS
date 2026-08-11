@@ -129,6 +129,61 @@ int main(void) {
            the flight speed is not what the constant says. */
         okf(frames < 30, "in roughly the time the flight speed implies",
             (float)frames, 30.0f);
+
+        /* --- the winch loop retriggers, and does not run free -------------
+           The reel is the only sustained sound here, and the mixer has no
+           loop: it is a 110ms recipe restarted on a timer. Two ways that goes
+           wrong and neither makes a noise a test could hear, so the timer is
+           checked instead.
+
+           Firing every frame would push 60 voices a second into a 12-voice
+           mixer and evict every other sound for the length of the pull. Never
+           firing leaves the pull silent. What must hold is that the timer
+           counts down and rearms -- a bounded number of triggers over a known
+           span.
+           감기 소리는 이곳의 유일한 지속음이며 믹서에는 루프가 없습니다. 110ms 레시피를
+           타이머로 재시작하는 방식입니다. 잘못되는 경우가 둘인데 어느 쪽도 테스트가
+           들을 수 있는 소리를 내지 않으므로, 대신 타이머를 검사합니다. */
+        {
+            /* Count the frames on which the timer was DUE, which is exactly
+               the frames a trigger happens on. Watching the timer rise instead
+               does not work and was the first attempt: firing every frame
+               resets it every frame, so it never appears to jump relative to
+               the previous sample and the broken version scored ONE. The
+               condition the code itself branches on is the honest thing to
+               sample.
+               타이머가 *만료된* 프레임을 셉니다. 이것이 정확히 트리거가 발생하는
+               프레임입니다. 타이머가 올라가는 것을 보는 방식은 동작하지 않으며 그것이
+               첫 시도였습니다. 매 프레임 발사하면 타이머도 매 프레임 재설정되므로 이전
+               표본 대비 상승으로 보이지 않고, 고장 난 버전이 1점을 받았습니다. 코드
+               자신이 분기하는 조건을 표본으로 삼는 것이 정직한 방법입니다. */
+            int triggers = 0, pulled = 0;
+            float prev = -1.0f;
+            for (int i = 0; i < 60 && w.hook_state == HOOK_PULLING; i++) {
+                wp_hook_update(&w, &L, &pos, &vel, DT);
+                if (w.hook_state != HOOK_PULLING) break;
+                pulled++;
+                /* Sample AFTER the update. wp_hook_update decrements and
+                   rearms in the same call, so reading the timer before it runs
+                   only ever sees the rearmed value and scores one trigger for
+                   the whole pull however the code behaves -- which is what the
+                   first two attempts at this check did.
+                   갱신 *이후에* 표본을 얻습니다. wp_hook_update는 같은 호출 안에서
+                   감소와 재장전을 모두 수행하므로, 실행 전에 타이머를 읽으면 재장전된
+                   값만 보게 되어 코드가 어떻게 동작하든 견인 전체에서 트리거 1회로
+                   집계됩니다. 이 검사의 첫 두 시도가 바로 그랬습니다. */
+                if (prev >= 0.0f && w.hook_reel_timer > prev) triggers++;
+                prev = w.hook_reel_timer;
+            }
+
+            ok(pulled > 10, "the pull lasts long enough to need a loop at all");
+            ok(triggers > 0, "the winch loop actually retriggers while reeling");
+            /* Firing every frame would give one per frame; the interval caps
+               it near pulled*DT/HOOK_REEL_INTERVAL, which is well under half. */
+            okf(triggers < pulled / 2,
+                "and is paced rather than fired every frame",
+                (float)triggers, (float)(pulled / 2));
+        }
     }
 
     /* --- a throw into empty space misses and gives up ---------------------- */
@@ -218,17 +273,58 @@ int main(void) {
             "the launch is capped, not a catapult", v3len(vel), HOOK_LAUNCH_MAX);
     }
 
-    /* --- the launch keeps some of the travel direction ---------------------
-       Straight up would stop a chain dead above each target; keeping part of
-       the approach is what lets hooks link together. */
+    /* --- the launch keeps travel that is not into the surface --------------
+       Straight up would stop a chain dead above each target, so the launch
+       preserves part of the approach. But it must preserve only the part that
+       can actually be travelled.
+
+       This assertion used to read `vel.z < -0.5` on a hook fired dead-on at a
+       wall -- that is, it required the launch to keep driving the player INTO
+       the wall they had just arrived at. It passed, and the behaviour it was
+       protecting was the bug: player_move refuses that move every frame, so
+       the momentum neither travelled nor decayed and the player juddered
+       against the surface at 20 m/s. Measured before the fix, the launch came
+       out at 24.4 m/s with 13.3 of it aimed at the wall and position frozen at
+       z=-19.57 while vel.z held at -20.5.
+
+       So a dead-on hook now launches straight up: there IS no approach
+       direction to keep that is not into the wall. What has to survive is
+       sideways travel, which is what actually chains hooks together, and that
+       is checked below.
+       이 단언은 원래 벽에 정면으로 쏜 훅에 대해 `vel.z < -0.5`를 요구했습니다. 즉 도약이
+       방금 도달한 벽 *안쪽으로* 플레이어를 계속 밀어 넣기를 요구한 것입니다. 통과했지만
+       그것이 보호하던 동작이 곧 버그였습니다. 정면 훅은 이제 수직으로 도약합니다. 벽
+       안쪽이 아니면서 유지할 만한 접근 방향이 존재하지 않기 때문입니다. 살아남아야 하는
+       것은 실제로 훅을 연결해 주는 측면 이동이며, 아래에서 검사합니다. */
     {
         Weapon w = {0};
         v3 pos = v3f(0.0f, STAND_Y, 0.0f), vel = v3f(0,0,0);
         wp_hook_fire(&w, pos, 0.0f, 0.0f);
         run_hook(&w, &L, &pos, &vel, 60 * 8);
 
-        /* Travelling -z on arrival, so the launch should retain -z. */
-        ok(vel.z < -0.5f, "and carries the approach direction into the arc");
+        ok(vel.y > 1.0f, "a dead-on hook launches, upward");
+        okf(vel.z > -0.5f,
+            "and keeps nothing aimed at the wall it just arrived at",
+            vel.z, 0.0f);
+    }
+
+    /* --- sideways travel DOES survive the launch ---------------------------
+       The half of the rule the assertion above cannot check. A hook taken
+       while moving across the wall has travel that is genuinely free to
+       continue, and dropping it would make every launch identical and kill
+       the chaining the ALONG term exists for.
+       위의 단언이 검사할 수 없는 나머지 절반입니다. 벽을 가로지르며 걸린 훅은 실제로
+       계속 진행할 수 있는 이동 성분을 가지며, 이를 버리면 모든 도약이 똑같아져
+       ALONG 항이 존재하는 이유인 연결이 사라집니다. */
+    {
+        Weapon w = {0};
+        v3 pos = v3f(0.0f, STAND_Y, 0.0f);
+        v3 vel = v3f(12.0f, 0.0f, 0.0f);       /* moving across the wall */
+        wp_hook_fire(&w, pos, 0.0f, 0.0f);
+        run_hook(&w, &L, &pos, &vel, 60 * 8);
+
+        ok(vel.x > 0.2f,
+           "travel across the surface is carried into the launch");
     }
 
     /* ================= beat 3: hooking a monster is an attack =============
@@ -336,7 +432,25 @@ int main(void) {
         enemy_reset();
     }
 
-    /* --- a pull that cannot finish times out rather than hanging ----------- */
+    /* --- a pull that cannot finish ends, and ends QUICKLY -------------------
+       This used to be a pure timeout test: hold the player still, watch the
+       hook give up after HOOK_PULL_TIMEOUT. It still ends, but now it ends in
+       about a fifth of a second instead of three seconds, because a player who
+       is not moving is a player the pull has stopped closing on -- which is
+       the same condition the floor case hits.
+
+       That is the intended behaviour and worth stating rather than hiding: the
+       timeout is now the last resort for a pull that is still making progress
+       but will never get there (a target running away), while anything that
+       has genuinely stopped resolves in HOOK_STALL_TIME.
+       이전에는 순수한 시간 초과 테스트였습니다. 플레이어를 고정해 두고 훅이
+       HOOK_PULL_TIMEOUT 후 포기하는지 확인했습니다. 여전히 끝나기는 하지만 이제 3초가
+       아니라 약 0.2초 만에 끝납니다. 움직이지 않는 플레이어는 견인이 더 이상 좁히지
+       못하는 플레이어이며, 이는 바닥 사례가 부딪히는 것과 동일한 조건입니다.
+
+       이는 의도된 동작이므로 숨기지 않고 명시합니다. 시간 초과는 이제 여전히 전진하고
+       있지만 결코 도달하지 못할 견인(도망치는 대상)을 위한 최후의 수단이며, 실제로 멈춘
+       것은 HOOK_STALL_TIME 안에 해결됩니다. */
     {
         Weapon w = {0};
         v3 pos = v3f(0.0f, STAND_Y, 0.0f), vel = v3f(0,0,0);
@@ -357,6 +471,59 @@ int main(void) {
         okf(frames < 60 * (HOOK_PULL_TIMEOUT + 1.0f),
             "within the timeout rather than hanging forever",
             (float)frames, 60 * (HOOK_PULL_TIMEOUT + 1.0f));
+        /* The point of the stall detector: a pull going nowhere must not make
+           the player sit through the full timeout. */
+        okf(frames < 60 * 0.6f,
+            "and well inside it -- a stalled pull resolves, it does not wait",
+            (float)frames, 60 * 0.6f);
+    }
+
+    /* --- a hook at the FLOOR completes instead of timing out ----------------
+       Reported from play: firing down at the ground left the player waiting
+       for the loop to end. The cause is geometric, not a tuning miss -- the
+       pull measures from the EYE and the player stands on the floor, so the
+       distance bottoms out at PLAYER_EYE (1.70m) against a HOOK_ARRIVE_DIST of
+       1.60m and stops changing. Measured before the fix: 1.70m reached in
+       0.75s, then 2.25s of nothing until the timeout.
+
+       Asserted as a DURATION rather than as "did it arrive", because timing
+       out also ends the hook -- the old behaviour would satisfy any check that
+       only asked whether the state went idle.
+       플레이에서 보고된 문제입니다. 바닥을 향해 쏘면 플레이어가 루프가 끝나기를 기다려야
+       했습니다. 원인은 튜닝 실수가 아니라 기하학적인 것입니다. "도달했는가"가 아니라
+       *소요 시간*으로 단언하는 이유는, 시간 초과 역시 훅을 끝내기 때문입니다. 이전
+       동작도 상태가 유휴가 되었는지만 묻는 검사라면 통과했을 것입니다. */
+    {
+        Weapon w = {0};
+        v3 pos = v3f(0.0f, STAND_Y, 0.0f), vel = v3f(0,0,0);
+
+        /* Straight down. STAND_Y is 15m up in a 30m room, so there is floor
+           below and the claw has something to bite. */
+        wp_hook_arm(&w);
+        ok(wp_hook_fire(&w, pos, 0.0f, -1.5f), "a hook fired at the floor throws");
+
+        int frames = 0, pull_frames = 0;
+        while (w.hook_state != HOOK_IDLE && frames < 60 * 10) {
+            int pulling = (w.hook_state == HOOK_PULLING);
+            wp_hook_update(&w, &L, &pos, &vel, DT);
+            if (pulling) pull_frames++;
+            /* Integrate and stand on the floor, as player_move would -- the
+               floor is the whole reason the distance stops shrinking. */
+            vel.y -= PLAYER_GRAVITY * DT;
+            pos = v3add(pos, v3scale(vel, DT));
+            float fl, ce;
+            if (level_ground(&L, pos.x, pos.z, pos.y - PLAYER_EYE, 1e9f, &fl, &ce) &&
+                pos.y - PLAYER_EYE < fl) {
+                pos.y = fl + PLAYER_EYE;
+                if (vel.y < 0.0f) vel.y = 0.0f;
+            }
+            frames++;
+        }
+
+        ok(w.hook_state == HOOK_IDLE, "and the hook ends rather than hanging");
+        okf(pull_frames < 60 * (HOOK_PULL_TIMEOUT - 0.5f),
+            "well before the timeout -- the player is not made to wait",
+            pull_frames * DT, HOOK_PULL_TIMEOUT - 0.5f);
     }
 
     /* ================= range, aim lock and the range indicator ============ */
@@ -548,6 +715,74 @@ int main(void) {
         v3 vel = v3f(0,0,0);
         wp_hook_release(&w);
         ok(v3len(vel) < 1e-4f, "a cancelled hook launches nothing");
+    }
+
+    /* --- the pull converges on the hook's line, whatever you brought to it ---
+       Reported from play: firing the hook while already moving sideways
+       carried that momentum through the whole pull, so the player flew a curve
+       and landed well off the anchor rather than on it.
+
+       The winch only ever ACCELERATED along the hook and capped that component;
+       nothing touched the component across it, so entry momentum survived
+       untouched to the end. Measured on this 20m fixture before the fix: 12 m/s
+       of sideways entry missed the anchor by 3.6m, and 30 m/s -- which a
+       chained hook reaches easily, HOOK_LAUNCH_MAX being 30 and airborne drag
+       being almost nothing -- missed by 8.5m and took 30% longer to arrive.
+
+       What is asserted here is ARRIVAL ACCURACY, not the shape of the path.
+       The pull is still allowed to curve early, and does: HOOK_PULL_STRAIGHTEN
+       is a decay rather than a hard zero precisely so a fast entry still reads
+       as being yanked. What must not happen is finishing somewhere other than
+       the thing you hooked.
+
+       플레이에서 보고된 문제: 이미 측면으로 이동 중일 때 훅을 발사하면 그 운동량이 견인
+       내내 유지되어, 플레이어가 곡선을 그리며 목표가 아닌 한참 벗어난 곳에 도달했습니다.
+       여기서 단언하는 것은 경로의 *모양*이 아니라 *도달 정확도*입니다. 견인은 초반에
+       여전히 휘어져도 되며 실제로 그렇습니다. */
+    {
+        /* Same entry speeds as the report, including the ones a chained hook
+           actually reaches. The bound is generous -- this is not asserting a
+           particular curve, only that the hook still puts you at its target. */
+        const float SIDE[]   = { 0.0f, 6.0f, 12.0f, 20.0f, 30.0f };
+        const float MAX_MISS = 2.5f;
+
+        float worst = 0.0f;
+        int   all_arrived = 1;
+
+        for (int i = 0; i < (int)(sizeof(SIDE)/sizeof(SIDE[0])); i++) {
+            Weapon w = {0};
+            v3 pos = v3f(0.0f, STAND_Y, 0.0f);
+            v3 vel = v3f(SIDE[i], 0.0f, 0.0f);      /* pure sideways entry */
+
+            wp_hook_arm(&w);
+            if (!wp_hook_fire(&w, pos, 0.0f, 0.0f)) { all_arrived = 0; continue; }
+
+            /* Let the claw fly and bite, remembering where it actually landed.
+               The anchor is read from the weapon rather than assumed, so this
+               measures the pull and not the aim. */
+            v3 anchor = v3f(0,0,0);
+            int frames = 0, latched = 0;
+            while (w.hook_state != HOOK_IDLE && frames < 600) {
+                wp_hook_update(&w, &L, &pos, &vel, DT);
+                if (w.hook_state == HOOK_PULLING && !latched) {
+                    latched = 1;
+                    anchor  = w.hook_target;
+                }
+                vel.y -= PLAYER_GRAVITY * DT;
+                pos = v3add(pos, v3scale(vel, DT));
+                frames++;
+            }
+            if (!latched) { all_arrived = 0; continue; }
+
+            float dx = pos.x - anchor.x, dz = pos.z - anchor.z;
+            float miss = sqrtf(dx*dx + dz*dz);
+            if (miss > worst) worst = miss;
+        }
+
+        ok(all_arrived, "every entry speed throws a claw that bites");
+        okf(worst < MAX_MISS,
+            "the pull ends at its anchor however fast you entered it",
+            worst, MAX_MISS);
     }
 
     /* --- momentum carries after release, and decays instead of vanishing ---

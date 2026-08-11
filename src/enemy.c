@@ -5,6 +5,7 @@
 
 #include "enemy.h"
 #include "audio.h"
+#include "fx.h"
 #include "diag.h"
 #include "player.h"    /* PLAYER_EYE / PLAYER_RADIUS -- 발사체 히트 박스용 */
 #include <math.h>
@@ -29,14 +30,25 @@ static Shot g_shots[ENEMY_MAX_SHOTS];
  */
 static const MonType TYPES[MON_TYPES] = {
     /* IMP: 기준선. 충분히 빠르며, 근접 샷건 한 방에 죽습니다. */
-    {  40, 3.0f, 0.40f, 1.70f, 1.30f, 34.0f,  1.8f,  9, 0.35f, 1.10f, 0.70f,  0.0f },
+    { "imp",    40, 3.0f, 0.40f, 1.70f, 1.30f, 34.0f,  1.8f,  9, 0.35f, 1.10f, 0.70f,  0.0f },
     /* BRUTE: 체력이 높은 벽. 느리게 다가오지만 강력한 공격을 하므로, 피하기보다 계획적으로 대처해야 하는 위협입니다. */
-    { 120, 1.9f, 0.62f, 2.35f, 1.80f, 34.0f,  2.3f, 24, 0.55f, 1.50f, 0.85f,  0.0f },
+    { "brute", 120, 1.9f, 0.62f, 2.35f, 1.80f, 34.0f,  2.3f, 24, 0.55f, 1.50f, 0.85f,  0.0f },
     /* HOUND: 빠르고 약한 야수. 가만히 있는 것을 응징합니다. 한 번의 공격 피해는 적지만, 경고를 알아차리기 전에 덮칩니다. */
-    {  18, 5.3f, 0.38f, 1.25f, 0.70f, 40.0f,  1.5f,  5, 0.18f, 0.65f, 1.00f,  0.0f },
+    { "hound",  18, 5.3f, 0.38f, 1.25f, 0.70f, 40.0f,  1.5f,  5, 0.18f, 0.65f, 1.00f,  0.0f },
     /* CASTER: 계속 움직여야 하는 이유. 접근하지 않고 사정거리를 유지하며 주문을 시전하므로, 발놀림 대신 엄폐와 각도가 중요합니다. */
-    {  26, 2.4f, 0.42f, 1.90f, 1.45f, 40.0f, 13.0f, 12, 0.85f, 1.40f, 0.80f, 11.0f },
+    { "caster", 26, 2.4f, 0.42f, 1.90f, 1.45f, 40.0f, 13.0f, 12, 0.85f, 1.40f, 0.80f, 11.0f },
 };
+
+/* `spawn`은 종류가 하나뿐이던 시절의 이름이며, 기존 맵들이 여전히 사용합니다.
+   TYPES에 넣지 않고 별칭으로 두는 이유는, 그것이 실제로 별칭이기 때문입니다. 테이블에
+   넣으면 다섯 번째 *종류*가 되어 스프라이트 아틀라스에 행 하나를 요구하고
+   enemytest가 검사하는 종류 수를 바꾸게 됩니다.
+   A legacy name from when there was only one kind, still used by existing maps.
+   Kept as an alias rather than a TYPES row because that is what it is: a row
+   would make it a fifth KIND, demanding an atlas row and changing the type
+   count enemytest checks. */
+#define MON_LEGACY_NAME "spawn"
+#define MON_LEGACY_TYPE MON_IMP
 
 /** @brief 원거리 몬스터(Caster)가 플레이어에게 허용하는 최소 접근 거리. 이보다 가까워지면 뒤로 물러납니다. */
 #define CASTER_KEEP  0.55f
@@ -78,7 +90,18 @@ static void shot_fire(v3 from, v3 at, float speed, int damage) {
     Shot *s = 0;
     for (int i = 0; i < ENEMY_MAX_SHOTS; i++)
         if (!g_shots[i].active) { s = &g_shots[i]; break; }
-    if (!s) return;
+    /* Every other pool in the project reports when it turns something away,
+       and this one did not. A caster that finished its whole wind-up and then
+       produced no bolt is indistinguishable from one that never attacked --
+       the animation plays either way -- so the symptom is "the caster
+       sometimes just doesn't shoot", which names no cause at all. Costs
+       nothing in release; see diag.h.
+       이 프로젝트의 다른 모든 풀은 무언가를 거절할 때 보고하는데 이곳만 그러지
+       않았습니다. 시전 동작을 전부 마치고도 볼트를 만들어 내지 못한 캐스터는 애초에
+       공격하지 않은 캐스터와 구분되지 않습니다. 어느 쪽이든 애니메이션은 재생되기
+       때문입니다. 그래서 증상은 "캐스터가 가끔 그냥 안 쏜다"가 되며, 이것만으로는 원인을
+       전혀 알 수 없습니다. 릴리스에서는 비용이 없습니다. diag.h를 참조하십시오. */
+    if (!s) { DIAG(DIAG_SHOT_CAP); return; }
 
     v3 d = v3sub(at, from);
     float len = v3len(d);
@@ -90,6 +113,12 @@ static void shot_fire(v3 from, v3 at, float speed, int damage) {
     s->life   = 6.0f;
     s->damage = damage;
     s->active = 1;
+    /* Zero, not the interval: the first trail particle is laid on the frame
+       the bolt appears, so the wake starts at the muzzle rather than a
+       fraction of a second down the flight path.
+       간격이 아니라 0입니다. 첫 궤적 파티클이 볼트가 나타나는 프레임에 놓이므로,
+       흔적이 비행 경로 중간이 아니라 총구에서 시작됩니다. */
+    s->trail_timer = 0.0f;
 }
 
 /**
@@ -113,6 +142,27 @@ static int shots_update(const Level *l, v3 player_eye, float dt) {
         float dist = v3len(step);
         if (dist < 1e-6f) continue;
         v3 dir = v3scale(step, 1.0f / dist);
+
+        /* Lay down the trail at a fixed interval rather than once per frame.
+           Per-frame emission makes the trail's density depend on the frame
+           rate -- visibly denser at 144fps than at 60 -- and lets one bolt in
+           flight fill the shared 256-particle pool by itself, starving every
+           other effect. The interval is in seconds, so the spacing along the
+           bolt's path is the same however fast the machine runs.
+           프레임마다가 아니라 고정 간격으로 궤적을 남깁니다. 프레임 단위 방출은 궤적
+           밀도를 프레임률에 의존하게 만들고(144fps에서 60fps보다 눈에 띄게 조밀해집니다),
+           비행 중인 볼트 하나가 공유 256개 파티클 풀을 혼자 채워 다른 이펙트를
+           고갈시킵니다. 간격이 초 단위이므로 경로상의 간격은 기기 속도와 무관하게
+           일정합니다. */
+        s->trail_timer -= dt;
+        if (s->trail_timer <= 0.0f) {
+            s->trail_timer = SHOT_TRAIL_INTERVAL;
+            /* Thrown backward along the flight, so what little spread the
+               trail has drifts behind the bolt rather than ahead of it.
+               비행 방향의 반대로 던집니다. 그래야 궤적이 가진 약간의 산포가 볼트 앞이
+               아니라 뒤로 흩어집니다. */
+            fx_spawn("bolttrail", s->pos, v3scale(dir, -1.0f));
+        }
 
         float t; v3 n;
         int hit_wall = level_trace(l, s->pos, dir, dist + SHOT_RADIUS, &t, &n);
@@ -146,6 +196,11 @@ static int shots_update(const Level *l, v3 player_eye, float dt) {
             dealt += s->damage;
             s->active = 0;
             play_at(s->pos, "ehit", 85);
+            /* Burst back along the bolt's own travel, so it reads as coming
+               off the thing it struck rather than continuing through it.
+               볼트의 진행 방향 반대로 터뜨립니다. 그래야 대상을 통과하는 것이 아니라
+               맞은 지점에서 튀어나오는 것으로 읽힙니다. */
+            fx_spawn("boltburst", s->pos, v3scale(dir, -1.0f));
             continue;
         }
 
@@ -153,6 +208,7 @@ static int shots_update(const Level *l, v3 player_eye, float dt) {
             s->pos = v3add(s->pos, v3scale(dir, t));
             s->active = 0;
             play_at(s->pos, "ehit", 45);
+            fx_spawn("boltburst", s->pos, n);
             continue;
         }
 
@@ -220,9 +276,90 @@ static int can_see(const Level *l, const Enemy *m, v3 player_eye) {
     float dist = v3len(d);
     if (dist < 0.001f) return 1;
     d = v3scale(d, 1.0f / dist);
-    float t; v3 n;
-    if (!level_trace(l, eye, d, dist, &t, &n)) return 1;
-    return t >= dist - 0.05f;
+
+    /* level_blocked rather than level_trace: this asks only whether the line is
+       clear, and level_trace additionally bisects to locate the hit and derives
+       a surface normal there -- work this function used to compute and throw
+       away on every call. That is once per monster per frame, against a shot
+       twice a second, so it was the bulk of what tracing cost the game.
+
+       The old form traced to `dist` and then compared the hit distance back
+       against it to tell "hit the player's own position" from "hit a wall in
+       between". Tracing SHORT of the player answers the same question without
+       the comparison: nothing solid within that range means the line is clear.
+       The margin is the marcher's own step, so a wall the trace would have
+       found at the very last sample is still counted as blocking.
+
+       level_trace가 아니라 level_blocked를 씁니다. 이 함수는 선이 뚫려 있는지만 묻는데,
+       level_trace는 그에 더해 충돌 지점을 찾기 위해 이분 탐색을 하고 그곳의 표면 법선까지
+       유도합니다. 이 함수가 매 호출마다 계산하고는 버리던 작업입니다. 그것이 몬스터마다
+       매 프레임이고 사격은 초당 두 번이므로, 게임이 광선 판정에 치르던 비용의 대부분이
+       이것이었습니다.
+
+       이전 형태는 `dist`까지 판정한 뒤 충돌 거리를 다시 `dist`와 비교하여 "플레이어의
+       위치 자체에 맞음"과 "중간의 벽에 맞음"을 구분했습니다. 플레이어에 *못 미치는*
+       거리까지 판정하면 그 비교 없이 같은 질문에 답할 수 있습니다. 그 범위 안에 막는
+       것이 없다는 것이 곧 선이 뚫려 있다는 뜻입니다. 여유분은 마처 자신의 간격이므로,
+       판정이 마지막 샘플에서 발견했을 벽도 여전히 막는 것으로 계산됩니다. */
+    return !level_blocked(l, eye, d, dist - 0.05f);
+}
+
+/**
+ * @brief ::can_see, answered from a cache refreshed every ::SIGHT_PERIOD frames.
+ *
+ * ENGLISH
+ * -------
+ * For the POLLING questions only -- "has this monster noticed the player yet",
+ * "may this caster plant and start a cast". Both are asked every frame of every
+ * monster and neither needs an answer newer than a few frames: a monster
+ * reacting to cover 50ms late is not perceptible, and a slight reaction delay
+ * reads as the monster registering what happened rather than as lag.
+ *
+ * @warning NOT for the moment a bolt is released. That check exists precisely
+ *          because a target can duck mid-wind-up, and answering it from a
+ *          reading taken before the duck is the bug the check was added to
+ *          prevent -- a caster shooting through a wall. That site calls
+ *          ::can_see directly and always will; see the note there.
+ *
+ * The refresh is staggered across the pool by ::enemy_spawn_level, which seeds
+ * each monster's counter from its index, rather than refreshing every monster
+ * on the same frame. A whole-pool refresh costs the same on average and arrives
+ * as a spike every ::SIGHT_PERIOD frames, which is the shape of stall that
+ * shows up as a stutter rather than as a lower average.
+ *
+ * `seen` starts at zero, which is "cannot see" -- so a monster spawned this
+ * frame stays idle until its first real reading rather than acting on a
+ * fabricated one. Being wrong for one refresh interval has to fail toward doing
+ * nothing.
+ *
+ * 한국어
+ * ------
+ * @brief ::SIGHT_PERIOD 프레임마다 갱신되는 캐시로 답하는 ::can_see입니다.
+ *
+ * *폴링* 질문 전용입니다. "이 몬스터가 플레이어를 알아챘는가", "이 캐스터가 자리를 잡고
+ * 시전을 시작해도 되는가"입니다. 둘 다 모든 몬스터에 대해 매 프레임 묻지만 몇 프레임보다
+ * 새로운 답을 필요로 하지 않습니다. 몬스터가 엄폐에 50ms 늦게 반응하는 것은 지각되지
+ * 않으며, 약간의 반응 지연은 지연이 아니라 몬스터가 상황을 인지하는 것으로 읽힙니다.
+ *
+ * @warning 볼트를 *발사하는 순간*에는 사용하면 안 됩니다. 그 검사는 시전 도중에 대상이
+ *          숨을 수 있기 때문에 존재하며, 숨기 *이전에* 측정한 값으로 답하는 것이야말로 그
+ *          검사가 막으려던 버그입니다. 벽을 관통해 쏘는 캐스터가 됩니다. 그 지점은
+ *          ::can_see를 직접 호출하며 앞으로도 그럴 것입니다. 그곳의 주석을 참조하십시오.
+ *
+ * 갱신은 모든 몬스터를 같은 프레임에 갱신하지 않고 몬스터 인덱스로 분산합니다. 풀 전체를
+ * 한꺼번에 갱신하면 평균 비용은 같으면서 ::SIGHT_PERIOD 프레임마다 스파이크로 도착하는데,
+ * 이는 평균이 낮아지는 대신 끊김으로 나타나는 형태의 지연입니다.
+ *
+ * `seen`은 0에서 시작하며 이는 "볼 수 없음"입니다. 따라서 이번 프레임에 생성된 몬스터는
+ * 지어낸 값으로 행동하는 대신 첫 실제 측정이 나올 때까지 대기합니다. 한 갱신 주기 동안
+ * 틀린다면 아무것도 하지 않는 쪽으로 틀려야 합니다.
+ */
+static int sees_player(const Level *l, Enemy *m, v3 player_eye) {
+    if (m->sight_age <= 0) {
+        m->sight_age = SIGHT_PERIOD;
+        m->seen = (char)can_see(l, m, player_eye);
+    }
+    return m->seen;
 }
 
 /* --- 공개 API 함수 --- */
@@ -232,15 +369,25 @@ const MonType *mon_stats(int type) {
     return &TYPES[type];
 }
 
+/* 두 문자열이 같은지 검사합니다. <string.h>를 끌어오지 않기 위한 것이며, fx.c의
+   find_def가 이펙트 이름에 쓰는 것과 동일한 루프입니다.
+   Whether two strings match. Avoids pulling in <string.h>, and is the same loop
+   fx.c's find_def uses on effect names. */
+static int name_eq(const char *a, const char *b) {
+    while (*a && *a == *b) { a++; b++; }
+    return !*a && !*b;
+}
+
 int mon_type_for(const char *kind) {
-    const char *k = kind;
-    if ((k[0]=='i'&&k[1]=='m'&&k[2]=='p'&&k[3]==0) ||
-        (k[0]=='s'&&k[1]=='p'&&k[2]=='a'&&k[3]=='w'&&k[4]=='n'&&k[5]==0))
-        return MON_IMP;
-    if (k[0]=='b'&&k[1]=='r'&&k[2]=='u'&&k[3]=='t'&&k[4]=='e'&&k[5]==0) return MON_BRUTE;
-    if (k[0]=='h'&&k[1]=='o'&&k[2]=='u'&&k[3]=='n'&&k[4]=='d'&&k[5]==0) return MON_HOUND;
-    if (k[0]=='c'&&k[1]=='a'&&k[2]=='s'&&k[3]=='t'&&k[4]=='e'&&k[5]=='r'&&k[6]==0)
-        return MON_CASTER;
+    /* 테이블을 순회합니다. 새 몬스터는 TYPES에 행 하나를 추가하면 이곳이 자동으로
+       알아보므로, 이 함수는 종류가 늘어나도 수정할 필요가 없습니다.
+       Walks the table, so a new monster is a TYPES row and this function finds
+       it without being edited. */
+    for (int i = 0; i < MON_TYPES; i++)
+        if (name_eq(TYPES[i].name, kind)) return i;
+
+    if (name_eq(MON_LEGACY_NAME, kind)) return MON_LEGACY_TYPE;
+
     return -1;
 }
 
@@ -299,6 +446,17 @@ void enemy_spawn_level(const Level *l) {
         m->state  = E_IDLE;
         m->active = 1;
         m->anim   = frand() * 6.28f;
+
+        /* Spread the sight refreshes across the period rather than lining them
+           all up on the frame after a spawn. Derived from the index so it is
+           deterministic -- the headless tests step this simulation and compare
+           exact outcomes, and frand() here would make which monster refreshes
+           on which frame depend on how many spawned before it.
+           시야 갱신을 생성 직후의 한 프레임에 몰지 않고 주기 전체에 분산시킵니다. 인덱스
+           에서 유도하므로 결정론적입니다. 헤드리스 테스트가 이 시뮬레이션을 진행시키며
+           정확한 결과를 비교하는데, 이곳에서 frand()를 쓰면 어느 몬스터가 어느 프레임에
+           갱신되는지가 그 앞에 몇 마리가 생성되었는지에 좌우됩니다. */
+        m->sight_age = (short)((g_count - 1) % SIGHT_PERIOD);
     }
 }
 
@@ -319,13 +477,33 @@ int enemy_update(const Level *l, v3 player_eye, float dt) {
             continue;
         }
 
+        /* Age the cached sight reading. Counted down here, once, rather than
+           inside sees_player: the two polling sites below may each ask in the
+           same frame, and a decrement per ASK would retire the reading in one
+           frame instead of SIGHT_PERIOD. Decremented after the E_DEAD skip
+           above, because a corpse asks nothing and refreshing for it would be
+           the whole saving spent on monsters that no longer look at anything.
+           캐시된 시야 판정 결과를 노화시킵니다. sees_player 안이 아니라 이곳에서 한 번만
+           감소시킵니다. 아래의 두 폴링 지점이 같은 프레임에 각각 물어볼 수 있는데, *질문*
+           마다 감소시키면 결과가 SIGHT_PERIOD가 아니라 한 프레임 만에 만료됩니다. 위의
+           E_DEAD 건너뛰기 뒤에 두는 이유는 시체는 아무것도 묻지 않으며, 시체를 위해
+           갱신하는 것은 더 이상 아무것도 보지 않는 몬스터에 절감분을 전부 쓰는
+           일이기 때문입니다. */
+        if (m->sight_age > 0) m->sight_age--;
+
         v3 to = v3sub(player_eye, v3f(m->pos.x, m->pos.y + S->eye, m->pos.z));
         float dist = sqrtf(to.x*to.x + to.z*to.z);
         m->yaw = atan2f(-to.x, -to.z);
 
         switch (m->state) {
         case E_IDLE:
-            if (dist < S->sight && can_see(l, m, player_eye)) {
+            /* Cached: noticing the player a frame or two late is imperceptible,
+               and the distance test in front of it means a monster out of sight
+               range never pays for the trace at all.
+               캐시를 씁니다. 플레이어를 한두 프레임 늦게 알아채는 것은 지각되지 않으며,
+               앞의 거리 검사 덕분에 시야 거리 밖의 몬스터는 판정 비용을 아예 치르지
+               않습니다. */
+            if (dist < S->sight && sees_player(l, m, player_eye)) {
                 m->state = E_CHASE;
                 play_at(m->pos, "sight", 80);
             }
@@ -340,7 +518,15 @@ int enemy_update(const Level *l, v3 player_eye, float dt) {
                     move_toward(l, S, m, to.x * inv * step, to.z * inv * step);
                 } else if (dist < S->attack * CASTER_KEEP) {
                     move_toward(l, S, m, -to.x * inv * step, -to.z * inv * step);
-                } else if (can_see(l, m, player_eye)) {
+                /* Cached: this decides whether to PLANT and begin a wind-up,
+                   and the wind-up is long enough that a frame or two of
+                   staleness cannot matter -- the release below checks again,
+                   live, which is the check that actually guards the wall.
+                   캐시를 씁니다. 이것은 자리를 잡고 시전을 *시작할지*를 결정하며, 시전
+                   시간이 충분히 길어 한두 프레임의 지연은 문제가 될 수 없습니다. 아래의
+                   발사 시점이 실시간으로 다시 검사하며, 벽을 실제로 지키는 것은 그
+                   검사입니다. */
+                } else if (sees_player(l, m, player_eye)) {
                     m->state = E_ATTACK;
                     m->timer = 0.0f;
                     m->swung = 0;
@@ -362,6 +548,21 @@ int enemy_update(const Level *l, v3 player_eye, float dt) {
             if (!m->swung && m->timer >= S->windup) {
                 m->swung = 1;
                 if (S->shot_speed > 0.0f) {
+                    /* NOT cached, and must never be. This is the check that
+                       exists because a target can duck DURING the wind-up:
+                       answering it from a reading taken up to SIGHT_PERIOD
+                       frames ago is answering it from before the duck, which
+                       is a caster shooting through a wall -- the exact bug the
+                       second check was added to prevent. Once per released
+                       bolt is also a rate the trace can afford; it is the
+                       per-frame polling above that could not.
+                       캐시를 쓰지 않으며 앞으로도 써서는 안 됩니다. 이 검사는 시전
+                       *도중에* 대상이 숨을 수 있기 때문에 존재합니다. 최대 SIGHT_PERIOD
+                       프레임 전에 측정한 값으로 답하는 것은 숨기 이전의 상황으로
+                       답하는 것이며, 그것은 벽을 관통해 쏘는 캐스터입니다. 두 번째
+                       검사가 추가된 이유가 바로 그 버그입니다. 또한 발사된 볼트당 한
+                       번이라면 판정 비용을 감당할 수 있습니다. 감당할 수 없었던 것은
+                       위쪽의 매 프레임 폴링입니다. */
                     if (can_see(l, m, player_eye)) {
                         v3 from = v3f(m->pos.x, m->pos.y + S->eye, m->pos.z);
                         v3 at   = v3f(player_eye.x,
@@ -438,7 +639,6 @@ int enemy_hitscan(v3 o, v3 d, float maxdist, float *out_t, int *out_idx) {
 }
 
 void enemy_hurt(int idx, int dmg, v3 dir) {
-    (void)dir;
     if (idx < 0 || idx >= g_count) return;
     Enemy *m = &g_enemies[idx];
     if (!m->active || m->state == E_DEAD) return;
@@ -446,12 +646,30 @@ void enemy_hurt(int idx, int dmg, v3 dir) {
     m->health -= dmg;
     m->flash = 1.0f;
 
+    /* Centre of mass rather than the feet, so the spray leaves the body and
+       not the floor underneath it. Enemy stores only what varies per instance,
+       so the height comes from the type table.
+       발이 아니라 몸통 중심입니다. 그래야 분출이 발밑 바닥이 아니라 몸에서 나옵니다.
+       Enemy는 개체별로 달라지는 값만 보관하므로 신장은 종류 테이블에서 가져옵니다. */
+    const MonType *S = &TYPES[m->type];
+    v3 mid = v3f(m->pos.x, m->pos.y + S->height * 0.5f, m->pos.z);
+
+    /* `dir` is the direction the blow travelled, so the spray goes back along
+       it -- toward whoever landed the hit. This parameter was accepted and
+       discarded before there was anything to point.
+       `dir`은 타격이 진행한 방향이므로 분출은 그 반대, 즉 타격을 가한 쪽으로 향합니다.
+       가리킬 대상이 생기기 전까지 이 매개변수는 받기만 하고 버려졌습니다. */
+    v3 back = v3len(dir) > 1e-4f ? v3scale(v3norm(dir), -1.0f) : v3f(0, 1, 0);
+
     if (m->health <= 0) {
         m->state = E_DEAD;
         m->timer = 0.6f;
         play_at(m->pos, "edie", 95);
+        fx_spawn("gib", mid, back);
         return;
     }
+
+    fx_spawn("blood", mid, back);
 
     play_at(m->pos, "epain", 70);
     if (m->state == E_CHASE || m->state == E_IDLE) {

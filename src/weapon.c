@@ -1,38 +1,39 @@
 /**
  * @file weapon.c
- * @brief Implements the hitscan shotgun, the grapple rope, the view model and the effects.
+ * @brief Implements the hitscan shotgun, the view model, and the effects it leaves.
  *
  * ENGLISH
  * -------
- * The file divides into two halves that share only the ::Weapon struct and the
- * habit of pushing the player by writing to a caller-owned velocity:
+ * The shotgun: a Quake-1-style six-pellet hitscan blast, its recoil kick, and
+ * the impact/tracer/decal effects it leaves behind. Plus the view model and the
+ * HUD, which are the parts of this file that necessarily touch GL.
  *
- *  - The shotgun: a Quake-1-style six-pellet hitscan blast, its recoil kick,
- *    and the impact/tracer/decal effects it leaves behind.
- *  - The grapple: a DOOM Eternal Meat Hook -- fire a projectile, get reeled
- *    to what it hits, damage it on arrival, bounce off automatically. See the
- *    tuning banner in weapon.h for why this is a winch where the rope
- *    constraint it replaced deliberately was not.
- *
- * The wp_hook_* family takes the level explicitly and touches no GL, which is
- * what lets tools/hooktest.c drive all four beats with no context. The
- * rendering half necessarily does touch GL and is not testable that way.
+ * @note The grapple used to live here too and now lives in hook.c. The two
+ *       shared the ::Weapon struct and the habit of pushing the player by
+ *       writing to a caller-owned velocity, and nothing else -- so the split
+ *       moved no logic and changed no call site. This file still DRAWS the
+ *       tether and the flying claw, because drawing them needs the gun's
+ *       model-space muzzle, which is a property of the weapon rather than of
+ *       the hook.
+ * @note ::wp_fire and the hook both push the player through a `v3 *player_vel`
+ *       the caller passes in, so a shot and a grapple pull are two things doing
+ *       the same kind of push rather than two mechanisms that both happen to
+ *       move the player.
  *
  * 한국어
  * ------
- * 이 파일은 ::Weapon 구조체와, 호출자가 소유한 속도에 값을 써서 플레이어를
- * 밀어내는 방식만을 공유하는 두 부분으로 나뉩니다:
+ * 샷건입니다. Quake 1 스타일의 6발 산탄 히트스캔 사격과 그 반동, 그리고 그것이 남기는
+ * 탄흔·예광탄·자국 효과입니다. 여기에 뷰 모델과 HUD가 더해지며, 이 파일에서 필연적으로
+ * GL을 사용하는 부분이 그것들입니다.
  *
- *  - 샷건: Quake 1 스타일의 6발 산탄 히트스캔 사격과 그 반동, 그리고 그것이
- *    남기는 탄흔/예광탄/자국 효과.
- *  - 그래플: DOOM Eternal의 미트 훅입니다. 발사체를 던지고, 맞은 대상 쪽으로
- *    끌려가고, 도달 시 피해를 입히고, 자동으로 튕겨 나옵니다. 이것이 대체한 로프
- *    구속이 의도적으로 피했던 윈치 방식을 왜 여기서는 채택했는지는 weapon.h의
- *    튜닝 배너를 참조하십시오.
- *
- * wp_hook_* 계열은 레벨을 명시적으로 받고 GL을 사용하지 않으므로,
- * tools/hooktest.c가 컨텍스트 없이 네 단계 전부를 구동할 수 있습니다. 반면
- * 렌더링 부분은 필연적으로 GL을 사용하므로 그런 방식으로는 테스트할 수 없습니다.
+ * @note 그래플도 이곳에 있었으나 이제 hook.c에 있습니다. 둘은 ::Weapon 구조체와,
+ *       호출자가 소유한 속도에 값을 써서 플레이어를 밀어내는 방식만을 공유했으므로,
+ *       분리하면서 로직을 옮기지도 호출 지점을 바꾸지도 않았습니다. 로프와 비행 중인
+ *       클로를 *그리는* 것은 여전히 이 파일입니다. 그리려면 총기의 모델 공간 총구가
+ *       필요한데, 그것은 훅이 아니라 무기의 속성이기 때문입니다.
+ * @note ::wp_fire와 훅은 모두 호출자가 넘겨준 `v3 *player_vel`을 통해 플레이어를
+ *       밀어냅니다. 따라서 사격과 그래플 견인은 우연히 둘 다 플레이어를 움직이는 서로
+ *       다른 두 장치가 아니라, 같은 종류의 밀어내기를 하는 두 가지입니다.
  */
 
 #include "weapon.h"
@@ -41,18 +42,39 @@
 #include "audio.h"
 #include "level.h"
 #include "enemy.h"
+#include "fx.h"       /* authored particle effects, spawned by name */
+#include "txt.h"      /* txt_copy -- the model name buffer */
 #include "diag.h"
 #include "post.h"     /* post_in_world_pass -- the pass-boundary guards */
-#include "player.h"   /* PLAYER_GRAVITY -- the pull cancels it while reeling.
-                         Constants only, and only in the .c: weapon.h stays
-                         free of player.h so neither header depends on the
-                         other. enemy.c and pickup.c borrow constants the same
-                         way.
-                         PLAYER_GRAVITY 때문입니다. 견인 중에 중력을 상쇄합니다.
-                         상수만 사용하며 .c 파일에서만 포함하므로, weapon.h는
-                         player.h로부터 자유롭게 유지되어 두 헤더가 서로 의존하지
-                         않습니다. enemy.c와 pickup.c도 같은 방식으로 상수를
-                         빌려 씁니다. */
+#include "sprite.h"   /* the hand-drawn viewmodel, when art replaces the model */
+/* player.h is deliberately absent. It was here for PLAYER_GRAVITY, which the
+   grapple's pull cancels while reeling -- and the pull now lives in hook.c,
+   which includes it for that reason. Nothing left in this file names a
+   PLAYER_* constant, so keeping the include would leave the header graph
+   describing a dependency that no longer exists. Same rule as main.c's note
+   about model.h/tex.h/sprite.h.
+   player.h는 의도적으로 제외했습니다. 견인이 감는 동안 상쇄하는 PLAYER_GRAVITY 때문에
+   있었는데, 그 견인이 이제 hook.c에 있고 그 파일이 같은 이유로 이것을 포함합니다. 이
+   파일에는 PLAYER_* 상수를 언급하는 것이 더 이상 남아 있지 않으므로, include를 남겨 두면
+   헤더 그래프가 존재하지 않는 의존성을 설명하게 됩니다. model.h/tex.h/sprite.h에 대한
+   main.c의 주석과 같은 규칙입니다. */
+
+/* Material names are authored against LVL_MAT and looked up through tex_mat,
+   whose cache can only hold TEX_NAME_MAX. If the authoring limit ever grew
+   past the cache's, every over-long name would miss the cache forever and be
+   rebuilt from its recipe on each lookup -- correct on screen, quietly
+   expensive, and reported only as a diag counter. Checked here because this
+   is a file that already includes both headers and passes level-authored
+   names to tex_mat; no new dependency is introduced to make the check possible.
+
+   재질 이름은 LVL_MAT을 기준으로 제작되고 tex_mat을 통해 조회되는데, tex_mat의 캐시는
+   TEX_NAME_MAX까지만 담을 수 있습니다. 제작 상한이 캐시의 상한을 넘어서면, 초과하는 모든
+   이름이 영원히 캐시 미스가 되어 조회할 때마다 레시피로부터 재생성됩니다. 화면상으로는
+   올바르지만 조용히 비용이 들며, diag 카운터로만 보고됩니다. 이 파일이 두 헤더를 이미
+   포함하고 있고 레벨에서 제작된 이름을 tex_mat에 전달하므로 이곳에서 검사합니다. 검사를
+   위해 새로운 의존성을 추가하지 않습니다. */
+_Static_assert(TEX_NAME_MAX >= LVL_MAT,
+               "tex_mat's cache must hold any name a level can author");
 
 /* ------------------------------------------------------------------ tuning */
 
@@ -71,8 +93,37 @@
 #define PUNCH_RETURN   7.0f
 #define FLASH_TIME     0.075f
 
-#define IMPACT_LIFE    6.0f
+/* Decals last two very different lengths of time depending on what they are
+ * stuck to, and using one constant for both was a real defect.
+ *
+ * A bullet hole in a WALL should persist: the wall is not going anywhere, and
+ * a corridor accumulating the marks of a fight is most of what makes a fight
+ * feel like it happened.
+ *
+ * A blood mark on a MONSTER cannot, because the monster moves. The decal is
+ * placed in world space at the point of impact and never follows its target,
+ * so after the monster walks away the mark is left hanging in mid-air. At six
+ * seconds -- twelve times the 500ms the authored `blood` particles live -- the
+ * spray was long gone while the stain stayed floating where the monster used
+ * to be. Short enough that it reads as part of the same hit is the fix; it
+ * disappears while the body is still roughly under it.
+ *
+ * 데칼은 무엇에 붙었느냐에 따라 지속 시간이 크게 달라야 하며, 둘에 같은 상수를 쓴 것이
+ * 실제 결함이었습니다.
+ *
+ * *벽*의 탄흔은 남아야 합니다. 벽은 움직이지 않으며, 복도에 쌓인 교전의 흔적이 곧 그
+ * 교전이 있었다는 느낌의 대부분입니다.
+ *
+ * *몬스터*의 혈흔은 남을 수 없습니다. 몬스터가 움직이기 때문입니다. 데칼은 충돌 지점의
+ * 월드 좌표에 놓이고 대상을 따라가지 않으므로, 몬스터가 걸어가 버리면 자국만 허공에
+ * 남습니다. 6초는 제작된 `blood` 파티클의 수명 500ms의 12배이며, 분출이 사라지고 한참
+ * 뒤까지 얼룩이 몬스터가 있던 자리에 떠 있었습니다. 같은 피격의 일부로 읽힐 만큼 짧게
+ * 만드는 것이 해법이며, 몸이 아직 그 아래에 있는 동안 사라집니다. */
+#define IMPACT_LIFE    6.0f     /* wall decals: the room keeps its scars */
+#define BLOOD_LIFE     0.55f    /* body decals: gone before the body moves off */
 #define TRACER_LIFE    0.055f
+
+
 /* Every trigger pull spawns PELLETS of each, so the ring buffers hold a few
    full blasts rather than a few shots. */
 #define MAX_IMPACTS   48
@@ -111,6 +162,31 @@ GunPose g_gun_pose = {
 #define SWAY_ROLL      1.5f
 
 #define SPARK_TIME     0.06f
+
+/* The blood decal must outlive the spark that appears with it and must not
+ * outlive the wall decal. Neither bound is arbitrary:
+ *
+ *   - shorter than SPARK_TIME and the mark would vanish before the flash that
+ *     announced it, so a hit would end before it registered;
+ *   - as long as IMPACT_LIFE and it is the bug this constant exists to fix --
+ *     a stain left hanging where a monster used to be standing.
+ *
+ * Checked here because the decals are file-local and never reach the public
+ * API, so no headless test can observe them. A relationship that only holds
+ * because nobody has retuned one of the two is a relationship worth stating.
+ *
+ * 혈흔 데칼은 함께 나타나는 스파크보다는 오래 남아야 하고 벽 데칼보다는 오래 남아서는
+ * 안 됩니다. 두 경계 모두 임의의 값이 아닙니다. SPARK_TIME보다 짧으면 자국이 그것을
+ * 알린 섬광보다 먼저 사라져 명중이 인지되기 전에 끝나 버리고, IMPACT_LIFE만큼 길면 이
+ * 상수가 고치려는 바로 그 버그, 즉 몬스터가 서 있던 자리에 얼룩만 떠 있는 상황이 됩니다.
+ *
+ * 데칼은 파일 지역이며 공개 API에 도달하지 않으므로 어떤 헤드리스 테스트도 관측할 수
+ * 없기에 이곳에서 검사합니다. 둘 중 하나를 아무도 재조정하지 않았기 때문에만 성립하는
+ * 관계라면, 명시해 둘 가치가 있습니다. */
+_Static_assert(BLOOD_LIFE > SPARK_TIME,
+               "a blood mark must outlast the spark that announced it");
+_Static_assert(BLOOD_LIFE < IMPACT_LIFE,
+               "a blood mark must not linger like a wall decal -- monsters move");
 
 /* ------------------------------------------------------------ module state */
 
@@ -305,10 +381,7 @@ void wp_set_model(const char *name) {
     Model m;
     if (!mdl_load(name, &m)) return;
 
-    int i = 0;
-    for (; name[i] && i < (int)sizeof(g_model_name) - 1; i++)
-        g_model_name[i] = name[i];
-    g_model_name[i] = 0;
+    txt_copy(g_model_name, sizeof(g_model_name), name, -1);
 
     MeshBuf gun;
     mb_init(&gun, MDL_MAX_VERTS);
@@ -548,8 +621,19 @@ static void fire(Weapon *w, v3 eye, float yaw, float pitch,
             im->p = blood ? v3sub(end, v3scale(dir, 0.05f))
                           : v3add(end, v3scale(n, 0.012f));
             im->n = blood ? v3scale(dir, -1.0f) : n;
-            im->life = IMPACT_LIFE;
+            im->life = blood ? BLOOD_LIFE : IMPACT_LIFE;
             im->blood = blood;
+
+            /* The authored half of the same hit. The built-in decal and spark
+               above stay: they are the shotgun's own feedback and are tuned
+               against its fire rate. This adds whatever assets\effects.txt
+               says a hit on this surface throws off, so the look can be
+               retuned without a rebuild.
+               같은 명중의 제작된 쪽입니다. 위의 내장 자국과 스파크는 그대로 둡니다.
+               그것은 샷건 자체의 피드백이며 발사 속도에 맞춰 조정된 것입니다. 여기서는
+               assets\effects.txt가 이 표면 명중이 무엇을 튀기는지 정의한 대로 추가하므로,
+               재빌드 없이 룩을 조정할 수 있습니다. */
+            fx_spawn(blood ? "blood" : "spark", im->p, im->n);
         }
 
         Tracer *tr = &g_tracers[g_tracer_next];
@@ -577,440 +661,6 @@ static void fire(Weapon *w, v3 eye, float yaw, float pitch,
     g_flash_roll  = frand(w) * M_TAU;
 }
 
-/* -------------------------------------------------------------- the hook
- *
- * ENGLISH
- * -------
- * A DOOM Eternal Meat Hook: fire, pull, damage, launch. See the tuning banner
- * in weapon.h for the design; this is the machinery.
- *
- * The claw is a PROJECTILE, so this file owns a small simulation of it -- one
- * position stepped forward each frame and tested against the level and the
- * monsters. That is the only reason wp_hook_update needs the level: the throw
- * has not resolved yet when wp_hook_fire returns.
- *
- * The pull is a WINCH, which is what the previous rope-constraint version
- * deliberately was not. It accelerates the player at the target and caps the
- * result, because a Meat Hook closes distance rather than holding a length.
- * If you are looking for the swing physics, they are gone on purpose -- see
- * the note in weapon.h on why the two are different mechanics.
- *
- * These functions touch no GL and take the level explicitly, so
- * tools/hooktest.c drives the whole four-beat cycle with no context.
- *
- * 한국어
- * ------
- * DOOM Eternal의 미트 훅입니다. 발사, 견인, 피해, 도약으로 구성됩니다. 설계는
- * weapon.h의 튜닝 배너를 참조하십시오. 이곳은 그 구현입니다.
- *
- * 클로는 *발사체*이므로 이 파일이 그에 대한 작은 시뮬레이션을 소유합니다. 매 프레임
- * 전진하는 위치 하나를 레벨 및 몬스터와 충돌 검사합니다. wp_hook_update가 레벨을
- * 필요로 하는 유일한 이유가 이것입니다. wp_hook_fire가 반환되는 시점에는 투척이 아직
- * 해결되지 않았기 때문입니다.
- *
- * 견인은 *윈치*이며, 이는 이전의 로프 구속 버전이 의도적으로 피했던 방식입니다.
- * 플레이어를 대상 쪽으로 가속하고 결과에 상한을 둡니다. 미트 훅은 길이를 유지하는
- * 것이 아니라 거리를 좁히는 도구이기 때문입니다. 스윙 물리를 찾고 계신다면, 그것은
- * 의도적으로 제거되었습니다. 두 방식이 왜 다른 메커니즘인지는 weapon.h의 설명을
- * 참조하십시오.
- *
- * 이 함수들은 GL을 사용하지 않고 레벨을 명시적으로 받으므로, tools/hooktest.c가
- * 컨텍스트 없이 4단계 주기 전체를 실행합니다.
- */
-
-/* Reeling in has to be able to reach the arrival test, or a completed pull
-   would never fire its launch. Checked here rather than trusted to whoever
-   next retunes the block in weapon.h. (A _Static_assert rather than #if: the
-   preprocessor cannot compare floating constants.) */
-_Static_assert(HOOK_ARRIVE_DIST > 0.0f,
-               "HOOK_ARRIVE_DIST must be positive or the pull never arrives");
-_Static_assert(HOOK_REFIRE_DELAY > HOOK_COOLDOWN,
-               "a connected hook must cost more than a clean miss");
-
-/**
- * @brief Ends the hook cycle and charges the rearm delay. The single exit path.
- *
- * ENGLISH
- * -------
- * @param[in,out] w Weapon to reset to ::HOOK_IDLE.
- * @note Every path that ends a hook goes through here -- arrival, timeout,
- *       a miss, and an explicit cancel -- so the rearm delay cannot be
- *       remembered in three places and forgotten in the fourth.
- * @note Only ever lengthens the cooldown: a hook that ended while the
- *       launcher happened to be on a longer timer should not shorten it.
- *
- * 한국어
- * ------
- * @brief 훅 주기를 종료하고 재장전 지연을 부과합니다. 유일한 종료 경로입니다.
- * @param[in,out] w ::HOOK_IDLE로 되돌릴 무기.
- * @note 훅을 끝내는 모든 경로(도달, 시간 초과, 빗나감, 명시적 취소)가 이 함수를
- *       거치므로, 재장전 지연을 세 곳에서 처리하다가 네 번째에서 빠뜨리는 일이
- *       발생할 수 없습니다.
- * @note 쿨다운은 늘리기만 합니다. 발사기가 마침 더 긴 타이머 상태일 때 훅이 끝났다고
- *       해서 그 시간을 줄여서는 안 되기 때문입니다.
- */
-static void hook_end(Weapon *w) {
-    w->hook_state = HOOK_IDLE;
-    w->hook_enemy = -1;
-    w->hook_timer = 0.0f;
-    if (w->hook_cooldown < HOOK_REFIRE_DELAY) w->hook_cooldown = HOOK_REFIRE_DELAY;
-}
-
-void wp_hook_arm(Weapon *w) {
-    w->hook_latched = 0;
-}
-
-int wp_hook_locks_aim(const Weapon *w) {
-    return w->hook_state != HOOK_IDLE;
-}
-
-int wp_hook_in_range(const Weapon *w, const Level *l,
-                     v3 eye, float yaw, float pitch) {
-    /* "Would a throw connect right now" -- so the same refusals wp_hook_fire
-       applies count as out of range. A crosshair that lights up while the
-       launcher is on cooldown is lying about what the button will do.
-       "지금 발사하면 명중하는가"이므로, wp_hook_fire가 적용하는 것과 동일한 거부
-       조건들이 사거리 밖으로 간주됩니다. 발사기가 쿨다운 중인데 조준점이 켜진다면
-       버튼이 무엇을 할지에 대해 거짓말을 하는 것입니다. */
-    if (w->hook_state != HOOK_IDLE) return 0;
-    if (w->hook_latched)            return 0;
-    if (w->hook_cooldown > 0.0f)    return 0;
-
-    float cy = cosf(yaw), sy = sinf(yaw);
-    float cp = cosf(pitch), sp = sinf(pitch);
-    v3 fwd = v3f(-sy * cp, sp, -cy * cp);
-
-    /* Monsters first, then geometry -- the same priority hook_fly uses, so
-       the indicator agrees with what the claw would actually hit.
-       몬스터를 먼저, 그다음 지오메트리를 확인합니다. hook_fly와 동일한 우선순위이므로
-       표시가 클로가 실제로 맞힐 대상과 일치합니다. */
-    float t; int idx;
-    if (enemy_hitscan(eye, fwd, HOOK_RANGE, &t, &idx)) return 1;
-
-    v3 n;
-    return (l && level_trace(l, eye, fwd, HOOK_RANGE, &t, &n)) ? 1 : 0;
-}
-
-void wp_hook_release(Weapon *w) {
-    hook_end(w);
-}
-
-int wp_hook_fire(Weapon *w, v3 eye, float yaw, float pitch) {
-    if (w->hook_state != HOOK_IDLE) return 0;   /* one claw in the air at a time */
-    if (w->hook_latched) return 0;              /* this press has had its throw */
-    if (w->hook_cooldown > 0.0f) return 0;
-
-    /* The claw is away the moment the trigger goes, so the cooldown is spent
-       here rather than when it lands. A throw that finds nothing still threw.
-       방아쇠를 당기는 순간 클로가 떠나므로, 착지 시점이 아니라 여기서 쿨다운을
-       소모합니다. 아무것도 맞히지 못한 투척도 투척한 것입니다. */
-    w->hook_cooldown = HOOK_COOLDOWN;
-    w->hook_latched  = 1;
-
-    float cy = cosf(yaw), sy = sinf(yaw);
-    float cp = cosf(pitch), sp = sinf(pitch);
-    v3 fwd = v3f(-sy * cp, sp, -cy * cp);
-
-    /* The claw starts at the eye and flies along the aim. Starting at the
-       drawn muzzle would look better for the first metre and then diverge
-       from the crosshair, which is the wrong trade -- the tether is drawn
-       from the muzzle regardless (see hook_muzzle), so the visual is honest
-       without the flight path having to be.
-       클로는 눈에서 출발하여 조준 방향으로 날아갑니다. 화면에 그려진 총구에서
-       출발하면 첫 1미터는 더 나아 보이겠지만 이후 조준점과 어긋나게 되며, 이는 잘못된
-       거래입니다. 로프는 어차피 총구에서 그려지므로(hook_muzzle 참조), 비행 경로가
-       그럴 필요 없이도 시각적으로 정직합니다. */
-    w->hook_state  = HOOK_FLYING;
-    w->hook_pos    = eye;
-    w->hook_target = v3add(eye, v3scale(fwd, HOOK_RANGE));
-    w->hook_enemy  = -1;
-    w->hook_timer  = 0.0f;
-
-    audio_play("hook", 75);
-    return 1;
-}
-
-/**
- * @brief Steps the claw forward one frame and tests what it hits. Beat 1.
- *
- * ENGLISH
- * -------
- * @param[in,out] w  Weapon whose claw is in flight.
- * @param[in]     l  Level to collide against; may be NULL for monsters only.
- * @param[in]     dt Timestep in seconds.
- * @return 1 while still flying or on a hit, 0 when the throw missed and the
- *         hook has been ended.
- * @note Sub-steps the flight in ::HOOK_FLY_STEP increments rather than one
- *       jump per frame. At 90 m/s a single 60 Hz step is 1.5 m, which is wide
- *       enough to pass straight through a monster or a thin wall -- the
- *       classic fast-projectile tunnelling bug.
- * @note Monsters are tested before geometry over the same sub-step, so a
- *       monster standing against a wall is hooked rather than the wall behind
- *       it. That is the whole point of the mechanic, and getting the priority
- *       backwards would make it feel broken near cover.
- *
- * 한국어
- * ------
- * @brief 클로를 한 프레임 전진시키고 무엇에 맞았는지 검사합니다. 1단계입니다.
- * @param[in,out] w  클로가 비행 중인 무기.
- * @param[in]     l  충돌 판정 대상 레벨. NULL이면 몬스터만 검사합니다.
- * @param[in]     dt 시간 간격 (초).
- * @return 아직 비행 중이거나 명중하면 1, 빗나가서 훅이 종료되면 0.
- * @note 프레임당 한 번 도약하는 대신 ::HOOK_FLY_STEP 단위로 세분하여 전진합니다.
- *       초속 90m에서 60Hz 한 스텝은 1.5m이며, 이는 몬스터나 얇은 벽을 그대로
- *       통과하기에 충분한 거리입니다. 고속 발사체의 전형적인 터널링 버그입니다.
- * @note 동일한 세부 스텝 내에서 지오메트리보다 몬스터를 먼저 검사하므로, 벽에 붙어
- *       선 몬스터가 있으면 뒤쪽 벽이 아니라 몬스터가 걸립니다. 그것이 이 메커니즘의
- *       핵심이며, 우선순위를 반대로 하면 엄폐물 근처에서 고장 난 것처럼 느껴집니다.
- */
-static int hook_fly(Weapon *w, const Level *l, float dt) {
-    v3 to_end = v3sub(w->hook_target, w->hook_pos);
-    float remaining = v3len(to_end);
-    if (remaining < 1e-4f) { hook_end(w); return 0; }   /* reached max range */
-
-    v3 dir = v3scale(to_end, 1.0f / remaining);
-    float travel = HOOK_FLY_SPEED * dt;
-    if (travel > remaining) travel = remaining;
-
-    /* Walk the segment in short steps so nothing thin is skipped over.
-       얇은 대상을 건너뛰지 않도록 선분을 짧은 스텝으로 나누어 진행합니다. */
-    float done = 0.0f;
-    while (done < travel) {
-        float step = travel - done;
-        if (step > HOOK_FLY_STEP) step = HOOK_FLY_STEP;
-
-        v3 from = w->hook_pos;
-        v3 next = v3add(from, v3scale(dir, step));
-
-        /* Monsters first: a demon in front of a wall is the target, not the
-           wall. 몬스터 우선: 벽 앞의 악마가 대상이지 벽이 아닙니다. */
-        float et; int ei;
-        if (enemy_hitscan(from, dir, step, &et, &ei)) {
-            w->hook_pos    = v3add(from, v3scale(dir, et));
-            w->hook_target = w->hook_pos;
-            w->hook_enemy  = ei;
-            w->hook_state  = HOOK_PULLING;
-            w->hook_timer  = 0.0f;
-            return 1;
-        }
-
-        /* Then geometry. A wall is a perfectly good anchor -- it just deals
-           no damage on arrival.
-           다음으로 지오메트리입니다. 벽도 훌륭한 고정점이며, 다만 도달 시 피해를
-           주지 않을 뿐입니다. */
-        float lt; v3 ln;
-        if (l && level_trace(l, from, dir, step, &lt, &ln)) {
-            w->hook_pos    = v3add(from, v3scale(dir, lt));
-            w->hook_target = w->hook_pos;
-            w->hook_enemy  = -1;
-            w->hook_state  = HOOK_PULLING;
-            w->hook_timer  = 0.0f;
-            return 1;
-        }
-
-        w->hook_pos = next;
-        done += step;
-    }
-
-    /* Still travelling. Running out of range is a clean miss.
-       아직 비행 중입니다. 사거리를 소진하면 깨끗한 빗나감입니다. */
-    if (v3len(v3sub(w->hook_target, w->hook_pos)) < 1e-3f) { hook_end(w); return 0; }
-    return 1;
-}
-
-/**
- * @brief Applies the launch impulse that ends a completed hook. Beat 4.
- *
- * ENGLISH
- * -------
- * @param[in]     travel Unit direction the player was moving in on arrival.
- * @param[in]     speed  Arrival speed, m/s.
- * @param[in,out] vel    Player momentum to overwrite with the launch.
- * @note Overwrites rather than adds. The arrival velocity points straight at
- *       whatever was just hit, so keeping it would drive the player into the
- *       target they are supposed to be bouncing off -- the launch has to
- *       replace that motion, not compete with it.
- * @note Two components: ::HOOK_LAUNCH_UP clears the target so the next hook
- *       has somewhere to go, and ::HOOK_LAUNCH_ALONG preserves a fraction of
- *       the travel direction so a chain of hooks keeps its momentum instead
- *       of stopping dead above each one.
- *
- * 한국어
- * ------
- * @brief 완료된 훅을 마무리하는 도약 충격량을 적용합니다. 4단계입니다.
- * @param[in]     travel 도달 시점에 플레이어가 이동하던 단위 방향.
- * @param[in]     speed  도달 속도 (m/s).
- * @param[in,out] vel    도약으로 덮어쓸 플레이어 운동량.
- * @note 더하지 않고 덮어씁니다. 도달 속도는 방금 부딪힌 대상을 정면으로 향하고
- *       있으므로, 그대로 두면 튕겨 나와야 할 대상 쪽으로 플레이어를 밀어 넣게 됩니다.
- *       도약은 그 운동을 대체해야지 경쟁해서는 안 됩니다.
- * @note 두 성분으로 구성됩니다. ::HOOK_LAUNCH_UP은 대상에서 벗어나게 하여 다음 훅이
- *       갈 곳을 확보하고, ::HOOK_LAUNCH_ALONG은 진행 방향의 일부를 보존하여 연속된
- *       훅이 매번 대상 위에서 멈추지 않고 운동량을 유지하게 합니다.
- */
-static void hook_launch(v3 travel, float speed, v3 *vel) {
-    v3 up    = v3f(0.0f, HOOK_LAUNCH_UP, 0.0f);
-    v3 along = v3scale(travel, speed * HOOK_LAUNCH_ALONG);
-
-    v3 out = v3add(up, along);
-    float sp = v3len(out);
-    if (sp > HOOK_LAUNCH_MAX) out = v3scale(out, HOOK_LAUNCH_MAX / sp);
-
-    *vel = out;
-}
-
-int wp_hook_update(Weapon *w, const Level *l, v3 *pos, v3 *vel, float dt) {
-    if (w->hook_state == HOOK_IDLE) return 0;
-
-    w->hook_timer += dt;
-
-    /* --- beat 1: the claw is still travelling ---------------------------- */
-    if (w->hook_state == HOOK_FLYING)
-        return hook_fly(w, l, dt);
-
-    /* --- the target may have moved --------------------------------------- */
-    if (w->hook_enemy >= 0) {
-        const Enemy *e = enemy_at(w->hook_enemy);
-        /* A dead or despawned target ends the hook without a launch: there is
-           nothing left to bounce off. Tracking by index rather than position
-           is what makes this detectable at all.
-           죽었거나 사라진 대상은 도약 없이 훅을 종료시킵니다. 튕겨 나올 대상이 남아
-           있지 않기 때문입니다. 위치가 아닌 인덱스로 추적하기에 이를 감지할 수
-           있습니다. */
-        if (!e || !e->active || e->state == E_DEAD) { hook_end(w); return 0; }
-        /* Aim at the centre of mass rather than the feet, or the pull drags
-           the player into the floor. Height comes from the type table, since
-           Enemy stores only what varies per instance.
-           발이 아닌 몸통 중심을 겨냥합니다. 그렇지 않으면 견인이 플레이어를 바닥으로
-           끌고 들어갑니다. Enemy는 개체마다 달라지는 값만 보관하므로 신장은 종류
-           테이블에서 가져옵니다. */
-        const MonType *S = mon_stats(e->type);
-        float mid = S ? S->height * 0.5f : 0.8f;
-        w->hook_target = v3f(e->pos.x, e->pos.y + mid, e->pos.z);
-    }
-
-    v3 to = v3sub(w->hook_target, *pos);
-    float dist = v3len(to);
-
-    /* --- beats 3 and 4: arrival, damage, launch ---------------------------
-       Two ways to arrive, and the second is not optional. A proximity test
-       alone misses whenever one frame's travel exceeds the arrival radius:
-       at HOOK_PULL_MAX the player covers 0.63 m per 60Hz frame, and against a
-       target the pull can overshoot -- especially a moving one, or when the
-       player carries sideways momentum into the hook -- the closest approach
-       can land outside HOOK_ARRIVE_DIST entirely. The player then sails past
-       and oscillates around the target forever, because the pull keeps
-       reversing to chase it. That is exactly what happened here: a straight
-       20 m hook overshot to 29 m and never got nearer than 2.07 m against a
-       1.6 m threshold.
-
-       So arrival is ALSO "the target is now behind me". Once the direction to
-       it has flipped relative to travel, the hook has done its job whether or
-       not the radius was ever satisfied.
-
-       도달 판정이 두 가지이며 두 번째는 선택 사항이 아닙니다. 근접 판정만으로는 한
-       프레임의 이동 거리가 도달 반경을 넘는 순간 놓치게 됩니다. HOOK_PULL_MAX에서
-       플레이어는 60Hz 프레임당 0.63m를 이동하며, 견인이 대상을 지나칠 수 있는 상황
-       (특히 대상이 움직이거나 플레이어가 측면 운동량을 가지고 훅에 들어온 경우)에는
-       최근접 거리가 HOOK_ARRIVE_DIST 바깥에 머무를 수 있습니다. 그러면 플레이어는
-       대상을 지나쳐 날아가고, 견인이 계속 방향을 뒤집어 추격하므로 영원히 진동하게
-       됩니다. 실제로 그런 일이 발생했습니다. 20m 직선 훅이 29m까지 지나쳐 갔고 1.6m
-       임계값에 대해 2.07m보다 가까워진 적이 없었습니다.
-
-       따라서 "대상이 이제 내 뒤에 있다"도 도달로 간주합니다. 대상을 향한 방향이 진행
-       방향 대비 뒤집혔다면, 반경 조건을 만족했든 아니든 훅은 제 역할을 다한 것입니다.
-
-       The overshoot test is deliberately narrow. It asks whether the velocity
-       ALONG THE HOOK has reversed -- not whether the total velocity happens to
-       point away, which is a different and much looser question. On the first
-       pull frame the player is still nearly stationary while gravity
-       cancellation has nudged vel.y upward, so a whole-vector test reads that
-       tiny upward drift as "the target is behind me" and ends the hook
-       instantly, having moved nobody. Requiring real inbound speed first, and
-       then testing only the component that matters, is what separates a
-       genuine fly-past from noise.
-
-       지나침 판정은 의도적으로 좁게 설계되었습니다. *훅 방향* 속도 성분이 뒤집혔는지를
-       묻지, 전체 속도가 우연히 반대쪽을 향하는지를 묻지 않습니다. 후자는 훨씬 느슨한
-       다른 질문입니다. 견인 첫 프레임에는 플레이어가 거의 정지해 있는 반면 중력 상쇄가
-       vel.y를 위로 살짝 밀어 올리므로, 벡터 전체로 판정하면 그 미세한 상승을 "대상이
-       뒤에 있다"로 읽어 아무도 움직이지 않은 채 훅이 즉시 종료됩니다. 먼저 실제로
-       접근 중일 것을 요구하고 그다음 관련된 성분만 검사하는 것이, 진짜 지나침과
-       잡음을 구분하는 방법입니다. */
-    float closing = v3dot(*vel, v3scale(to, 1.0f / (dist > 1e-4f ? dist : 1.0f)));
-    int   passed  = (w->hook_timer > 0.15f && closing < -1.0f);
-    if (dist < HOOK_ARRIVE_DIST || passed) {
-        /* The direction of travel at the moment of arrival, which the launch
-           partly preserves. Falls back to the hook direction when the player
-           is somehow stationary, so a launch always has a sane axis.
-           도달 순간의 이동 방향이며, 도약이 이를 부분적으로 보존합니다. 플레이어가
-           어떤 이유로든 정지해 있으면 훅 방향으로 대체하여 도약이 항상 온전한 축을
-           갖도록 합니다. */
-        float speed = v3len(*vel);
-        v3 travel = (speed > 0.1f) ? v3scale(*vel, 1.0f / speed)
-                                   : v3norm(to);
-
-        /* Beat 3: hooking a monster is an attack. Dealt once, here, rather
-           than per frame of contact.
-           3단계: 몬스터를 거는 것은 공격입니다. 접촉하는 매 프레임이 아니라 이곳에서
-           한 번만 적용됩니다. */
-        if (w->hook_enemy >= 0) {
-            enemy_hurt(w->hook_enemy, HOOK_IMPACT_DAMAGE, travel);
-            audio_play("ehit", 80);
-        } else {
-            audio_play("impact", 60);
-        }
-
-        /* Beat 4: bounce off automatically. No button, no timing. */
-        hook_launch(travel, speed, vel);
-
-        hook_end(w);
-        return 0;
-    }
-
-    /* --- beat 2: the pull ------------------------------------------------- */
-    if (w->hook_timer > HOOK_PULL_TIMEOUT) {
-        /* Could not get there -- the target is running, or is somewhere the
-           player cannot follow. A failure, so no launch.
-           도달할 수 없었습니다. 대상이 도망치고 있거나 플레이어가 따라갈 수 없는 곳에
-           있습니다. 실패이므로 도약도 없습니다. */
-        hook_end(w);
-        return 0;
-    }
-    if (dist < 1e-4f) return 1;                  /* degenerate; nothing sane to do */
-
-    v3 dir = v3scale(to, 1.0f / dist);           /* player -> target, unit */
-
-    /* Cancel gravity so a long horizontal hook does not sag into the floor
-       before it arrives. This runs before player_move applies gravity for the
-       frame, so adding it back here is what neutralises it.
-       긴 수평 훅이 도달 전에 바닥으로 처지지 않도록 중력을 상쇄합니다. 이 코드는
-       player_move가 해당 프레임의 중력을 적용하기 전에 실행되므로, 여기서 중력을 다시
-       더하는 것이 상쇄 효과를 냅니다. */
-    vel->y += PLAYER_GRAVITY * HOOK_PULL_ANTIGRAV * dt;
-
-    /* The winch. Straight at the target, capped -- see the weapon.h banner on
-       why this is a pull rather than a rope constraint.
-       윈치입니다. 대상을 정면으로 향하며 상한이 있습니다. 이것이 로프 구속이 아닌
-       견인인 이유는 weapon.h의 배너를 참조하십시오. */
-    *vel = v3add(*vel, v3scale(dir, HOOK_PULL_ACCEL * dt));
-
-    /* Cap the component along the hook rather than the whole velocity, so
-       sideways momentum the player brought with them survives the pull
-       instead of being scaled away by a global clamp.
-       전체 속도가 아니라 훅 방향 성분만 제한합니다. 그래야 플레이어가 가지고 온 측면
-       운동량이 전역 클램프에 의해 깎이지 않고 견인 중에도 유지됩니다. */
-    float along = v3dot(*vel, dir);
-    if (along > HOOK_PULL_MAX)
-        *vel = v3add(*vel, v3scale(dir, HOOK_PULL_MAX - along));
-
-    float sp = v3len(*vel);
-    if (sp > HOOK_MAX_SPEED) *vel = v3scale(*vel, HOOK_MAX_SPEED / sp);
-
-    (void)pos;   /* read through `to` above; never written -- the pull works
-                    through velocity so it collides like any other movement */
-    return 1;
-}
 
 void wp_update(Weapon *w, float dt, int firing, v3 eye, float yaw, float pitch,
                float move_speed, float mouse_dx, float mouse_dy,
@@ -1093,11 +743,19 @@ void wp_draw_world(const Weapon *w, mat4 view_proj,
         mesh_upload(&g_fx_mesh, &g_fx_buf, 1);
         glBindVertexArray(g_fx_mesh.vao);
         for (int k = 0; k < n_live; k++) {
-            float a = g_impacts[order[k]].life / IMPACT_LIFE;
+            const Impact *im = &g_impacts[order[k]];
+            /* Fade against the life this decal was actually GIVEN, not against
+               the wall constant: dividing a 0.55s blood mark by 6.0 leaves it
+               at 9% alpha from the moment it appears, which is a decal nobody
+               ever sees rather than one that fades.
+               해당 데칼이 *실제로 부여받은* 수명을 기준으로 페이드합니다. 벽 상수를
+               쓰면 0.55초짜리 혈흔을 6.0으로 나누게 되어 생성되는 순간부터 알파 9%가
+               되며, 이는 페이드되는 데칼이 아니라 아무도 볼 수 없는 데칼입니다. */
+            float a = im->life / (im->blood ? BLOOD_LIFE : IMPACT_LIFE);
             if (a > 1.0f) a = 1.0f;
             /* Blood stains dark red where a wall hole is near-black. */
-            if (g_impacts[order[k]].blood) rd_color(0.30f, 0.02f, 0.02f, a * 0.85f);
-            else                           rd_color(0.04f, 0.03f, 0.03f, a * 0.85f);
+            if (im->blood) rd_color(0.30f, 0.02f, 0.02f, a * 0.85f);
+            else           rd_color(0.04f, 0.03f, 0.03f, a * 0.85f);
             glDrawArrays(GL_TRIANGLES, k * 6, 6);
         }
     }
@@ -1110,7 +768,15 @@ void wp_draw_world(const Weapon *w, mat4 view_proj,
 
     int sn = 0;
     for (int i = 0; i < MAX_IMPACTS; i++) {
-        float age = IMPACT_LIFE - g_impacts[i].life;
+        /* Age against this decal's OWN starting life. Deriving it from the
+           wall constant made every blood impact 5.45s old the instant it
+           spawned, so its spark was skipped entirely and a hit on a monster
+           lost the flash that tells the player they connected.
+           이 데칼 *자신의* 시작 수명을 기준으로 나이를 계산합니다. 벽 상수로 유도하면
+           모든 혈흔이 생성되는 순간 이미 5.45초 된 것이 되어 스파크가 통째로
+           건너뛰어지며, 몬스터를 맞혔을 때 명중을 알리는 섬광이 사라집니다. */
+        float span = g_impacts[i].blood ? BLOOD_LIFE : IMPACT_LIFE;
+        float age  = span - g_impacts[i].life;
         if (g_impacts[i].life <= 0.0f || age > SPARK_TIME) continue;
         /* Billboarded to the camera, and scaled with distance so a far hit
            stays legible instead of shrinking to a single pixel. */
@@ -1123,11 +789,13 @@ void wp_draw_world(const Weapon *w, mat4 view_proj,
         mesh_upload(&g_fx_mesh, &g_fx_buf, 1);
         glBindVertexArray(g_fx_mesh.vao);
         for (int k = 0; k < sn; k++) {
-            float age = IMPACT_LIFE - g_impacts[order[k]].life;
+            const Impact *im = &g_impacts[order[k]];
+            float span = im->blood ? BLOOD_LIFE : IMPACT_LIFE;
+            float age  = span - im->life;
             float a = 1.0f - age / SPARK_TIME;
             /* A red puff on flesh, a warm spark on stone. */
-            if (g_impacts[order[k]].blood) rd_color(0.90f, 0.12f, 0.10f, a * 0.9f);
-            else                           rd_color(1.0f, 0.85f, 0.50f, a * 0.9f);
+            if (im->blood) rd_color(0.90f, 0.12f, 0.10f, a * 0.9f);
+            else           rd_color(1.0f, 0.85f, 0.50f, a * 0.9f);
             glDrawArrays(GL_TRIANGLES, k * 6, 6);
         }
     }
@@ -1279,12 +947,200 @@ mat4 wp_gun_matrix(const Weapon *w) {
                           mat4_scale(v3f(g->scale, g->scale, g->scale))))));
 }
 
+/**
+ * @brief Which drawn frame the gun is on, from the gun's own timers.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] w The weapon.
+ * @return One of the WPN_* frames.
+ *
+ * @note Read from the timers that already exist rather than from an animation
+ *       clock of its own. A second clock would have to be advanced in step with
+ *       firing, and the failure when it drifts is a gun whose picture disagrees
+ *       with what it is doing -- pumping while idle, or still while it shoots.
+ *       The monsters pick their frames from ::EState for the same reason.
+ *
+ * 한국어
+ * ------
+ * @brief 총기 자신의 타이머로부터 현재 그려질 프레임을 결정합니다.
+ * @return WPN_* 프레임 중 하나.
+ *
+ * @note 자체 애니메이션 시계가 아니라 이미 존재하는 타이머에서 읽습니다. 두 번째 시계는
+ *       발사와 보조를 맞춰 진행되어야 하며, 어긋났을 때의 증상은 그림이 실제 동작과
+ *       불일치하는 총기입니다. 대기 중에 펌프질을 하거나, 발사하는데 가만히 있는 식입니다.
+ *       몬스터가 ::EState에서 프레임을 고르는 것과 같은 이유입니다.
+ */
+static int wp_sprite_frame(const Weapon *w) {
+    /* The flash is short and is exactly the shot, so it owns the fire frame. */
+    if (w->flash > 0.0f) return WPN_FIRE;
+
+    /* The pump runs after it, and its two halves split the remaining time.
+       펌프 동작이 그 뒤에 이어지며, 남은 시간을 두 절반이 나눠 갖습니다. */
+    if (w->pump_timer > 0.0f) {
+        float half = FIRE_INTERVAL * 0.55f * 0.5f;
+        return (w->pump_timer > half) ? WPN_PUMP0 : WPN_PUMP1;
+    }
+    return WPN_IDLE;
+}
+
+/**
+ * @brief Draws the hand-drawn viewmodel: a screen-aligned quad, Doom-style.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] w      The weapon.
+ * @param[in] aspect Viewport aspect, so the quad keeps its proportions.
+ *
+ * The same bob, sway and punch the 3D path uses, applied as 2D offsets rather
+ * than as a transform. That is what keeps the feel across the switch: the
+ * numbers driving the motion are the weapon's, not the renderer's, so a gun
+ * that felt right as a model feels the same as a drawing.
+ *
+ * @note Drawn under an ORTHO projection covering the viewport, so the sprite
+ *       occupies a fixed share of the screen at any resolution. A perspective
+ *       projection would make the gun's apparent size depend on the FOV, which
+ *       is correct for a 3D model sitting in front of the eye and wrong for a
+ *       drawing that is meant to be a fixed part of the frame.
+ * @note Alpha-tested through ::RD_SPRITE rather than blended, because the art's
+ *       alpha is a silhouette mask. Blending would leave a fringe of half-lit
+ *       pixels around every edge the artist drew sharp.
+ *
+ * 한국어
+ * ------
+ * @brief 손으로 그린 뷰 모델을 그립니다. Doom 방식의 화면 정렬 쿼드입니다.
+ *
+ * 3D 경로가 쓰는 것과 동일한 흔들림·스웨이·반동을 변환 행렬이 아니라 2D 오프셋으로
+ * 적용합니다. 그것이 전환을 넘어 감각을 유지하는 방법입니다. 움직임을 구동하는 수치는
+ * 렌더러가 아니라 무기의 것이므로, 모델일 때 좋았던 총기는 그림이 되어도 같게 느껴집니다.
+ *
+ * @note 뷰포트를 덮는 *정사영* 투영으로 그리므로, 스프라이트가 어떤 해상도에서도 화면의
+ *       일정한 비율을 차지합니다. 원근 투영은 총기의 겉보기 크기를 시야각에 의존하게
+ *       만드는데, 눈앞에 놓인 3D 모델에는 옳지만 프레임의 고정된 일부여야 하는 그림에는
+ *       틀립니다.
+ * @note 블렌딩이 아니라 ::RD_SPRITE의 알파 테스트를 씁니다. 아트의 알파가 실루엣
+ *       마스크이기 때문입니다. 블렌딩하면 아티스트가 선명하게 그린 모든 가장자리에 반쯤
+ *       밝은 픽셀의 테두리가 남습니다.
+ */
+static void wp_draw_view_sprite(const Weapon *w, float aspect) {
+    /* A 1x1 box with y up, so every offset below is a fraction of the screen
+       and none of them has to know the pixel size.
+       y가 위로 향하는 1x1 상자입니다. 아래의 모든 오프셋이 화면에 대한 비율이 되며, 어느
+       것도 픽셀 크기를 알 필요가 없습니다. */
+    mat4 proj = mat4_ortho(0.0f, 1.0f, 0.0f, 1.0f, -1.0f, 1.0f);
+
+    /* How much of the screen the gun covers. Width follows the cell's aspect
+       so the drawing is never stretched, and the aspect correction runs on the
+       WIDTH because the height is what the artist framed against.
+       총기가 화면에서 차지하는 비율입니다. 너비는 셀의 종횡비를 따라 그림이 늘어나지 않게
+       하며, 종횡비 보정은 *너비*에 적용합니다. 아티스트가 기준으로 삼아 배치한 것이
+       높이이기 때문입니다. */
+    const float SH = 0.62f;
+    float sw = SH * ((float)WPN_CW / (float)WPN_CH) / (aspect > 0.01f ? aspect : 1.0f);
+
+    /* The weapon's own motion, as screen fractions. The scales are small
+       because a viewmodel that swings a visible fraction of the screen reads
+       as the camera being loose rather than as a held weapon.
+       무기 자신의 움직임을 화면 비율로 표현합니다. 배율이 작은 이유는, 화면의 눈에 띄는
+       비율만큼 흔들리는 뷰 모델은 쥐고 있는 무기가 아니라 카메라가 헐거운 것처럼 읽히기
+       때문입니다. */
+    float bx = sinf(w->bob_phase)         * 0.012f;
+    float by = -fabsf(cosf(w->bob_phase)) * 0.010f;
+    float cx = 0.5f + bx + w->sway_x * 0.9f;
+    float cy = 0.0f + by + w->sway_y * 0.9f - w->punch * 0.35f;
+
+    float x0 = cx - sw * 0.5f, x1 = cx + sw * 0.5f;
+    float y0 = cy,             y1 = cy + SH;
+
+    int frame = wp_sprite_frame(w);
+    float u0, v0, u1, v1;
+    weapon_uv(frame, &u0, &v0, &u1, &v1);
+
+    mb_reset(&g_fx_buf);
+    v3 n = v3f(0, 0, 1);
+    mb_vtx(&g_fx_buf, v3f(x0, y0, 0), n, u0, v0);
+    mb_vtx(&g_fx_buf, v3f(x1, y0, 0), n, u1, v0);
+    mb_vtx(&g_fx_buf, v3f(x1, y1, 0), n, u1, v1);
+    mb_vtx(&g_fx_buf, v3f(x0, y0, 0), n, u0, v0);
+    mb_vtx(&g_fx_buf, v3f(x1, y1, 0), n, u1, v1);
+    mb_vtx(&g_fx_buf, v3f(x0, y1, 0), n, u0, v1);
+    mesh_upload(&g_fx_mesh, &g_fx_buf, 1);
+
+    rd_mvp(proj);
+    rd_mode(RD_SPRITE2D);
+    rd_color(1.0f, 1.0f, 1.0f, 0.0f);
+    rd_snap(0.0f, 0.0f);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, weapon_atlas());
+    glDisable(GL_CULL_FACE);
+    mesh_draw(&g_fx_mesh);
+    glEnable(GL_CULL_FACE);
+
+    /* --- the muzzle flash, at the point the DRAWING marked ---
+       Skipped entirely when the art carried no marker: a flash at a guessed
+       position is worse than none, because it tells the artist the marker is
+       working when it is not.
+       그림이 표식을 담지 않았으면 완전히 건너뜁니다. 추측한 위치의 화염은 없는 것보다
+       나쁩니다. 표식이 동작하지 않는데도 동작한다고 아티스트에게 알려 주기 때문입니다. */
+    float mu, mv;
+    if (w->flash > 0.0f && weapon_muzzle(frame, &mu, &mv)) {
+        float k  = w->flash / FLASH_TIME;
+        float fs = (0.10f + 0.07f * k) * g_flash_scale;
+        float fx = x0 + mu * (x1 - x0);
+        float fy = y0 + mv * (y1 - y0);
+
+        mb_reset(&g_fx_buf);
+        for (int i = 0; i < 3; i++) {
+            float a = g_flash_roll + i * (M_PI_F / 3.0f);
+            v3 r = v3f(cosf(a) / (aspect > 0.01f ? aspect : 1.0f), sinf(a), 0.0f);
+            v3 u = v3f(-sinf(a) / (aspect > 0.01f ? aspect : 1.0f), cosf(a), 0.0f);
+            mb_billboard(&g_fx_buf, v3f(fx, fy, 0.0f), r, u, fs, fs);
+        }
+        mesh_upload(&g_fx_mesh, &g_fx_buf, 1);
+
+        rd_mode(RD_FLAT);
+        rd_color(1.0f, 0.80f, 0.38f, k * 0.85f);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+        glDepthMask(GL_FALSE);
+        glDisable(GL_CULL_FACE);
+        mesh_draw(&g_fx_mesh);
+        glEnable(GL_CULL_FACE);
+        glDepthMask(GL_TRUE);
+        glDisable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    }
+}
+
 void wp_draw_view(const Weapon *w, float aspect) {
     /* The view model belongs to the WORLD pass: it shares the scene's
        lighting, and a crisp weapon over a pixelated world reads as a bug.
        뷰 모델은 *월드* 패스에 속합니다. 장면의 조명을 공유하며, 픽셀화된 월드 위의
        선명한 무기는 버그처럼 보입니다. */
     DIAG_WANT_WORLD_PASS(post_in_world_pass());
+
+    /* --- hand-drawn art REPLACES the model, when it exists ---------------
+       One question, asked once a frame, answered by whether the files are
+       there. Adding art is dropping `gun0.png` into assets/sprites/ and
+       removing it is deleting the file; nothing else in the project changes
+       and there is no flag to keep in agreement with the directory.
+
+       The depth buffer is still cleared first, because the sprite path draws
+       over the world exactly as the model did.
+
+       손으로 그린 아트가 있으면 모델을 *대체*합니다. 프레임마다 한 번 묻는 하나의
+       질문이며, 답은 파일이 있는지 여부입니다. 아트를 추가하는 것은 assets/sprites/에
+       `gun0.png`를 넣는 것이고 제거하는 것은 파일을 지우는 것입니다. 프로젝트의 다른
+       무엇도 바뀌지 않으며, 디렉터리와 일치시켜야 할 플래그도 없습니다.
+
+       깊이 버퍼는 여전히 먼저 지웁니다. 스프라이트 경로도 모델과 똑같이 월드 위에
+       그리기 때문입니다. */
+    if (weapon_has_art()) {
+        glClear(GL_DEPTH_BUFFER_BIT);
+        wp_draw_view_sprite(w, aspect);
+        return;
+    }
+
     /* A narrower FOV than the world camera keeps the gun from looking
        fish-eyed, and a fresh depth buffer stops it clipping into walls. */
     glClear(GL_DEPTH_BUFFER_BIT);
@@ -1293,6 +1149,15 @@ void wp_draw_view(const Weapon *w, float aspect) {
 
     rd_mvp(mat4_mul(proj, model));
     rd_mode(RD_VIEWMODEL);
+    /* No vertex snap on the gun. It sits at a fixed distance in the centre of
+       the screen, so snapping makes it vibrate continuously in the one place
+       the eye is least willing to forgive it -- the world wobbles because the
+       camera moves relative to it, but the gun never moves relative to the
+       camera at all.
+       총기에는 정점 스냅을 적용하지 않습니다. 화면 중앙의 고정된 거리에 있으므로 스냅하면
+       눈이 가장 용납하지 않는 바로 그 위치에서 계속 진동합니다. 월드는 카메라가 그에 대해
+       상대적으로 움직이기 때문에 흔들리지만, 총기는 카메라에 대해 전혀 움직이지 않습니다. */
+    rd_snap(0.0f, 0.0f);
     glActiveTexture(GL_TEXTURE0);
 
     /* One draw per material. At ~200 vertices the extra calls cost nothing,

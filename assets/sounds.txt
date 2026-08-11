@@ -80,7 +80,25 @@ l 1 320 300 1400   4 300  70    # a rising saw sweep -- you made it out
 l 2 260 700 1600   8 240  45    # a sine over it for a chime
 l 3 120 900  400   0 110  30    # a short zap
 
-# --- game won --------------------------------------------------------------
+# --- game over, and game won -----------------------------------------------
+
+# The player's death. Deliberately the inverse of `win` below: where that
+# rises through three notes and resolves upward, this falls and never lands on
+# anything. The two endings should be distinguishable with the screen off.
+#
+# Longer than every other sound here (900ms) because it is the only one nothing
+# can interrupt -- the world is frozen behind it.
+#
+# 플레이어의 사망입니다. 아래의 `win`과 의도적으로 정반대입니다. 그쪽이 세 음을 거쳐
+# 위로 해결되는 반면 이쪽은 하강하며 어디에도 안착하지 않습니다. 두 결말은 화면을 꺼도
+# 구분되어야 합니다.
+#
+# 이곳의 다른 모든 소리보다 긴 900ms인데, 무엇도 이를 중단시킬 수 없는 유일한 소리이기
+# 때문입니다. 뒤에서 월드가 정지해 있습니다.
+s pdie
+l 2 900 330  70    6 880  70     # a long sine fall, all the way down
+l 0 700 160  40   10 680  50     # a square body sagging under it
+l 3 420 500  90    0 400  40     # the breath going out
 
 s win
 l 2 260 440  660   4 240  60     # a rising sine fanfare, first note
@@ -102,11 +120,44 @@ l 3 140 1200 260   0 130  60     # the bolt bursting
 l 2 180  660 180   0 170  45     # a low tonal thump under it
 
 # --- the grapple hook -------------------------------------------------------
-# A sharp metallic snap and a clunk landing in the same instant, since the
-# claw travels and lands on the same frame -- there is no separate "in flight"
-# sound to write.
+# Four beats, four sounds, because the player has to be able to tell them apart
+# without looking: the throw leaves, the claw bites something, the winch reels,
+# and the arrival throws you off. An earlier version had only the throw and
+# borrowed `impact`/`ehit` for the rest, which meant a hook landing on a wall
+# was indistinguishable from a shotgun pellet doing the same.
 
 s hook
 l 0 55  2400  650   0  50  55     # a fast metallic snap -- the claw leaving
 l 3 45  1600  300   0  40  35     # a scrape of noise riding it
-l 0 90   180  110   4  85  40     # a low clunk as it bites in
+
+# The claw biting STONE. Hard, bright, over instantly -- metal on rock. This is
+# the sound that used to be the tail of `hook`, split out now that the flight
+# has a real duration and the bite lands whenever it lands.
+s hbite
+l 0 70   900  220   0  65  55     # the clunk of the claw seating
+l 3 60  2200  600   0  55  40     # a chip of stone coming off
+l 0 110  150   90   4 100  35     # a low body under it, so it has weight
+
+# The claw biting FLESH. Duller and lower with no bright chip: meat does not
+# ring. Same length so the two read as the same event on different materials
+# rather than as two different mechanics.
+s hbiteb
+l 3 90   420  110   0  85  60     # a wet thud
+l 0 130  120   70   6 120  45     # a low body, longer than the stone version
+l 2 70   260  140   0  65  25     # a soft tonal edge so it is not just noise
+
+# The winch, reeling. The only LOOPING sound in the game: it is retriggered
+# while HOOK_PULLING and must therefore be short enough to restart cleanly and
+# quiet enough to sit under everything else. A rising sweep sells acceleration
+# without needing to know the actual speed.
+s hreel
+l 1 110  180  340   6 100  32     # a saw rising -- the winch spinning up
+l 3 90   600  900   0  85  18     # chain noise over it, deliberately faint
+
+# Arrival: the launch that throws the player off. Bigger than the bite, with a
+# downward sweep that reads as a shove rather than an impact -- this is the
+# beat where the player stops being pulled and starts flying.
+s hland
+l 0 90   320   90   0  85  60     # a heavy thump
+l 3 140 1400  200   0 130  45     # the burst of the release
+l 2 220  180   60   8 210  40     # a low tail so the launch has follow-through

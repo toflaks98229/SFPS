@@ -241,6 +241,94 @@ The falling zero-crossing rate is the frequency sweep — a flat row means the
 sweep never happened, which is the failure a peak-level check would miss.
 `-wav` also drops `build\snd_<name>.wav` if you do want to listen.
 
+## Effects
+
+A particle effect is a few integers in
+[assets/effects.txt](assets/effects.txt) saying how many particles to throw,
+how fast, what colour, and how they change as they die. Code spawns one by
+name and never mentions any of those numbers:
+
+```c
+fx_spawn("spark", hit_point, surface_normal);
+```
+
+```
+e spark
+  count 6              # particles per spawn
+  life 220             # milliseconds each one lives
+  size 14 2            # edge length in cm, at birth and at death
+  rgb 255 216 128
+  alpha 90 0           # percent, at birth and at death
+  speed 320 260        # cm/s along the normal, +/- spread
+  gravity 400          # cm/s^2 downward
+  blend add            # `add` glows, `alpha` can be darker than the wall
+  face camera          # `camera` billboards, `normal` lies flat -- a decal
+```
+
+Every number is an integer, so the parser needs no float handling — the same
+rule the model, material, sound and level languages follow. Unknown keywords
+are **skipped rather than rejected**, so a file written against a newer build
+still loads in an older one instead of failing wholesale.
+
+### Adding one
+
+1. Add an `e <name>` block to `assets/effects.txt`.
+2. Call `fx_spawn("<name>", position, normal)` wherever the event happens.
+3. Save. In a dev build the running game re-reads the file — no rebuild.
+
+That is the whole procedure. There is no struct to declare, no ring buffer to
+size, no ageing loop and no draw call: `fx.c` owns all five and they are
+written once. Before this existed each effect was its own copy of those five
+pieces in `weapon.c`, which is why there were exactly three of them.
+
+**The normal is what gives an effect its direction.** For a surface hit pass
+the surface normal and particles come off the wall; for something bursting in
+open air pass any unit vector and let `spread` scatter them. `spread` widens
+the *direction* as well as the speed, so a spread near the speed reads as a
+burst and a small one as a jet.
+
+**Pick the blend for what the effect has to do, not for how bright it is.**
+`add` can only ever lighten, which is correct for sparks, muzzle flash and
+bolts — and wrong for blood, smoke or a scorch mark, none of which can exist
+if they cannot be darker than what is behind them. This is the one parameter
+that cannot be fixed by tuning the others.
+
+### Where effects are allowed to draw
+
+`fx_draw` belongs in the **world pass**, before `post_end` — particles are part
+of the scene and must be pixelised and dithered with it. A dev build asserts
+this: drawing on the wrong side of the boundary increments `DIAG_PASS_ORDER`
+and shows up in the title bar. See [Making silent truncation visible](#making-silent-truncation-visible).
+
+The pool is shared across every effect (`FX_MAX_PARTICLES`, 256). A flood
+overwrites the oldest particles rather than refusing the newest — the burst
+that just spawned is the one being looked at — and reports `DIAG_FX_CAP` so
+the truncation is visible rather than merely silent.
+
+### Verifying an effect you have not seen yet
+
+`fx_spawn` and `fx_update` touch no GL, so the parse and the simulation are
+checked headlessly by `build\fxtest.exe`:
+
+```
+  parsed 7 effect definitions
+
+  assets\effects.txt supplies at least one effect            ok
+  an unknown name spawns nothing and does not crash               6 /      6  ok
+  and every particle retires once its life runs out               0 /      0  ok
+  a flood never exceeds the particle pool                       256 /    256  ok
+  every effect the game spawns by name exists in the file         7 /      7  ok
+```
+
+The last line is the one that catches a rename: an effect the code spawns but
+the file no longer defines produces nothing at all, and nothing is exactly
+what a missing effect looks like in play.
+
+For the look itself, `build\dithershot.exe <level> <effect>` renders the real
+level with the effect firing and writes a PNG — the same tool used to compare
+dither settings, since an effect has to be judged through the post pass rather
+than beside it.
+
 ## Levels
 
 A level is a list of **sectors**: a 2D floor plan polygon plus a floor and
@@ -396,7 +484,7 @@ where you lay a map out, and a 3D view is where you find out it feels wrong.
 
 | | |
 |---|---|
-| `W` `A` `S` `D` | fly — `SPACE`/`C` rise and fall, `SHIFT` faster |
+| `W` `A` `S` `D` | fly **along the view** — look up and go up; `SPACE`/`C` are straight up/down, `SHIFT` faster |
 | `RMB` | look (3D) or pan (plan) — `F` returns to the player start |
 | wheel | raise the surface under the cursor (3D), or zoom (plan) |
 | `-` `=` | selected sector's floor down/up (`SHIFT`: ceiling) |
@@ -433,6 +521,75 @@ colour chip. Drag a swatch onto a surface in the 3D view and it lands there;
 the target highlights while the swatch is in flight. Clicking a swatch instead
 applies it to whatever was last picked in 3D, and a dot of colour on the name
 marks the material already on that surface.
+
+### The inspector, and the fields that had no UI
+
+The panel used to be read-only text. That was not a presentation problem: a
+field with no widget had **no way to be edited at all**, so the level format
+had grown past what the editor could reach.
+
+Two things were entirely unreachable, and one of them was worse than
+unreachable:
+
+- **`hurt`** — the per-sector hazard rate that makes a lava floor lethal. It
+  could only be authored by hand-editing `assets/levels.txt`.
+- **Point lights** — all eight fields of them. You typed the numbers into the
+  text file and ran the game to find out where the lamp landed.
+
+**And saving deleted both.** `level_load` parses them, `mapedit` held them in
+memory correctly, and the serialiser wrote neither back — so opening `arena` and
+pressing `CTRL+S` removed all four of its lights, and opening `vault` removed
+its lava. Nothing failed and the level still loaded, so the only symptom was a
+room gone dark. That is the worst shape a bug can have in an editor: the tool
+you reach for to make a small change, charging you everything it did not know
+about.
+
+`mapedit -verify` now reads a save back and counts what survived, across every
+level the file defines rather than one:
+
+```
+mapedit -verify: save/reload round trip
+
+  arena         6 sectors   5 entities   4 lights   ok
+  vault         3 sectors   6 entities   0 lights   ok
+
+every level survives a save unchanged
+```
+
+Verified by reintroducing the omission and watching it report
+`FAIL lights: wrote 0, level has 4` — a writer is exactly the kind of code where
+what is missing is invisible from the inside, because every line that *is* there
+works.
+
+**Lights are drawn in the plan, in their own colour, at their real radius.** The
+reach is the field hardest to guess and the one that decides whether a room is
+lit or merely has a bright spot in it, so the ring is the part that matters.
+Click one to select it, drag it to move it, and the inspector edits the rest.
+
+**The widget layer is hand-written and headless-testable.** `tools/ui.h` is an
+immediate-mode GUI — buttons, drag-or-type number fields, text fields, scrolling
+lists, collapsible sections — built on the renderer's existing `RD_FLAT`,
+`RD_TEXT` and `RD_SWATCH` modes, so it needed nothing new from `src/`.
+
+Immediate mode was chosen for the reason this project keeps choosing things:
+there is no widget tree to fall out of step with the data. `ui_drag_short(&s->floor, …)`
+reads and writes the live struct, so the panel cannot show a value the level
+does not contain.
+
+**Only `ui_end` touches GL.** Every widget above it is arithmetic over a struct,
+which is what makes `build\uitest.exe` possible — it feeds synthetic input,
+asserts what the widgets returned, and never opens a window. "It is a GUI"
+sounded like a reason not to test it and was not one; the suite caught two real
+bugs before any panel existed:
+
+- a release-frame reset that cleared `active` *before* the widgets ran, which
+  would have made every button in the editor pressable, highlightable and
+  incapable of firing;
+- a number field that opened seeded with its current value and **appended** what
+  you typed, so clicking a ceiling of `450` and typing `300` gave `450300`,
+  which the range then clamped to the tallest room the format allows.
+
+Both are the kind of thing that survives review and gets blamed on the mouse.
 
 Swatches use a fifth shader mode, `RD_SWATCH`, which is the material with no
 lighting and no fog on it. Reusing `RD_WORLD` would have shown every swatch
@@ -604,6 +761,54 @@ This is what `.\size.ps1 -Detail` is for. The per-section report only said the
 binary was 55KB; the per-symbol report named `g_keys` (1,024 bytes), `g_impacts`
 (1,344) and `g_tracers` (672) sitting in `.data` full of zeros.
 
+### Where the bytes actually are, and why compression is not the answer yet
+
+Measured on the current 145,408-byte build, so the next person asking "can we
+compress this?" has the numbers rather than the intuition:
+
+```
+  .text     109,888    76%    code
+  .rdata     25,752    18%    shader source, baked assets, string literals
+  .idata      4,252     3%    the import table
+  .data         672    <1%
+  everything else     1,520
+  .bss       75,696     0%    zeroed at load -- costs nothing on disk
+```
+
+**Compression targets the wrong 18%.** The baked assets — every model, material,
+sound, level and effect the game ships — are **6,095 bytes**, and `bake.ps1`
+already gets a ~7× reduction on them by stripping comments. Running deflate over
+what is left yields 2,180 bytes: a **3.9KB saving, 2.7% of the binary**, against
+a decompressor that costs code in `.text`, the section that is actually large.
+
+Whole-file packing looks better on paper and is worse in practice:
+
+```
+  game.exe        145,408
+  deflate          71,296   (49%)
+  lzma             62,764   (43%)
+```
+
+A packer would save ~80KB — **5.6% of a budget that is 90% empty.** UPX and
+kkrunchy both work by prepending a decompressor stub and unpacking at load, so
+the cost is a real one (a stub, a slower start, and antivirus heuristics that
+treat self-extracting executables as suspicious) paid against a constraint that
+is not binding.
+
+**The rule this project already follows beats all of it.** "Store the recipe,
+not the result" is not compression, it is *not generating the bytes in the first
+place*: `sprite_atlas` is the single largest symbol in the binary at 8,304 bytes
+of code, and it stands in for four monsters × five frames of RGBA art that would
+be megabytes. The same trade is why there are no `.wav` files, no `.png` files,
+and no level data beyond 1,306 bytes of text. Compressing a recipe saves a
+fraction of something already tiny.
+
+So the honest answer is that there is nothing to do here **until `.text` is the
+problem**, and at 7.4% of the budget it is not. If it ever becomes one, the
+order is: cut generated code first (`sprite_atlas`, `mb_extrude_taper` and
+`mb_box` are the three largest symbols), and only then reach for a packer. The
+roadmap entry says "if the budget ever gets tight" for exactly this reason.
+
 ## Monsters
 
 Doom-style: the world is 3D, but a monster is a flat billboard that turns to
@@ -619,6 +824,59 @@ straight in the alpha channel, with a darkened rim for free. Five frames come
 out of the same code with different pose parameters: two for the walk cycle,
 one attack, a flinch, and a corpse. Same trade as the textures and the sounds —
 keep the recipe, generate the pixels.
+
+### Hand-drawn art, and the weapon that replaces its model
+
+A PNG dropped in [assets/sprites/](assets/sprites/) is baked to palette-indexed
+text at build time, so **the game gains an image format without gaining an image
+decoder** — the same trade `.obj` already makes for meshes. Shipping the PNG
+would mean carrying ~15KB of inflate and filter reconstruction to save 3KB of
+pixels.
+
+**A weapon drawing REPLACES the 3D view model; a monster drawing composites
+over its generated one.** The difference is deliberate. A half-drawn bestiary
+should still show creatures, so a drawing is painted on top of the SDF version
+and a monster with no art keeps the generated one. A gun drawn over the extruded
+gun would be two guns — so the moment `gun0.png` exists the model stops being
+drawn, and deleting the file brings it straight back. Nothing else changes and
+there is no flag to keep in agreement with the directory.
+
+**The weapon faces forward, not sideways.** You are looking down your own
+sights, so the barrel recedes to a muzzle near the top-centre of the cell and
+your hands are at the bottom edge. A side profile is what a weapon looks like in
+a shop display, not what a held one looks like.
+
+**The muzzle is one magenta pixel**, recorded and then left transparent. The
+alternative is a constant in `weapon.c` that somebody edits to match the art,
+and this project already knows what that costs — placing the shotgun that way
+failed three times in a row, which is why `modeledit` puts a draggable muzzle on
+the 3D model. The marker is the same idea for a drawing: redraw the gun and the
+flash follows it.
+
+A viewmodel sprite needs its own shader mode, and finding out why was the
+interesting part. Reusing `RD_SPRITE` produced a **solid white gun**: its
+`uColor.a` is a monster's hit-flash, so passing a reasonable-looking alpha of
+1.0 asks for a fully white sprite — and its fog is a function of the distance
+from the eye to the vertex, which for screen coordinates is not a distance at
+all. `RD_SPRITE2D` is the same hard cutout with neither, because a viewmodel is
+part of the *frame* rather than a thing standing in the world.
+
+**Every byte of the encoding carries six bits now, not four.** The first version
+stored one hex digit per 4-bit palette index and spent another on a run length,
+which capped a run at 15 pixels — so on flat-shaded art it was the *cap*
+breaking the runs up rather than the picture. Moving both to a 64-character
+alphabet that needs no escaping inside a C string literal:
+
+| 128×96 viewmodel | before | after |
+|---|---|---|
+| flat-shaded | 2,098 B | **946 B** (2.2×) |
+| 160×120 flat | 3,224 B | **1,298 B** (2.5×) |
+| dithered | 6,272 B | **5,332 B** (1.2×) |
+
+Both encodings are produced and the shorter kept, per sprite, so an artist never
+has to think about which. A four-frame weapon costs about 4KB — 0.3% of the
+budget — and the shipped binary is 148,992 bytes with the 3D gun, 153,088 with
+the drawing.
 
 **Four types, and a new one is a table row plus a `_pixel` function** — no new
 code path. The atlas is a grid, one row per type, one column per frame:
@@ -760,12 +1018,13 @@ that has one does not silently break the progression.
 ### Ending the game
 
 **A level with an empty `next` is terminal:** reaching its exit does not try to
-load anywhere, it sets a `g_won` flag in [src/main.c](src/main.c) instead. No
+load anywhere, it sets a `won` flag on the run state in
+[src/main.c](src/main.c) instead. No
 new entity kind, no new level directive — the same `exit` that transitions
 between levels ends the game the moment the level it sits in has nowhere left
 to send the player.
 
-Winning **freezes the world rather than clearing it**: once `g_won` is set,
+Winning **freezes the world rather than clearing it**: once `won` is set,
 `update()`, `enemy_update()` and `pickup_update()` are all skipped, so the last
 frame — monsters mid-stride, the gun mid-sway — holds still under a dimmed
 overlay showing `YOU WIN`, the final health and ammo, and `ESC to quit`. That
@@ -781,6 +1040,53 @@ Two things worth knowing if you add a second ending:
   level either names somewhere to go or it doesn't; adding a second piece of
   state that has to agree with the first is exactly the kind of thing that
   drifts. `leveltrans` asserts `vault.next[0] == 0` directly for this reason.
+
+### What a restart has to put back
+
+A run can end three ways and restart three ways — the menu's `RESTART` row, a
+key on the death screen, and a click on it — and all three have to clear
+**exactly** the same state. A death screen that restarted without clearing the
+win latch, or a menu restart that left the player dead, is a separate
+half-working path rather than a bug in a shared one.
+
+That agreement used to be a list. The restart assigned three fields by name,
+and the run owned eleven:
+
+```c
+run_reset(&g_run, 0);      /* the whole of it */
+```
+
+`RunState` in [src/run.h](src/run.h) holds every one of them and `run_reset`
+assigns a zeroed struct, so **a field added to the struct is reset without
+anybody editing the reset.** That is the entire point: the two fields the old
+list did not name were the title clock and the world clock, plus three lava
+timers that were function-local `static`s buried in the frame loop — somewhere
+a restart could not see them even in principle.
+
+Nothing visible was wrong. The accumulator clears itself on dry ground and the
+rest are sub-second timers, so the bug was real and harmless at the same time,
+which is why it survived. It stops being harmless the first time somebody adds
+a field that is not a timer.
+
+`title` is the one field not simply zeroed: a restart goes straight back into
+the run, because the player has already asked to play. Startup passes 1 and
+gets the title screen. One function, one difference, both entry points.
+
+**It is split out of `main.c` so it can be tested.** Everything else here that
+holds rules worth checking is reachable from a headless tool; the run's own
+state machine was the last piece that was not, because it lived beside
+`WinMain` and a tool brings its own entry point. `build\runtest.exe` now checks
+it, and the assertion that actually holds the design to its promise compares
+raw bytes rather than fields:
+
+```
+  two differently-dirtied runs reset to the identical state  ok
+```
+
+A field-by-field test only covers the fields somebody remembered to list, and
+forgetting one is precisely the failure the struct exists to prevent. Verified
+by reintroducing the old field-by-field reset and watching six assertions fail,
+rather than assumed.
 
 ## Momentum: the grapple hook and recoil jumping
 
@@ -1169,6 +1475,219 @@ checks `glGetError`. Verified by replacing `dot(...)` with a nonexistent GLSL
 function and watching four assertions fail — the same reverting check the
 audio work used, and this time the test genuinely catches its target.
 
+## PSX-era rendering: what to add, and what not to
+
+The pixelisation and dithering above already do half of this look. What is
+missing is everything that came from the PlayStation's *geometry* pipeline
+rather than its framebuffer, and those artefacts are the ones people actually
+recognise: the wobbling vertices, the warping textures, the polygons that pop
+through each other.
+
+This section is the survey and the plan. It is written before the work so the
+order is a decision rather than an accident, because these techniques interact:
+vertex snapping and light noise both change what the dither has to quantise.
+
+Two of the three geometry artefacts are **deliberately not implemented** —
+affine texture mapping and depth-sort popping. Both are recognisable, both are
+cheap to switch on, and both are wrong for a project whose geometry is authored
+as whole sectors rather than as PSX-sized triangles. The reasoning is in
+[What NOT to do](#what-not-to-do); it belongs there rather than as a footnote,
+because "we could have and chose not to" is the part that gets forgotten and
+re-litigated.
+
+### What the hardware actually did, and why
+
+Every artefact below is a *consequence* of a specific hardware limit, not a
+stylistic choice anyone made. Reproducing the limit reproduces the look;
+reproducing the look directly tends to overshoot into parody.
+
+| Artefact | Cause |
+|---|---|
+| Vertices wobble and jitter | The GTE transformed vertices with 16-bit fixed-point maths and produced integer screen coordinates. There was no subpixel precision, so a vertex snapped to the pixel grid and *changed which pixel* as the camera moved. |
+| Textures swim and warp | No perspective-correct interpolation. UVs were interpolated linearly across a triangle in screen space, so a large polygon seen at an angle stretched its texture wrongly — worst on floors and long walls. |
+| Polygons cut through each other | No depth buffer in the usual sense. Sorting was per-primitive into an ordering table, so two polygons at similar depth could swap order between frames. |
+| Colour banding and dither | 15-bit framebuffer (32 levels per channel) with a hardware dither to hide the steps. |
+| Everything is dark and fogged | Limited fill rate meant short draw distances, and fog was how the far plane was hidden. |
+| No texture filtering | Point sampling only. Combined with low-resolution textures this is why surfaces look chunky rather than blurry. |
+
+### What this project already has
+
+Two of the six, and both are the framebuffer half:
+
+- **Low resolution and colour quantisation** — `POST_HEIGHT` renders small and
+  `LEVELS = 4` in the resolve shader quantises harder than the PSX's 15-bit
+  buffer did. See [Pixelisation and luminance-driven dithering](#pixelisation-and-luminance-driven-dithering).
+- **Distance fog** — already in the world shader, already hiding the far plane.
+
+Everything in the table above that comes from the geometry pipeline is absent.
+`VS_SRC` is four lines and does nothing but transform.
+
+### The plan, in the order it should be done
+
+Ordered by *how much look per unit of risk*, not by how interesting each one is.
+Each step is small enough to be judged on its own with `dithershot` before the
+next is started.
+
+**1. Vertex snapping — DONE.** The single most recognisable artefact and the
+cheapest to add. `rd_snap` sets the grid, `VS_SRC` does the quantisation, and
+`PSX_SNAP_COARSE` in main.c is the one number to change when tuning it.
+
+Snap in clip space, not world space. The wobble has to be relative to the
+*screen* grid, because that is what the hardware's integer coordinates were;
+snapping world positions moves geometry in ways that depend on where the level
+was authored rather than on where the camera is.
+
+```glsl
+vec4 p = uMVP * vec4(aPos, 1.0);
+if (uSnap.x > 0.0 && p.w > 0.0) {      // w <= 0 is behind the eye
+  vec2 ndc = p.xy / p.w;
+  p.xy = floor(ndc * uSnap + 0.5) / uSnap * p.w;
+}
+```
+
+The `/p.w` and `*p.w` are not decoration: clip space is pre-divide, so the
+snap has to happen in NDC and then be put back. Snapping `p.xy` directly
+quantises by an amount that scales with distance, so the far geometry stops
+snapping at all — simulated on a 640-wide grid, a point at `w=1` moves by
+5.0e-04 either way, but at `w=60` the direct version moves it by 5.2e-06 while
+the correct one still moves it the full 5.0e-04. The wobble would fade out
+with distance, which is the opposite of the artefact.
+
+The grid comes from `post_size`, added for this. A *coarser* grid than the
+render resolution is the dial for "more PSX": matching the buffer exactly is
+the honest amount and is almost invisible at 640x360, because the artefact is a
+whole-pixel jump and those pixels are half the angular size the PSX's were.
+`PSX_SNAP_COARSE` is 2.0, which halves the grid.
+
+Simulating the shader maths directly — a vertex creeping sideways by a quarter
+pixel per step, over three pixels of travel:
+
+| | positions the vertex took |
+|---|---|
+| snap off | 12 (continuous) |
+| coarse 1.0 | 3 |
+| coarse 2.0 | 1 |
+
+That hold-then-jump is the wobble. Note what it means for measurement: the
+artefact is *the absence of movement*, so a still screenshot shows nothing at
+all and only the game running shows it.
+
+**Do not snap the view model.** It is drawn in gun space at a fixed distance,
+so snapping makes it vibrate constantly in the centre of the screen where the
+eye is least forgiving. The mode uniform already separates it.
+
+**2. Light noise on the illumination — DONE.** This is where the current
+banded lighting meets the PSX look. The bands from `LIGHT_BANDS` are clean
+steps with hard edges; the hardware's were noisy because the dither ran on the
+final colour at 15-bit, breaking every boundary up.
+
+The value noise already in `FS_PROC` (`n2`, `fbm`) is the tool. Perturbing the
+*illumination* before it bands — rather than adding noise to the final colour —
+keeps the noise attached to the surface instead of crawling across the screen
+as the camera moves:
+
+```glsl
+lum += (n2(vPos.xz * NOISE_SCALE) - 0.5) * NOISE_AMOUNT;
+lum = floor(lum * (LIGHT_BANDS-1.0) + 0.5) / (LIGHT_BANDS-1.0);
+```
+
+Noise applied *before* the quantisation dissolves the band edge into a
+stippled boundary; applied after, it just adds grain on top of clean steps and
+reads as film grain rather than as dithered light.
+
+Sampled from `vPos.xz` — world space, so the pattern is attached to the
+surface. Screen-space noise crawls as the camera moves, which is the one thing
+that reliably reads as post-processing rather than as the room.
+
+**The amplitude is not small.** A band is `1/(LIGHT_BANDS-1)` = 0.25 wide and
+`NOISE_AMOUNT` is 0.20, which perturbs by up to 40% of a band. The first
+attempt used 0.055 on the reasoning that a tenth of a band would stipple an
+edge, and measured against a zero-noise reference frame it changed *nothing* —
+almost every surface sits near the middle of its band rather than near an edge,
+so a small perturbation moves nothing across a boundary:
+
+| `NOISE_AMOUNT` | pixels changed vs. no noise |
+|---|---|
+| 0.055 | 0.00% |
+| 0.10 | 0.05% |
+| 0.20 | 7.2% |
+| 0.35 | 16.1% |
+
+Past about half a band the bands stop being bands, so 0.20 is the useful end of
+that range rather than the middle of it.
+
+**3. Nearest-neighbour texture sampling.** `tex.c` and `sprite.c` set
+`GL_LINEAR` and 8x anisotropic filtering. The PSX had neither.
+
+This one is listed last and marked as **a judgement call rather than a
+recommendation**, because the anisotropic filtering is there for a stated
+reason: the note in `tex_make` records that grazing-angle floors aliased
+badly, that the aliasing fed the luminance-driven dither, and that the result
+was a chaotic band across the mid-distance floor. Turning filtering off will
+bring that back.
+
+The honest options are to accept the aliasing as part of the look, or to keep
+filtering and lose one artefact. Do not decide this from the table above —
+decide it from a screenshot of the actual floor.
+
+### What NOT to do
+
+**Do not add affine texture mapping.** `noperspective` on the UV varying is one
+keyword and it is the second most recognisable artefact on the list, which is
+exactly why it needs a reason rather than a shrug.
+
+The warp is proportional to how much depth changes across a polygon, and this
+project's walls are whole sector edges — single large quads, not the small
+triangles a PSX-era model was cut into. Measured as the UV error at a quad's
+midpoint: a 2m-to-3m wall is off by 0.10, a 2m-to-8m one by 0.30, and a
+sector-sized 2m-to-40m floor by 0.45 against a theoretical maximum of 0.5. The
+arena's sectors are 35m across, so every floor and every long wall would sit at
+the top of that range.
+
+That is not the PSX look, it is a broken one. The hardware warped because its
+polygons were small and its artists worked around it; a quad forty metres deep
+warps until the texture is unreadable. Making it work would mean subdividing
+level geometry into PSX-sized triangles — which is a change to
+`level_geometry`, to the vertex budget, and to `MeshBuf` sizing, for one
+artefact. The geometry here is authored as sectors on purpose, and that
+decision is worth more than the warp.
+
+**Do not add depth sorting artefacts.** Polygons cutting through each other is
+a genuine PSX artefact and it is also just a bug that shipped. Reproducing it
+means giving up the depth buffer, and everything in this project — the
+particles, the sprites, the view model over a cleared depth buffer — assumes
+depth works. Sixteen call sites across five files set `GL_DEPTH_TEST`,
+`glDepthMask` or clear the buffer, and `wp_draw_view` in particular draws the
+gun over a *deliberately cleared* depth buffer so it never clips a wall. The
+cost is rewriting all of that, and the gain is an artefact most players
+remember as "the graphics were broken".
+
+**Do not add per-vertex Gouraud colour to imitate PSX lighting.** It would mean
+a fourth vertex attribute on every vertex in the project, and the banded
+per-pixel lighting already produces flatter, more era-appropriate shading than
+smooth Gouraud would. The `Vtx` struct is 32 bytes and every mesh is generated
+at startup; growing it costs RAM on every model to reproduce something the
+current lighting does better.
+
+**Do not lower `POST_HEIGHT` to 240 to "match" the PSX.** The pixel size is
+already a deliberate choice with its own note about integer scaling and pixel
+creep. Vertex snapping and banded, noisy light will read as PSX at the current
+resolution; making the pixels bigger is a separate decision about legibility,
+not part of this work.
+
+### How each step gets judged
+
+`dithershot` renders the real level through the real pass and writes a PNG, and
+it takes a level name so a comparison is two commands. Each step above should
+be looked at before the next is started, because they compound: light noise on
+top of snapped vertices is a different picture from either alone, and the
+nearest-neighbour question in step 3 can only be answered against whatever the
+first two have already done to the floor.
+
+The one that cannot be judged from a still image is the vertex snapping — the
+wobble only exists when the camera moves. That needs the game running, and it
+is the reason the snap grid is a uniform rather than a compile-time constant.
+
 ## Layout
 
 | File | Role |
@@ -1187,10 +1706,12 @@ audio work used, and this time the test genuinely catches its target.
 | [src/model.h](src/model.h) / [src/model.c](src/model.c) | model text parser → extruded geometry |
 | [src/data.h](src/data.h) / [src/data.c](src/data.c) | baked text in release, watched files in dev |
 | [src/player.h](src/player.h) / [src/player.c](src/player.c) | movement, momentum, collision — no GL |
-| [src/weapon.h](src/weapon.h) / [src/weapon.c](src/weapon.c) | hitscan, recoil, recoil-jump kick, grapple hook, view model, flash, tracers, decals |
+| [src/weapon.h](src/weapon.h) / [src/weapon.c](src/weapon.c) | hitscan, recoil, recoil-jump kick, view model, flash, tracers, decals |
+| [src/hook.c](src/hook.c) | the grapple: a projectile claw, the winch pull, the launch — no GL |
 | [src/enemy.h](src/enemy.h) / [src/enemy.c](src/enemy.c) | monster types, AI, spawning, collision, hitscan — no GL |
 | [src/pickup.h](src/pickup.h) / [src/pickup.c](src/pickup.c) | ammo/health pickups: spawn and collection — no GL |
 | [src/sprite.h](src/sprite.h) / [src/sprite.c](src/sprite.c) | procedural monster + pickup sprite atlases (SDF → RGBA silhouette) |
+| [src/run.h](src/run.h) / [src/run.c](src/run.c) | the state one playthrough owns, and the single call that resets it |
 | [src/main.c](src/main.c) | window, input, level, movement, frame loop |
 | [tools/modelview.c](tools/modelview.c) | model viewer and view-model pose tuner |
 | [tools/enemytest.c](tools/enemytest.c) | headless monster AI checks |
@@ -1200,6 +1721,9 @@ audio work used, and this time the test genuinely catches its target.
 | [src/diag.h](src/diag.h) / [src/diag.c](src/diag.c) | capacity-overflow counters — dev builds only, 0 bytes in release |
 | [tools/hooktest.c](tools/hooktest.c) | headless grapple + momentum checks |
 | [tools/diagtest.c](tools/diagtest.c) | headless diagnostics checks |
+| [tools/runtest.c](tools/runtest.c) | headless restart / run-state checks |
+| [tools/ui.h](tools/ui.h) / [tools/ui.c](tools/ui.c) | the editors' immediate-mode widget layer — only `ui_end` touches GL |
+| [tools/uitest.c](tools/uitest.c) | headless widget checks: drags, fields, click handshake |
 | [tools/audiorace.c](tools/audiorace.c) | audio threading contract under contention |
 | [tools/posttest.c](tools/posttest.c) | FBO + dither shader, on a real GL context |
 | [tools/sprdump.c](tools/sprdump.c) | dump the sprite atlas to a PPM (dev builds only) |

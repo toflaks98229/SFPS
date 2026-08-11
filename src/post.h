@@ -119,6 +119,123 @@
 /** @brief Widest offscreen buffer we will allocate, for a very wide window. / 매우 넓은 창을 위해 할당하는 최대 오프스크린 버퍼 폭. */
 #define POST_MAX_WIDTH 1024
 
+/**
+ * @brief Scanline depth the game runs at when scanlines are switched on.
+ *
+ * ENGLISH
+ * -------
+ * The value ::post_set_scanline starts at, named so the settings menu can put
+ * it back after switching scanlines off. A menu that restored a hardcoded
+ * number of its own would be a second copy of this decision, and the two would
+ * drift the first time either was retuned.
+ *
+ * @note 0.18 costs the frame about 9% of its brightness -- see the note on
+ *       ::post_set_scanline for why it is not higher.
+ *
+ * 한국어
+ * ------
+ * @brief 주사선을 켰을 때 게임이 사용하는 주사선 세기입니다.
+ *
+ * ::post_set_scanline이 시작하는 값이며, 설정 메뉴가 주사선을 껐다가 되돌릴 수 있도록
+ * 이름을 붙였습니다. 메뉴가 자체적으로 하드코딩한 숫자로 복원한다면 이 결정의 두 번째
+ * 사본이 되고, 어느 한쪽을 재조정하는 순간 둘이 어긋납니다.
+ *
+ * @note 0.18은 프레임 밝기의 약 9%를 소모합니다. 이보다 높지 않은 이유는
+ *       ::post_set_scanline의 참고 사항을 확인하십시오.
+ */
+#define POST_SCANLINE_DEFAULT 0.18f
+
+/* --- The single-hue (duotone) look / 단색조 룩 --- */
+
+/**
+ * @brief How far the image collapses onto one hue. 0 keeps scene colour, 1 is fully duotone.
+ *
+ * ENGLISH
+ * -------
+ * The dither above preserves each material's own colour: measured across the
+ * whole Bayer tile, brick goes in at chroma 0.370 and comes out at 0.376,
+ * tech green 0.280 and 0.287. That is a colour dither and it is a deliberate
+ * choice.
+ *
+ * Return of the Obra Dinn and Who's Lila do the opposite -- they discard scene
+ * hue entirely and map luminance onto a ramp between two fixed colours, so the
+ * whole image reads as one ink on one paper and a material becomes a DENSITY
+ * rather than a colour. This dial mixes between the two treatments.
+ *
+ * @note Applied after the quantisation, not instead of it, so every decision
+ *       above about WHERE the dots fall is untouched -- this only changes what
+ *       colour they are.
+ * @note At 0 the stage is mathematically inert and the pass behaves exactly as
+ *       it did before it existed, so the colour look is not lost.
+ * @note Partial values are useful and not merely a crossfade: around 0.7 the
+ *       image is dominated by the ink while a trace of the material's own hue
+ *       survives, which is closer to Who's Lila than either extreme.
+ *
+ * 한국어
+ * ------
+ * @brief 이미지가 하나의 색상으로 수렴하는 정도입니다. 0이면 장면 색을 유지하고 1이면
+ *        완전한 단색조가 됩니다.
+ *
+ * 위의 디더는 각 재질의 고유한 색을 보존합니다. Bayer 타일 전체에 걸쳐 측정하면 벽돌은
+ * 채도 0.370으로 들어가 0.376으로 나오고, 기술 녹색은 0.280과 0.287입니다. 이것은 컬러
+ * 디더이며 의도된 선택입니다.
+ *
+ * 오브라 딘 호의 귀환과 후즈 라일라는 그 반대입니다. 장면의 색상을 완전히 버리고 휘도를
+ * 두 고정색 사이의 램프에 매핑하므로, 화면 전체가 한 종이 위의 한 잉크로 읽히고 재질은
+ * 색이 아니라 *농도*가 됩니다. 이 값이 두 방식 사이를 혼합합니다.
+ *
+ * @note 양자화를 대체하지 않고 그 이후에 적용되므로, 점이 *어디에* 떨어질지에 대한 위의
+ *       모든 결정은 그대로입니다. 이 단계는 그 점이 무슨 색인지만 바꿉니다.
+ * @note 0이면 이 단계는 수학적으로 아무 영향이 없어 이 기능이 없던 때와 정확히 동일하게
+ *       동작하므로, 컬러 룩은 사라지지 않습니다.
+ * @note 중간값도 단순한 교차 페이드가 아니라 쓸모가 있습니다. 0.7 부근에서는 잉크가
+ *       화면을 지배하면서도 재질 고유의 색이 희미하게 남는데, 이는 양극단 어느 쪽보다
+ *       후즈 라일라에 가깝습니다.
+ */
+#define POST_DUOTONE 0.0
+
+/**
+ * @brief The dark end of the duotone ramp -- what luminance 0 becomes.
+ *
+ * ENGLISH
+ * -------
+ * @note Written as plain decimals with no `f` suffix: these are stringified
+ *       straight into GLSL, where `0.09f` is a syntax error.
+ * @note The default is Obra Dinn's pairing -- a very dark blue-black ink on a
+ *       warm bone paper, rather than pure #000 on #fff. Neither end being
+ *       neutral is what stops the image reading as a black-and-white photo.
+ *
+ * 한국어
+ * ------
+ * @brief 듀오톤 램프의 어두운 끝이며, 휘도 0이 이 색이 됩니다.
+ * @note `f` 접미사 없는 일반 십진수로 작성합니다. 이 값들은 GLSL에 그대로 문자열로
+ *       삽입되는데, GLSL에서 `0.09f`는 문법 오류입니다.
+ * @note 기본값은 오브라 딘의 조합입니다. 순수한 #000과 #fff가 아니라, 따뜻한 뼈색 종이
+ *       위의 매우 어두운 청흑색 잉크입니다. 양 끝 모두 중성이 아닌 것이 화면을 흑백
+ *       사진처럼 보이지 않게 만듭니다.
+ */
+#define POST_INK_R   0.05
+#define POST_INK_G   0.06
+#define POST_INK_B   0.11
+
+/**
+ * @brief The bright end of the duotone ramp -- what luminance 1 becomes.
+ *
+ * ENGLISH
+ * -------
+ * @note Swapping INK and PAPER gives a negative image, which is a legitimate
+ *       look and costs nothing to try.
+ *
+ * 한국어
+ * ------
+ * @brief 듀오톤 램프의 밝은 끝이며, 휘도 1이 이 색이 됩니다.
+ * @note INK와 PAPER를 바꾸면 음화가 되며, 이 역시 유효한 룩이고 시도하는 데 드는 비용이
+ *       없습니다.
+ */
+#define POST_PAPER_R 0.93
+#define POST_PAPER_G 0.90
+#define POST_PAPER_B 0.78
+
 /* --- Public function prototypes / 공개 함수 프로토타입 --- */
 
 /**
@@ -268,6 +385,84 @@ void post_end(int win_w, int win_h);
  *       POST_ASSERT_WORLD_PASS / POST_ASSERT_UI_PASS 검사를 두는 용도입니다.
  */
 int post_in_world_pass(void);
+
+/**
+ * @brief The offscreen buffer's size, for anything that must match its grid.
+ *
+ * ENGLISH
+ * -------
+ * @param[out] w Receives the width in pixels. May be NULL.
+ * @param[out] h Receives the height in pixels. May be NULL.
+ * @note Reports 0,0 when ::post_init failed or the effect is off, so a caller
+ *       can tell "no offscreen grid exists" from "the grid is this size"
+ *       without a second query.
+ * @note Exists for the vertex snap. The snap has to quantise to the pixel grid
+ *       the image is actually rasterised on, and that is this buffer rather
+ *       than the window -- snapping to the window's resolution would put the
+ *       steps at a finer spacing than the pixels the player sees, which
+ *       produces no visible wobble at all.
+ *
+ * 한국어
+ * ------
+ * @brief 오프스크린 버퍼의 크기입니다. 그 격자에 맞춰야 하는 쪽을 위해 제공됩니다.
+ * @param[out] w 너비(픽셀)를 받습니다. NULL이어도 됩니다.
+ * @param[out] h 높이(픽셀)를 받습니다. NULL이어도 됩니다.
+ * @note ::post_init이 실패했거나 효과가 꺼져 있으면 0,0을 보고하므로, 호출자가 추가
+ *       조회 없이 "오프스크린 격자가 없음"과 "격자 크기가 이것임"을 구분할 수 있습니다.
+ * @note 정점 스냅을 위해 존재합니다. 스냅은 이미지가 실제로 래스터화되는 픽셀 격자에
+ *       맞춰 양자화해야 하며, 그것은 창이 아니라 이 버퍼입니다. 창 해상도에 맞춰
+ *       스냅하면 플레이어가 보는 픽셀보다 촘촘한 간격에 단계가 놓여 흔들림이 전혀
+ *       보이지 않습니다.
+ */
+void post_size(int *w, int *h);
+
+/**
+ * @brief Sets how much the CRT scanlines darken alternate output rows.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] depth 0 disables scanlines entirely; 1 blacks out every other
+ *                  row. Clamped to that range.
+ * @note The scanline is indexed against OUTPUT rows, not art pixels, because
+ *       it is a property of the display rather than of the image. At a 2x
+ *       integer scale that puts a line every art pixel, which is the real CRT
+ *       spacing; at 1x it would be every output row and too fine to see.
+ * @note The depth is a real brightness cost: half the rows lose `depth`, so
+ *       the frame averages `1 - depth/2` of what it was. The default 0.18 is
+ *       9%, and higher crushes the dither's darkest band into solid black.
+ * @note Runtime-settable for the same reason the vertex snap is: a look like
+ *       this has to be judged in motion. It is also what lets ::posttest
+ *       measure the scanline at all -- the Bayer matrix has its own row-to-row
+ *       brightness difference, so the only way to isolate the scanline is to
+ *       render the same frame with it on and off.
+ *
+ * 한국어
+ * ------
+ * @brief CRT 주사선이 출력 행을 얼마나 어둡게 할지 설정합니다.
+ * @param[in] depth 0이면 주사선이 완전히 비활성화되고, 1이면 한 행 걸러 완전히
+ *                  검게 만듭니다. 이 범위로 제한됩니다.
+ * @note 주사선은 아트 픽셀이 아니라 *출력 행*을 기준으로 인덱싱됩니다. 이미지가 아니라
+ *       디스플레이의 속성이기 때문입니다. 2배 정수 배율에서는 아트 픽셀마다 한 줄이
+ *       놓이며 이것이 실제 CRT 간격입니다. 1배였다면 출력 행마다가 되어 너무 촘촘해
+ *       보이지 않습니다.
+ * @note 세기는 실제 밝기 비용입니다. 행의 절반이 `depth`만큼 어두워지므로 프레임 평균이
+ *       `1 - depth/2`가 됩니다. 기본값 0.18은 9%이며, 이보다 높이면 디더의 가장 어두운
+ *       밴드가 완전한 검정으로 뭉갭니다.
+ * @note 정점 스냅과 같은 이유로 런타임에 설정 가능합니다. 이런 종류의 룩은 움직임 속에서
+ *       판단해야 합니다. 또한 이것이 ::posttest가 주사선을 측정할 수 있게 하는 유일한
+ *       수단이기도 합니다. Bayer 행렬 자체가 행 간 밝기 차이를 갖고 있어, 주사선을
+ *       분리하려면 같은 프레임을 켜고/끄고 렌더링하는 수밖에 없습니다.
+ */
+void post_set_scanline(float depth);
+
+/**
+ * @brief The current scanline depth.
+ *
+ * 한국어
+ * ------
+ * @brief 현재 주사선 세기입니다.
+ */
+float post_scanline(void);
 
 /**
  * @brief Releases the offscreen target and the blit shader.

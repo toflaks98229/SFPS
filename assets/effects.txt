@@ -1,0 +1,279 @@
+# SFPS particle effects
+#
+# Spawned by name from code: fx_spawn("spark", point, normal).
+#
+#   e <name>            starts a definition; everything after it belongs to it
+#   count <n>           particles per spawn
+#   life <ms>           how long each particle lives
+#   size <born> <dead>  edge length in centimetres, interpolated over the life
+#   rgb <r> <g> <b>     colour at birth, 0..255
+#   rgb2 <r> <g> <b>    colour at death. Omit and the birth colour is held.
+#                       A spark cooling white -> orange, or blood darkening as
+#                       it falls, says what the thing WAS; an alpha fade alone
+#                       only says that it is ending
+#   alpha <born> <dead> opacity in percent, interpolated over the life
+#   speed <v> <spread>  initial speed along the spawn normal, cm/s, +/- spread.
+#                       spread also scatters the DIRECTION: a large spread
+#                       relative to speed reads as a burst, a small one as a jet
+#   spawn <r>           radius the burst starts from, cm. THE parameter for
+#                       making a burst read as separate particles: from a
+#                       single point they overlap while still large, and two
+#                       overlapping additive quads at 90% alpha composite to
+#                       99.7% -- a dozen sparks become one white blob
+#   drag <pct>          speed lost per second, percent. 0 flies at a constant
+#                       rate and reads as an expanding shell; a high value
+#                       shoots out and settles, which is what debris does
+#   spin <deg>          degrees per second each particle rolls. Even at 0 the
+#                       starting angle is randomised, because identically
+#                       oriented squares line their edges up and read as one
+#                       shape being scaled
+#   gravity <a>         downward acceleration, cm/s^2. 0 floats, 900 falls
+#   blend add|alpha     `add` glows and never darkens; `alpha` can be dark
+#   face camera|normal   `camera` always faces you; `normal` lies flat on the
+#                       surface it was spawned against -- that is a decal
+#
+# Every number is an integer. Unknown keywords are skipped rather than
+# rejected, so a file written for a newer build still loads in an older one.
+#
+# Editing this file updates the running game (dev builds): the definitions are
+# re-read and live particles are dropped, so a change is visible on the next
+# shot rather than the next launch.
+#
+# 이 파일을 수정하면 실행 중인 게임에 반영됩니다(개발 빌드). 정의를 다시 읽고 살아 있는
+# 입자는 버리므로, 변경 사항은 다음 실행이 아니라 다음 발사에서 확인됩니다.
+
+# --- weapon impacts ---------------------------------------------------------
+
+# Sparks off a wall. Additive so they read as light against dark stone, and
+# fast with a wide spread so the burst looks like it came off the surface.
+e spark
+  count 7
+  life 260
+  size 11 1
+  rgb 255 232 170
+  rgb2 220 90 20         # white-hot, cooling to ember orange
+  alpha 85 0
+  speed 340 280
+  spawn 6
+  drag 150               # sparks lose speed fast; they are small and light
+  spin 540
+  gravity 420
+  blend add
+  face camera
+
+# The same event seen on flesh. Slower, heavier, and it falls -- blood arcs
+# where sparks fly. Alpha-blended because it must be able to be darker than
+# what is behind it, which additive can never be.
+e blood
+  count 9
+  life 520
+  size 10 3
+  rgb 175 20 16
+  rgb2 70 8 8            # darkens as it falls, the way blood does
+  alpha 92 0
+  speed 220 185
+  spawn 9
+  drag 60
+  spin 260
+  gravity 900
+  blend alpha
+  face camera
+
+# The mark left behind. One particle, no motion, and a long life: this is a
+# decal wearing a particle's clothes. `face normal` is what makes it lie on
+# the wall instead of turning to follow the camera.
+e bullethole
+  count 1
+  life 6000
+  size 9 9
+  rgb 12 10 9
+  alpha 85 0
+  speed 0 0
+  gravity 0
+  blend alpha
+  face normal
+
+# --- monsters ---------------------------------------------------------------
+
+# A hooked or shot monster dying. Dark, slow, drifting upward -- the rising
+# motion is what separates a death from an impact.
+e gib
+  count 12
+  life 720
+  size 13 4
+  rgb 150 28 22
+  rgb2 55 10 9
+  alpha 90 0
+  speed 300 250
+  spawn 16               # a body comes apart across its own width
+  drag 55
+  spin 180                # slow tumble -- these are chunks, not sparks
+  gravity 780
+  blend alpha
+  face camera
+
+# The bolt a caster throws, bursting on whatever it hit. Cold and bright,
+# matching the blue rosette the projectile itself is drawn with.
+e boltburst
+  count 11
+  life 340
+  size 14 2
+  rgb 200 235 255
+  rgb2 60 110 210        # cools into the bolt's own blue
+  alpha 85 0
+  speed 400 330
+  spawn 11
+  drag 140
+  spin 480
+  gravity 0
+  blend add
+  face camera
+
+# The trail the same bolt leaves behind it in flight. One particle per emission
+# and barely any speed: the bolt supplies the motion, so a trail that also
+# moved would smear ahead of the thing it is supposed to be trailing. It hangs
+# and fades where the bolt passed, which is what reads as a wake.
+#
+# Short-lived on purpose. The pool is shared across every effect, and a bolt
+# emitting for two seconds of flight is the one thing here that can fill it on
+# its own -- see the emission interval in enemy.c.
+e bolttrail
+  count 1
+  life 280
+  size 9 1
+  rgb 150 200 255
+  rgb2 40 80 170         # the wake cools behind the bolt
+  alpha 65 0
+  speed 12 8
+  spawn 3
+  drag 90
+  spin 120
+  gravity 0
+  blend add
+  face camera
+
+# --- the grapple ------------------------------------------------------------
+
+# The claw biting STONE. Small, brief and bright: an acknowledgement, not a
+# display -- the player is about to be yanked and should be watching where they
+# are going, not the anchor behind them.
+e hookbite
+  count 6
+  life 200
+  size 8 1
+  rgb 225 240 255
+  rgb2 120 170 230
+  alpha 85 0
+  speed 280 220
+  spawn 5
+  drag 160
+  spin 600
+  gravity 220
+  blend add
+  face camera
+
+# The claw biting FLESH. Alpha rather than additive, and dark: a spark off a
+# monster would read as the monster glowing. Same count and life as the stone
+# bite so the two are the same event, differing only in material -- which is
+# the whole reason they are separate definitions rather than one.
+e hookbiteb
+  count 7
+  life 240
+  size 10 3
+  rgb 165 22 18
+  rgb2 65 9 8
+  alpha 90 0
+  speed 260 210
+  spawn 8
+  drag 70
+  spin 300
+  gravity 520
+  blend alpha
+  face camera
+
+# Arrival: the launch. The biggest burst the hook produces, because this is the
+# beat the player feels -- they stop being reeled and are thrown. Fast and wide
+# so it reads as a shove outward rather than as another impact.
+e hookland
+  count 14
+  life 340
+  size 16 2
+  rgb 235 245 255
+  rgb2 90 150 230        # cools from white to the hook's own blue
+  alpha 80 0
+  speed 460 380
+  spawn 14               # without this the 14 quads saturate into one blob
+  drag 130               # burst out hard, then settle
+  spin 420
+  gravity 320
+  blend add
+  face camera
+
+# --- pickups ----------------------------------------------------------------
+
+# Collecting something. Rises and fades rather than scattering, so it reads as
+# the item going up into the player rather than breaking apart.
+e pickup
+  count 8
+  life 480
+  size 9 1
+  rgb 180 255 210
+  rgb2 60 200 130
+  alpha 85 0
+  speed 160 70
+  spawn 10
+  drag 80
+  spin 220
+  gravity -130
+  blend add
+  face camera
+
+# --- lava ---------------------------------------------------------------
+
+# Smoke boiling off a lava floor. Spawned by main.c at points sampled across
+# the hazard sectors, not by any impact -- see the lava smoke block there for
+# why the sampling is what it is.
+#
+# NEGATIVE gravity is what makes it rise, and it is the whole effect: hot gas
+# is buoyant, so it accelerates upward rather than merely being thrown that
+# way. Launching it up with `speed` alone and letting it coast would slow to a
+# stop and hang, which reads as steam in a vacuum. `speed` is kept low for the
+# same reason -- the rise should come from the buoyancy, not the throw.
+#
+# `alpha` peaks low: this sits on top of a surface that is already the
+# brightest thing in the room, and smoke opaque enough to be obvious hides the
+# lava it is supposed to be coming from.
+#
+# `blend alpha`, NOT add: smoke is the one thing here that must be able to be
+# DARKER than what is behind it. Additive smoke over lava glows, which is a
+# contradiction -- it is soot.
+#
+# 용암 바닥에서 끓어오르는 연기입니다. 충돌이 아니라 main.c가 위험 지형 섹터 전체에서
+# 표본 추출한 지점에 생성합니다. 표본 추출 방식의 이유는 그곳의 용암 연기 블록을
+# 참조하십시오.
+#
+# *음수* 중력이 상승을 만들며 그것이 이 효과의 전부입니다. 뜨거운 기체는 부력을 받으므로
+# 단지 위로 던져지는 것이 아니라 위로 가속합니다. `speed`만으로 쏘아 올려 관성으로
+# 두면 점점 느려지다 멈춰 매달리는데, 이는 진공 속의 수증기처럼 읽힙니다. 같은 이유로
+# `speed`를 낮게 유지합니다. 상승은 던지기가 아니라 부력에서 나와야 합니다.
+#
+# `alpha`의 정점이 낮습니다. 이것은 방에서 이미 가장 밝은 표면 위에 놓이며, 눈에 띌 만큼
+# 불투명한 연기는 정작 그것이 피어오르는 용암을 가립니다.
+#
+# `blend add`가 아니라 `alpha`입니다. 연기는 이곳에서 뒤에 있는 것보다 *어두울* 수
+# 있어야 하는 유일한 대상입니다. 용암 위의 가산 연기는 빛나게 되는데, 그것은 모순입니다.
+# 그을음이기 때문입니다.
+e lavasmoke
+  count 1                # one puff per spawn -- main.c paces the rate
+  life 2400              # long: smoke lingers where a spark does not
+  size 26 78             # GROWS as it rises, the way a plume disperses
+  rgb 90 68 58           # warm soot, lit from below by what it came off
+  rgb2 42 40 44          # cooling to a neutral grey as it climbs
+  alpha 34 0
+  speed 55 30            # gentle -- the rise is buoyancy, not a throw
+  spawn 22               # scattered, so a run of puffs is not a column
+  drag 40
+  spin 24                # slow roll; smoke turns over, it does not tumble
+  gravity -95            # NEGATIVE: it rises, and keeps accelerating
+  blend alpha            # must be able to be darker than the lava behind it
+  face camera

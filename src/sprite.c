@@ -533,6 +533,26 @@ static GLuint g_atlas;
  *       assets/sprites/에 잘못 들어온 PNG는 0번 인덱스의 몬스터 위에 덧그려지는 대신
  *       무시됩니다.
  */
+/* Which atlas a pass of the sprite text is filling.
+   스프라이트 텍스트를 한 번 훑을 때 어떤 아틀라스를 채우는지입니다. */
+enum { SPR_DEST_MONSTER, SPR_DEST_WEAPON };
+
+/* Muzzle point per weapon frame, in cell pixels; -1 when the drawing did
+   not mark one. Filled by the same pass that decodes the pixels.
+   무기 프레임별 총구 지점(셀 픽셀 단위)입니다. 그림이 표시하지 않았으면 -1입니다.
+   픽셀을 디코딩하는 동일한 패스가 채웁니다. */
+static int g_weapon_muz[WPN_FRAMES][2] = {{-1,-1},{-1,-1},{-1,-1},{-1,-1}};
+
+/* The viewmodel's name prefix. "gun0" is frame 0 of the weapon, the same way
+   "imp0" is frame 0 of the imp -- the name carries the placement, so adding art
+   needs no table anywhere.
+   뷰 모델의 이름 접두사입니다. "imp0"이 임프의 프레임 0인 것과 같은 방식으로 "gun0"은
+   무기의 프레임 0입니다. 이름이 배치 정보를 담고 있으므로 아트를 추가하는 데 어떤 표도
+   필요하지 않습니다. */
+static int is_weapon_prefix(const char *s, int len) {
+    return len == 3 && s[0] == 'g' && s[1] == 'u' && s[2] == 'n';
+}
+
 static int mon_type_for_prefix(const char *s, int len) {
     if (len == 3 && s[0]=='i' && s[1]=='m' && s[2]=='p')                     return MON_IMP;
     if (len == 5 && s[0]=='b' && s[1]=='r' && s[2]=='u' && s[3]=='t' && s[4]=='e') return MON_BRUTE;
@@ -545,6 +565,43 @@ static int hexval(char c) {
     if (c >= '0' && c <= '9') return c - '0';
     if (c >= 'a' && c <= 'f') return c - 'a' + 10;
     if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+/**
+ * @brief One character of the sprite alphabet back to its six bits.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] c A character from the alphabet bake.ps1 encodes with.
+ * @return 0..63, or -1 for anything else.
+ *
+ * @note Computed rather than looked up in a string, so there is no table here
+ *       that could disagree with the one in bake.ps1. The ORDER is the
+ *       contract between the two, and it is stated the same way in both: A-Z,
+ *       a-z, 0-9, '+', '-'.
+ * @note Those 64 characters are exactly the printable ones that need no
+ *       escaping inside a C string literal -- no backslash, no double quote,
+ *       and no '?', which can begin a trigraph.
+ *
+ * 한국어
+ * ------
+ * @brief 스프라이트 알파벳의 한 문자를 6비트 값으로 되돌립니다.
+ * @param[in] c bake.ps1이 인코딩에 사용하는 알파벳의 문자.
+ * @return 0..63. 그 외의 문자는 -1.
+ *
+ * @note 문자열에서 조회하지 않고 계산합니다. 그래야 bake.ps1의 표와 어긋날 수 있는 표가
+ *       이곳에 존재하지 않습니다. *순서*가 둘 사이의 계약이며, 양쪽 모두 같은 방식으로
+ *       기술합니다. A-Z, a-z, 0-9, '+', '-'입니다.
+ * @note 이 64개 문자는 C 문자열 리터럴 안에서 이스케이프가 필요 없는 출력 가능 문자입니다.
+ *       역슬래시도, 큰따옴표도, 삼중자를 시작할 수 있는 '?'도 없습니다.
+ */
+static int b64val(char c) {
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    if (c == '+') return 62;
+    if (c == '-') return 63;
     return -1;
 }
 
@@ -600,9 +657,19 @@ static int hexval(char c) {
  *          동작도 하지 않으며, 그림이 존재하기 전까지 이 프로젝트가 배포되는 상태가
  *          바로 그것입니다.
  */
-static void overlay_drawn_sprites(unsigned char *buf, int W, int H) {
+static void overlay_drawn_sprites(unsigned char *buf, int W, int H, int dest) {
     const char *p = data_text(DATA_SPRITES);
     if (!p || !*p) return;
+
+    /* One cell size per destination. The parser is shared because the
+       format is: only where a sprite LANDS depends on what is being
+       filled, so a second copy of the decoder for the weapon would be the
+       same code with a different bug in it.
+       대상마다 셀 크기가 다릅니다. 포맷이 같으므로 파서를 공유합니다. 무엇을 채우는지에
+       따라 달라지는 것은 스프라이트가 *어디에 놓이는가*뿐이며, 무기를 위한 두 번째
+       디코더 사본은 다른 버그를 가진 같은 코드가 될 뿐입니다. */
+    const int cell_w = (dest == SPR_DEST_WEAPON) ? WPN_CW : SPR_CW;
+    const int cell_h = (dest == SPR_DEST_WEAPON) ? WPN_CH : SPR_CH;
 
     unsigned char pal[16][3] = {{0,0,0}};
     int n_pal = 0;
@@ -651,14 +718,45 @@ static void overlay_drawn_sprites(unsigned char *buf, int W, int H) {
            행을 결정합니다. 새 그림에 코드 수정이 필요 없도록 테이블 조회 대신 이곳에서
            해석합니다. */
         int frame = nm[nm_len - 1] - '0';
-        if (frame < 0 || frame >= SPR_FRAMES) frame = 0;
 
-        int type = mon_type_for_prefix(nm, nm_len - 1);
+        /* The prefix picks the row, and which rows exist depends on what is
+           being filled. A sprite addressed to the other atlas is skipped
+           here but its data is still consumed below, so one stream feeds
+           both passes without either having to know the other's names.
+           접두사가 행을 결정하며, 어떤 행이 존재하는지는 무엇을 채우는지에 따라
+           달라집니다. 다른 아틀라스로 향하는 스프라이트는 이곳에서 건너뛰되 아래에서
+           데이터는 소비되므로, 하나의 스트림이 서로의 이름을 알 필요 없이 두 패스를
+           모두 먹입니다. */
+        int type;
+        if (dest == SPR_DEST_WEAPON) {
+            type = is_weapon_prefix(nm, nm_len - 1) ? 0 : -1;
+            if (frame < 0 || frame >= WPN_FRAMES) frame = 0;
+        } else {
+            type = mon_type_for_prefix(nm, nm_len - 1);
+            if (frame < 0 || frame >= SPR_FRAMES) frame = 0;
+        }
 
-        /* The data line: 'd' run-length, 'f' one digit per pixel. */
+        /* An optional muzzle marker, then the data line.
+           Only weapons carry one -- bake.ps1 emits it for a magenta pixel --
+           but it is parsed for every sprite so the stream stays in sync. A
+           monster that grew one would simply be recording a point nothing
+           reads yet.
+           선택적인 총구 표식이 먼저 오고 그다음 데이터 줄입니다. 마젠타 픽셀에 대해
+           bake.ps1이 기록하므로 무기만 이를 가지지만, 스트림 동기화를 위해 모든
+           스프라이트에 대해 파싱합니다. */
+        int muz_x = -1, muz_y = -1;
         const char *op = txt_token(p, &len);
         if (!op) break;
-        int is_rle = txt_is(op, len, "d");
+        if (txt_is(op, len, "m")) {
+            int ok2 = 1;
+            p = op + len;
+            p = txt_read_int(p, &muz_x, &ok2);
+            p = txt_read_int(p, &muz_y, &ok2);
+            if (!ok2) break;
+            op = txt_token(p, &len);
+            if (!op) break;
+        }
+        int is_rle = txt_is(op, len, "r");
         p = op + len;
 
         const char *data = txt_token(p, &len);
@@ -673,36 +771,89 @@ static void overlay_drawn_sprites(unsigned char *buf, int W, int H) {
            파싱하는 것과 같은 이유입니다. */
         if (type < 0) continue;
 
-        int ox = frame * SPR_CW, oy = type * SPR_CH;
+        int ox = frame * cell_w, oy = type * cell_h;
         int px_i = 0, total = sw * sh;
+
+        /* Stored in the SAME cell coordinates the pixels land in, so it
+           survives the centring and bottom-seating below rather than
+           being a point in the source image that no longer matches where
+           the drawing ended up.
+           픽셀이 놓이는 것과 *동일한* 셀 좌표로 저장합니다. 그래야 아래의 가운데
+           맞춤과 바닥 정렬을 거친 뒤에도 유효하며, 그림이 실제로 놓인 위치와 더
+           이상 맞지 않는 원본 이미지상의 점이 되지 않습니다. */
+        if (dest == SPR_DEST_WEAPON && muz_x >= 0 && frame < WPN_FRAMES) {
+            g_weapon_muz[frame][0] = (cell_w - sw) / 2 + muz_x;
+            g_weapon_muz[frame][1] = (cell_h - sh)     + muz_y;
+        }
+
+        /* Both opcodes spend whole characters rather than hex digits, so a
+           byte of .rdata carries six bits of picture instead of four. See the
+           encoder in bake.ps1 for the measurements that motivated it.
+           두 opcode 모두 16진수 자리가 아니라 문자 전체를 사용하므로, .rdata 1바이트가
+           4비트가 아니라 6비트의 그림을 담습니다. */
+        /* The two indices a packed triple has produced but not yet emitted.
+           Declared per SPRITE, not inside the loop: as a static it would carry
+           a half-finished triple from one drawing into the next, so a sprite
+           whose pixel count is not a multiple of three would shift every
+           sprite after it by a pixel. That is the kind of fault that looks
+           like bad art rather than like a decoder bug.
+           패킹된 3픽셀 묶음이 만들어 냈지만 아직 내보내지 않은 두 인덱스입니다. 루프
+           안이 아니라 *스프라이트마다* 선언합니다. static이었다면 완성되지 않은 묶음이
+           한 그림에서 다음 그림으로 넘어가, 픽셀 수가 3의 배수가 아닌 스프라이트 뒤의
+           모든 스프라이트가 한 픽셀씩 밀렸을 것입니다. 디코더 버그가 아니라 아트가
+           잘못된 것처럼 보이는 종류의 결함입니다. */
+        int pend[2] = {0, 0}, n_pend = 0;
 
         for (int i = 0; i < len && px_i < total; ) {
             int count, index;
+
             if (is_rle) {
+                /* r: one character of run, one of palette index. */
                 if (i + 1 >= len) break;
-                count = hexval(data[i]);
-                index = hexval(data[i+1]);
+                count = b64val(data[i]);
+                index = b64val(data[i+1]);
                 i += 2;
-                if (count < 0 || index < 0) break;
+                if (count < 0 || index < 0 || index >= 16) break;
             } else {
-                index = hexval(data[i]);
-                i += 1;
+                /* p: three 4-bit indices packed into two characters. Emitted
+                   one pixel at a time so the run loop below is shared -- the
+                   remaining two are held in `pend` until the next turns.
+                   세 개의 4비트 인덱스가 두 문자에 담깁니다. 아래의 실행 루프를
+                   공유하도록 한 번에 한 픽셀씩 내보내며, 나머지 둘은 다음 차례까지
+                   `pend`에 보관합니다. */
+                if (n_pend > 0) {
+                    index = pend[0];
+                    pend[0] = pend[1];
+                    n_pend--;
+                } else {
+                    if (i + 1 >= len) break;
+                    int hi = b64val(data[i]), lo = b64val(data[i+1]);
+                    i += 2;
+                    if (hi < 0 || lo < 0) break;
+                    int v = (hi << 6) | lo;             /* 12 bits */
+                    index   = (v >> 8) & 0xf;
+                    pend[0] = (v >> 4) & 0xf;
+                    pend[1] =  v       & 0xf;
+                    n_pend  = 2;
+                }
                 count = 1;
-                if (index < 0) break;
             }
 
             for (int r = 0; r < count && px_i < total; r++, px_i++) {
-                if (index == 0) continue;          /* transparent: leave the SDF pixel */
+                if (index == 0) continue;          /* transparent: leave what is under it */
 
                 int sx = px_i % sw, sy = px_i / sw;
                 /* Centre the drawing in its cell horizontally and sit it on
                    the cell's bottom, so a 32x32 sprite in a 64x96 cell stands
-                   on the ground rather than floating at the top.
+                   on the ground rather than floating at the top. A viewmodel
+                   wants the same rule for the same reason: it rises from the
+                   bottom edge of the screen.
                    그림을 셀 안에서 가로로 가운데 맞추고 셀 바닥에 놓습니다. 그래야
                    64x96 셀 안의 32x32 스프라이트가 위쪽에 떠 있지 않고 지면에
-                   섭니다. */
-                int ax = ox + (SPR_CW - sw) / 2 + sx;
-                int ay = oy + (SPR_CH - sh)     + sy;
+                   섭니다. 뷰 모델도 같은 이유로 같은 규칙을 원합니다. 화면 아래쪽
+                   가장자리에서 올라오기 때문입니다. */
+                int ax = ox + (cell_w - sw) / 2 + sx;
+                int ay = oy + (cell_h - sh)     + sy;
                 if (ax < 0 || ax >= W || ay < 0 || ay >= H) continue;
 
                 unsigned char *q = &buf[(ay * W + ax) * 4];
@@ -754,7 +905,7 @@ GLuint sprite_atlas(void) {
        overlay_drawn_sprites for why this composites rather than replaces.
        손으로 그린 스프라이트를 마지막에 생성된 것 위에 덧그립니다. 교체가 아니라
        합성인 이유는 overlay_drawn_sprites를 참조하십시오. */
-    overlay_drawn_sprites(buf, W, H);
+    overlay_drawn_sprites(buf, W, H, SPR_DEST_MONSTER);
 
     glGenTextures(1, &g_atlas);
     glBindTexture(GL_TEXTURE_2D, g_atlas);
@@ -812,7 +963,7 @@ int sprite_dump_ppm(const char *path) {
           }
         }
 
-    overlay_drawn_sprites(buf, W, H);
+    overlay_drawn_sprites(buf, W, H, SPR_DEST_MONSTER);
 
     for (int y = 0; y < H; y++)
       for (int x = 0; x < W; x++) {
@@ -847,4 +998,157 @@ void sprite_uv(int type, int frame, float *u0, float *v0, float *u1, float *v1) 
        billboard's v grows upward. */
     *v0 = (type + 1) * ch - insv;   /* bottom of the row -> feet */
     *v1 = type * ch + insv;         /* top of the row -> head */
+}
+
+/* ------------------------------------------------- the hand-drawn viewmodel */
+
+static GLuint g_weapon_atlas;
+static int    g_weapon_built, g_weapon_any;
+
+/**
+ * @brief Builds the weapon atlas, and settles whether there is any art at all.
+ *
+ * ENGLISH
+ * -------
+ * Unlike the monster atlas there is no generator underneath: a cell with no
+ * drawing stays fully transparent, and a weapon with no frames at all reports
+ * ::weapon_has_art zero so the caller draws the extruded model instead.
+ *
+ * @note The buffer starts CLEARED rather than filled, which is what makes the
+ *       fallback work by construction. The monsters start filled by the SDF
+ *       pass and are drawn over; here there is nothing to draw over, so an
+ *       undrawn frame has to be nothing rather than whatever the heap held.
+ * @note `g_weapon_any` is decided by whether any pixel arrived, not by whether
+ *       the text mentioned a gun. A file that decoded to nothing -- an empty
+ *       PNG, a name that did not match -- should fall back rather than draw an
+ *       invisible weapon, and "the gun disappeared" is a much worse first
+ *       experience of adding art than "the art did not take".
+ *
+ * 한국어
+ * ------
+ * @brief 무기 아틀라스를 생성하고, 아트가 존재하는지 여부를 확정합니다.
+ *
+ * 몬스터 아틀라스와 달리 아래에 깔린 생성기가 없습니다. 그림이 없는 셀은 완전히 투명하게
+ * 남고, 프레임이 하나도 없는 무기는 ::weapon_has_art가 0을 보고하므로 호출자가 대신 압출
+ * 모델을 그립니다.
+ *
+ * @note 버퍼를 채우지 않고 *비운 채* 시작하며, 그것이 폴백을 구조적으로 성립시킵니다.
+ *       몬스터는 SDF 패스가 채운 위에 덧그리지만 이곳에는 덧그릴 대상이 없으므로, 그려지지
+ *       않은 프레임은 힙에 남아 있던 값이 아니라 아무것도 아니어야 합니다.
+ * @note `g_weapon_any`는 텍스트가 총기를 언급했는지가 아니라 픽셀이 실제로 도착했는지로
+ *       결정됩니다. 아무것도 디코딩되지 않은 파일(빈 PNG, 일치하지 않는 이름)은 보이지 않는
+ *       무기를 그리는 대신 폴백해야 합니다. "총이 사라졌다"는 것은 아트를 추가하며 겪는 첫
+ *       경험으로는 "아트가 적용되지 않았다"보다 훨씬 나쁩니다.
+ */
+static void weapon_build(void) {
+    if (g_weapon_built) return;
+    g_weapon_built = 1;
+
+    int W = WPN_CW * WPN_FRAMES, H = WPN_CH;
+    unsigned char *buf = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
+                                   (SIZE_T)W * H * 4);
+    if (!buf) return;
+
+    overlay_drawn_sprites(buf, W, H, SPR_DEST_WEAPON);
+
+    /* Any opaque pixel means art arrived. */
+    for (int i = 0; i < W * H; i++)
+        if (buf[i * 4 + 3]) { g_weapon_any = 1; break; }
+
+    if (g_weapon_any) {
+        glGenTextures(1, &g_weapon_atlas);
+        glBindTexture(GL_TEXTURE_2D, g_weapon_atlas);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, W, H, 0,
+                     GL_RGBA, GL_UNSIGNED_BYTE, buf);
+        /* NEAREST, and no mipmaps: this is pixel art shown at roughly its own
+           scale, and any filtering would soften the edges the artist drew.
+           The monsters take the same treatment for the same reason.
+           NEAREST이며 밉맵도 없습니다. 이것은 대략 자기 크기로 표시되는 픽셀 아트이며,
+           어떤 필터링도 아티스트가 그린 가장자리를 뭉갭니다. */
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    }
+
+    HeapFree(GetProcessHeap(), 0, buf);
+}
+
+int weapon_has_art(void) {
+    weapon_build();
+    return g_weapon_any;
+}
+
+GLuint weapon_atlas(void) {
+    weapon_build();
+    return g_weapon_atlas;
+}
+
+void weapon_uv(int frame, float *u0, float *v0, float *u1, float *v1) {
+    if (frame < 0) frame = 0;
+    if (frame >= WPN_FRAMES) frame = WPN_FRAMES - 1;
+
+    float cw = 1.0f / WPN_FRAMES;
+    float insu = 0.5f / (WPN_CW * WPN_FRAMES);
+    float insv = 0.5f / WPN_CH;
+
+    *u0 = frame * cw + insu;
+    *u1 = (frame + 1) * cw - insu;
+    /* v flipped: image row 0 is the top of the drawing, and the quad's v grows
+       upward -- the same convention sprite_uv follows.
+       v를 뒤집습니다. 이미지의 0번 행은 그림의 위쪽이고 쿼드의 v는 위로 증가합니다.
+       sprite_uv가 따르는 것과 같은 규약입니다. */
+    *v0 = 1.0f - insv;
+    *v1 = insv;
+}
+
+/**
+ * @brief Where a weapon frame's muzzle sits, as a fraction of its cell.
+ *
+ * ENGLISH
+ * -------
+ * @param[in]  frame One of the WPN_* frames; clamped.
+ * @param[out] u     0..1 across the cell, left to right.
+ * @param[out] v     0..1 up the cell, BOTTOM to top.
+ * @return Non-zero when the drawing marked a muzzle, 0 when it did not.
+ *
+ * @note Normalised rather than in pixels, because the caller draws the sprite
+ *       at whatever size the screen calls for and a pixel offset would only be
+ *       right at one scale.
+ * @note `v` is measured from the bottom to match the quad it will be placed on,
+ *       where the image's own rows run the other way. Doing the flip here means
+ *       exactly one place knows about it.
+ *
+ * 한국어
+ * ------
+ * @brief 무기 프레임의 총구가 셀 안에서 차지하는 위치를 비율로 반환합니다.
+ * @param[in]  frame WPN_* 프레임 중 하나. 범위를 벗어나면 제한됩니다.
+ * @param[out] u     셀을 가로지르는 0..1 값. 왼쪽에서 오른쪽.
+ * @param[out] v     셀을 올라가는 0..1 값. *아래*에서 위로.
+ * @return 그림이 총구를 표시했으면 0이 아닌 값, 표시하지 않았으면 0.
+ *
+ * @note 픽셀이 아니라 정규화된 값입니다. 호출자가 화면이 요구하는 크기로 스프라이트를
+ *       그리므로, 픽셀 오프셋은 한 배율에서만 맞기 때문입니다.
+ * @note `v`는 놓이게 될 쿼드에 맞추어 아래에서부터 잽니다. 이미지 자체의 행은 반대
+ *       방향으로 진행합니다. 뒤집기를 이곳에서 처리하면 그것을 아는 곳이 정확히 하나가
+ *       됩니다.
+ */
+int weapon_muzzle(int frame, float *u, float *v) {
+    weapon_build();
+    if (frame < 0) frame = 0;
+    if (frame >= WPN_FRAMES) frame = WPN_FRAMES - 1;
+
+    /* Fall back to frame 0's marker: only the firing frame strictly needs one,
+       and an artist who marked the idle pose and not the rest should not get a
+       flash that jumps to a corner on the frames they skipped.
+       0번 프레임의 표식으로 대체합니다. 엄밀히 표식이 필요한 것은 발사 프레임뿐이며,
+       대기 자세만 표시하고 나머지를 건너뛴 아티스트가 그 프레임들에서 화염이 구석으로
+       튀는 결과를 얻어서는 안 됩니다. */
+    int mx = g_weapon_muz[frame][0], my = g_weapon_muz[frame][1];
+    if (mx < 0) { mx = g_weapon_muz[0][0]; my = g_weapon_muz[0][1]; }
+    if (mx < 0) return 0;
+
+    *u = (mx + 0.5f) / (float)WPN_CW;
+    *v = 1.0f - (my + 0.5f) / (float)WPN_CH;
+    return 1;
 }

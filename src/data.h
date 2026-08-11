@@ -29,6 +29,7 @@ enum DataAsset {
     DATA_MESHES,      /**< .obj에서 변환된 정점 데이터 */
     DATA_LEVELS,      /**< 레벨 레이아웃 및 엔티티 */
     DATA_SPRITES,     /**< PNG에서 변환된 팔레트 인덱스 스프라이트. DATA_MESHES와 마찬가지로 감시할 파일이 없습니다. */
+    DATA_EFFECTS,     /**< 파티클 이펙트 레시피 (fx.c). 감시 대상 파일이 있습니다. */
     DATA_COUNT        /**< 총 데이터 에셋 수 */
 };
 

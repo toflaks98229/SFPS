@@ -179,6 +179,63 @@ static inline int txt_is_number(const char *tok, int len) {
     return 1;
 }
 
+/* --- Copying / 복사 --- */
+
+/**
+ * @brief Copies a token or string into a fixed-size buffer, always terminated.
+ *
+ * ENGLISH
+ * -------
+ * @param[out] dst Destination buffer.
+ * @param[in]  cap Capacity of `dst` in bytes, INCLUDING the terminator. Must
+ *                 be at least 1.
+ * @param[in]  src Source characters. Need not be null-terminated when `len` is
+ *                 given, which is what makes this usable directly on a
+ *                 ::txt_token result.
+ * @param[in]  len How many characters to copy, or -1 to copy `src` up to its
+ *                 own null terminator.
+ * @return How many characters were written, not counting the terminator.
+ *
+ * @note Truncates rather than overflowing, and null-terminates in every case
+ *       including truncation and `len == 0`.
+ * @note The bound is tested BEFORE the source character, so the capacity is
+ *       what stops the loop and a malformed source cannot run past the buffer.
+ *       Five hand-written copy loops were replaced by this, and one of them
+ *       (main.c's level-name copy) tested them the other way round -- correct
+ *       only because the source happened to be terminated in range.
+ * @warning `dst` and `src` must not overlap.
+ *
+ * 한국어
+ * ------
+ * @brief 토큰 또는 문자열을 고정 크기 버퍼에 복사하며, 항상 널로 종료합니다.
+ * @param[out] dst 대상 버퍼.
+ * @param[in]  cap `dst`의 용량 (바이트). 종료 문자를 *포함*합니다. 최소 1 이상이어야
+ *                 합니다.
+ * @param[in]  src 원본 문자열. `len`이 주어지면 널로 끝나지 않아도 되며, 덕분에
+ *                 ::txt_token의 결과에 바로 사용할 수 있습니다.
+ * @param[in]  len 복사할 문자 수. -1이면 `src` 자신의 널 종료 문자까지 복사합니다.
+ * @return 종료 문자를 제외하고 기록된 문자 수.
+ *
+ * @note 넘치지 않고 잘라 내며, 잘린 경우와 `len == 0`인 경우를 포함해 모든 경우에
+ *       널로 종료합니다.
+ * @note 원본 문자보다 경계를 *먼저* 검사하므로 루프를 멈추는 것은 용량이며, 잘못된
+ *       원본이 버퍼를 넘어설 수 없습니다. 손으로 작성한 복사 루프 다섯 개가 이 함수로
+ *       대체되었는데, 그중 하나(main.c의 레벨 이름 복사)는 검사 순서가 반대였고 원본이
+ *       우연히 범위 안에서 종료되었기 때문에만 올바르게 동작했습니다.
+ * @warning `dst`와 `src`는 겹쳐서는 안 됩니다.
+ */
+static inline int txt_copy(char *dst, int cap, const char *src, int len) {
+    int i = 0;
+    /* `i < cap - 1` first: the capacity is what stops this loop, so a source
+       that is longer than expected -- or not terminated at all -- truncates
+       instead of running off the end of dst.
+       `i < cap - 1`을 먼저 검사합니다. 루프를 멈추는 것은 용량이므로, 예상보다 긴
+       원본이나 아예 종료되지 않은 원본도 dst 밖으로 나가지 않고 잘립니다. */
+    for (; i < cap - 1 && (len < 0 || i < len) && src[i]; i++) dst[i] = src[i];
+    dst[i] = 0;
+    return i;
+}
+
 /* --- Conversion / 변환 --- */
 
 /**

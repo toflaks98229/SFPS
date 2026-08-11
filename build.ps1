@@ -49,6 +49,20 @@ if (-not (Test-Path $outDir)) { New-Item -ItemType Directory $outDir | Out-Null 
 
 $sources = Get-ChildItem (Join-Path $root 'src') -Filter *.c | ForEach-Object { $_.FullName }
 
+# Tool-side shared libraries: tools\*.c with no entry point of their own. These
+# are linked INTO tools rather than built AS tools, so the -Tools sweep has to
+# skip them or it tries to link a binary with no WinMain and fails with an
+# error that names the linker rather than the mistake.
+#
+# Listed by name rather than detected by grepping for WinMain: a build script
+# that guesses at the contents of source files is a rule with no way to state
+# itself, and adding a library here is one line at the moment you create it.
+$toolLibNames = @('ui')
+$toolLibs = $toolLibNames | ForEach-Object { Join-Path $root "tools\$_.c" }
+foreach ($lib in $toolLibs) {
+    if (-not (Test-Path $lib)) { throw "Tool library missing: $lib" }
+}
+
 if ($Debug) {
     # DEBUG_HUD adds a live player/weapon state readout in the title bar.
     # HOT_RELOAD reads assets\*.txt at runtime and watches them, so editing a
@@ -84,15 +98,29 @@ $libs = @('-Wl,--gc-sections', "-Wl,-Map=$mapFile",
 # Tools link the game's own modules so their preview matches the real thing.
 # They never ship, so they are built for debuggability, not size, and their
 # size is deliberately absent from the budget report.
-function Invoke-ToolBuild([string]$name) {
+# $extraDefines builds a SECOND binary from the same source with different
+# constants. It exists for capacity limits: a cache sized to hold everything the
+# project defines means its overflow branch never runs, so the code that only
+# executes when something has gone wrong is the code that goes untested. Passing
+# a small -DMAX_CACHED forces it. $suffix keeps the variant beside the normal
+# build rather than overwriting it.
+function Invoke-ToolBuild([string]$name, [string[]]$extraDefines = @(), [string]$suffix = '') {
     $src = Join-Path $root "tools\$name.c"
     if (-not (Test-Path $src)) { throw "No tool source at $src" }
-    $script:lastToolExe = Join-Path $outDir "$name.exe"
+    $script:lastToolExe = Join-Path $outDir "$name$suffix.exe"
 
     # main.c holds WinMain for the game; a tool brings its own.
     $shared = $sources | Where-Object { (Split-Path $_ -Leaf) -ne 'main.c' }
 
-    Write-Host "Compiling tool $name..." -ForegroundColor Cyan
+    # ...plus the tool-side shared library. $toolLibs are tools\*.c that hold no
+    # entry point and exist to be linked into the tools that want them -- the
+    # same relationship src\*.c has to the game. They are compiled into every
+    # tool rather than tracked per tool: nothing here is size-constrained, and a
+    # per-tool dependency list is a second place for the truth to live.
+    $shared += $toolLibs | Where-Object { $_ -ne $src }
+
+    $label = if ($suffix) { "$name$suffix" } else { $name }
+    Write-Host "Compiling tool $label..." -ForegroundColor Cyan
     # HOT_RELOAD is mandatory for tools, not optional: without it data_text()
     # returns the copy baked into gen_assets.h, so an editor would edit a
     # stale snapshot and its save would silently overwrite whatever the user
@@ -103,11 +131,19 @@ function Invoke-ToolBuild([string]$name) {
     # variable instead of returned.
     # -I src so a tool may include "level.h" as well as "../src/level.h".
     & $gcc '-std=c11' '-O1' '-g' '-Wall' '-Wextra' '-mconsole' '-DHOT_RELOAD' `
+           @extraDefines `
            '-I' (Join-Path $root 'src') `
            $src @shared -o $script:lastToolExe `
            '-lopengl32' '-lgdi32' '-luser32' '-lwinmm' '-lm' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Tool build failed (exit $LASTEXITCODE)" }
     Write-Host "  -> $script:lastToolExe" -ForegroundColor DarkGray
+}
+
+# Variants: the same test source built again with a capacity forced small
+# enough that its overflow path actually executes. Keyed by tool name so the
+# -Tools sweep picks them up automatically.
+$toolVariants = @{
+    'textest' = @{ Defines = @('-DMAX_CACHED=4'); Suffix = '_tinycache' }
 }
 
 if ($Tool) {
@@ -151,7 +187,19 @@ if ($Debug) {
 
 if ($Tools) {
     Get-ChildItem (Join-Path $root 'tools') -Filter *.c |
-        ForEach-Object { Invoke-ToolBuild $_.BaseName }
+      Where-Object { $toolLibNames -notcontains $_.BaseName } |
+      ForEach-Object {
+        $toolName = $_.BaseName
+        Invoke-ToolBuild $toolName
+
+        # Some tests need a second binary with a constant forced to a value the
+        # real build never reaches, so the branch that only runs on overflow is
+        # exercised too. See $toolVariants.
+        if ($toolVariants.ContainsKey($toolName)) {
+            $v = $toolVariants[$toolName]
+            Invoke-ToolBuild $toolName $v.Defines $v.Suffix
+        }
+    }
 }
 
 if ($Run) {

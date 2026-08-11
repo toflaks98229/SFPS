@@ -107,8 +107,12 @@ typedef enum {
     DIAG_MODEL_POINTS,  /**< Model silhouette exceeded MB_MAX_SILHOUETTE. / 모델 실루엣이 MB_MAX_SILHOUETTE를 초과했습니다. */
     DIAG_MAT_RANGES,    /**< Material runs exceeded the range table; runs merged. / 재질 구간이 테이블을 초과하여 병합되었습니다. */
     DIAG_TEX_OPS,       /**< Texture recipe exceeded MAX_OPS. / 텍스처 레시피가 MAX_OPS를 초과했습니다. */
+    DIAG_TEX_CACHE,     /**< Material cache full; the material was rebuilt per call. / 재질 캐시가 가득 참. 해당 재질이 호출마다 재생성되었습니다. */
+    DIAG_FX_CAP,        /**< Effect defs or particles exceeded their pool. / 이펙트 정의 또는 입자가 풀을 초과했습니다. */
+    DIAG_LIGHT_CAP,     /**< Level declared more lights than LVL_MAX_LIGHTS. / 레벨이 LVL_MAX_LIGHTS보다 많은 광원을 선언했습니다. */
     DIAG_ENEMY_CAP,     /**< Level wanted more monsters than ENEMY_MAX. / 레벨이 ENEMY_MAX보다 많은 몬스터를 요구했습니다. */
     DIAG_PICKUP_CAP,    /**< Level wanted more pickups than PICKUP_MAX. / 레벨이 PICKUP_MAX보다 많은 아이템을 요구했습니다. */
+    DIAG_SHOT_CAP,      /**< A monster wanted to fire with ENEMY_MAX_SHOTS already in flight. / ENEMY_MAX_SHOTS가 이미 비행 중인 상태에서 몬스터가 발사를 시도했습니다. */
     DIAG_SOUND_CAP,     /**< Recipe text exceeded MAX_SOUNDS or MAX_LAYERS. / 레시피 텍스트가 MAX_SOUNDS 또는 MAX_LAYERS를 초과했습니다. */
     DIAG_PASS_ORDER,    /**< A draw was made on the wrong side of the world/UI pass boundary. / 월드/UI 패스 경계의 잘못된 쪽에서 그리기가 수행되었습니다. */
     DIAG_COUNT          /**< Number of counters. / 카운터의 개수. */

@@ -18,6 +18,7 @@
 #include "pickup.h"
 #include "player.h"       /* PLAYER_EYE, to turn an eye position into feet */
 #include "audio.h"
+#include "fx.h"
 #include "diag.h"
 #include <math.h>
 
@@ -128,6 +129,12 @@ void pickup_update(v3 player_eye, int *health, int health_max,
            제거하지 않고 비활성화합니다. 같은 배열을 순회하는 렌더러를 위해
            인덱스를 안정적으로 유지하기 위함입니다. */
         p->active = 0;
+
+        /* Thrown upward: the item goes INTO the player, which is a different
+           motion from something breaking apart where it stood.
+           위쪽으로 던집니다. 아이템이 플레이어에게 *들어가는* 것이며, 이는 제자리에서
+           부서지는 것과는 다른 움직임입니다. */
+        fx_spawn("pickup", v3f(p->pos.x, p->pos.y + 0.4f, p->pos.z), v3f(0, 1, 0));
     }
 }
 

@@ -24,6 +24,9 @@
 #   proc   k s            no pixels at all: fragment shader k computes the
 #                         surface from the UV, s/100 cells per unit -- see the
 #                         procedural section at the end of this file
+#   bump   n              relief: tilt the shading normal by the material's own
+#                         brightness gradient, n/100. Procedural materials only
+#                         -- see the relief note in the procedural section
 #
 # Ops that follow `brick` know which pixels are mortar, which is how a flat
 # op list expresses "only inside a brick".
@@ -158,43 +161,108 @@ gloss 22
 # Keep this list in step with the PROC_* enum in src/render.h and the switch
 # in procColour(); there is no way to share an enum with GLSL.
 
+
+# --- relief ----------------------------------------------------------------
+# `bump <n>` tilts the shading normal by the material's OWN brightness
+# gradient, so mortar joints, panel seams and hex lattice lines catch light on
+# one side and shade on the other as the player moves past them. There is no
+# normal-map texture and no per-vertex tangent: the height is the pattern's
+# luminance and the tangent frame is derived from the face normal, which works
+# because world UVs here are a dominant-axis projection. See procNormal in
+# src/render.c.
+#
+# The value is a percentage. It is a SLOPE, so what reads correctly depends on
+# how deep the feature is meant to be, not on how dark it is: a mortar joint is
+# a real recess and takes a lot, marble veining is a colour change in a flat
+# polished surface and should take none at all.
+#
+# A material that does not mention `bump` stays perfectly flat, which is what
+# every recipe written before this existed expects.
+#
+# `bump <n>`은 재질 *자신의* 밝기 기울기만큼 셰이딩 법선을 기울입니다. 덕분에 줄눈,
+# 패널 이음매, 육각 격자선이 플레이어가 지나갈 때 한쪽은 빛을 받고 반대쪽은 그늘집니다.
+# 노멀 맵 텍스처도 정점별 탄젠트도 없습니다. 높이는 패턴의 휘도이고 탄젠트 프레임은 면
+# 법선에서 유도하는데, 이곳의 월드 UV가 지배적 축 투영이기에 가능합니다.
+# src/render.c의 procNormal을 참조하십시오.
+#
+# 값은 퍼센트입니다. *기울기*이므로 올바르게 읽히는 값은 얼마나 어두운지가 아니라 그
+# 요소가 얼마나 깊어야 하는지에 달려 있습니다. 줄눈은 실제로 파인 곳이라 큰 값을 받고,
+# 대리석 무늬는 평평하게 연마된 표면의 색 변화이므로 전혀 받지 않아야 합니다.
+#
+# `bump`를 언급하지 않는 재질은 완전히 평평하게 유지되며, 이 기능이 생기기 전에 작성된
+# 모든 레시피가 그것을 기대합니다.
+
 t pbrick
 base 148 72 54
 proc 1 120              # 1.2 courses per unit
+bump 90                 # mortar is a real recess -- the deepest relief here
 
 t ptile
 base 132 138 146
 proc 2 200
 gloss 45
+bump 70                 # grout lines, shallower than mortar
 
 t ppanel
 base 92 96 105
 proc 3 100
 gloss 65
+bump 85                 # seams and rivets both stand out
 
 t pwood
 base 122 78 40
 proc 4 90
 gloss 20
+bump 25                 # sawn grain is texture, not depth
 
 t phex
 base 84 104 120
 proc 5 160
 gloss 50
+bump 75                 # the lattice is cut into the plate
 
 t pmarble
 base 176 176 182
 proc 6 70
 gloss 75
+# No `bump`: veining is a colour change in a polished slab, not a recess.
+# Bumping it would make the stone look eroded rather than cut.
+# `bump` 없음: 무늬는 파인 곳이 아니라 연마된 판의 색 변화입니다. 요철을 주면
+# 돌이 잘린 것이 아니라 침식된 것처럼 보입니다.
 
 t prust
 base 122 62 30
 proc 7 110
 gloss 25
+bump 45                 # pitted, but not deeply
 
 t pgrid
 base 40 180 210
 proc 8 150
+# No `bump`: the grid lines are EMISSIVE, so their brightness is light coming
+# out rather than a surface facing toward one. Differencing it would tilt the
+# normal away from the glow, which is backwards.
+# `bump` 없음: 격자선은 *발광*이므로 그 밝기는 표면이 광원을 향한 것이 아니라 빛이
+# 나오는 것입니다. 이를 차분하면 법선이 발광에서 멀어지게 기울어져 반대가 됩니다.
+
+# Molten rock. The base colour is the CRACK, not the crust -- the crust is
+# near-black rock the shader supplies itself, and what the recipe chooses is
+# what colour the glow between the plates is. Swap it toward green for acid or
+# toward blue for something colder without touching the shader.
+#
+# No `gloss`: molten rock is not a mirror, and a specular highlight sliding
+# over lava reads as wet plastic.
+#
+# 녹은 암석입니다. base 색상은 껍질이 아니라 *균열*입니다. 껍질은 셰이더가 자체적으로
+# 제공하는 거의 검은 암석이며, 레시피가 고르는 것은 판 사이에서 빛나는 색입니다. 셰이더를
+# 건드리지 않고 초록 쪽으로 옮기면 산성 웅덩이가, 파랑 쪽으로 옮기면 더 차가운 무언가가
+# 됩니다.
+#
+# `gloss`가 없습니다. 녹은 암석은 거울이 아니며, 용암 위를 미끄러지는 스페큘러 하이라이트는
+# 젖은 플라스틱처럼 보입니다.
+t plava
+base 235 96 22
+proc 9 60
 
 # --- the grapple's tether -------------------------------------------------
 # A twisted hemp rope. `ribs` stripes along the recipe's local x axis, and the

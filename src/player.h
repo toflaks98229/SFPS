@@ -49,6 +49,73 @@
 #define PLAYER_MAX_HP  100     ///< @brief Health at spawn and the cap pickups top up to. / 스폰 시 체력이자 아이템으로 회복 가능한 상한값.
 
 /* ==========================================================================
+ * DEATH COLLAPSE -- the camera falling to the floor when the player dies.
+ *
+ * ENGLISH
+ * -------
+ * Three things move, all driven by the same eased clock so they land together
+ * rather than finishing at three different moments:
+ *
+ *   DROP  the eye sinks from standing height to just above the floor. This is
+ *         the part that actually reads as dying -- the world grows past you.
+ *   ROLL  the horizon tilts. A drop on its own reads as crouching; the tilt is
+ *         what says the body is no longer holding itself up.
+ *   PITCH the view falls toward the floor, but only part way. Looking straight
+ *         down at the end fills the screen with floor texture and hides the
+ *         thing that killed you, which is the one thing a player wants to see.
+ *
+ * Eased out rather than linear: a body drops fastest at the start and settles.
+ * Linear motion here reads as a lift descending.
+ *
+ * Applied to the CAMERA, never to Player::pos. Sinking the real position would
+ * put the eye inside the floor, where level_trace reports an immediate hit at
+ * zero range.
+ *
+ * Kept here rather than in main.c because tools/dithershot.c previews the pose
+ * and must use these values rather than a copy -- a preview that has drifted
+ * from the thing it previews is worse than no preview.
+ *
+ * 한국어
+ * ------
+ * 사망 시 카메라가 바닥으로 쓰러지는 연출입니다.
+ *
+ * 세 가지가 움직이며, 서로 다른 세 시점에 끝나지 않고 함께 안착하도록 전부 동일한
+ * 이징 시계로 구동됩니다.
+ *
+ *   DROP  눈이 선 높이에서 바닥 바로 위까지 내려앉습니다. 실제로 죽는 것으로 읽히는
+ *         부분이며, 월드가 당신을 지나쳐 커집니다.
+ *   ROLL  수평선이 기울어집니다. 내려앉기만 하면 웅크리는 것으로 읽히고, 기울어짐이
+ *         몸이 더 이상 스스로를 지탱하지 못한다고 말합니다.
+ *   PITCH 시선이 바닥을 향해 떨어지되 끝까지 가지는 않습니다. 마지막에 수직으로
+ *         내려다보면 화면이 바닥 텍스처로 가득 차 당신을 죽인 것을 가리는데, 그것이야말로
+ *         플레이어가 가장 보고 싶어 하는 것입니다.
+ *
+ * 선형이 아니라 감속 이징입니다. 몸은 처음에 가장 빠르게 떨어졌다가 가라앉습니다.
+ * 이곳의 선형 운동은 엘리베이터가 내려가는 것처럼 읽힙니다.
+ *
+ * Player::pos가 아니라 *카메라*에 적용합니다. 실제 위치를 내리면 눈이 바닥 안으로
+ * 들어가고, 그곳에서 level_trace는 거리 0에서 즉시 충돌을 보고합니다.
+ *
+ * main.c가 아니라 이곳에 두는 이유는 tools/dithershot.c가 이 자세를 미리보기 때문이며,
+ * 사본이 아니라 이 값을 사용해야 합니다. 미리보기 대상과 어긋난 미리보기는 없느니만
+ * 못합니다.
+ * ==========================================================================
+ */
+#define DEATH_ANIM_TIME  0.7f   ///< @brief Seconds the collapse takes. / 쓰러짐에 걸리는 시간 (초).
+#define DEATH_DROP       1.15f  ///< @brief Metres the eye sinks. Just under PLAYER_EYE, so it stops above the floor. / 눈이 내려앉는 거리 (미터). PLAYER_EYE보다 약간 작아 바닥 위에서 멈춥니다.
+#define DEATH_ROLL       0.62f  ///< @brief Radians the horizon tilts -- about 35 degrees. / 수평선이 기울어지는 각도 (라디안). 약 35도입니다.
+#define DEATH_PITCH      0.30f  ///< @brief Radians the view falls, well short of straight down. / 시선이 떨어지는 각도 (라디안). 수직 아래에는 한참 못 미칩니다.
+
+/* The eye must stop ABOVE the floor. A drop of PLAYER_EYE or more puts it at
+   or below floor level, where open_at() reports solid and level_trace hits at
+   zero range -- the camera would end the animation inside the ground.
+   눈은 바닥 *위에서* 멈춰야 합니다. PLAYER_EYE 이상 떨어지면 바닥 높이이거나 그 아래가
+   되는데, 그곳에서 open_at()은 막힌 것으로 보고하고 level_trace는 거리 0에서 충돌합니다.
+   카메라가 애니메이션을 땅속에서 끝내게 됩니다. */
+_Static_assert(DEATH_DROP < PLAYER_EYE,
+               "the death camera must settle above the floor, not inside it");
+
+/* ==========================================================================
  * MOMENTUM TUNING -- how fast vel.x/z (see below) bleeds off, regardless of
  * what put it there. The forces that ADD to it -- the grapple's pull, the
  * shotgun's recoil kick -- are tuned separately in weapon.h; this is the

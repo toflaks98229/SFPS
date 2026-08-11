@@ -20,7 +20,8 @@ $sets = @(
     @{ Name = 'ASSET_MODELS';  File = 'assets\models.txt'   },
     @{ Name = 'ASSET_RECIPES'; File = 'assets\textures.txt' },
     @{ Name = 'ASSET_SOUNDS';  File = 'assets\sounds.txt'   },
-    @{ Name = 'ASSET_LEVELS';  File = 'assets\levels.txt'   }
+    @{ Name = 'ASSET_LEVELS';  File = 'assets\levels.txt'   },
+    @{ Name = 'ASSET_EFFECTS'; File = 'assets\effects.txt'  }
 )
 
 # Wavefront .obj -> the integer mesh text the game parses.
@@ -162,8 +163,11 @@ foreach ($s in $sets) {
 #
 #   pal <n> <rrggbb> ...     one palette for every sprite in the set
 #   s <name> <w> <h>         begin a sprite
-#   d <hex run pairs>        RLE: one hex digit count, one hex digit index
-#   f <hex digits>           flat: one hex digit per pixel
+#   r <char pairs>           RLE: one char run (1..63), one char index
+#   p <char pairs>           packed: three 4-bit indices per two chars
+#
+# Both data opcodes use a 64-character printable alphabet, so every byte of
+# .rdata carries six bits of picture instead of a hex digit's four.
 #
 # Two encodings because neither wins everywhere. RLE exploits the horizontal
 # runs that separate pixel art from a photograph, and on flat art it is a
@@ -189,9 +193,40 @@ function ConvertFrom-Png([string]$path, [string]$name, [System.Collections.Array
         # Index every pixel against the shared palette, growing it as new
         # colours appear and snapping to the nearest entry once it is full.
         $idx = New-Object int[] ($w * $h)
+        $muzX = -1; $muzY = -1
         for ($y = 0; $y -lt $h; $y++) {
             for ($x = 0; $x -lt $w; $x++) {
                 $c = $bmp.GetPixel($x, $y)
+
+                # MAGENTA IS A MARKER, NOT A COLOUR: it says "the muzzle is
+                # here" and is never drawn.
+                #
+                # A weapon sprite has to say where its flash and tracers come
+                # from, and the alternative is a constant in weapon.c that
+                # somebody edits to match the art. This project already learned
+                # what that costs: placing the shotgun by editing constants,
+                # rebuilding and squinting at screenshots failed three times in
+                # a row, which is why modeledit puts a draggable muzzle on the
+                # 3D model. A marker pixel is the same idea for a drawing --
+                # redraw the gun and the flash follows it, because the muzzle IS
+                # part of the drawing.
+                #
+                # FF00FF because no one paints with it by accident, and it is
+                # the convention half of games have used for exactly this.
+                #
+                # 마젠타는 색이 아니라 *표식*입니다. "총구가 여기 있다"는 뜻이며 결코
+                # 그려지지 않습니다. 무기 스프라이트는 화염과 예광탄이 어디서 나오는지
+                # 말해야 하는데, 대안은 누군가 아트에 맞춰 수정하는 weapon.c의 상수입니다.
+                # 이 프로젝트는 그 대가를 이미 배웠습니다. 상수를 고치고 다시 빌드해
+                # 스크린샷을 들여다보는 방식으로 샷건을 배치하려다 세 번 연속 실패했고,
+                # 그래서 modeledit이 3D 모델에 끌 수 있는 총구를 둡니다. 표식 픽셀은
+                # 그림에 대해 같은 발상입니다. 총을 다시 그리면 화염이 따라옵니다. 총구가
+                # 그림의 *일부*이기 때문입니다.
+                if ($c.A -ge 128 -and $c.R -gt 240 -and $c.G -lt 16 -and $c.B -gt 240) {
+                    $muzX = $x; $muzY = $y
+                    $idx[$y * $w + $x] = 0
+                    continue
+                }
 
                 # Fully transparent pixels are all the same pixel regardless
                 # of what RGB Aseprite left under them, and they must share
@@ -227,7 +262,7 @@ function ConvertFrom-Png([string]$path, [string]$name, [System.Collections.Array
         #
         # RLE is the obvious choice for pixel art and is usually right, but it
         # is not always: it stores two characters per RUN, so it only beats a
-        # flat index stream when runs average longer than two pixels. Heavy
+        # packed index stream when runs average longer than three pixels. Heavy
         # dithering -- which is a legitimate pixel-art technique, and one this
         # game's own renderer leans on -- breaks runs down to 1-2 px and makes
         # RLE actively worse than storing the indices directly. Measured on
@@ -238,28 +273,62 @@ function ConvertFrom-Png([string]$path, [string]$name, [System.Collections.Array
         # shorter. The decoder reads whichever opcode it finds, so a sprite
         # that changes character between edits changes encoding with it and
         # nobody has to think about which to use.
+        #
+        # BOTH now spend a full printable character rather than a hex digit.
+        # The first version used hex, which throws away half of every byte: a
+        # character carries six usable bits and a hex digit uses four. Worse,
+        # spending one digit on a run length capped a run at 15 pixels, so on
+        # flat-shaded art it was the CAP breaking the runs up rather than the
+        # picture. Measured on viewmodel-sized gun art, lifting the cap to 63
+        # and packing the indices was 2.2x smaller on flat art and 1.2x on
+        # dithered -- the same drawing, the same palette, purely the encoding:
+        #
+        #     128x96 flat     2,098 -> 946 bytes
+        #     160x120 flat    3,224 -> 1,298
+        #     128x96 dithered 6,272 -> 5,332
+        #
+        # 64 characters that need no escaping inside a C string literal: no
+        # backslash, no double quote, and no '?' (which can start a trigraph).
+        $A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-'
+
+        # Run-length: one character for the run, one for the palette index.
         $rle = New-Object System.Text.StringBuilder
         $i = 0
         while ($i -lt $idx.Length) {
             $j = $i
-            while ($j -lt $idx.Length -and $idx[$j] -eq $idx[$i] -and ($j - $i) -lt 15) { $j++ }
-            [void]$rle.Append(('{0:x}{1:x}' -f ($j - $i), $idx[$i]))
+            while ($j -lt $idx.Length -and $idx[$j] -eq $idx[$i] -and ($j - $i) -lt 63) { $j++ }
+            [void]$rle.Append($A[$j - $i]).Append($A[$idx[$i]])
             $i = $j
         }
 
-        # Flat: one hex digit per pixel. Caps the palette at 16 entries, which
-        # is the same limit the RLE index nibble already imposes.
-        $flat = New-Object System.Text.StringBuilder
-        foreach ($v in $idx) { [void]$flat.Append(('{0:x}' -f $v)) }
-
-        if ($rle.Length -le $flat.Length) {
-            $op = 'd'; $data = $rle.ToString()
-        } else {
-            $op = 'f'; $data = $flat.ToString()
+        # Packed: three 4-bit indices (12 bits) in two 6-bit characters, so 1.5
+        # pixels per byte where a hex digit managed 1. This is what wins when
+        # the art is noisy enough that runs stop paying for themselves.
+        $packed = New-Object System.Text.StringBuilder
+        for ($i = 0; $i -lt $idx.Length; $i += 3) {
+            $a = $idx[$i]
+            $b = if ($i + 1 -lt $idx.Length) { $idx[$i + 1] } else { 0 }
+            $c = if ($i + 2 -lt $idx.Length) { $idx[$i + 2] } else { 0 }
+            $v = ($a -shl 8) -bor ($b -shl 4) -bor $c
+            [void]$packed.Append($A[$v -shr 6]).Append($A[$v -band 63])
         }
 
+        if ($rle.Length -le $packed.Length) {
+            $op = 'r'; $data = $rle.ToString()
+        } else {
+            $op = 'p'; $data = $packed.ToString()
+        }
+
+        # The muzzle marker, when the drawing carried one. Emitted BEFORE the
+        # data line so the decoder has it while the sprite is still the current
+        # one -- the parser is a single forward pass and never looks back.
+        # 그림에 표식이 있었다면 총구를 기록합니다. 디코더가 해당 스프라이트를 처리하는
+        # 동안 값을 갖도록 데이터 줄보다 *앞에* 놓습니다. 파서는 단방향 1회 통과이며
+        # 되돌아보지 않습니다.
+        $muz = if ($muzX -ge 0) { "m $muzX $muzY`n" } else { '' }
+
         return [pscustomobject]@{
-            Text = "s $name $w $h`n$op $data`n"
+            Text = "s $name $w $h`n$muz$op $data`n"
             W    = $w
             H    = $h
             Enc  = $op

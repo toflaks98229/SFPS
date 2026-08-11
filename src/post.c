@@ -67,7 +67,11 @@ static GLuint g_fbo, g_colour, g_depth;
 static GLuint g_vao;
 /** @brief The resolve program and its uniform locations. / 해상 프로그램과 그 유니폼 위치. */
 static GLuint g_prog;
-static GLint  g_u_tex, g_u_res;
+static GLint  g_u_tex, g_u_res, g_u_win, g_u_time, g_u_scan;
+/** @brief Scanline depth, 0..1. See post_set_scanline. / 주사선 세기(0..1). post_set_scanline 참조. */
+static float  g_scan = POST_SCANLINE_DEFAULT;
+/** @brief Frames drawn, wrapped. Drives the CRT grain. / 그린 프레임 수(순환). CRT 그레인을 구동합니다. */
+static float  g_frame;
 /** @brief Offscreen dimensions in pixels. / 오프스크린 크기(픽셀). */
 static int    g_w, g_h;
 /** @brief Non-zero once init succeeded; cleared if the FBO was incomplete. / 초기화 성공 시 0이 아님. FBO가 불완전하면 해제됩니다. */
@@ -182,6 +186,47 @@ static const char *FS =
 "out vec4 FragColor;\n"
 "uniform sampler2D uTex;\n"
 "uniform vec2 uRes;\n"          /* offscreen size, for the matrix lookup */
+/* The WINDOW's size, which is a different question from uRes and is why this
+   is a second uniform rather than a derived value. The dither matrix is
+   indexed in art pixels, but a scanline is a property of the display: it has
+   to land on output rows, and at a 2x integer scale that is twice as many rows
+   as there are art pixels.
+   *창*의 크기이며 uRes와는 다른 질문이므로 파생값이 아니라 별도의 유니폼입니다. 디더
+   행렬은 아트 픽셀 단위로 인덱싱되지만 주사선은 디스플레이의 속성입니다. 출력 행에 놓여야
+   하며, 2배 정수 배율에서 그것은 아트 픽셀보다 두 배 많은 행입니다. */
+"uniform vec2 uWin;\n"
+/* Frame counter, for anything that must not be identical every frame. Wrapped
+   by the caller so it never grows large enough to lose float precision.
+   매 프레임 동일해서는 안 되는 것을 위한 프레임 카운터입니다. float 정밀도를 잃을 만큼
+   커지지 않도록 호출자가 순환시킵니다. */
+"uniform float uTime;\n"
+/* Scanline depth, as a uniform rather than a constant.
+ *
+ * Two reasons, and the second is why this is not merely tidier. It lets the
+ * look be tuned in a running game, the same way the vertex snap is. And it
+ * lets a test toggle the scanline while holding everything else fixed --
+ * which turned out to be the only way to measure it at all.
+ *
+ * The obvious test is "are odd output rows darker than even ones", and it does
+ * not work: the 8x8 Bayer matrix has a row-to-row threshold difference of 16
+ * built into it, so a flat grey already comes out with a 24% even/odd
+ * brightness split before any scanline is applied. Measured with the scanline
+ * disabled, that check reported 23.9% and passed. Comparing rows cannot
+ * separate the dither from the scanline; comparing the same frame with the
+ * scanline on and off can.
+ *
+ * 주사선 세기이며 상수가 아니라 유니폼입니다.
+ *
+ * 이유가 둘인데, 두 번째가 이것이 단순한 정돈이 아닌 이유입니다. 정점 스냅과 마찬가지로
+ * 실행 중인 게임에서 룩을 조정할 수 있게 하고, 테스트가 나머지를 고정한 채 주사선만
+ * 토글할 수 있게 합니다. 후자는 결국 이것을 측정할 수 있는 유일한 방법이었습니다.
+ *
+ * 떠오르는 테스트는 "홀수 출력 행이 짝수 행보다 어두운가"이지만 동작하지 않습니다.
+ * 8x8 Bayer 행렬은 행 간 임계값 차이 16을 내장하고 있어, 주사선을 적용하기 전에도
+ * 평탄한 회색이 이미 24%의 짝/홀 밝기 차이를 갖습니다. 주사선을 끈 채로 측정했더니 그
+ * 검사가 23.9%를 보고하며 통과했습니다. 행끼리 비교해서는 디더와 주사선을 분리할 수
+ * 없지만, 같은 프레임을 주사선 켜고/끄고 비교하면 가능합니다. */
+"uniform float uScan;\n"
 
 /* 8x8 Bayer, values 0..63. Written as a flat array indexed by hand because
    GLSL 330 cannot portably initialise a const matrix from a nested list.
@@ -243,6 +288,74 @@ static const char *FS =
  * "덜 픽셀화된 디더링"을 위한 조정값입니다. 렌더 해상도와 이 값을 함께 올리면 점의
  * 겉보기 크기는 유지되면서 월드 자체는 선명해집니다. */
 "const float DITHER_SCALE = 1.0;\n"
+
+/* --- the single-hue (duotone) stage ------------------------------------
+ *
+ * ENGLISH
+ * -------
+ * Everything above preserves the scene's own colours: a brick wall dithers to
+ * dithered brick, a steel plate to dithered steel. Measured across the whole
+ * Bayer tile, each material's chroma comes out within a few percent of what it
+ * went in as -- 0.370 in and 0.376 out for brick, 0.280 and 0.287 for the tech
+ * green. That is a colour dither, and it is a deliberate choice.
+ *
+ * The look this stage adds is the other one: Return of the Obra Dinn and Who's
+ * Lila both DISCARD scene hue entirely and map luminance onto a single ramp
+ * between two chosen colours. The image reads as one ink on one paper, and
+ * every material becomes a density of that ink rather than a colour of its
+ * own. Obra Dinn is near-black on bone white; Who's Lila is a colder, dimmer
+ * pairing with far less separation between its ends.
+ *
+ * It is applied AFTER the quantisation rather than instead of it, so all the
+ * tuning above -- the gamma-space steps, the luminance drive, the hue
+ * preservation -- still decides WHERE the dots fall. This stage only decides
+ * what colour they are. At DUOTONE 0 it is mathematically inert and the pass
+ * behaves exactly as it did before, so the colour look is not lost, only
+ * joined.
+ *
+ * The remap is driven by the quantised LUMINANCE, not by the quantised RGB.
+ * Using the RGB would let a saturated red and a mid grey of the same
+ * brightness land on different points of the ramp, which reintroduces exactly
+ * the hue variation this is supposed to remove.
+ *
+ * 한국어
+ * ------
+ * 위의 모든 처리는 장면 자신의 색을 보존합니다. 벽돌 벽은 디더링된 벽돌이 되고 강철판은
+ * 디더링된 강철이 됩니다. Bayer 타일 전체에 걸쳐 측정하면 각 재질의 채도가 입력값의 몇
+ * 퍼센트 이내로 나옵니다. 벽돌은 0.370이 들어가 0.376이 나오고, 기술 녹색은 0.280과
+ * 0.287입니다. 이것은 컬러 디더이며 의도된 선택입니다.
+ *
+ * 이 단계가 더하는 룩은 그 반대편입니다. 오브라 딘 호의 귀환과 후즈 라일라는 둘 다 장면의
+ * 색상을 *완전히 버리고* 휘도를 선택된 두 색 사이의 단일 램프에 매핑합니다. 화면이 한
+ * 종이 위의 한 잉크로 읽히며, 모든 재질이 고유한 색이 아니라 그 잉크의 농도가 됩니다.
+ * 오브라 딘은 뼈처럼 흰 바탕에 검정에 가까운 색이고, 후즈 라일라는 양 끝의 차이가 훨씬
+ * 적은 더 차갑고 어두운 조합입니다.
+ *
+ * 양자화를 대체하지 않고 그 *이후에* 적용되므로, 위의 모든 튜닝(감마 공간 단계, 휘도
+ * 구동, 색상 보존)이 여전히 점이 *어디에* 떨어질지를 결정합니다. 이 단계는 그 점이 무슨
+ * 색인지만 결정합니다. DUOTONE이 0이면 수학적으로 아무 영향이 없어 이 패스는 이전과
+ * 정확히 동일하게 동작하므로, 컬러 룩은 사라지지 않고 선택지가 하나 늘어날 뿐입니다.
+ *
+ * 재매핑은 양자화된 *휘도*로 구동되며 양자화된 RGB로 구동되지 않습니다. RGB를 쓰면 밝기가
+ * 같은 채도 높은 빨강과 중간 회색이 램프의 서로 다른 지점에 놓이게 되어, 정확히 이 단계가
+ * 제거하려는 색상 변화를 다시 불러들입니다.
+ *
+ * DUOTONE: 0 keeps the colour look untouched, 1 is fully single-hue.
+ * DUOTONE: 0이면 컬러 룩이 그대로 유지되고, 1이면 완전한 단색조가 됩니다. */
+"const float DUOTONE = " POST_STR(POST_DUOTONE) ";\n"
+
+/* The two ends of the ramp, as sRGB. INK is what luminance 0 becomes and PAPER
+   what luminance 1 becomes -- so INK is the darker of the two for a normal
+   positive image, and swapping them gives a negative.
+   램프의 양 끝이며 sRGB 값입니다. INK는 휘도 0이 becomes 되는 색이고 PAPER는 휘도 1이
+   되는 색입니다. 일반적인 양화 이미지에서는 INK가 둘 중 어두운 쪽이며, 둘을 바꾸면
+   음화가 됩니다. */
+"const vec3 INK   = vec3(" POST_STR(POST_INK_R)   ", "
+                          POST_STR(POST_INK_G)   ", "
+                          POST_STR(POST_INK_B)   ");\n"
+"const vec3 PAPER = vec3(" POST_STR(POST_PAPER_R) ", "
+                          POST_STR(POST_PAPER_G) ", "
+                          POST_STR(POST_PAPER_B) ");\n"
 
 /* Rendered samples per art pixel, per axis, GENERATED from the C constant.
  *
@@ -330,6 +443,49 @@ static const char *FS =
  * 과소평가됩니다. 0.0과 1.0 두 샘플은 감마 공간에서 0.5로 평균되는데 이는 실제로 그
  * 둘이 운반하는 빛의 21%에 불과하므로, 밝은 배경을 배경으로 한 모서리가 지나치게
  * 어둡게 나옵니다. 아래의 양자화가 따르는 것과 동일한 두 공간 규칙입니다. */
+/* --- BREATHING: the raster swells when the picture is bright -------------
+ *
+ * ENGLISH
+ * -------
+ * A CRT's deflection depends on the high-tension supply, and that supply sags
+ * under load. A bright frame draws more beam current, the HT droops, the beam
+ * is deflected further for the same drive, and the whole image grows by a
+ * fraction of a percent. Cut to a dark scene and it shrinks back. On a real
+ * set it is most obvious on a hard cut: the picture visibly breathes.
+ *
+ * Driven by the frame's MEAN brightness, which is what the supply actually
+ * responds to -- a small bright object does not load the supply, a bright wall
+ * filling the screen does. textureLod at a level past the last mip gets that
+ * mean for free: the top of the chain is one texel averaging everything drawn.
+ * Clamped high rather than computed exactly, because a level beyond the last
+ * one is clamped to the last one, which is the 1x1.
+ *
+ * Applied by scaling UV about the centre. Scaling by (1 - k) SHOWS more of the
+ * texture, i.e. the image shrinks; the sign here is chosen so a bright frame
+ * grows, which is the direction a sagging supply produces.
+ *
+ * 한국어
+ * ------
+ * CRT의 편향은 고압 전원에 의존하며, 그 전원은 부하가 걸리면 처집니다. 밝은 프레임은 빔
+ * 전류를 더 끌어당기고, 고압이 처지고, 같은 구동 전압에 대해 빔이 더 멀리 편향되어
+ * 화면 전체가 1퍼센트의 몇 분의 일만큼 커집니다. 어두운 장면으로 전환하면 다시
+ * 줄어듭니다. 실제 수상기에서는 급격한 장면 전환에서 가장 뚜렷합니다. 화면이 눈에 띄게
+ * 숨을 쉽니다.
+ *
+ * 프레임의 *평균* 밝기로 구동되며, 이것이 전원이 실제로 반응하는 값입니다. 작은 밝은
+ * 물체는 전원에 부하를 주지 않지만 화면을 채운 밝은 벽은 줍니다. 마지막 밉을 넘어선
+ * 레벨로 textureLod를 호출하면 그 평균을 공짜로 얻습니다. 체인의 최상위는 그려진 모든
+ * 것을 평균한 텍셀 하나입니다. 정확히 계산하지 않고 큰 값으로 고정하는 이유는, 마지막을
+ * 넘어선 레벨이 마지막(1x1)으로 클램프되기 때문입니다.
+ *
+ * UV를 중심 기준으로 확대·축소하여 적용합니다. (1 - k)로 곱하면 텍스처가 더 많이
+ * *보이므로* 이미지는 작아집니다. 밝은 프레임이 커지도록 부호를 정했으며, 이것이 처진
+ * 전원이 만드는 방향입니다. */
+"  const float BREATHE = 0.004;\n"
+"  vec3  avg3 = textureLod(uTex, vec2(0.5), 20.0).rgb;\n"
+"  float avg  = dot(avg3, vec3(0.2126, 0.7152, 0.0722));\n"
+"  vec2  uv   = (vUV - 0.5) * (1.0 - BREATHE * avg) + 0.5;\n"
+
 "  vec3 accum = vec3(0.0);\n"
 "  vec2 texel = 1.0 / (uRes * SUPERSAMPLE);\n"
 "  for (int sy = 0; sy < int(SUPERSAMPLE); ++sy)\n"
@@ -339,10 +495,100 @@ static const char *FS =
    각 서브 텍셀의 *중심*에서 샘플링합니다(+0.5). 그렇지 않으면 블록이 반 샘플만큼
    어긋나 평균이 한쪽 모서리로 치우칩니다. */
 "      vec2 off = (vec2(sx, sy) + 0.5) * texel;\n"
-"      vec2 base = floor(vUV * uRes) / uRes;\n"
-"      accum += toLinear(texture(uTex, base + off).rgb);\n"
+"      vec2 base = floor(uv * uRes) / uRes;\n"
+"      accum += toLinear(textureLod(uTex, base + off, 0.0).rgb);\n"
 "    }\n"
 "  vec3 src = toGamma(accum / (SUPERSAMPLE * SUPERSAMPLE));\n"
+
+/* --- BLOOMING: bright cells spill into their neighbours ------------------
+ *
+ * ENGLISH
+ * -------
+ * A CRT's electron beam is focused by a lens whose focus degrades as the beam
+ * current rises. A bright spot is therefore also a WIDE spot: the phosphor
+ * around it is struck too, and the pixel edge that was sharp in a dark scene
+ * smears in a bright one. It is the same physics as the breathing above --
+ * both are the tube failing to keep up with a bright picture -- which is why
+ * both are driven by brightness rather than applied uniformly.
+ *
+ * Gathered rather than scattered: a fragment cannot write to its neighbours,
+ * so instead each fragment asks what its neighbours are and takes what spills
+ * FROM them. Only the part of a neighbour above BLOOM_KNEE spills, because a
+ * mid-grey cell does not defocus the beam -- without the knee this would be a
+ * plain blur, which is a different artefact and one that just looks soft.
+ *
+ * Four taps, on the axes only. The diagonals carry a quarter of the weight of
+ * the axial neighbours at this radius and cost as much again; at four levels
+ * of output quantisation the difference does not survive the dither.
+ *
+ * Added in LINEAR light and before the quantisation. Light adds linearly --
+ * two half-bright neighbours spill as much as one full-bright one, which is
+ * only true in linear space -- and doing it before the quantisation lets the
+ * dither resolve the spill into its own stipple rather than laying a smooth
+ * gradient on top of a quantised image.
+ *
+ * 한국어
+ * ------
+ * CRT의 전자빔은 렌즈로 초점을 맞추는데, 빔 전류가 올라가면 그 초점이 흐트러집니다.
+ * 따라서 밝은 점은 동시에 *넓은* 점입니다. 주변의 형광체까지 때리게 되어, 어두운 장면에서
+ * 선명했던 픽셀 경계가 밝은 장면에서는 번집니다. 위의 브리딩과 같은 물리 현상입니다. 둘
+ * 다 브라운관이 밝은 화면을 감당하지 못하는 것이며, 그래서 둘 다 균일하게 적용되지 않고
+ * 밝기로 구동됩니다.
+ *
+ * 흩뿌리는 대신 모읍니다. 프래그먼트는 이웃에 쓸 수 없으므로, 각 프래그먼트가 자기
+ * 이웃이 무엇인지 묻고 그들*로부터* 새어 나오는 것을 받아 옵니다. 이웃 중 BLOOM_KNEE를
+ * 넘는 부분만 새어 나옵니다. 중간 회색 화소는 빔의 초점을 흐트러뜨리지 않기 때문입니다.
+ * 이 무릎이 없으면 단순한 블러가 되는데, 그것은 다른 아티팩트이며 그냥 흐릿해 보일
+ * 뿐입니다.
+ *
+ * 축 방향 4개만 샘플링합니다. 이 반경에서 대각선은 축 방향 이웃의 4분의 1 가중치를
+ * 나르면서 비용은 같으며, 출력이 4단계로 양자화되는 상황에서 그 차이는 디더를 견디지
+ * 못합니다.
+ *
+ * *선형* 광량에서, 양자화 *이전에* 더합니다. 빛은 선형으로 더해지며(절반 밝기 이웃 둘이
+ * 온전한 밝기 이웃 하나만큼 새어 나오는데, 이는 선형 공간에서만 참입니다), 양자화 전에
+ * 수행하면 디더가 그 번짐을 자기 방식의 스티플로 해상합니다. 양자화된 이미지 위에 부드러운
+ * 그라데이션을 얹는 것이 아닙니다. */
+"  const float BLOOM_KNEE   = 0.25;\n"
+"  const float BLOOM_AMOUNT = 0.55;\n"
+"  const float BLOOM_RADIUS = 1.35;\n"
+/* The knee is applied to EACH neighbour before they are summed, not to their
+   average. Averaging first lets a dark neighbour cancel a bright one: at an
+   edge, a fragment with one blazing neighbour and three black ones averages to
+   a quarter brightness, which sits below any useful knee and blooms nothing.
+   Measured at the boundary of a full-white block, that average came to 0.2501
+   against a knee of 0.25 -- it missed by a ten-thousandth, and the bloom was
+   invisible at every brightness while looking perfectly correct in the source.
+   Physically the per-neighbour form is also the right one: it is each bright
+   cell that defocuses the beam, and a dark cell beside it does not undo that.
+   무릎을 이웃들의 *평균*이 아니라 각 이웃에 개별 적용합니다. 먼저 평균을 내면 어두운
+   이웃이 밝은 이웃을 상쇄합니다. 경계에서 눈부신 이웃 하나와 검은 이웃 셋을 가진
+   프래그먼트는 4분의 1 밝기로 평균되는데, 이는 쓸 만한 어떤 무릎보다도 낮아 아무것도
+   번지지 않습니다. 순백 블록의 경계에서 측정한 그 평균은 0.2501이었고 무릎은
+   0.25였습니다. 만분의 일 차이로 못 넘었고, 소스는 완벽히 올바라 보이는데 블루밍은 어떤
+   밝기에서도 보이지 않았습니다. 물리적으로도 이 형태가 옳습니다. 빔의 초점을 흐트러뜨리는
+   것은 각각의 밝은 화소이며, 그 옆의 어두운 화소가 그것을 되돌리지는 않습니다. */
+"  float bloom = 0.0;\n"
+"  {\n"
+"    vec2 st = BLOOM_RADIUS / uRes;\n"
+"    vec3 over = vec3(0.0);\n"
+"    over += max(toLinear(textureLod(uTex, uv + vec2( st.x, 0.0), 0.0).rgb)\n"
+"                - BLOOM_KNEE, 0.0);\n"
+"    over += max(toLinear(textureLod(uTex, uv + vec2(-st.x, 0.0), 0.0).rgb)\n"
+"                - BLOOM_KNEE, 0.0);\n"
+"    over += max(toLinear(textureLod(uTex, uv + vec2( 0.0, st.y), 0.0).rgb)\n"
+"                - BLOOM_KNEE, 0.0);\n"
+"    over += max(toLinear(textureLod(uTex, uv + vec2( 0.0,-st.y), 0.0).rgb)\n"
+"                - BLOOM_KNEE, 0.0);\n"
+"    over *= 0.25 / (1.0 - BLOOM_KNEE);\n"
+"    src = toGamma(toLinear(src) + over * BLOOM_AMOUNT);\n"
+/* Keep how much spilled. The dither below uses it to carry the part of the
+   bloom that is too small to survive quantisation on its own -- see the note
+   above `th`.
+   얼마나 새어 나왔는지를 보관합니다. 아래의 디더가 이 값을 사용해, 블룸 중 자력으로는
+   양자화를 견디지 못하는 부분을 나릅니다. `th` 위의 설명을 참조하십시오. */
+"    bloom = dot(over, vec3(0.2126, 0.7152, 0.0722)) * BLOOM_AMOUNT;\n"
+"  }\n"
 
 /* Matrix cell from the OFFSCREEN pixel coordinate, not the window's. Using
    the window's would shrink the pattern as the window grew, so the dither
@@ -379,7 +625,54 @@ static const char *FS =
    반대 방향으로 밀리므로, 패턴이 단순히 어두워지는 대신 그림자에서 열리고 빛에서
    닫힙니다. */
 "  float bias = (0.5 - lum) * LUMA_DRIVE;\n"
-"  float th   = clamp(t + bias, 0.0, 1.0) - 0.5;\n"
+
+/* The bloom also pushes the threshold, and this is what makes it visible at
+ * all.
+ *
+ * Adding the spill to `src` above is correct and insufficient. The output has
+ * four levels, so a bloom that does not push a fragment clear across a band
+ * boundary is rounded straight back to where it started and vanishes. Measured
+ * across the tone range, three of five representative cases lost the bloom
+ * entirely that way: the glow was computed, added, and then quantised away.
+ *
+ * Biasing the dither threshold instead lets the spill be expressed as a
+ * DENSITY. A fragment whose bloom is a third of a band cannot move a whole
+ * band on its own, but it can tip roughly a third of the Bayer cells in its
+ * neighbourhood over the line -- which is a stipple that reads as a faint
+ * glow, and is exactly how the dither renders every other partial value.
+ *
+ * The two work together rather than one replacing the other: a strong bloom
+ * still moves `src` a full band and comes out solid, while a weak one that
+ * would have disappeared now survives as pattern.
+ *
+ * ADDED, not subtracted. The quantiser is floor(src*(L-1) + 0.5 + th), so a
+ * larger th rounds UP and a smaller one rounds DOWN. Subtracting was the first
+ * attempt, on the reasoning that "lowering the threshold lets more through";
+ * it darkened instead, and the measured spill at a white edge fell from 127.6
+ * to 95.7 -- the bloom was being quantised away harder than before.
+ *
+ * 블룸도 임계값을 밀며, 이것이 블룸을 보이게 만드는 핵심입니다.
+ *
+ * 위에서 `src`에 번짐을 더하는 것은 옳지만 충분하지 않습니다. 출력이 4단계뿐이므로,
+ * 프래그먼트를 밴드 경계 너머로 확실히 밀어내지 못하는 블룸은 원래 자리로 그대로
+ * 반올림되어 사라집니다. 톤 범위 전반을 측정한 결과 대표적인 5개 사례 중 3개에서 블룸이
+ * 그렇게 통째로 소실되었습니다. 발광이 계산되고 더해진 뒤 양자화로 지워진 것입니다.
+ *
+ * 대신 디더 임계값을 편향시키면 번짐이 *밀도*로 표현됩니다. 블룸이 밴드의 3분의 1인
+ * 프래그먼트는 혼자서 한 밴드를 옮길 수 없지만, 주변 Bayer 셀의 약 3분의 1을 경계 너머로
+ * 넘길 수는 있습니다. 이는 희미한 발광으로 읽히는 스티플이며, 디더가 다른 모든 부분값을
+ * 표현하는 방식과 정확히 같습니다.
+ *
+ * 둘 중 하나가 다른 하나를 대체하는 것이 아니라 함께 작동합니다. 강한 블룸은 여전히
+ * `src`를 한 밴드만큼 옮겨 단색으로 나오고, 사라졌을 약한 블룸은 이제 패턴으로
+ * 살아남습니다.
+ *
+ * 빼는 것이 아니라 *더합니다*. 양자화는 floor(src*(L-1) + 0.5 + th)이므로 th가 크면
+ * *올림*되고 작으면 *내림*됩니다. "임계값을 낮추면 더 많이 통과한다"는 판단으로 처음에는
+ * 뺐는데, 오히려 어두워졌습니다. 흰 경계에서 측정한 번짐이 127.6에서 95.7로 떨어졌고,
+ * 블룸이 이전보다 더 심하게 양자화로 지워지고 있었습니다. */
+"  const float BLOOM_DITHER = 1.6;\n"
+"  float th   = clamp(t + bias + bloom * BLOOM_DITHER, 0.0, 1.0) - 0.5;\n"
 
 /* Quantise in GAMMA space, on the source value.
  *
@@ -452,7 +745,116 @@ static const char *FS =
 "  vec3  hue = src / max(lum, 1e-3);\n"
 "  vec3  qh  = clamp(hue * ql, 0.0, 1.0);\n"
 
-"  FragColor = vec4(clamp(mix(qh, q, SATURATION), 0.0, 1.0), 1.0);\n"
+"  vec3 col = clamp(mix(qh, q, SATURATION), 0.0, 1.0);\n"
+
+/* The single-hue remap. Inert at DUOTONE 0, which is why it can sit
+ * unconditionally in the shader rather than behind a second program.
+ *
+ * Driven by the QUANTISED LUMINANCE (ql), not by `col`. Using col's own
+ * luminance would let a saturated red and a mid grey of equal brightness land
+ * on different points of the ramp, which is precisely the hue variation this
+ * removes. ql is already the dithered decision for this pixel, so the pattern
+ * the stages above produced carries through exactly -- only its colour changes.
+ *
+ * Mixed in GAMMA space, matching where the quantisation happened. Interpolating
+ * two sRGB endpoints in linear light would put the midtones somewhere other
+ * than halfway between the inks as seen, and the four levels are few enough
+ * that each one's placement is visible.
+ *
+ * 단색조 재매핑입니다. DUOTONE이 0이면 아무 영향이 없으므로, 두 번째 프로그램 뒤에 두지
+ * 않고 셰이더에 무조건 배치할 수 있습니다.
+ *
+ * `col`이 아니라 *양자화된 휘도*(ql)로 구동됩니다. col 자신의 휘도를 쓰면 밝기가 같은
+ * 채도 높은 빨강과 중간 회색이 램프의 서로 다른 지점에 놓이는데, 이것이 바로 이 단계가
+ * 제거하려는 색상 변화입니다. ql은 이미 이 픽셀에 대해 디더가 내린 결정이므로, 위 단계들이
+ * 만들어 낸 패턴이 그대로 전달되고 색만 바뀝니다.
+ *
+ * 양자화가 일어난 곳과 맞추어 *감마* 공간에서 혼합합니다. 두 sRGB 끝점을 선형 광량에서
+ * 보간하면 중간 톤이 눈에 보이는 두 잉크의 중간이 아닌 곳에 놓이게 되며, 단계가 네 개뿐이라
+ * 각 단계의 위치가 눈에 띕니다. */
+"  vec3 duo = mix(INK, PAPER, ql);\n"
+"  col = mix(col, duo, DUOTONE);\n"
+
+/* --- CRT: scanlines and a little live grain ---------------------------
+ *
+ * ENGLISH
+ * -------
+ * Last, after everything else, and deliberately so: this is the display, not
+ * the image. Quantising a scanline would put the dither to work reproducing
+ * the scanline itself and waste levels the picture needs, so the darkening
+ * happens once the four-level decision has already been made.
+ *
+ * SCANLINES are indexed against uWin rather than uRes. The image is drawn at
+ * 360 art pixels and shown on 720 rows, so a line every OUTPUT row is far too
+ * fine to see and a line every ART pixel is the real CRT spacing. Using
+ * gl_FragCoord.y directly is what makes this land on physical rows regardless
+ * of what the art resolution happens to be.
+ *
+ * The intensity is a real brightness cost: half the rows lose SCAN_DEPTH, so
+ * the frame averages (1 - SCAN_DEPTH/2) of what it was. At 0.18 that is 9%,
+ * which is the reason it is not higher -- the dither's darkest band is already
+ * near black and a heavier scanline crushes it into solid black.
+ *
+ * GRAIN is a *temporal* noise, and it is the one thing here that changes every
+ * frame. It is not the same tool as the light noise in render.c: that one is
+ * attached to the world and never moves, which is what makes it read as the
+ * surface. This one moves constantly, which is what makes it read as the
+ * signal. Both at once would be muddy, so this is deliberately faint -- enough
+ * to keep a flat wall from looking like a solid fill, not enough to read as
+ * static.
+ *
+ * @note NOT vignetted, on request. Vignetting, barrel distortion and chromatic
+ *       aberration are one family -- they all darken or bend the edges, and
+ *       adding one without the others reads as a mistake rather than as a
+ *       choice. Leaving all three out is a coherent position; taking one is
+ *       not.
+ *
+ * 한국어
+ * ------
+ * 다른 모든 처리 이후 마지막에 놓이며, 이는 의도적입니다. 이것은 이미지가 아니라
+ * *디스플레이*입니다. 주사선을 양자화하면 디더가 주사선 자체를 재현하는 데 동원되어
+ * 그림에 필요한 단계를 낭비하므로, 4단계 결정이 끝난 뒤에 어둡게 만듭니다.
+ *
+ * *주사선*은 uRes가 아니라 uWin을 기준으로 인덱싱됩니다. 이미지는 360 아트 픽셀로
+ * 그려져 720행에 표시되므로, *출력 행*마다 선을 넣으면 너무 촘촘해 보이지 않고 *아트
+ * 픽셀*마다가 실제 CRT 간격입니다. gl_FragCoord.y를 직접 쓰는 것이, 아트 해상도가
+ * 무엇이든 물리적 행에 정확히 놓이게 만드는 방법입니다.
+ *
+ * 세기는 실제 밝기 비용입니다. 행의 절반이 SCAN_DEPTH만큼 어두워지므로 프레임 평균이
+ * (1 - SCAN_DEPTH/2)가 됩니다. 0.18에서 9%이며, 이보다 높이지 않는 이유가 그것입니다.
+ * 디더의 가장 어두운 밴드가 이미 검정에 가까운데 주사선이 무거우면 완전한 검정으로
+ * 뭉갭니다.
+ *
+ * *그레인*은 *시간적* 노이즈이며, 이곳에서 매 프레임 변하는 유일한 것입니다. render.c의
+ * 조명 노이즈와는 다른 도구입니다. 그쪽은 월드에 붙어 움직이지 않으며 그것이 표면으로
+ * 읽히게 만듭니다. 이쪽은 계속 움직이며 그것이 신호로 읽히게 만듭니다. 둘 다 강하면
+ * 탁해지므로 의도적으로 희미합니다. 평평한 벽이 단색 칠처럼 보이지 않을 정도이지,
+ * 잡음으로 읽힐 정도는 아닙니다.
+ *
+ * @note 요청에 따라 비네팅은 *없습니다*. 비네팅, 통 왜곡, 색수차는 한 계열입니다. 모두
+ *       가장자리를 어둡게 하거나 휘게 하며, 나머지 없이 하나만 넣으면 선택이 아니라 실수로
+ *       읽힙니다. 셋 다 빼는 것은 일관된 입장이지만 하나만 취하는 것은 그렇지 않습니다. */
+"  const float GRAIN = 0.05;\n"
+
+/* Odd output rows are the dark ones. mod on the raw fragment row means the
+   pattern is locked to the display, not to the image -- resizing the window
+   changes how many art pixels a scanline covers, which is what a real monitor
+   does too.
+   홀수 출력 행이 어두운 쪽입니다. 원본 프래그먼트 행에 mod를 적용하므로 패턴이 이미지가
+   아니라 디스플레이에 고정됩니다. 창 크기를 바꾸면 주사선 하나가 덮는 아트 픽셀 수가
+   달라지는데, 실제 모니터도 그렇게 동작합니다. */
+"  float row = mod(gl_FragCoord.y, 2.0);\n"
+"  col *= 1.0 - uScan * step(1.0, row);\n"
+
+/* Temporal grain. h21 is the same hash the dither's neighbours use, fed the
+   fragment position and the frame so it lands somewhere different each time.
+   시간적 그레인입니다. h21은 디더 주변부가 쓰는 것과 같은 해시이며, 프래그먼트 위치와
+   프레임을 입력받아 매번 다른 곳에 놓입니다. */
+"  float g = fract(sin(dot(gl_FragCoord.xy + uTime, vec2(12.9898,78.233)))\n"
+"                  * 43758.5453);\n"
+"  col += (g - 0.5) * GRAIN;\n"
+
+"  FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);\n"
 "}\n";
 
 /* --- Static function prototypes / 정적 함수 프로토타입 --- */
@@ -490,7 +892,20 @@ int post_init(int width, int height) {
     glBindTexture(GL_TEXTURE_2D, g_colour);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, fbw, fbh, 0,
                  GL_RGBA, GL_UNSIGNED_BYTE, 0);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    /* NEAREST_MIPMAP_NEAREST, not plain NEAREST: the magnification filter is
+       what makes the image blocky and that stays NEAREST, but the minification
+       filter has to allow mipmaps because the breathing needs the frame's mean
+       brightness and the top mip level IS that mean -- one 1x1 texel averaging
+       everything drawn. Computing it any other way would mean reading the
+       framebuffer back to the CPU, which stalls the pipeline for a number the
+       GPU can produce for free.
+       단순 NEAREST가 아니라 NEAREST_MIPMAP_NEAREST입니다. 화면을 각지게 만드는 것은
+       *확대* 필터이고 그것은 NEAREST로 유지되지만, *축소* 필터는 밉맵을 허용해야 합니다.
+       브리딩이 프레임 평균 밝기를 필요로 하는데 최상위 밉 레벨이 곧 그 평균이기
+       때문입니다. 1x1 텍셀 하나가 그려진 모든 것을 평균한 값입니다. 다른 방법으로
+       계산하려면 프레임버퍼를 CPU로 읽어야 하는데, 이는 GPU가 공짜로 만들어 낼 수 있는
+       값을 위해 파이프라인을 멈추는 것입니다. */
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     /* Clamp, or the dither's edge pixels sample from the opposite side.
        클램프하지 않으면 디더의 가장자리 픽셀이 반대편에서 샘플링됩니다. */
@@ -560,7 +975,10 @@ int post_init(int width, int height) {
     if (!linked) { post_shutdown(); return 0; }
 
     g_u_tex = glGetUniformLocation(g_prog, "uTex");
-    g_u_res = glGetUniformLocation(g_prog, "uRes");
+    g_u_res  = glGetUniformLocation(g_prog, "uRes");
+    g_u_win  = glGetUniformLocation(g_prog, "uWin");
+    g_u_time = glGetUniformLocation(g_prog, "uTime");
+    g_u_scan = glGetUniformLocation(g_prog, "uScan");
 
     /* An empty VAO is still required: core profile refuses to draw with no
        vertex array bound, even when the shader reads no attributes.
@@ -575,6 +993,25 @@ int post_init(int width, int height) {
 int post_enabled(void) { return g_ready && g_on; }
 
 int post_in_world_pass(void) { return g_in_world; }
+
+void post_set_scanline(float depth) {
+    if (depth < 0.0f) depth = 0.0f;
+    if (depth > 1.0f) depth = 1.0f;
+    g_scan = depth;
+}
+
+float post_scanline(void) { return g_scan; }
+
+void post_size(int *w, int *h) {
+    /* Zero when there is no offscreen buffer to speak of, rather than the
+       stale dimensions of one that failed to complete. A caller sizing a grid
+       from this needs to know the difference.
+       완성되지 못한 버퍼의 오래된 크기가 아니라 0을 반환합니다. 이 값으로 격자 크기를
+       정하는 호출자는 그 차이를 알아야 합니다. */
+    int live = (g_ready && g_on);
+    if (w) *w = live ? g_w : 0;
+    if (h) *h = live ? g_h : 0;
+}
 
 void post_set_enabled(int on) { g_on = on ? 1 : 0; }
 
@@ -610,8 +1047,36 @@ void post_end(int win_w, int win_h) {
     glUseProgram(g_prog);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, g_colour);
+
+    /* Build the mip chain. The breathing samples its top level -- a single
+       texel averaging the whole frame -- and without this call that level
+       holds whatever the last frame left there, or nothing at all, and the
+       image would either breathe on stale data or not at all.
+       Costs one pass over the framebuffer at decreasing sizes, which is under
+       a third of the area of the buffer itself.
+       밉 체인을 생성합니다. 브리딩이 그 최상위 레벨(프레임 전체를 평균한 텍셀 하나)을
+       샘플링하는데, 이 호출이 없으면 그 레벨에는 이전 프레임이 남긴 값이나 아무것도 없는
+       상태가 되어, 화면이 오래된 데이터로 숨을 쉬거나 아예 숨 쉬지 않게 됩니다.
+       비용은 크기가 줄어드는 프레임버퍼를 한 번 훑는 것이며, 버퍼 자체 면적의 3분의 1
+       미만입니다. */
+    glGenerateMipmap(GL_TEXTURE_2D);
+
     glUniform1i(g_u_tex, 0);
     glUniform2f(g_u_res, (float)g_w, (float)g_h);
+    glUniform2f(g_u_win, (float)(win_w > 0 ? win_w : 1),
+                         (float)(win_h > 0 ? win_h : 1));
+
+    /* Wrapped rather than counted forever. The grain hashes this together with
+       the fragment position, and a float that has grown past its precision
+       stops changing between frames -- the grain would freeze after a few
+       hours of running, which is exactly the kind of fault nobody reproduces.
+       무한히 세지 않고 순환시킵니다. 그레인은 이 값을 프래그먼트 위치와 함께 해싱하는데,
+       정밀도를 넘어선 float은 프레임 간에 더 이상 변하지 않게 됩니다. 몇 시간 실행 후
+       그레인이 멈추는 셈인데, 이는 아무도 재현하지 못하는 종류의 결함입니다. */
+    g_frame += 1.0f;
+    if (g_frame > 4096.0f) g_frame = 0.0f;
+    glUniform1f(g_u_time, g_frame);
+    glUniform1f(g_u_scan, g_scan);
 
     glBindVertexArray(g_vao);
     glDrawArrays(GL_TRIANGLES, 0, 3);

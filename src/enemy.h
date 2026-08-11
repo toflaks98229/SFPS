@@ -23,6 +23,72 @@
 #define ENEMY_MAX_SHOTS  48     ///< @brief 동시에 활성화될 수 있는 최대 몬스터 발사체 수.
 #define SHOT_RADIUS      0.22f  ///< @brief 발사체의 충돌 반경 (미터).
 
+/**
+ * @brief 궤적 파티클 방출 간격 (초).
+ *
+ * 시간 단위이므로 경로상의 간격은 프레임률과 무관하게 일정합니다. 캐스터의 발사체 속도는
+ * 11m/s이므로 0.03초 간격은 약 33cm마다 하나를 남기며, 이는 궤적이 점선이 아닌 선으로
+ * 읽히기에 충분히 조밀하면서도 비행 한 번이 공유 파티클 풀을 고갈시키지 않을 만큼
+ * 성깁니다. 값을 줄이면 궤적이 촘촘해지는 대신 풀 소비가 늘어납니다.
+ */
+#define SHOT_TRAIL_INTERVAL 0.03f
+
+/**
+ * @brief How many frames a cached line-of-sight reading is reused for.
+ *
+ * ENGLISH
+ * -------
+ * The visibility trace was the single most expensive thing the AI did -- once
+ * per monster per frame, where a shot fires twice a second. Answering it every
+ * fourth frame instead cuts that by 75%, and 4 frames is ~67ms at 60fps: below
+ * the point where a monster's reaction to cover reads as a delay rather than as
+ * the monster noticing.
+ *
+ * Raising it further keeps paying, and stops being free. At 8 frames (~133ms) a
+ * player who steps out and back behind cover inside that window is never seen
+ * at all, which is a monster that can be walked past rather than one that
+ * reacts slowly.
+ *
+ * @note Frames rather than seconds, deliberately. The cost this exists to
+ *       bound is per FRAME, so a frame count keeps the saving constant however
+ *       fast the machine runs. A time-based period would do less work per frame
+ *       on a slow machine -- the opposite of what a slow machine needs.
+ * @note Applies to the POLLING sight questions only -- whether a monster has
+ *       noticed the player, and whether a caster may plant and begin a cast.
+ *       The check made as a bolt is RELEASED is always live, because it exists
+ *       to catch a target ducking mid-wind-up. See enemy.c.
+ * @note In the header rather than enemy.c because tools/levelbench.c computes
+ *       the AI's per-frame trace budget from it. A second copy of the number
+ *       there would drift from this one, and the benchmark would then report a
+ *       saving the game does not make.
+ *
+ * 한국어
+ * ------
+ * @brief 캐시된 시야 판정 결과를 몇 프레임 동안 재사용하는지입니다.
+ *
+ * 가시성 판정은 AI가 수행하던 것 중 가장 비쌌습니다. 사격이 초당 두 번인 데 반해 이것은
+ * 몬스터마다 매 프레임이었습니다. 네 프레임에 한 번만 답하면 그 비용이 75% 줄고, 60fps에서
+ * 4프레임은 약 67ms입니다. 몬스터의 엄폐 반응이 지연으로 읽히지 않고 몬스터가 상황을
+ * 알아채는 것으로 읽히는 범위 안입니다.
+ *
+ * 더 올리면 이득은 계속 늘지만 더 이상 공짜가 아닙니다. 8프레임(약 133ms)에서는 그 창
+ * 안에 엄폐물 밖으로 나왔다 들어간 플레이어가 아예 목격되지 않는데, 이는 느리게 반응하는
+ * 몬스터가 아니라 그냥 지나쳐 갈 수 있는 몬스터입니다.
+ *
+ * @note 초가 아니라 프레임 단위인 것은 의도적입니다. 이 값이 억제하려는 비용이 *프레임*
+ *       단위이므로, 프레임 수로 세면 기기 속도와 무관하게 절감량이 일정합니다. 시간
+ *       기반 주기는 느린 기기에서 프레임당 작업량을 줄이는데, 이는 느린 기기에 필요한
+ *       것의 정반대입니다.
+ * @note *폴링* 시야 질문에만 적용됩니다. 몬스터가 플레이어를 알아챘는지, 캐스터가 자리를
+ *       잡고 시전을 시작해도 되는지입니다. 볼트를 *발사하는* 시점의 검사는 항상
+ *       실시간이며, 그 검사는 시전 도중 대상이 숨는 경우를 잡기 위해 존재합니다.
+ *       enemy.c를 참조하십시오.
+ * @note enemy.c가 아니라 헤더에 두는 이유는 tools/levelbench.c가 이 값으로 AI의 프레임당
+ *       판정 예산을 계산하기 때문입니다. 그곳에 숫자의 사본을 두면 이 값과 어긋나게 되고,
+ *       그러면 벤치마크가 게임이 실제로 얻지 못하는 절감량을 보고하게 됩니다.
+ */
+#define SIGHT_PERIOD 4
+
 /* --- 열거형 --- */
 
 /**
@@ -62,6 +128,16 @@ typedef enum {
  * 추가하는 것으로 충분하며, 새로운 코드 경로는 필요하지 않습니다.
  */
 typedef struct {
+    /**
+     * @brief 이 종류를 배치하는 엔티티 이름. 레벨 텍스트에 기록되는 이름입니다.
+     *
+     * 테이블 안에 두는 이유는, 종류 추가가 "행 하나 + `_pixel` 함수 하나"라는 원칙을
+     * 지키기 위함입니다. 이전에는 mon_type_for가 이름들을 손으로 펼친 문자 비교로
+     * 들고 있어서, 새 몬스터를 추가할 때 손대야 할 곳이 세 군데였고 그중 하나는
+     * 이 테이블에서 멀리 떨어져 있었습니다. 이름이 스탯 옆에 있으면 둘이 어긋날 수
+     * 없습니다.
+     */
+    const char *name;
     int   hp;           /**< 체력. */
     float speed;        /**< 이동 속도 (m/s). */
     float radius;       /**< 충돌 반경 (미터). */
@@ -92,6 +168,31 @@ typedef struct {
     float  flash;       /**< 피격 시 흰색 섬광 효과 (0으로 감소). */
     int    swung;       /**< 현재 공격의 피해가 이미 적용되었는지 여부. */
     int    active;      /**< 이 슬롯이 사용 중인지 여부. */
+
+    /**
+     * @brief 마지막으로 측정한 플레이어 시야 확보 여부. 파생값이며 제작값이 아닙니다.
+     *
+     * 시야 판정(level_blocked)은 AI가 수행하던 것 중 가장 비쌌으므로, 매 프레임이 아니라
+     * 몇 프레임에 한 번만 측정하고 그 사이에는 이 값을 재사용합니다. 자세한 근거는
+     * enemy.c의 SIGHT_PERIOD를 참조하십시오.
+     *
+     * 0(볼 수 없음)에서 시작하는 것이 중요합니다. 새로 생성된 몬스터는 지어낸 값으로
+     * 행동하는 대신 첫 실제 측정이 나올 때까지 대기합니다. 아직 모를 때는 아무것도 하지
+     * 않는 쪽으로 틀려야 합니다.
+     *
+     * @warning 볼트를 *발사하는 순간*의 판정에는 쓰이지 않습니다. 그 검사는 시전 도중
+     *          대상이 숨는 경우를 잡기 위해 존재하므로 반드시 최신이어야 합니다.
+     */
+    char   seen;
+
+    /**
+     * @brief `seen`을 다시 측정하기까지 남은 프레임 수.
+     *
+     * 몬스터마다 서로 다른 값에서 시작하여 갱신 시점을 분산시킵니다. 전부 같은 프레임에
+     * 갱신하면 평균 비용은 같으면서 주기마다 스파이크로 몰리는데, 그것은 평균이 낮아지는
+     * 대신 끊김으로 나타나는 형태입니다.
+     */
+    short  sight_age;
 } Enemy;
 
 /**
@@ -108,6 +209,16 @@ typedef struct {
     float life;     /**< 발사체가 사라지기까지 남은 시간 (초). 0이면 슬롯이 비어있음. */
     int   damage;   /**< 피해량. */
     int   active;   /**< 이 슬롯이 활성 상태인지 여부. */
+
+    /**
+     * @brief 다음 궤적 파티클을 방출하기까지 남은 시간 (초).
+     *
+     * 프레임마다 방출하지 않고 일정 간격으로 방출하기 위한 타이머입니다. 프레임 단위로
+     * 방출하면 궤적의 밀도가 프레임률에 좌우되고(60fps와 144fps에서 다르게 보임),
+     * 비행 중인 볼트 하나가 256개짜리 공유 파티클 풀을 혼자 채워 다른 모든 이펙트를
+     * 밀어냅니다. 간격을 두면 궤적이 프레임률과 무관하게 일정해집니다.
+     */
+    float trail_timer;
 } Shot;
 
 /* --- 함수 --- */

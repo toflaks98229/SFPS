@@ -218,6 +218,92 @@ int main(void) {
        "sideways hits a wall");
     okf(fabsf(n.y) < 0.2f, "wall normal is horizontal", n.y, 0.0f);
 
+    /* --- a hit normal must FACE the ray that found it ----------------------
+       Checking only that the wall normal is horizontal was not enough, and the
+       gap shipped: nearest_edge_normal returns the sector's OUTWARD normal,
+       which for a player standing inside a room points into the wall. All four
+       walls came back pointing away from the shooter while the floor and
+       ceiling were correct -- those two derive their normal from the ray's own
+       direction rather than from the polygon.
+
+       Nothing crashed and nothing looked wrong in the geometry, so the only
+       symptom was impact particles being thrown into the wall and never seen.
+       Every direction is checked here, not just one, because the previous
+       version passed on the single case it happened to try.
+       충돌 법선은 자신을 찾아낸 광선을 *향해야* 합니다. 벽 법선이 수평인지만 검사한
+       것으로는 부족했고 그 틈이 출시되었습니다. 아무것도 중단되지 않고 지오메트리도
+       멀쩡해 보였으므로, 유일한 증상은 피격 파티클이 벽 속으로 던져져 보이지 않는
+       것이었습니다. 이전 버전이 우연히 시도한 한 가지 경우에서 통과했기 때문에, 여기서는
+       한 방향이 아니라 모든 방향을 검사합니다. */
+    {
+        v3 DIRS[6] = { v3f( 1,0,0), v3f(-1,0,0), v3f(0,0, 1),
+                       v3f(0,0,-1), v3f(0, 1,0), v3f(0,-1,0) };
+        int away = 0, tested = 0;
+        for (int i = 0; i < 6; i++) {
+            float tt; v3 nn;
+            if (!level_trace(&l, eye, DIRS[i], 200.0f, &tt, &nn)) continue;
+            tested++;
+            if (v3dot(nn, DIRS[i]) > 0.0f) away++;
+        }
+        ok(tested >= 5, "the fixture presents surfaces in every direction");
+        okf(away == 0,
+            "every hit normal faces the ray, so particles spawn outward",
+            (float)away, 0.0f);
+    }
+
+    /* --- level_blocked must agree with level_trace -------------------------
+       level_blocked is the visibility half of level_trace, split out so a
+       line-of-sight test stops paying for the bisection that locates the hit
+       and the edge scan that derives a normal there. It is the call the monster
+       AI now makes once per monster instead of a full trace.
+
+       The two share ::march precisely so they cannot disagree, and this is what
+       holds that claim to account. A disagreement has one visible symptom and
+       it is a bad one: level_blocked reporting clear where level_trace reports
+       a hit is a monster that sees, and therefore shoots, through a wall --
+       exactly what the caster's second line-of-sight check exists to prevent.
+
+       Rays are cast in every direction from a point inside the map rather than
+       along the axes only, because a disagreement would come from the marcher's
+       step landing differently on a grazing angle, and an axis-aligned ray is
+       the case least likely to expose that.
+
+       level_blocked는 level_trace의 가시성 부분을 분리한 것으로, 시야 판정이 충돌 지점을
+       찾는 이분 탐색과 그곳의 법선을 유도하는 모서리 순회 비용을 더 이상 치르지 않게
+       합니다. 몬스터 AI가 이제 온전한 판정 대신 몬스터마다 한 번씩 호출하는 함수입니다.
+
+       두 함수는 서로 어긋날 수 없도록 ::march를 공유하며, 이 검사가 그 주장을 실제로
+       책임집니다. 어긋남의 증상은 하나뿐이고 그것은 나쁜 증상입니다. level_trace가 충돌을
+       보고하는 곳에서 level_blocked가 뚫려 있다고 답하면, 그것은 벽을 통해 보고 따라서 벽을
+       통해 쏘는 몬스터입니다. 캐스터의 두 번째 시야 검사가 막으려는 것이 정확히 그것입니다.
+
+       축 방향만이 아니라 모든 방향으로 광선을 쏩니다. 어긋남이 생긴다면 스치는 각도에서
+       마처의 간격이 다르게 놓이는 데서 올 텐데, 축에 정렬된 광선은 그것을 드러낼 가능성이
+       가장 낮은 경우이기 때문입니다. */
+    {
+        int disagree = 0, cast = 0, blocked_n = 0;
+        unsigned rng = 0x13579bdfu;
+        for (int i = 0; i < 400; i++) {
+            rng = rng * 1664525u + 1013904223u;
+            float a = ((rng >> 8) & 0xffff) / 65536.0f * 6.2831853f;
+            rng = rng * 1664525u + 1013904223u;
+            float e = (((rng >> 8) & 0xffff) / 65536.0f - 0.5f) * 1.6f;
+
+            v3 d = v3norm(v3f(cosf(a), e, sinf(a)));
+            float tt; v3 nn;
+            int hit = level_trace(&l, eye, d, 60.0f, &tt, &nn);
+            int blk = level_blocked(&l, eye, d, 60.0f);
+            cast++;
+            if (blk) blocked_n++;
+            if (hit != blk) disagree++;
+        }
+        ok(cast > 0 && blocked_n > 0,
+           "the fixture has rays that actually hit something");
+        okf(disagree == 0,
+            "level_blocked agrees with level_trace on every ray",
+            (float)disagree, 0.0f);
+    }
+
     /* --- partial overlap ---------------------------------------------------
        Two sectors overlapping only part of an edge -- the case the whole
        last-wins authoring model invites, and the one that was broken.
@@ -376,6 +462,203 @@ int main(void) {
                big.n_sectors, bb.count, ms);
         ok(ms < 16.0f, "a full level rebuilds inside one frame");
         mb_free(&bb);
+    }
+
+    /* --- the bounding-box fast path must never change an ANSWER ------------
+       point_in_sector rejects against a cached box before running the
+       crossing test. That is an optimisation, and an optimisation that
+       disagrees with the thing it optimises is just a bug with better timing.
+
+       Two properties are checked, and the second is the one that actually bit:
+
+         1. With bounds computed, every query agrees with the same query on a
+            sector whose bounds were never computed.
+         2. A Level assembled FIELD BY FIELD -- which every headless fixture in
+            tools/ does, and which no one thinks of as an initialisation step --
+            is correct without anyone calling level_bounds.
+
+       Property 2 failed once already. `Level l = {0}` leaves a box of
+       (0,0)-(0,0), which is a perfectly valid box that contains only the
+       origin, so every sector rejected every point and the entire level became
+       solid. Five test suites went red at once. The fix was a separate
+       has_bounds flag, whose zero value means "not computed" -- so the safe
+       answer is the one zeroed memory already gives. */
+    {
+        Level hand = {0};
+        Sector *s = &hand.sectors[hand.n_sectors++];
+        short p[8] = { -1200,-1200,  1200,-1200,  1200,1200,  -1200,1200 };
+        for (int i = 0; i < 8; i++) s->pts[i] = p[i];
+        s->n = 4; s->floor = 0; s->ceil = 600;
+
+        ok(!s->has_bounds,
+           "a hand-built sector starts with no bounds -- zeroed means unknown");
+
+        /* Sample a grid over and around the square, recording the answer
+           before and after the bounds exist. */
+        int disagreed = 0, inside_seen = 0, outside_seen = 0;
+        float fa, ca, fb, cb;
+        float probe[9] = { -30.0f, -12.0f, -11.9f, -6.0f, 0.0f,
+                            6.0f, 11.9f, 12.0f, 30.0f };
+
+        int before[9][9];
+        for (int i = 0; i < 9; i++)
+            for (int j = 0; j < 9; j++) {
+                before[i][j] = level_ground(&hand, probe[i], probe[j],
+                                            -1e9f, 1e9f, &fa, &ca);
+                if (before[i][j]) inside_seen++; else outside_seen++;
+            }
+
+        level_bounds(s);
+        ok(s->has_bounds, "and level_bounds marks them computed");
+
+        for (int i = 0; i < 9; i++)
+            for (int j = 0; j < 9; j++) {
+                int after = level_ground(&hand, probe[i], probe[j],
+                                         -1e9f, 1e9f, &fb, &cb);
+                if (after != before[i][j]) disagreed++;
+            }
+
+        /* Both outcomes must appear, or the comparison proved nothing: a grid
+           entirely outside the square would agree trivially. */
+        ok(inside_seen > 0 && outside_seen > 0,
+           "the probe grid straddles the sector's edge");
+        okf(disagreed == 0,
+            "the box rejects only points the crossing test rejects anyway",
+            (float)disagreed, 0.0f);
+    }
+
+    /* --- point lights parse, and stay inside their cap ---------------------
+       A light is eight integers on one line, and the parser has to consume
+       exactly those eight -- a miscount would leave the reader mid-line and
+       every declaration after it would be read as garbage. That failure is
+       silent: the level still loads, it is just darker or lit wrongly.
+
+       The cap matters as much as the parse. LVL_MAX_LIGHTS bounds what a level
+       may declare and RD_MAX_LIGHTS bounds what the shader evaluates; a level
+       between the two would store lights that never appear. level.c asserts
+       the relationship at compile time, and this checks the runtime half.
+       광원은 한 줄에 정수 여덟 개이며, 파서는 정확히 그 여덟 개를 소비해야 합니다. 개수를
+       잘못 세면 읽기 위치가 줄 중간에 남아 이후의 모든 선언이 쓰레기 값으로 읽힙니다. 이
+       실패는 조용합니다. 레벨은 여전히 로드되며 다만 더 어둡거나 잘못 조명될 뿐입니다. */
+    {
+        Level lit;
+        ok(level_load("arena", &lit), "the arena loads for the light check");
+
+        okf(lit.n_lights > 0,
+            "and declares at least one point light",
+            (float)lit.n_lights, 1.0f);
+        okf(lit.n_lights <= LVL_MAX_LIGHTS,
+            "never more than the cap, whatever the file says",
+            (float)lit.n_lights, (float)LVL_MAX_LIGHTS);
+
+        /* Every field has to survive the parse. A radius of zero lights
+           nothing and a power of zero is invisible, so either would make the
+           light exist in memory and not on screen -- exactly the kind of
+           silent nothing this suite exists to catch. */
+        int sane = 1;
+        for (int i = 0; i < lit.n_lights; i++) {
+            const Light *L = &lit.lights[i];
+            if (L->radius <= 0) sane = 0;
+            if (L->power  <= 0) sane = 0;
+            if (L->r < 0 || L->g < 0 || L->b < 0) sane = 0;
+            if (L->r > 255 || L->g > 255 || L->b > 255) sane = 0;
+        }
+        ok(sane, "every light has a usable radius, power and colour");
+
+        /* The parser must not have lost its place: entities are declared
+           around the lights in this file, so a light that consumed the wrong
+           number of tokens would eat them. */
+        ok(lit.n_ents > 0,
+           "and the entities around them still parsed -- the reader kept its place");
+    }
+
+    /* --- hazard floors -----------------------------------------------------
+       `hurt <dps>` makes a floor damage whatever stands on it. Two properties
+       matter and neither is visible from inside the game until a player is
+       standing in lava wondering why nothing is happening:
+
+       A sector with no `hurt` must read as exactly zero, or every floor in
+       every existing level becomes lethal the moment the field is added.
+
+       And the LAST-WINS rule has to apply here as it does to floor height,
+       because that is what allows a safe platform in the middle of a lava
+       pit -- which is the only thing that makes a lava room playable rather
+       than merely a wall.
+
+       Built by hand rather than read from the shipped level, for the reason
+       the fixture note at the top of this file gives: a test that asserts this
+       week's map goes red the moment somebody edits it.
+
+       `hurt <dps>`는 바닥이 그 위에 선 대상에게 피해를 주게 합니다. 두 가지 성질이
+       중요하며, 둘 다 플레이어가 용암 위에 서서 왜 아무 일도 없는지 의아해하기
+       전까지는 게임 안에서 보이지 않습니다.
+
+       `hurt`가 없는 섹터는 정확히 0으로 읽혀야 합니다. 그렇지 않으면 이 필드가 추가되는
+       순간 기존 모든 레벨의 모든 바닥이 치명적이 됩니다.
+
+       그리고 바닥 높이와 마찬가지로 마지막 선언 우선 규칙이 적용되어야 합니다. 그것이
+       용암 구덩이 한가운데의 안전한 발판을 가능하게 하며, 그것만이 용암 방을 단순한 벽이
+       아니라 플레이 가능한 곳으로 만듭니다.
+
+       이 파일 상단의 픽스처 참고 사항이 밝히는 이유로, 배포되는 레벨을 읽지 않고 손으로
+       만듭니다. 이번 주의 맵을 단언하는 테스트는 누군가 그것을 편집하는 순간
+       빨간불이 됩니다. */
+    {
+        Level h;
+        Level zero = {0};
+        h = zero;
+
+        /* A big safe room. */
+        Sector *room = &h.sectors[h.n_sectors++];
+        short rp[8] = { -1000,-1000, 1000,-1000, 1000,1000, -1000,1000 };
+        for (int i = 0; i < 8; i++) room->pts[i] = rp[i];
+        room->n = 4; room->floor = 0; room->ceil = 600; room->hurt = 0;
+
+        /* A lava pool inside it. */
+        Sector *lava = &h.sectors[h.n_sectors++];
+        short lp[8] = { -500,-500, 500,-500, 500,500, -500,500 };
+        for (int i = 0; i < 8; i++) lava->pts[i] = lp[i];
+        lava->n = 4; lava->floor = -40; lava->ceil = 600; lava->hurt = 20;
+
+        /* And a safe platform in the middle of the lava, declared last. */
+        Sector *isle = &h.sectors[h.n_sectors++];
+        short ip[8] = { -150,-150, 150,-150, 150,150, -150,150 };
+        for (int i = 0; i < 8; i++) isle->pts[i] = ip[i];
+        isle->n = 4; isle->floor = 20; isle->ceil = 600; isle->hurt = 0;
+
+        for (int i = 0; i < h.n_sectors; i++) level_bounds(&h.sectors[i]);
+        level_grid_build(&h);
+
+        okf(level_hazard_at(&h, 0.0f, 0.0f) == 0,
+            "the safe island in the lava hurts nothing",
+            (float)level_hazard_at(&h, 0.0f, 0.0f), 0.0f);
+
+        okf(level_hazard_at(&h, 3.5f, 0.0f) == 20,
+            "the lava around it does",
+            (float)level_hazard_at(&h, 3.5f, 0.0f), 20.0f);
+
+        okf(level_hazard_at(&h, 8.0f, 8.0f) == 0,
+            "and the room outside the lava does not",
+            (float)level_hazard_at(&h, 8.0f, 8.0f), 0.0f);
+
+        okf(level_hazard_at(&h, 500.0f, 500.0f) == 0,
+            "a point outside the map is not a hazard either",
+            (float)level_hazard_at(&h, 500.0f, 500.0f), 0.0f);
+
+        /* A level parsed with no `hurt` anywhere must be entirely safe. This
+           is the check that would catch the field being left uninitialised by
+           the sector parser, which would make every floor hazardous by
+           whatever happened to be on the stack.
+           `hurt`가 전혀 없는 레벨은 완전히 안전해야 합니다. 섹터 파서가 이 필드를
+           초기화하지 않고 두는 경우를 잡아내는 검사이며, 그렇게 되면 스택에 남아 있던
+           값에 따라 모든 바닥이 위험해집니다. */
+        Level plain;
+        if (level_load("arena", &plain)) {
+            int any = 0;
+            for (int i = 0; i < plain.n_sectors; i++)
+                if (plain.sectors[i].hurt != 0) any = 1;
+            ok(!any, "a level that authors no hazard has none");
+        }
     }
 
     mb_free(&b);

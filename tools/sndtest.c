@@ -118,6 +118,76 @@ static int each_sound(int want_wav) {
     return fails;
 }
 
+/* Every name the game passes to audio_play, gathered by hand from the source.
+ *
+ * ENGLISH
+ * -------
+ * The list above (each_sound) walks the FILE and asks whether each recipe makes
+ * a noise. This asks the opposite and more important question: does every name
+ * the CODE calls for still exist in the file?
+ *
+ * The two failures are not symmetrical. A recipe in the file that nothing plays
+ * is dead weight and costs a few bytes. A name in the code that the file no
+ * longer defines is silence at the moment the game most wanted a sound, and it
+ * looks exactly like a sound that is simply quiet -- audio_play finds nothing
+ * and returns, with no error anywhere. That is the failure mode this catches,
+ * and it is the one a rename produces.
+ *
+ * fxtest makes this same check for effects and it is the assertion there that
+ * has earned its keep; sounds had no equivalent. Kept as a hand-written list
+ * because the alternative -- scanning the .c files -- would make this test a
+ * parser of C rather than a test of the game.
+ *
+ * @note Anything added here must be a name some audio_play call site passes.
+ *       Grep for `audio_play(` to refresh it.
+ *
+ * 한국어
+ * ------
+ * 위의 each_sound는 *파일*을 순회하며 각 레시피가 소리를 내는지 묻습니다. 이 검사는 그
+ * 반대이자 더 중요한 질문을 던집니다. *코드*가 부르는 모든 이름이 파일에 아직 존재하는가?
+ *
+ * 두 실패는 대칭이 아닙니다. 아무도 재생하지 않는 레시피는 몇 바이트를 차지하는 잉여일
+ * 뿐입니다. 그러나 파일이 더 이상 정의하지 않는 이름을 코드가 부르면, 게임이 가장 소리를
+ * 원한 순간의 침묵이 되며 그것은 그냥 조용한 소리와 정확히 똑같아 보입니다. audio_play는
+ * 아무것도 찾지 못하고 반환하며 어디에도 오류가 남지 않습니다. 이것이 이 검사가 잡아내는
+ * 실패 양상이고, 이름 변경이 만들어 내는 실패입니다.
+ *
+ * fxtest가 이펙트에 대해 같은 검사를 하며 그곳에서 값어치를 증명한 단언이 바로 그것입니다.
+ * 사운드에는 대응하는 것이 없었습니다. 손으로 작성한 목록으로 두는 이유는, 대안인 .c 파일
+ * 스캔이 이 테스트를 게임의 테스트가 아니라 C 파서로 만들기 때문입니다.
+ */
+static const char *PLAYED[] = {
+    "shot", "dry", "pump", "impact",          /* weapon.c */
+    "hook", "hreel", "hland", "hbite", "hbiteb",  /* hook.c */
+    "phurt", "pdie", "win", "exit",           /* main.c */
+    "pammo", "pmed"                           /* pickup.c */
+};
+
+/* Names the game plays that the recipe file must still define.
+   게임이 재생하는 이름 중 레시피 파일이 여전히 정의해야 하는 것들입니다. */
+static int check_played(void) {
+    int missing = 0;
+    int n = (int)(sizeof(PLAYED) / sizeof(PLAYED[0]));
+
+    printf("\n  --- names the code plays ---\n");
+    for (int i = 0; i < n; i++) {
+        /* audio_render is the offline half of the same lookup audio_play does,
+           and it needs no device -- it returns 0 frames for a name the recipe
+           text does not define, which is exactly the question being asked.
+           audio_render는 audio_play가 수행하는 것과 동일한 조회의 오프라인 버전이며
+           장치가 필요 없습니다. 레시피 텍스트가 정의하지 않은 이름에 대해 0 프레임을
+           반환하는데, 그것이 바로 여기서 묻는 질문입니다. */
+        if (audio_render(PLAYED[i], g_buf, MAX_FRAMES) <= 0) {
+            printf("  %-10s MISSING -- audio_play(\"%s\") will be silent\n",
+                   PLAYED[i], PLAYED[i]);
+            missing++;
+        }
+    }
+    printf("  %-10s %d/%d names resolve  %s\n", "", n - missing, n,
+           missing ? "FAIL" : "ok");
+    return missing;
+}
+
 int main(int argc, char **argv) {
     int want_wav = 0;
     const char *one = 0;
@@ -130,6 +200,13 @@ int main(int argc, char **argv) {
            data_from_file(DATA_SOUNDS) ? "assets/sounds.txt" : "the baked copy");
 
     int fails = one ? report(one, want_wav) : each_sound(want_wav);
+
+    /* Skipped when a single sound was named: the caller asked about that one,
+       and failing on the other fourteen would be answering a different question.
+       사운드 하나를 지정한 경우에는 건너뜁니다. 호출자가 그것에 대해 물었으므로, 나머지
+       열네 개로 실패하는 것은 다른 질문에 답하는 셈입니다. */
+    if (!one) fails += check_played();
+
     printf(fails ? "\n%d problem(s)\n" : "\nall sounds produced audio\n", fails);
     return fails != 0;
 }

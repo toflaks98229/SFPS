@@ -180,6 +180,21 @@ typedef struct {
     int   grounded;     /**< Non-zero while standing on a floor. Recomputed every player_move. / 바닥에 서 있으면 0이 아닙니다. player_move마다 재계산됩니다. */
     int   health;       /**< 0 = dead; set by player_spawn, drained by monsters. / 0이면 사망. player_spawn이 설정하고 몬스터가 감소시킵니다. */
     float hurt;         /**< Red screen flash on taking a hit, decays to 0. / 피격 시 붉은 화면 점멸 효과. 0으로 감쇠합니다. */
+
+    /**
+     * @brief Keycards held, a KEY_* mask from level.h.
+     *
+     * On the player rather than in the level, because it is something the
+     * player carries between rooms and across a level transition. A level
+     * reload must not take a key away, and it cannot if the key was never
+     * stored in the level.
+     *
+     * @brief 보유한 키카드입니다. level.h의 KEY_* 마스크입니다.
+     * @note 레벨이 아니라 플레이어에 둡니다. 방 사이와 레벨 전환을 넘어 플레이어가
+     *       지니고 다니는 것이기 때문입니다. 레벨을 다시 읽는 것이 열쇠를 빼앗아서는
+     *       안 되며, 열쇠가 레벨에 저장된 적이 없다면 그럴 수 없습니다.
+     */
+    int   keys;
 } Player;
 
 /* --- Public function prototypes / 공개 함수 프로토타입 --- */

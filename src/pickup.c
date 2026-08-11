@@ -86,7 +86,7 @@ const Pickup *pickup_at(int i) {
 }
 
 void pickup_update(v3 player_eye, int *health, int health_max,
-                   int *ammo, int ammo_max, float dt) {
+                   Weapon *w, int *keys, float dt) {
     /* The player's feet, so a pickup at floor level is compared like with
        like rather than against the eye 1.7 m up. */
     float feet_y = player_eye.y - PLAYER_EYE;
@@ -118,10 +118,63 @@ void pickup_update(v3 player_eye, int *health, int health_max,
                저장해 두지 않고 구급상자 전체를 소비합니다. */
             if (*health > health_max) *health = health_max;
             audio_play("pmed", 80);
-        } else { /* PK_AMMO */
-            if (*ammo >= ammo_max) continue;
-            *ammo += PICKUP_AMMO;
-            if (*ammo > ammo_max) *ammo = ammo_max;
+        } else if (PK_KEY_MASK(p->kind) != KEY_NONE) {
+            /* Taken even when already held: a second red key is not useful,
+               but leaving one lying there reads as a key you have not found
+               yet, and a player who backtracks for it has been lied to.
+               이미 가지고 있어도 획득합니다. 두 번째 붉은 열쇠가 유용하지는 않지만, 그대로
+               놓아두면 아직 찾지 못한 열쇠처럼 보이고, 그것을 위해 되돌아온 플레이어는
+               속은 것입니다. */
+            *keys |= PK_KEY_MASK(p->kind);
+            audio_play("pammo", 100);
+        } else if (PK_WEAPON_WEAPON(p->kind) >= 0) {
+            /* --- a weapon lying on the floor ------------------------------
+               Taken even when already owned, because it carries ammunition and
+               a player who walks over a second axe expects to be given
+               something. Owning it already just means the belt is what gets
+               topped up.
+
+               Switching to it on the FIRST pickup only. Finding a weapon
+               should put it in your hands -- that is the moment it exists --
+               but a later one yanking the shotgun away mid-fight would be the
+               game overriding a choice the player already made.
+
+               이미 보유 중이어도 획득합니다. 탄약을 가지고 있으며, 두 번째 도끼를 밟은
+               플레이어는 무언가 얻기를 기대하기 때문입니다. 이미 보유 중이라면 채워지는
+               것이 탄약일 뿐입니다.
+
+               전환은 *처음* 획득할 때만 합니다. 무기를 발견하면 손에 쥐여야 합니다.
+               그 순간이 그 무기가 존재하게 되는 순간입니다. 그러나 나중에 주운 것이
+               교전 도중 샷건을 빼앗는다면, 그것은 플레이어가 이미 내린 선택을 게임이
+               뒤엎는 일입니다. */
+            int gw = PK_WEAPON_WEAPON(p->kind);
+            const WeaponType *S = wp_stats(gw);
+            int had = w->owned[gw];
+
+            if (had && w->ammo[gw] >= S->max_ammo) continue;
+
+            w->owned[gw] = 1;
+            w->ammo[gw] += S->start_ammo;
+            if (w->ammo[gw] > S->max_ammo) w->ammo[gw] = S->max_ammo;
+            if (!had) w->cur = gw;
+            audio_play("pammo", 90);
+        } else {
+            /* An ammo box, for whichever belt its kind names. */
+            int aw = PK_AMMO_WEAPON(p->kind);
+            if (aw < 0) continue;
+            const WeaponType *S = wp_stats(aw);
+
+            /* A box for a weapon you do not have is left alone rather than
+               banked. Walking over it later, once the weapon is found, is what
+               makes finding the weapon feel like it opened something up.
+               보유하지 않은 무기의 상자는 쌓아 두지 않고 그대로 둡니다. 무기를 찾은 뒤
+               다시 지나가며 줍는 것이, 무기를 찾은 일이 무언가를 열어 주었다는 느낌을
+               만듭니다. */
+            if (!w->owned[aw]) continue;
+            if (w->ammo[aw] >= S->max_ammo) continue;
+
+            w->ammo[aw] += S->pickup_ammo;
+            if (w->ammo[aw] > S->max_ammo) w->ammo[aw] = S->max_ammo;
             audio_play("pammo", 80);
         }
         /* Deactivated rather than removed, so indices stay stable for the
@@ -162,9 +215,72 @@ void pickup_update(v3 player_eye, int *health, int health_max,
  *       문자 단위로 비교합니다. 각 분기의 명시적인 종료 문자 검사가 "ammobox"가
  *       "ammo"와 일치하지 않도록 막아 줍니다.
  */
+/* Whether two names match. Avoids <string.h>, and is the same loop enemy.c and
+   fx.c use on their own name lookups.
+   두 이름이 일치하는지 여부입니다. <string.h>를 끌어오지 않으며, enemy.c와 fx.c가 자체
+   이름 조회에 쓰는 것과 같은 루프입니다. */
+static int name_eq(const char *a, const char *b) {
+    while (*a && *a == *b) { a++; b++; }
+    return !*a && !*b;
+}
+
+/**
+ * @brief The pickup kind a level entity's name asks for, or -1.
+ *
+ * ENGLISH
+ * -------
+ * Three families, checked in the order a name could be ambiguous in:
+ *
+ *   health              the medkit
+ *   ammo                the shotgun's box, under the name every level already
+ *                       uses -- renaming it would empty the authored maps
+ *   <weapon>ammo        that weapon's box, e.g. "rapidammo"
+ *   <weapon>            the weapon itself, e.g. "axe"
+ *
+ * The weapon families are derived from ::WEAPONS by walking it, so a weapon
+ * added to that table can be placed in a level immediately -- there is no
+ * second list of entity names to extend, and therefore no way for one to name
+ * a weapon the other does not.
+ *
+ * @note "<weapon>ammo" is tested before "<weapon>" because the latter is a
+ *       prefix of the former. Reversed, "rapidammo" would match the weapon
+ *       "rapid" and a level would spawn a free gun where it asked for a box.
+ *
+ * 한국어
+ * ------
+ * @brief 레벨 엔티티 이름이 요구하는 아이템 종류. 없으면 -1입니다.
+ *
+ * 이름이 모호할 수 있는 순서대로 세 계열을 검사합니다. 무기 계열은 ::WEAPONS를 순회하여
+ * 유도하므로, 그 표에 추가된 무기는 즉시 레벨에 배치할 수 있습니다. 확장해야 할 두 번째
+ * 엔티티 이름 목록이 없으며, 따라서 한쪽만 아는 무기가 생길 수 없습니다.
+ *
+ * @note "<무기>ammo"를 "<무기>"보다 먼저 검사합니다. 후자가 전자의 접두사이기 때문입니다.
+ *       순서가 반대라면 "rapidammo"가 무기 "rapid"와 일치하여, 상자를 요청한 레벨이 공짜
+ *       무기를 생성하게 됩니다.
+ */
 static int pickup_kind_for(const char *k) {
-    if (k[0]=='a'&&k[1]=='m'&&k[2]=='m'&&k[3]=='o'&&k[4]==0) return PK_AMMO;
-    if (k[0]=='h'&&k[1]=='e'&&k[2]=='a'&&k[3]=='l'&&k[4]=='t'&&k[5]=='h'&&k[6]==0)
-        return PK_HEALTH;
+    if (name_eq(k, "health")) return PK_HEALTH;
+    if (name_eq(k, "ammo"))   return PK_AMMO;
+
+    for (int w = 0; w < WP_TYPES; w++) {
+        const char *n = wp_stats(w)->name;
+
+        /* "<name>ammo", compared without building a string. */
+        const char *p = k, *q = n;
+        while (*q && *p == *q) { p++; q++; }
+        if (!*q && name_eq(p, "ammo")) return PK_AMMO_FOR(w);
+    }
+    for (int w = 0; w < WP_TYPES; w++)
+        if (name_eq(k, wp_stats(w)->name)) return PK_WEAPON_FOR(w);
+
+    /* Keycards, named by colour: `redkey`, `bluekey`, `yellowkey`. The colour
+       leads because that is how a player refers to them and how the door that
+       wants one is written -- `key red`.
+       색이 앞에 옵니다. 플레이어가 그렇게 부르고, 그것을 요구하는 문도 `key red`로
+       기록되기 때문입니다. */
+    if (name_eq(k, "redkey"))    return PK_KEY0 + 0;
+    if (name_eq(k, "bluekey"))   return PK_KEY0 + 1;
+    if (name_eq(k, "yellowkey")) return PK_KEY0 + 2;
+
     return -1;
 }

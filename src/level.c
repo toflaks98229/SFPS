@@ -245,6 +245,7 @@ int level_load(const char *name, Level *out) {
     out->n_sectors = 0;
     out->n_ents = 0;
     out->n_lights = 0;
+    out->n_doors  = 0;
     out->name[0] = 0;
     out->next[0] = 0;
     out->start[0] = out->start[1] = out->start[2] = 0;
@@ -317,6 +318,97 @@ int level_load(const char *name, Level *out) {
             int v, ok;
             p = txt_read_int(p, &v, &ok);
             if (ok && cur) cur->hurt = (short)v;
+            continue;
+        }
+
+        /* `door <up|down|x|z> <amount> [speed <n>] [tag <n>] [key <colour>]`
+         *
+         * ENGLISH
+         * -------
+         * Attaches to the sector being described, so a door is written inside
+         * the `s` block it moves rather than in a list somewhere else that has
+         * to name it. That is the same reason `hurt` sits here: a property of a
+         * sector belongs with the sector, and a second table keyed by index is
+         * a thing to keep in step.
+         *
+         * The optional words are read in a loop rather than positionally, so
+         * `door up 300 key red` and `door up 300 tag 2 speed 400` are both
+         * valid and neither needs a placeholder for what it does not say.
+         *
+         * 한국어
+         * ------
+         * 설명 중인 섹터에 붙습니다. 따라서 문은 그것을 지목해야 하는 다른 곳의 목록이
+         * 아니라, 그것이 움직이는 `s` 블록 *안에* 기록됩니다. `hurt`가 이곳에 있는 것과 같은
+         * 이유입니다. 섹터의 속성은 섹터와 함께 있어야 하며, 인덱스로 참조하는 두 번째 표는
+         * 동기화를 유지해야 할 대상이 됩니다.
+         *
+         * 선택 단어들은 위치가 아니라 루프로 읽으므로, `door up 300 key red`와
+         * `door up 300 tag 2 speed 400` 모두 유효하며 말하지 않은 것에 대한 자리
+         * 표시자가 필요 없습니다.
+         */
+        if (txt_is(t, len, "door")) {
+            const char *ax = txt_token(p, &len);
+            if (!ax) continue;
+            p = ax + len;
+
+            int axis = -1;
+            if      (txt_is(ax, len, "up"))   axis = DOOR_UP;
+            else if (txt_is(ax, len, "down")) axis = DOOR_DOWN;
+            else if (txt_is(ax, len, "x"))    axis = DOOR_X;
+            else if (txt_is(ax, len, "z"))    axis = DOOR_Z;
+            if (axis < 0) continue;
+
+            int amount, ok = 1;
+            p = txt_read_int(p, &amount, &ok);
+            if (!ok) continue;
+
+            /* Defaults chosen so `door up 300` alone is a complete, sensible
+               door: it opens on touch, needs no key, and travels at a speed
+               that reads as a door rather than as a lift.
+               `door up 300`만으로도 완결된 문이 되도록 기본값을 정했습니다. 접촉 시
+               열리고, 열쇠가 필요 없으며, 승강기가 아니라 문으로 읽히는 속도로
+               움직입니다. */
+            int speed = 300, tag = 0, key = KEY_NONE;
+
+            for (;;) {
+                const char *o = txt_token(p, &len);
+                if (!o) break;
+
+                if (txt_is(o, len, "speed")) {
+                    p = o + len;
+                    int v; p = txt_read_int(p, &v, &ok);
+                    if (ok && v > 0) speed = v;
+                    continue;
+                }
+                if (txt_is(o, len, "tag")) {
+                    p = o + len;
+                    int v; p = txt_read_int(p, &v, &ok);
+                    if (ok) tag = v;
+                    continue;
+                }
+                if (txt_is(o, len, "key")) {
+                    p = o + len;
+                    const char *c = txt_token(p, &len);
+                    if (!c) break;
+                    p = c + len;
+                    if      (txt_is(c, len, "red"))    key = KEY_RED;
+                    else if (txt_is(c, len, "blue"))   key = KEY_BLUE;
+                    else if (txt_is(c, len, "yellow")) key = KEY_YELLOW;
+                    continue;
+                }
+                break;      /* not ours: leave it for the outer loop */
+            }
+
+            if (!cur) continue;
+            if (out->n_doors >= LVL_MAX_DOORS) { DIAG(DIAG_DOOR_CAP); continue; }
+
+            DoorDef *d = &out->doors[out->n_doors++];
+            d->sector = (short)(cur - out->sectors);
+            d->axis   = (short)axis;
+            d->amount = (short)amount;
+            d->speed  = (short)speed;
+            d->tag    = (short)tag;
+            d->key    = (short)key;
             continue;
         }
 

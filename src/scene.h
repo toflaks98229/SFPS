@@ -282,6 +282,22 @@ void scene_draw_pickups(Scene *s, mat4 vp, v3 eye, v3 cam_right);
  */
 void scene_draw_shots(Scene *s, mat4 vp, v3 cam_right, v3 cam_up);
 
+/**
+ * @brief Draws the player's grenades and bolts.
+ *
+ * @note Reuses the shot buffer: the two passes never overlap in a frame, and
+ *       a second buffer of the same size would be memory held for nothing.
+ * @note A grenade reddens as its fuse burns, which is the only warning the
+ *       player gets that one at their feet is about to go off.
+ *
+ * @brief 플레이어의 유탄과 탄을 그립니다.
+ * @note 발사체 버퍼를 재사용합니다. 두 패스가 한 프레임 안에서 겹치지 않으며, 같은 크기의
+ *       두 번째 버퍼는 아무것도 아닌 것을 위해 붙잡아 두는 메모리입니다.
+ * @note 유탄은 도화선이 타면서 붉어집니다. 발밑의 유탄이 곧 터진다는 것에 대해 플레이어가
+ *       받는 유일한 경고입니다.
+ */
+void scene_draw_proj(Scene *s, mat4 vp, v3 cam_right, v3 cam_up);
+
 /* --- UI passes: after post_end / UI 패스: post_end 이후 --- */
 
 /**

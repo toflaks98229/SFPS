@@ -39,6 +39,176 @@
 #define WEAPON_START_AMMO 20    ///< @brief Shells you spawn with. / 스폰 시 보유하는 탄환 수.
 #define WEAPON_MAX_AMMO   50    ///< @brief What a belt holds -- pickups stop here. / 탄띠의 최대 수용량. 아이템 획득도 여기서 멈춥니다.
 
+/* --- The weapon roster / 무기 구성 ---------------------------------------
+ *
+ * ENGLISH
+ * -------
+ * One row per weapon in ::WEAPONS, and a new one is a row plus whatever art it
+ * wants -- the same shape enemy.c's bestiary has, and for the same reason: a
+ * kind that needs a new code path is a kind that will drift from the others.
+ *
+ * Each weapon answers a question the others answer badly. That is the whole
+ * design brief for a shooter's roster, and it is why the differences here are
+ * in HOW an attack reaches its target rather than in how much it hurts:
+ *
+ *   shotgun  a wall of hitscan pellets, now, at close range
+ *   grenade  around a corner, or into a group, at the cost of travel time
+ *   rapid    sustained pressure on one target, with lead to work out
+ *   axe      no ammo problem at all, if you are willing to close the distance
+ *
+ * 한국어
+ * ------
+ * ::WEAPONS에 무기당 한 행이며, 새 무기는 행 하나에 원하는 아트를 더한 것이 전부입니다.
+ * enemy.c의 몬스터 도감과 같은 형태이고 이유도 같습니다. 새 코드 경로가 필요한 종류는
+ * 결국 다른 것들과 어긋나게 됩니다.
+ *
+ * 각 무기는 다른 무기들이 잘 답하지 못하는 질문에 답합니다. 그것이 슈터 구성의 설계
+ * 요지 전부이며, 이곳의 차이가 피해량이 아니라 공격이 *어떻게* 목표에 도달하는가에 있는
+ * 이유입니다.
+ */
+
+/**
+ * @brief The weapons, in the order the number keys select them.
+ *
+ * @note Also the order of their sprite prefixes and pickup kinds, so a weapon
+ *       added here is added everywhere by index rather than by a table that
+ *       has to agree with this one.
+ *
+ * @brief 숫자 키가 선택하는 순서대로의 무기 목록입니다.
+ * @note 스프라이트 접두사와 아이템 종류의 순서이기도 하므로, 이곳에 추가된 무기는 이
+ *       목록과 일치시켜야 하는 별도의 표가 아니라 인덱스로 모든 곳에 추가됩니다.
+ */
+enum {
+    WP_SHOTGUN,   /**< Hitscan pellets. / 히트스캔 산탄. */
+    WP_GRENADE,   /**< Arcing, bouncing, timed explosive. / 곡사·도탄·시한 폭발물. */
+    WP_RAPID,     /**< Fast projectile stream. / 빠른 발사체 연사. */
+    WP_AXE,       /**< Melee, with a dash. / 근접. 대쉬를 동반합니다. */
+    WP_TYPES      /**< How many. / 무기 종류의 수. */
+};
+
+/**
+ * @struct WeaponType
+ * @brief Everything that makes one weapon behave unlike another.
+ *
+ * ENGLISH
+ * -------
+ * @note HOW an attack reaches its target is decided by which of `pellets`,
+ *       `proj_speed` and `melee_range` is non-zero -- exactly one per row, the
+ *       way enemy.c's `shot_speed` decides melee from ranged without a second
+ *       flag to disagree with it. tools/weapontest.c asserts that.
+ * @note `hook` says whether right-click throws the grapple. The axe is the one
+ *       row that does not: it leaps instead, and a weapon that offered both
+ *       would need a third button.
+ *
+ * 한국어
+ * ------
+ * @note 공격이 목표에 *어떻게* 도달하는지는 `pellets`, `proj_speed`, `melee_range` 중
+ *       무엇이 0이 아닌지로 결정되며, 행마다 정확히 하나입니다. enemy.c의 `shot_speed`가
+ *       별도의 플래그 없이 근접과 원거리를 가르는 것과 같습니다. tools/weapontest.c가
+ *       이를 단언합니다.
+ * @note `hook`은 우클릭이 그래플을 던지는지를 나타냅니다. 도끼가 유일하게 그렇지 않은
+ *       행이며, 대신 도약합니다. 둘 다 제공하는 무기는 세 번째 버튼이 필요해집니다.
+ */
+typedef struct {
+    const char *name;       /**< Shown on the HUD; also the sprite prefix and pickup name. / HUD 표시명이자 스프라이트 접두사, 아이템 이름. */
+    const char *model;      /**< models.txt entry, drawn when there is no sprite art. / 스프라이트 아트가 없을 때 그리는 models.txt 항목. */
+    const char *fire_snd;   /**< sounds.txt entry for the attack. / 공격 사운드. */
+
+    int   start_ammo;       /**< Rounds you spawn with, or pick the weapon up with. / 스폰 또는 획득 시의 탄약. */
+    int   max_ammo;         /**< What the belt holds for this type. / 이 종류의 최대 탄약. */
+    int   pickup_ammo;      /**< Rounds one ammo box gives. / 탄약 상자 하나가 주는 양. */
+
+    int   damage;           /**< Per pellet, per projectile, or per swing. / 산탄 하나·발사체 하나·휘두르기 한 번당 피해량. */
+    float cooldown;         /**< Seconds between attacks. / 공격 간격 (초). */
+    float spread;           /**< Cone half-angle, radians. / 산포 원뿔의 반각 (라디안). */
+
+    short pellets;          /**< >0: hitscan, this many rays. / 0보다 크면 히트스캔이며 이 수만큼의 광선. */
+    float proj_speed;       /**< >0: launches a projectile at this m/s. / 0보다 크면 이 속도(m/s)로 발사체를 발사. */
+    float proj_gravity;     /**< m/s^2 pulling the projectile down; 0 flies straight. / 발사체를 끌어내리는 가속도. 0이면 직진. */
+    float melee_range;      /**< >0: a swing reaching this far, in metres. / 0보다 크면 이 거리(미터)까지 닿는 근접 공격. */
+
+    float recoil, punch;    /**< Camera kick and view model kickback. / 카메라 반동과 뷰 모델 후퇴. */
+    int   hook;             /**< Non-zero when right-click throws the grapple. / 0이 아니면 우클릭이 그래플을 던집니다. */
+} WeaponType;
+
+/* --- The axe's movement / 도끼의 이동 -------------------------------------
+ *
+ * ENGLISH
+ * -------
+ * The axe is the only weapon whose attacks are also movement, and that is what
+ * makes a melee weapon viable here at all. Everything else in this game outruns
+ * a walk, so a weapon with 2.2m of reach that did not move you would only ever
+ * hit what had already caught you.
+ *
+ * These sit beside the grapple's tuning in this header for the reason stated
+ * there: the feel of being thrown across a room is one thing to tune, and
+ * splitting its numbers between two files is how half of them get tuned.
+ *
+ * 한국어
+ * ------
+ * 도끼는 공격이 곧 이동이기도 한 유일한 무기이며, 그것이 이곳에서 근접 무기를 성립하게
+ * 하는 요소입니다. 이 게임의 다른 모든 것이 걷기보다 빠르므로, 사거리 2.2m짜리 무기가
+ * 플레이어를 움직여 주지 않으면 이미 자신을 붙잡은 것만 때리게 됩니다.
+ *
+ * 그래플의 튜닝 값 옆 이 헤더에 두는 이유는 그곳에 적힌 것과 같습니다. 방을 가로질러
+ * 던져지는 감각은 하나의 조정 대상이며, 그 수치를 두 파일에 나누는 것이 그중 절반만
+ * 조정되는 경로입니다.
+ */
+
+/** @brief m/s added along the aim by a swing. / 휘두르기가 조준 방향으로 더하는 속도 (m/s). */
+#define AXE_DASH_SPEED   14.0f
+
+/** @brief Upward m/s the leap gives. / 도약이 부여하는 상승 속도 (m/s). */
+#define AXE_LEAP_UP      13.0f
+/** @brief Forward m/s the leap gives along the aim. / 도약이 조준 방향으로 부여하는 속도 (m/s). */
+#define AXE_LEAP_FWD      9.0f
+
+/**
+ * @brief Radius of the slam that lands with you, metres.
+ *
+ * Wider than a grenade's blast, because the grenade is thrown at a place you
+ * chose and this one goes off wherever you happened to come down. Paying for
+ * the loss of aim with area is what keeps it worth a charge.
+ *
+ * 유탄의 폭발보다 넓습니다. 유탄은 고른 지점으로 던지지만 이것은 착지한 곳에서 터지기
+ * 때문입니다. 조준을 잃는 대가를 범위로 치르는 것이 충전량을 쓸 가치를 유지시킵니다.
+ */
+#define AXE_SLAM_RADIUS   5.5f
+/** @brief Damage at the centre of the slam. / 내려찍기 중심에서의 피해량. */
+#define AXE_SLAM_DAMAGE     70
+
+/**
+ * @brief Seconds a leap may stay airborne before the slam is forced.
+ *
+ * A leap that carries you off a ledge would otherwise never land, and its
+ * charge would be spent on nothing. This is the same argument the grapple's
+ * pull timeout makes.
+ *
+ * 난간 너머로 데려간 도약은 그렇지 않으면 결코 착지하지 않으며, 충전량이 헛되이
+ * 소모됩니다. 그래플의 견인 시간 초과와 같은 논거입니다.
+ */
+#define AXE_LEAP_TIMEOUT  2.5f
+
+/**
+ * @brief Stats for one weapon. Never returns NULL; clamps a bad index.
+ * @param[in] type A WP_* index.
+ *
+ * @brief 무기 하나의 특성입니다. NULL을 반환하지 않으며 잘못된 인덱스는 제한합니다.
+ */
+const WeaponType *wp_stats(int type);
+
+
+/**
+ * @brief The weapon index whose name matches, or -1.
+ *
+ * @note Walks the table, so a weapon added to ::WEAPONS is found here without
+ *       this function being edited -- the same rule ::mon_type_for follows.
+ *
+ * @brief 이름이 일치하는 무기 인덱스. 없으면 -1입니다.
+ * @note 표를 순회하므로 무기를 추가해도 이 함수를 고칠 필요가 없습니다.
+ */
+int wp_type_for(const char *name);
+
 /* --- View model placement / 뷰 모델 배치 --- */
 
 /**
@@ -434,7 +604,59 @@ typedef enum {
  *       wp_update를 건너뛰는 호출자는 모든 쿨다운이 멈춘 상태를 보게 됩니다.
  */
 typedef struct {
-    int   ammo;          /**< Shells; one per trigger pull, refilled by pickups. / 탄환. 방아쇠를 당길 때마다 하나씩 소모되며 아이템으로 보충됩니다. */
+    /**
+     * @brief Rounds held per weapon, indexed by WP_*.
+     *
+     * ENGLISH
+     * -------
+     * Separate pools rather than one shared number, because shared ammo makes
+     * every weapon the same weapon with a different animation: the choice
+     * stops being "which of these answers this room" and becomes "which spends
+     * my one resource most efficiently", which has a single right answer and
+     * therefore is not a choice.
+     *
+     * 한국어
+     * ------
+     * @brief WP_*로 인덱싱되는 무기별 보유 탄약입니다.
+     *
+     * 하나의 공유 수치가 아니라 별도의 탄약고입니다. 탄약을 공유하면 모든 무기가 애니메이션만
+     * 다른 같은 무기가 됩니다. 선택이 "이 방에 무엇이 답인가"가 아니라 "무엇이 내 유일한
+     * 자원을 가장 효율적으로 쓰는가"가 되는데, 후자는 정답이 하나뿐이므로 선택이 아닙니다.
+     */
+    int   ammo[WP_TYPES];
+
+    /**
+     * @brief Which weapon is in hand, a WP_* index.
+     *
+     * @note Switching is instant and costs no time. A draw animation would be
+     *       the obvious addition and it is a tax on the one decision this
+     *       roster exists to make -- picking the right tool has to be cheap
+     *       enough to do mid-fight.
+     *
+     * @brief 손에 든 무기의 WP_* 인덱스입니다.
+     * @note 전환은 즉시 이루어지며 시간이 들지 않습니다. 꺼내는 동작을 추가하는 것은
+     *       뻔한 선택이지만, 이 구성이 존재하는 이유인 그 하나의 판단에 세금을 매기는
+     *       일입니다. 올바른 도구를 고르는 일은 교전 중에도 할 만큼 저렴해야 합니다.
+     */
+    int   cur;
+
+    /** @brief Non-zero once picked up, indexed by WP_*. / 획득했으면 0이 아닙니다. WP_*로 인덱싱됩니다. */
+    int   owned[WP_TYPES];
+
+    /**
+     * @brief An axe leap is airborne and owes a slam on landing.
+     *
+     * Latched rather than derived from the player being off the ground,
+     * because those are different questions: falling off a ledge is also being
+     * airborne and does not owe anybody an explosion.
+     *
+     * 바닥에서 떨어져 있다는 사실에서 유도하지 않고 래치로 둡니다. 둘은 다른 질문입니다.
+     * 난간에서 떨어지는 것도 공중에 있는 것이지만 누구에게도 폭발을 빚지고 있지
+     * 않습니다.
+     */
+    int   leaping;
+    /** @brief Seconds the current leap has been airborne. / 현재 도약이 공중에 있던 시간(초). */
+    float leap_timer;
     float cooldown;      /**< Seconds until the next shot is allowed. / 다음 사격이 허용되기까지의 시간 (초). */
     float recoil;        /**< Extra camera pitch in radians, springs back to 0. / 카메라에 추가되는 피치 (라디안). 0으로 복원됩니다. */
     float punch;         /**< View model kickback in metres, springs back to 0. / 뷰 모델의 후퇴 거리 (미터). 0으로 복원됩니다. */
@@ -571,6 +793,62 @@ typedef struct {
      */
     int   hook_latched;
 } Weapon;
+
+/**
+ * @brief Right-click with the axe: leap, then slam where you land.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] w          Weapon; spends one charge from the axe's belt.
+ * @param[in]     yaw,pitch  Aim, for the forward part of the leap.
+ * @param[in,out] player_vel Receives the launch.
+ * @return Non-zero when the leap started.
+ *
+ * @note Refuses in mid-air. A leap that could be chained would be a flight
+ *       mode, and the grapple is already this game's answer to crossing a room
+ *       without touching the floor.
+ * @note The slam is not applied here -- it happens on landing, in
+ *       ::wp_axe_land. Splitting them is what makes the airborne moment
+ *       readable: the player can see where they are about to come down and
+ *       still steer it.
+ *
+ * 한국어
+ * ------
+ * @brief 도끼의 우클릭입니다. 도약한 뒤 착지 지점에서 내려찍습니다.
+ * @return 도약이 시작되었으면 0이 아닌 값.
+ *
+ * @note 공중에서는 거절합니다. 연속으로 이어지는 도약은 비행 모드가 되며, 바닥을 딛지
+ *       않고 방을 가로지르는 것에 대한 이 게임의 답은 이미 그래플입니다.
+ * @note 내려찍기는 이곳에서 적용되지 않습니다. 착지 시 ::wp_axe_land에서 일어납니다.
+ *       둘을 나누는 것이 체공 순간을 읽을 수 있게 합니다. 플레이어는 자신이 어디로
+ *       떨어질지 보면서 여전히 방향을 조정할 수 있습니다.
+ */
+int wp_axe_leap(Weapon *w, float yaw, float pitch, v3 *player_vel);
+
+/**
+ * @brief Resolves a leap that has come back down.
+ *
+ * @param[in,out] w         Weapon.
+ * @param[in]     feet      Where the player landed.
+ * @param[in]     grounded  Non-zero when the player is on a floor.
+ * @param[in]     dt        Timestep, for the airborne timeout.
+ * @return Non-zero on the frame the slam went off.
+ *
+ * @note Called every frame regardless, like ::wp_hook_update: a leap in
+ *       progress has to be advanced by something, and a caller that only
+ *       called this when it thought a landing had happened would be deciding
+ *       what landing means in a second place.
+ *
+ * @brief 다시 내려온 도약을 처리합니다.
+ * @return 내려찍기가 발동한 프레임이면 0이 아닌 값.
+ * @note ::wp_hook_update와 마찬가지로 매 프레임 호출됩니다. 진행 중인 도약은 무언가가
+ *       진행시켜야 하며, 착지했다고 판단될 때만 호출하는 호출자는 착지의 정의를 두 번째
+ *       장소에서 내리게 됩니다.
+ */
+int wp_axe_land(Weapon *w, v3 feet, int grounded, float dt);
+
+/** @brief Non-zero while an axe leap is in the air. / 도끼 도약이 공중에 있는 동안 0이 아닙니다. */
+int wp_axe_leaping(const Weapon *w);
 
 /* --- Public function prototypes: lifecycle / 공개 함수 프로토타입: 수명 주기 --- */
 

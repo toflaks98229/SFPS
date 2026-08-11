@@ -846,6 +846,24 @@ sights, so the barrel recedes to a muzzle near the top-centre of the cell and
 your hands are at the bottom edge. A side profile is what a weapon looks like in
 a shop display, not what a held one looks like.
 
+**The item on the floor is deliberately NOT this sprite.** Drawing the pickup
+with the weapon's own viewmodel art is the obvious move — the art exists, it
+costs no new pixels, and "the thing on the floor is the thing you pick up"
+sounds right. It was tried and it is worse.
+
+A viewmodel is drawn to be seen from one angle, filling the bottom of the
+screen, lit as though it were in your hands. On the floor across a room it is a
+small dark smear: the silhouette that reads as a weapon at 400 pixels tall reads
+as debris at 40, and the detail that sells it up close is the first thing the
+art resolution throws away. Four of them at range are four smudges you have to
+walk onto to identify.
+
+The generated icons answer what the floor actually asks — *what is that, and do
+I want it* — from across a room, because they were designed for that distance
+instead of borrowed from another one. Colour carries which weapon, and the
+shard-versus-box silhouette carries whether it is the weapon or its ammunition.
+Both survive being small. See `pickup_pixel` in [src/sprite.c](src/sprite.c).
+
 **The muzzle is one magenta pixel**, recorded and then left transparent. The
 alternative is a constant in `weapon.c` that somebody edits to match the art,
 and this project already knows what that costs — placing the shotgun that way

@@ -23,6 +23,12 @@
 #define PICKUP_H
 
 #include "level.h"
+/* WP_TYPES and the WP_* order: a pickup kind is derived from a weapon index
+   rather than listed beside it, so adding a weapon adds its ammo box and its
+   world item without a second table to keep in step.
+   WP_TYPES와 WP_* 순서가 필요합니다. 아이템 종류를 무기 인덱스에서 유도하므로, 무기를
+   추가하면 별도의 표를 맞출 필요 없이 탄약 상자와 월드 아이템이 함께 추가됩니다. */
+#include "weapon.h"
 
 /* --- Macros and constants / 매크로 및 상수 --- */
 
@@ -51,8 +57,62 @@
 enum {
     PK_AMMO,    /**< Ammo box, refills shells. / 탄약 상자. 탄환을 보충합니다. */
     PK_HEALTH,  /**< Medkit, restores health. / 구급상자. 체력을 회복시킵니다. */
+
+    /* --- one ammo box per weapon, and one of each weapon ------------------
+     *
+     * ENGLISH
+     * -------
+     * Laid out as two runs of WP_TYPES so a kind can be turned into a weapon
+     * index by subtraction rather than by a lookup table. ::PK_AMMO_FOR and
+     * ::PK_WEAPON_FOR are the only two places that arithmetic is written.
+     *
+     * PK_AMMO above is the shotgun's box under its old name, kept because
+     * every authored level says `ammo` and a rename would silently empty them.
+     * PK_AMMO_SHOTGUN is an alias for it rather than a second kind, so the two
+     * cannot drift into meaning different things.
+     *
+     * 한국어
+     * ------
+     * WP_TYPES 길이의 두 구간으로 배치하여, 종류를 조회표가 아니라 뺄셈으로 무기
+     * 인덱스로 바꿀 수 있게 합니다. 그 산술이 기록된 곳은 ::PK_AMMO_FOR와
+     * ::PK_WEAPON_FOR 두 곳뿐입니다.
+     *
+     * 위의 PK_AMMO는 샷건의 상자를 옛 이름으로 둔 것입니다. 제작된 모든 레벨이 `ammo`라고
+     * 적고 있으며 이름을 바꾸면 그것들이 조용히 비기 때문입니다.
+     */
+    PK_AMMO0,                        /**< Ammo for WP_SHOTGUN. / WP_SHOTGUN용 탄약. */
+    PK_AMMO_LAST = PK_AMMO0 + WP_TYPES - 1,
+
+    PK_WEAPON0,                      /**< The WP_SHOTGUN weapon itself. / WP_SHOTGUN 무기 자체. */
+    PK_WEAPON_LAST = PK_WEAPON0 + WP_TYPES - 1,
+
+    /* --- keycards ------------------------------------------------------
+       One per KEY_* bit, in the same order, so a kind converts to a mask by
+       shifting rather than by a table. A fourth key is a bit in level.h and a
+       colour here, and nothing else.
+       KEY_* 비트마다 하나이며 순서도 같으므로, 종류를 마스크로 바꾸는 것이 표가 아니라
+       시프트입니다. 네 번째 열쇠는 level.h의 비트 하나와 이곳의 색 하나가 전부입니다. */
+    PK_KEY0,
+    PK_KEY_LAST = PK_KEY0 + KEY_KINDS - 1,
+
     PK_KINDS    /**< Total number of pickup kinds. / 아이템 종류의 총 수. */
 };
+
+/** @brief The ammo-box kind that fills weapon `w`'s belt. / 무기 `w`의 탄약을 채우는 상자 종류. */
+#define PK_AMMO_FOR(w)    (PK_AMMO0   + (w))
+/** @brief The pickup kind that grants weapon `w`. / 무기 `w`를 주는 아이템 종류. */
+#define PK_WEAPON_FOR(w)  (PK_WEAPON0 + (w))
+
+/** @brief The weapon an ammo kind fills, or -1. / 탄약 종류가 채우는 무기. 아니면 -1. */
+#define PK_AMMO_WEAPON(k) \
+    ((k) == PK_AMMO ? WP_SHOTGUN \
+     : ((k) >= PK_AMMO0 && (k) <= PK_AMMO_LAST) ? (k) - PK_AMMO0 : -1)
+/** @brief The KEY_* mask a pickup kind grants, or ::KEY_NONE. / 아이템 종류가 주는 KEY_* 마스크. */
+#define PK_KEY_MASK(k)     (((k) >= PK_KEY0 && (k) <= PK_KEY_LAST) ? (1 << ((k) - PK_KEY0)) : KEY_NONE)
+
+/** @brief The weapon a pickup kind grants, or -1. / 아이템 종류가 주는 무기. 아니면 -1. */
+#define PK_WEAPON_WEAPON(k) \
+    (((k) >= PK_WEAPON0 && (k) <= PK_WEAPON_LAST) ? (k) - PK_WEAPON0 : -1)
 
 /* --- Type definitions / 타입 정의 --- */
 
@@ -194,6 +254,6 @@ const Pickup *pickup_at(int i);
  *       획득하지 않습니다.
  */
 void pickup_update(v3 player_eye, int *health, int health_max,
-                   int *ammo, int ammo_max, float dt);
+                   Weapon *w, int *keys, float dt);
 
 #endif

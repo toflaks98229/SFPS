@@ -26,6 +26,7 @@
  */
 
 #include "scene.h"
+#include "proj.h"   /* the player's grenades and bolts */
 #include "enemy.h"
 #include "pickup.h"
 #include "sprite.h"
@@ -504,14 +505,53 @@ void scene_draw_hud(Scene *s, int vw, int vh, const Player *p, const Weapon *w) 
 
     /* Ammo, bottom-right, and red when the gun is empty. */
     char am[16];
-    wsprintfA(am, "%d", w->ammo);
+    wsprintfA(am, "%d", w->ammo[w->cur]);
     float aw = font_width(HUD_TEXT_SIZE, am);
-    if (w->ammo == 0)
+    if (w->ammo[w->cur] == 0)
         text_run(s, vw - HUD_MARGIN - aw, vh - HUD_BASELINE, HUD_TEXT_SIZE, am,
                  0.9f, 0.2f, 0.2f, 1.0f);
     else
         text_run(s, vw - HUD_MARGIN - aw, vh - HUD_BASELINE, HUD_TEXT_SIZE, am,
                  0.9f, 0.85f, 0.4f, 1.0f);
+
+    /* --- the roster, above the ammo -------------------------------------
+     *
+     * ENGLISH
+     * -------
+     * A bare number was enough while there was one weapon; with four it says
+     * nothing, because "16" could be shells or grenades and those are very
+     * different amounts of remaining fight. The row names what is in hand and
+     * dims what is not carried, so the question "what have I got" is answered
+     * without opening anything.
+     *
+     * Ordered by WP_*, which is the order the number keys select them, so the
+     * position of a name is also the key that reaches it.
+     *
+     * 한국어
+     * ------
+     * 무기가 하나일 때는 숫자만으로 충분했지만 넷이 되면 아무것도 말해 주지 않습니다.
+     * "16"이 산탄일 수도 유탄일 수도 있는데, 그 둘은 남은 전투량이 크게 다릅니다. 이 행은
+     * 손에 든 것의 이름을 표시하고 보유하지 않은 것을 흐리게 하므로, "내가 무엇을 가지고
+     * 있는가"에 아무것도 열지 않고 답합니다.
+     *
+     * WP_* 순서이며 이는 숫자 키가 선택하는 순서이므로, 이름의 위치가 곧 그것에 닿는
+     * 키입니다.
+     */
+    {
+        float x = HUD_MARGIN;
+        float y = vh - HUD_BASELINE - HUD_TEXT_SIZE * 9.0f;
+        for (int i = 0; i < WP_TYPES; i++) {
+            const char *nm = wp_stats(i)->name;
+            float wd = font_width(1.0f, nm);
+            if (!w->owned[i])
+                text_run(s, x, y, 1.0f, nm, 0.30f, 0.32f, 0.36f, 1.0f);
+            else if (i == w->cur)
+                text_run(s, x, y, 1.0f, nm, 1.00f, 0.85f, 0.35f, 1.0f);
+            else
+                text_run(s, x, y, 1.0f, nm, 0.55f, 0.58f, 0.64f, 1.0f);
+            x += wd + 10.0f;
+        }
+    }
 
     ui_end();
 }
@@ -535,7 +575,7 @@ void scene_draw_win(Scene *s, int vw, int vh, const Player *p, const Weapon *w) 
 
     /* Final stats, so the ending says something rather than just stopping. */
     char line[64];
-    wsprintfA(line, "health %d   ammo %d", p->health, w->ammo);
+    wsprintfA(line, "health %d   ammo %d", p->health, w->ammo[w->cur]);
     float lw = font_width(WIN_STAT_SIZE, line);
     text_run(s, (vw - lw) * 0.5f, vh * 0.5f + 4.0f, WIN_STAT_SIZE, line,
              0.85f, 0.85f, 0.85f, 1.0f);
@@ -730,4 +770,69 @@ void scene_draw_menu(Scene *s, int vw, int vh) {
              0.52f, 0.52f, 0.56f, 1.0f);
 
     ui_end();
+}
+
+void scene_draw_proj(Scene *s, mat4 vp, v3 cam_right, v3 cam_up) {
+    DIAG_WANT_WORLD_PASS(post_in_world_pass());
+
+    int n = proj_count(), live = 0;
+
+    mb_reset(&s->shot_buf);
+    for (int i = 0; i < n; i++) {
+        const Proj *p = proj_at(i);
+        if (!p || !p->active) continue;
+
+        /* A grenade tumbles and a bolt does not, which is the same distinction
+           the simulation draws: `gravity` is what separates them, so the
+           drawing reads the same field rather than a second flag that could
+           disagree with it.
+           유탄은 구르고 탄은 구르지 않습니다. 시뮬레이션이 긋는 것과 같은 구분입니다.
+           `gravity`가 둘을 가르므로, 그림도 어긋날 수 있는 두 번째 플래그가 아니라 같은
+           필드를 읽습니다. */
+        int   arcs = p->gravity > 0.0f;
+        float size = arcs ? 0.30f : 0.16f;
+        float a    = arcs ? p->spin * 6.0f : 0.0f;
+
+        v3 r = v3add(v3scale(cam_right,  cosf(a)), v3scale(cam_up,  sinf(a)));
+        v3 u = v3add(v3scale(cam_right, -sinf(a)), v3scale(cam_up,  cosf(a)));
+        mb_billboard(&s->shot_buf, p->pos, r, u, size, size);
+        live++;
+    }
+    if (!live) return;
+
+    mesh_upload(&s->shot_mesh, &s->shot_buf, 1);
+    rd_mode(RD_FLAT);
+    rd_mvp(vp);
+    glDisable(GL_CULL_FACE);
+    glDepthMask(GL_FALSE);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+    glBindVertexArray(s->shot_mesh.vao);
+
+    /* Drawn one at a time so each carries its own colour: a grenade about to
+       go off is not the same object as one that was just thrown, and the fuse
+       is the only warning the player gets.
+       각자 자신의 색을 갖도록 하나씩 그립니다. 곧 터질 유탄은 방금 던져진 유탄과 같은
+       물체가 아니며, 도화선이 플레이어가 받는 유일한 경고입니다. */
+    int k = 0;
+    for (int i = 0; i < n; i++) {
+        const Proj *p = proj_at(i);
+        if (!p || !p->active) continue;
+
+        if (p->gravity > 0.0f) {
+            /* Cooling from white toward red as the fuse runs out. */
+            float t = p->fuse > 0.0f ? p->fuse / PROJ_FUSE : 0.0f;
+            if (t < 0.0f) t = 0.0f;
+            if (t > 1.0f) t = 1.0f;
+            rd_color(1.0f, 0.30f + 0.55f * t, 0.12f + 0.60f * t, 0.90f);
+        } else {
+            rd_color(0.55f, 0.85f, 1.00f, 0.85f);
+        }
+        glDrawArrays(GL_TRIANGLES, k * 6, 6);
+        k++;
+    }
+
+    glDisable(GL_BLEND);
+    glDepthMask(GL_TRUE);
+    glEnable(GL_CULL_FACE);
 }

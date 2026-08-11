@@ -47,6 +47,7 @@
 #include "diag.h"
 #include "post.h"     /* post_in_world_pass -- the pass-boundary guards */
 #include "sprite.h"   /* the hand-drawn viewmodel, when art replaces the model */
+#include "proj.h"     /* grenades and bolts: everything that travels */
 /* player.h is deliberately absent. It was here for PLAYER_GRAVITY, which the
    grapple's pull cancels while reeling -- and the pull now lives in hook.c,
    which includes it for that reason. Nothing left in this file names a
@@ -86,6 +87,68 @@ _Static_assert(TEX_NAME_MAX >= LVL_MAT,
 #define FIRE_INTERVAL  0.50f
 #define RANGE         120.0f
 #define PELLET_SPREAD  0.040f   /* fixed cone, not a growing bloom */
+
+/**
+ * @brief The roster. One row per weapon; see ::WeaponType for the rules.
+ *
+ * ENGLISH
+ * -------
+ * The numbers are tuned against the bestiary rather than against each other,
+ * because "is this weapon good" is not a question that has an answer on its
+ * own. An imp has 40hp, a brute 120, a hound 18:
+ *
+ *   shotgun  6 x 7 = 42 point blank, so one blast kills an imp and three are
+ *            needed for a brute. Unchanged from before this table existed.
+ *   grenade  55 in a radius, so it kills a clustered pair of imps outright and
+ *            takes a brute to half. Travel time is what it pays for that.
+ *   rapid    9 a shot at 12/sec = 108 dps sustained, the highest here, against
+ *            a magazine that empties in under four seconds of holding fire.
+ *   axe      45 a swing kills an imp in one and a hound without thinking, and
+ *            asks you to be within 2.2m of something trying to hit you.
+ *
+ * 한국어
+ * ------
+ * 수치는 서로가 아니라 몬스터 도감을 기준으로 조정했습니다. "이 무기가 좋은가"는 그
+ * 자체로는 답이 있는 질문이 아니기 때문입니다. 임프는 체력 40, 브루트는 120, 하운드는
+ * 18입니다.
+ */
+static const WeaponType WEAPONS[WP_TYPES] = {
+    /* name       model      snd      start max pick dmg  cool   spread  pel  spd   grav  melee  recoil punch hook */
+    { "shotgun", "shotgun", "shot",     20,  50,   8,   7, 0.50f, 0.040f,  6, 0.0f,  0.0f, 0.0f, 0.055f, 0.085f, 1 },
+
+    /* Arcs and bounces, so it reaches what you cannot see. The fuse is long
+       enough to bank a shot off a wall and short enough that a grenade at your
+       feet is your problem.
+       곡선을 그리며 튕기므로 보이지 않는 것에 닿습니다. 도화선은 벽에 튕겨 넣을 만큼
+       길고, 발밑의 유탄이 스스로의 문제가 될 만큼 짧습니다. */
+    { "grenade", "shotgun", "shot",      6,  20,   3,  55, 0.85f, 0.010f,  0, 26.0f, 26.0f, 0.0f, 0.075f, 0.130f, 1 },
+
+    /* No hitscan: the bolts travel, so a moving target has to be led. That is
+       the cost of the highest sustained damage in the roster.
+       히트스캔이 아닙니다. 탄이 날아가므로 움직이는 표적은 예측 사격이 필요합니다.
+       구성 내 최고 지속 피해량의 대가입니다. */
+    { "rapid",   "shotgun", "shot",     80, 200,  40,   9, 0.085f, 0.030f, 0, 70.0f,  0.0f, 0.0f, 0.012f, 0.022f, 1 },
+
+    /* Melee, and the only row with no hook: right-click leaps instead. Its
+       "ammo" is slam charges, which is why it is not simply free.
+       근접이며 훅이 없는 유일한 행입니다. 우클릭이 대신 도약합니다. "탄약"은 내려찍기
+       충전량이며, 그래서 완전히 공짜는 아닙니다. */
+    { "axe",     "shotgun", "shot",      3,   6,   2,  45, 0.42f, 0.0f,    0, 0.0f,  0.0f, 2.2f, 0.090f, 0.150f, 0 },
+};
+
+const WeaponType *wp_stats(int type) {
+    if (type < 0 || type >= WP_TYPES) type = WP_SHOTGUN;
+    return &WEAPONS[type];
+}
+
+int wp_type_for(const char *name) {
+    for (int i = 0; i < WP_TYPES; i++) {
+        const char *a = WEAPONS[i].name, *b = name;
+        while (*a && *a == *b) { a++; b++; }
+        if (!*a && !*b) return i;
+    }
+    return -1;
+}
 
 #define RECOIL_KICK    0.055f   /* radians added per shot */
 #define RECOIL_RETURN  6.5f     /* springback rate */
@@ -400,7 +463,17 @@ void wp_init(Weapon *w, const Level *level) {
     Weapon zero = {0};
     *w = zero;
     w->rng = 0x2545f491u;
-    w->ammo = WEAPON_START_AMMO;
+    /* Every weapon's own belt, and only the shotgun is in hand at the start.
+       A roster the player is handed complete has no pickups worth finding.
+       무기마다 자신의 탄약이며, 시작 시 손에 든 것은 샷건뿐입니다. 처음부터 전부 쥐여 준
+       구성에는 찾을 가치가 있는 아이템이 없습니다. */
+    for (int i = 0; i < WP_TYPES; i++) {
+        w->ammo[i]  = 0;
+        w->owned[i] = 0;
+    }
+    w->cur = WP_SHOTGUN;
+    w->owned[WP_SHOTGUN] = 1;
+    w->ammo[WP_SHOTGUN]  = WEAPON_START_AMMO;
     /* Not zero: 0 is a valid monster index, so a zeroed struct would read as
        "hooked to monster 0" and deal damage to a bystander on the first
        arrival. HOOK_IDLE makes that unreachable, but the field should still
@@ -567,8 +640,8 @@ static v3 hook_muzzle(void) {
  *       명중 대상에 대해 정직하게 유지되면서도, 효과는 총열에서 나온 것처럼
  *       보입니다.
  */
-static void fire(Weapon *w, v3 eye, float yaw, float pitch,
-                 v3 *player_vel, int player_grounded) {
+static void fire_hitscan(Weapon *w, v3 eye, float yaw, float pitch,
+                         v3 *player_vel, int player_grounded) {
     float cy = cosf(yaw), sy = sinf(yaw);
     float cp = cosf(pitch), sp = sinf(pitch);
     v3 fwd   = v3f(-sy * cp, sp, -cy * cp);
@@ -651,14 +724,164 @@ static void fire(Weapon *w, v3 eye, float yaw, float pitch,
     /* The pump is what gives a shotgun its rhythm, so it lands partway
        through the cooldown rather than on the trigger pull. */
     w->pump_timer = FIRE_INTERVAL * 0.55f;
+}
 
-    w->cooldown = FIRE_INTERVAL;
-    w->recoil  += RECOIL_KICK * (0.85f + frand(w) * 0.3f);
-    w->punch   += PUNCH_KICK;
+/**
+ * @brief The feedback every attack shares: cooldown, kick, flash.
+ *
+ * ENGLISH
+ * -------
+ * Pulled out of the shotgun's fire path when there were four weapons rather
+ * than one. The numbers come from the table, but WHICH numbers exist -- a
+ * cooldown, a camera kick, a view model punch, a flash -- is a property of
+ * attacking rather than of any one weapon, and a copy of this per weapon is
+ * four places for a springback to be tuned differently by accident.
+ *
+ * 한국어
+ * ------
+ * 무기가 하나에서 넷이 되면서 샷건의 사격 경로에서 추출했습니다. 수치는 표에서 오지만,
+ * *어떤* 수치가 존재하는지(재사용 대기시간, 카메라 반동, 뷰 모델 후퇴, 화염)는 특정
+ * 무기가 아니라 공격 자체의 속성입니다. 무기마다 사본을 두면 복원 속도가 실수로 다르게
+ * 조정될 곳이 네 군데가 됩니다.
+ */
+static void attack_feedback(Weapon *w, const WeaponType *S) {
+    w->cooldown = S->cooldown;
+    w->recoil  += S->recoil * (0.85f + frand(w) * 0.3f);
+    w->punch   += S->punch;
     w->flash    = FLASH_TIME;
 
     g_flash_scale = 1.1f + frand(w) * 0.7f;
     g_flash_roll  = frand(w) * M_TAU;
+}
+
+/**
+ * @brief Launches one projectile along the aim.
+ *
+ * ENGLISH
+ * -------
+ * The grenade and the rapid weapon are the same code with different table
+ * rows: `proj_gravity` decides whether what leaves the barrel arcs and bounces
+ * or flies flat, and `spread` decides whether it goes exactly where you
+ * pointed. See proj.h.
+ *
+ * @note Launched from the EYE, not the drawn muzzle, for the reason the
+ *       hitscan pellets are traced from the eye: the crosshair has to be
+ *       honest. A grenade that left the barrel would arc from a point below
+ *       and right of where the player is looking, and short throws would miss
+ *       low for no visible reason.
+ *
+ * 한국어
+ * ------
+ * 유탄과 연사 무기는 표의 행만 다른 같은 코드입니다. `proj_gravity`가 총구를 떠난 것이
+ * 곡선을 그리며 튕길지 평평하게 날지를 결정하고, `spread`가 정확히 겨눈 곳으로 갈지를
+ * 결정합니다.
+ *
+ * @note 그려진 총구가 아니라 *눈*에서 발사합니다. 히트스캔 산탄을 눈에서 추적하는 것과
+ *       같은 이유이며, 조준점이 정직해야 하기 때문입니다. 총구에서 떠나는 유탄은
+ *       플레이어가 보는 지점의 아래·오른쪽에서 호를 그리게 되고, 짧은 투척이 뚜렷한 이유
+ *       없이 아래로 빗나갑니다.
+ */
+static void fire_projectile(Weapon *w, const WeaponType *S,
+                            v3 eye, float yaw, float pitch) {
+    float cy = cosf(yaw), sy = sinf(yaw);
+    float cp = cosf(pitch), sp = sinf(pitch);
+    v3 fwd   = v3f(-sy * cp, sp, -cy * cp);
+    v3 right = v3f(cy, 0, -sy);
+    v3 up    = v3cross(right, fwd);
+
+    v3 dir = fwd;
+    if (S->spread > 0.0f)
+        dir = v3norm(v3add(fwd,
+                  v3add(v3scale(right, frand_signed(w) * S->spread),
+                        v3scale(up,    frand_signed(w) * S->spread))));
+
+    /* A grenade carries a fuse and a blast; a bolt carries neither and hurts
+       exactly what it touches. One table row is the whole difference.
+       유탄은 도화선과 폭발 반경을 가지고, 탄은 둘 다 없이 닿은 것만 정확히 상하게
+       합니다. 표의 한 행이 차이의 전부입니다. */
+    int arcs = S->proj_gravity > 0.0f;
+    proj_fire(eye, dir, S->proj_speed, S->proj_gravity, S->damage,
+              arcs ? PROJ_BLAST_RADIUS : 0.0f,
+              arcs ? PROJ_FUSE : 0.0f);
+
+    audio_play(S->fire_snd, arcs ? 100 : 70);
+}
+
+/**
+ * @brief A swing, and the lunge that carries it.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] player_vel Receives the dash.
+ *
+ * The dash is the point. A melee weapon in a game about momentum cannot ask
+ * the player to walk into range at walking speed -- everything else here moves
+ * faster than that, so the axe would only ever hit things that were already on
+ * top of you. Swinging THROWS you at what you are looking at, which turns
+ * closing the distance from a cost into the attack itself.
+ *
+ * @note The dash fires whether or not the swing connects, for the same reason
+ *       the shotgun kick does: it is a movement the player asked for, not a
+ *       reward for accuracy. Conditional, the axe would move you only when you
+ *       did not need it to.
+ *
+ * 한국어
+ * ------
+ * 대쉬가 핵심입니다. 운동량을 다루는 게임의 근접 무기가 플레이어에게 걷는 속도로 사거리
+ * 안에 들어오라고 요구할 수는 없습니다. 이곳의 다른 모든 것이 그보다 빠르므로, 도끼는
+ * 이미 코앞에 있는 것만 때리게 됩니다. 휘두르기가 바라보는 대상 쪽으로 *던져 주면*,
+ * 거리를 좁히는 일이 비용이 아니라 공격 자체가 됩니다.
+ *
+ * @note 명중 여부와 무관하게 대쉬가 발동합니다. 샷건의 반동과 같은 이유로, 플레이어가
+ *       요청한 이동이지 명중에 대한 보상이 아니기 때문입니다.
+ */
+static void fire_melee(Weapon *w, const WeaponType *S,
+                       v3 eye, float yaw, float pitch, v3 *player_vel) {
+    (void)w;
+    float cy = cosf(yaw), sy = sinf(yaw);
+    float cp = cosf(pitch), sp = sinf(pitch);
+    v3 fwd = v3f(-sy * cp, sp, -cy * cp);
+
+    /* Forward along the aim, with the vertical component damped: looking up
+       and swinging should carry you at the thing, not launch you over it.
+       조준 방향으로 전진하되 수직 성분은 감쇠합니다. 위를 보고 휘두르는 것이 대상을 넘어
+       날아가는 것이 아니라 대상 쪽으로 데려가야 합니다. */
+    v3 dash = v3f(fwd.x, fwd.y * 0.35f, fwd.z);
+    *player_vel = v3add(*player_vel, v3scale(v3norm(dash), AXE_DASH_SPEED));
+
+    /* The swing itself: the nearest monster within reach along the aim. A
+       hitscan over a short range IS a swing -- the arc is an animation, and a
+       real swept volume would miss things the drawing clearly passed through.
+       휘두르기 자체입니다. 짧은 사거리에 대한 히트스캔이 곧 휘두르기입니다. 호는
+       애니메이션이며, 실제 스윕 판정은 그림이 분명히 지나간 것을 빗나가게 됩니다. */
+    float et; int eidx;
+    if (enemy_hitscan(eye, fwd, S->melee_range, &et, &eidx)) {
+        enemy_hurt(eidx, S->damage, fwd);
+        audio_play("impact", 90);
+    }
+    audio_play(S->fire_snd, 80);
+}
+
+/**
+ * @brief Routes a trigger pull to whichever kind of attack this weapon is.
+ *
+ * @note Exactly one of `pellets`, `proj_speed` and `melee_range` is non-zero
+ *       per table row, so the order of these tests does not matter -- and
+ *       tools/weapontest.c asserts that so it stays true.
+ *
+ * @brief 방아쇠를 이 무기가 어떤 종류의 공격인지에 따라 분배합니다.
+ * @note 표의 행마다 `pellets`, `proj_speed`, `melee_range` 중 정확히 하나만 0이 아니므로
+ *       검사 순서는 중요하지 않습니다. tools/weapontest.c가 그것이 유지되도록 단언합니다.
+ */
+static void attack(Weapon *w, v3 eye, float yaw, float pitch,
+                   v3 *player_vel, int player_grounded) {
+    const WeaponType *S = wp_stats(w->cur);
+
+    if (S->pellets > 0)          fire_hitscan(w, eye, yaw, pitch, player_vel, player_grounded);
+    else if (S->proj_speed > 0)  fire_projectile(w, S, eye, yaw, pitch);
+    else if (S->melee_range > 0) fire_melee(w, S, eye, yaw, pitch, player_vel);
+
+    attack_feedback(w, S);
 }
 
 
@@ -679,9 +902,9 @@ void wp_update(Weapon *w, float dt, int firing, v3 eye, float yaw, float pitch,
     if (w->dry_timer > 0.0f) w->dry_timer -= dt;
 
     if (firing && w->cooldown <= 0.0f) {
-        if (w->ammo > 0) {
-            w->ammo--;
-            fire(w, eye, yaw, pitch + w->recoil, player_vel, player_grounded);
+        if (w->ammo[w->cur] > 0) {
+            w->ammo[w->cur]--;
+            attack(w, eye, yaw, pitch + w->recoil, player_vel, player_grounded);
         } else if (w->dry_timer <= 0.0f) {
             /* Empty: a click, and a short lockout so holding the trigger does
                not machine-gun the click sound. No cooldown is spent, so the
@@ -1291,4 +1514,70 @@ void wp_draw_hud(const Weapon *w, float aspect, int hook_ready) {
 
     glDisable(GL_BLEND);
     glEnable(GL_DEPTH_TEST);
+}
+
+/* ------------------------------------------------------------- the axe leap */
+
+int wp_axe_leaping(const Weapon *w) { return w->leaping; }
+
+int wp_axe_leap(Weapon *w, float yaw, float pitch, v3 *player_vel) {
+    if (w->cur != WP_AXE) return 0;
+    if (w->leaping) return 0;
+
+    const WeaponType *S = wp_stats(WP_AXE);
+    if (w->ammo[WP_AXE] <= 0) {
+        if (w->dry_timer <= 0.0f) { audio_play("dry", 55); w->dry_timer = 0.35f; }
+        return 0;
+    }
+    (void)S;
+
+    float cy = cosf(yaw), sy = sinf(yaw);
+    float cp = cosf(pitch), sp = sinf(pitch);
+    v3 fwd = v3f(-sy * cp, sp, -cy * cp);
+
+    /* Up, plus the horizontal part of the aim. The vertical component of the
+       aim is dropped rather than added: the leap's height is a constant so
+       the arc is predictable, and looking straight down should not cancel it.
+       위쪽에 조준의 수평 성분을 더합니다. 조준의 수직 성분은 더하지 않고 버립니다.
+       도약 높이가 상수여야 궤적을 예측할 수 있고, 바로 아래를 본다고 해서 도약이
+       취소되어서는 안 됩니다. */
+    v3 flat = v3f(fwd.x, 0.0f, fwd.z);
+    if (v3len(flat) > 1e-4f) flat = v3norm(flat);
+
+    player_vel->y = AXE_LEAP_UP;
+    *player_vel = v3add(*player_vel, v3scale(flat, AXE_LEAP_FWD));
+
+    w->ammo[WP_AXE]--;
+    w->leaping    = 1;
+    w->leap_timer = 0.0f;
+    w->punch     += wp_stats(WP_AXE)->punch;
+    audio_play("hook", 85);
+    return 1;
+}
+
+int wp_axe_land(Weapon *w, v3 feet, int grounded, float dt) {
+    if (!w->leaping) return 0;
+
+    w->leap_timer += dt;
+
+    /* Landing is the ground, or the timeout for a leap that went somewhere it
+       could never come down from.
+       착지는 바닥에 닿는 것이거나, 결코 내려올 수 없는 곳으로 간 도약에 대한 시간
+       초과입니다. */
+    if (!grounded && w->leap_timer < AXE_LEAP_TIMEOUT) return 0;
+
+    w->leaping = 0;
+
+    /* Centred on the feet, not the eye: the axe comes down at the floor, and a
+       blast centred 1.7m up would reach over a low wall the player is standing
+       behind.
+       눈이 아니라 발을 중심으로 합니다. 도끼는 바닥으로 내려오며, 1.7m 위를 중심으로 한
+       폭발은 플레이어가 뒤에 서 있는 낮은 벽을 넘어갑니다. */
+    proj_blast(feet, AXE_SLAM_RADIUS, AXE_SLAM_DAMAGE);
+    fx_spawn("boltburst", feet, v3f(0, 1, 0));
+    fx_spawn("spark", feet, v3f(0, 1, 0));
+    audio_play("impact", 100);
+
+    w->punch += wp_stats(WP_AXE)->punch * 1.5f;
+    return 1;
 }

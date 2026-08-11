@@ -47,6 +47,8 @@
 #include "pickup.h"
 #include "scene.h"    /* the per-frame draw passes and everything they own */
 #include "fx.h"       /* authored particle effects */
+#include "proj.h"     /* grenades and bolts in flight */
+#include "door.h"     /* moving sectors, switches and keycards */
 #include "post.h"
 #include "menu.h"     /* the ESC menu: pause, settings, restart, quit */
 #include "run.h"      /* RunState: what a restart puts back */
@@ -145,7 +147,8 @@ static HWND g_wnd;
 /* --- Camera and player state / 카메라 및 플레이어 상태 --- */
 
 /** @brief The player: position, momentum, health. / 플레이어. 위치, 운동량, 체력을 포함합니다. */
-static Player g_player = { {0.0f, PLAYER_EYE, 12.0f}, {0.0f, 0.0f, 0.0f}, 0, PLAYER_MAX_HP, 0.0f };
+static Player g_player = { {0.0f, PLAYER_EYE, 12.0f}, {0.0f, 0.0f, 0.0f},
+                           0, PLAYER_MAX_HP, 0.0f, KEY_NONE };
 /** @brief Look angles in radians; pitch is clamped short of vertical. / 라디안 단위의 시점 각도. 피치는 수직 직전에서 제한됩니다. */
 static float  g_yaw, g_pitch;
 /** @brief This frame's mouse movement, also driving view model sway. / 이번 프레임의 마우스 이동량. 뷰 모델 스웨이도 함께 유발합니다. */
@@ -419,6 +422,28 @@ static LRESULT CALLBACK wnd_proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
            있는 동안 매 프레임 전환됩니다. 두 화면을 나란히 비교하는 것이 이 효과를
            조정하는 주된 방법입니다. */
         if (wp == VK_F1) { post_set_enabled(!post_enabled()); return 0; }
+
+        /* --- weapon select ---------------------------------------------
+           On the message edge like the toggles above, so one press is one
+           switch. A weapon that is not owned is not selected: silently
+           refusing is better than an empty hand, and the number keys stay
+           harmless before the roster fills out.
+           위의 토글들과 마찬가지로 메시지 시점에 처리하므로 한 번 누르면 한 번
+           전환됩니다. 보유하지 않은 무기는 선택되지 않습니다. 빈손보다는 조용히
+           거절하는 편이 낫고, 구성이 갖춰지기 전까지 숫자 키가 무해하게 유지됩니다. */
+        if (wp >= '1' && wp < '1' + WP_TYPES) {
+            int want = (int)(wp - '1');
+            if (g_weapon.owned[want] && g_weapon.cur != want) {
+                g_weapon.cur = want;
+                /* A switch cancels a swing in progress rather than carrying
+                   its timer across: the axe's dash must not be inherited by
+                   the shotgun.
+                   진행 중인 공격을 이월하지 않고 취소합니다. 도끼의 대쉬를 샷건이
+                   물려받아서는 안 됩니다. */
+                g_weapon.cooldown = 0.0f;
+            }
+            return 0;
+        }
         g_keys[wp & 0xff] = 1;
         return 0;
     case WM_KEYUP:
@@ -618,8 +643,25 @@ static void update(float dt) {
        wp_hook_fire refuses while a hook is already in the air, on cooldown,
        or until the button has been released, so handing it the held state
        every frame is safe and one press stays one throw. */
+    /* Right-click means whatever the weapon in hand says it means. Guns throw
+       the grapple; the axe leaps. One button, because a third would be a key
+       the player has to remember for one weapon.
+
+       Routed on the weapon's `hook` field rather than on `cur == WP_AXE`, so a
+       later weapon that also leaps -- or one that does neither -- is a table
+       row and not an edit here.
+
+       우클릭은 손에 든 무기가 말하는 의미를 갖습니다. 총기는 그래플을 던지고 도끼는
+       도약합니다. 버튼 하나인 이유는, 세 번째 버튼은 무기 하나를 위해 플레이어가 외워야
+       하는 키가 되기 때문입니다.
+
+       `cur == WP_AXE`가 아니라 무기의 `hook` 필드로 분배하므로, 나중에 도약하는 무기나
+       둘 다 하지 않는 무기가 생겨도 이곳의 수정이 아니라 표의 행 하나가 됩니다. */
     if (g_hook_down && !g_run.won) {
-        wp_hook_fire(&g_weapon, g_player.pos, g_yaw, g_pitch);
+        if (wp_stats(g_weapon.cur)->hook)
+            wp_hook_fire(&g_weapon, g_player.pos, g_yaw, g_pitch);
+        else
+            wp_axe_leap(&g_weapon, g_yaw, g_pitch, &g_player.vel);
     } else {
         /* Button up: rearm. Unconditional, because a throw that missed also
            has to be cleared, and rearming is what the release edge means.
@@ -657,6 +699,14 @@ static void update(float dt) {
     RECT cr; GetClientRect(g_wnd, &cr);
     int vh = cr.bottom - cr.top;
     float aspect = (float)(cr.right - cr.left) / (float)(vh < 1 ? 1 : vh);
+
+    /* The leap resolves after player_move, so the slam lands on where the
+       player actually ended up rather than a frame behind it -- the same
+       reason the hook's constraint runs before the move and this runs after.
+       도약은 player_move 이후에 처리되므로, 내려찍기가 한 프레임 뒤가 아니라 플레이어가
+       실제로 도달한 지점에서 터집니다. 훅의 구속이 이동 전에 실행되고 이것이 이후에
+       실행되는 것과 같은 이유입니다. */
+    wp_axe_land(&g_weapon, g_player.pos, g_player.grounded, dt);
 
     wp_update(&g_weapon, dt, g_focused && g_mouse_down,
               g_player.pos, g_yaw, g_pitch, g_move_speed, g_mouse_dx, g_mouse_dy,
@@ -861,17 +911,29 @@ static int load_level(const char *name, Scene *sc, int dynamic, int carry_state)
 
     scene_build_level(sc, &g_level, dynamic);
 
-    int hp = g_player.health, ammo = g_weapon.ammo;
+    int hp = g_player.health, held_keys = g_player.keys;
+    int ammo[WP_TYPES], owned[WP_TYPES], cur = g_weapon.cur;
+    for (int i = 0; i < WP_TYPES; i++) { ammo[i] = g_weapon.ammo[i]; owned[i] = g_weapon.owned[i]; }
     g_yaw   = player_spawn(&g_player, &g_level);   /* resets health */
     g_pitch = 0.0f;
     if (carry_state) {
         g_player.health = hp;                      /* ...so restore it */
-        g_weapon.ammo   = ammo;
+        for (int i = 0; i < WP_TYPES; i++) { g_weapon.ammo[i] = ammo[i]; g_weapon.owned[i] = owned[i]; }
+        g_weapon.cur = cur;
+        g_player.keys = held_keys;
     }
 
     /* Monsters and pickups are placed from the level's own entities. */
     enemy_spawn_level(&g_level);
     pickup_spawn_level(&g_level);
+
+    /* After the sectors exist and before the first door_update: door.c copies
+       each door's CLOSED shape here, and it can only do that while the level
+       still holds it.
+       섹터가 존재한 뒤, 첫 door_update 이전입니다. door.c가 각 문의 *닫힌* 형상을
+       이곳에서 복사하며, 레벨이 아직 그것을 담고 있는 동안에만 가능합니다. */
+    door_reset(&g_level);
+    proj_reset();
 
     /* A hook mid-flight belongs to the level that is being left. Carrying it
        across would reel the player toward an anchor in geometry that no longer
@@ -1309,12 +1371,36 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
             }
         }
 
+        /* Grenades and bolts advance with the world. Frozen with it too:
+           a grenade hanging in mid-air behind a pause menu says the game is
+           still running when it is not.
+           유탄과 탄이 월드와 함께 진행합니다. 함께 정지하기도 합니다. 일시정지 메뉴 뒤에
+           공중에 멈춘 유탄은 게임이 멈춰 있는데도 돌아가고 있다고 말하는 셈입니다. */
+        /* Doors move the sectors themselves, so anything that collides sees
+           them without knowing what a door is -- but the DRAWN geometry was
+           built once at load and has to be rebuilt to follow. Only while
+           something is actually moving: a level with no doors, or with all of
+           them at rest, pays nothing.
+           문은 섹터 자체를 움직이므로 충돌하는 모든 것이 문의 정체를 모른 채 그것을
+           봅니다. 그러나 *그려지는* 지오메트리는 로드 시 한 번 만들어졌으므로 따라가려면
+           다시 만들어야 합니다. 실제로 움직이는 동안에만 수행하므로, 문이 없거나 전부
+           멈춰 있는 레벨은 비용을 치르지 않습니다. */
+        if (!frozen && door_update(&g_level, g_player.pos, g_player.keys, dt))
+            scene_build_level(&scene, &g_level, 1);
+
+        if (!frozen) proj_update(&g_level, dt);
+
         fx_update(dt);
 
-        /* Pickups top up health and ammo when walked over. */
+        /* Pickups top up health, ammo and the roster when walked over. The
+           weapon is passed whole rather than one ammo pointer, because a box
+           now says which belt it fills and a weapon pickup fills none of them.
+           체력·탄약·무기 구성을 보충합니다. 탄약 포인터 하나가 아니라 무기 전체를
+           넘깁니다. 상자가 이제 어느 탄약고를 채우는지 말하고, 무기 아이템은 그중 어느
+           것도 채우지 않기 때문입니다. */
         if (!frozen)
             pickup_update(g_player.pos, &g_player.health, PLAYER_MAX_HP,
-                          &g_weapon.ammo, WEAPON_MAX_AMMO, dt);
+                          &g_weapon, &g_player.keys, dt);
 
         /* Reaching the exit either loads the next level or, on a level with no
            `next`, ends the game. Health and ammo carry over on a transition,
@@ -1514,6 +1600,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
         scene_draw_enemies(&scene, vp, eye_pos, cam_right);
         scene_draw_pickups(&scene, vp, eye_pos, cam_right);
         scene_draw_shots  (&scene, vp, cam_right, cam_up);
+        scene_draw_proj   (&scene, vp, cam_right, cam_up);
         fx_draw(vp, cam_right, cam_up);
 
         /* --- bullet holes and tracers, still in world space --- */

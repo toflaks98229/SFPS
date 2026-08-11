@@ -114,6 +114,7 @@ typedef enum {
     DIAG_PICKUP_CAP,    /**< Level wanted more pickups than PICKUP_MAX. / 레벨이 PICKUP_MAX보다 많은 아이템을 요구했습니다. */
     DIAG_SHOT_CAP,      /**< A monster wanted to fire with ENEMY_MAX_SHOTS already in flight. / ENEMY_MAX_SHOTS가 이미 비행 중인 상태에서 몬스터가 발사를 시도했습니다. */
     DIAG_SOUND_CAP,     /**< Recipe text exceeded MAX_SOUNDS or MAX_LAYERS. / 레시피 텍스트가 MAX_SOUNDS 또는 MAX_LAYERS를 초과했습니다. */
+    DIAG_DOOR_CAP,      /**< Level declared more doors than LVL_MAX_DOORS. / 레벨이 LVL_MAX_DOORS보다 많은 문을 선언했습니다. */
     DIAG_PASS_ORDER,    /**< A draw was made on the wrong side of the world/UI pass boundary. / 월드/UI 패스 경계의 잘못된 쪽에서 그리기가 수행되었습니다. */
     DIAG_COUNT          /**< Number of counters. / 카운터의 개수. */
 } DiagKind;

@@ -848,14 +848,14 @@ int main(void) {
 
     /* --- firing kicks the player back, harder in the air -------------------- */
     {
-        Weapon w = {0}; w.ammo = 5;
+        Weapon w = {0}; w.ammo[WP_SHOTGUN] = 5;
         v3 eye = v3f(0, PLAYER_EYE, 0);
         /* Facing -z (yaw 0, pitch 0): the kick should push +z (backward). */
         v3 vel_ground = v3f(0,0,0), vel_air = v3f(0,0,0);
 
         wp_update(&w, DT, 1, eye, 0.0f, 0.0f, 0.0f, 0, 0, 1.4f, 1.6f,
                  &vel_ground, 1);
-        Weapon w2 = {0}; w2.ammo = 5;
+        Weapon w2 = {0}; w2.ammo[WP_SHOTGUN] = 5;
         wp_update(&w2, DT, 1, eye, 0.0f, 0.0f, 0.0f, 0, 0, 1.4f, 1.6f,
                  &vel_air, 0);
 
@@ -869,7 +869,7 @@ int main(void) {
 
     /* --- aiming down and firing launches you up, the rocket-jump trick ------ */
     {
-        Weapon w = {0}; w.ammo = 5;
+        Weapon w = {0}; w.ammo[WP_SHOTGUN] = 5;
         v3 eye = v3f(0, PLAYER_EYE, 0);
         v3 vel = v3f(0,0,0);
         float look_down = -0.8f;   /* radians; negative is down in this engine */

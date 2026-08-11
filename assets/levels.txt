@@ -91,6 +91,59 @@ e spawn -600 -900
 e spawn 900 400
 e caster 0 -400          # holds the middle of the room and shoots across it
 e ammo 0 0
+
+# The roster, laid out so each is found near something it answers. The grenade
+# sits by the pillars it can be banked around; the rapid gun in the open where
+# leading a target is the whole job; the axe close to the spawn, because a
+# weapon that asks you to close the distance is worth having early.
+# --- doors -------------------------------------------------------------
+#
+# Three sectors that move, one of each kind the format supports, placed where
+# each one's motion is the point:
+#
+#   The vertical door sits in the open floor: its ceiling is at the floor when
+#   closed, so it is a solid block you walk up to and it lifts out of the way.
+#
+#   The sliding door needs no headroom, so it is the one that can be put
+#   anywhere -- here it is opened from a distance by a switch rather than by
+#   walking into it, which is what a tag is for.
+#
+#   The keyed door refuses until the red card is found. It is the only one that
+#   can say no.
+
+s
+floor -50  ceil -50
+door up 400
+mat floor pgrid  wall pgrid  ceil pgrid
+p
+   1750 -300   2150 -300   2150 300   1750 300
+
+s
+floor -50  ceil 320
+door x 500 speed 260 tag 1
+mat floor prust  wall prust  ceil ppanel
+p
+   -1900 700   -1500 700   -1500 1300   -1900 1300
+
+s
+floor -50  ceil 340
+door up 380 key red
+mat floor plava  wall pbrick  ceil ppanel
+p
+   700 1500   1200 1500   1200 2000   700 2000
+
+e grenade    -700   600
+e rapid       800   400
+e axe        -300  -700
+
+# One box of each, placed away from its weapon: a belt you fill on the way to
+# something else is a reason to take the long way round.
+e switch1     -1000   900
+e redkey       2300    600
+
+e grenadeammo  1100  -400
+e rapidammo   -1200  -200
+e axeammo       200   900
 e exit 0 -1200
 
 # Point lights: light <x> <y> <z> <radius> <r> <g> <b> <power>

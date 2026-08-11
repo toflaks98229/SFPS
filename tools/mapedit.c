@@ -926,6 +926,39 @@ static int serialise(char *buf, int cap) {
             at = append_int(buf, at, cap, s->hurt);
         }
 
+        /* Doors, written inside the sector they move. The same class of loss
+           the lights were: level.c parses `door` into the Level, and a
+           serialiser that did not write it back would delete every door in the
+           map on the first save. `mapedit -verify` counts them for that reason.
+           문은 자신이 움직이는 섹터 안에 기록합니다. 조명과 같은 종류의 손실입니다.
+           level.c가 `door`를 Level로 파싱하는데 직렬화기가 되돌려 쓰지 않으면, 첫 저장에서
+           맵의 모든 문이 삭제됩니다. `mapedit -verify`가 그래서 문을 셉니다. */
+        for (int di = 0; di < g_level.n_doors; di++) {
+            const DoorDef *d = &g_level.doors[di];
+            if (d->sector != i) continue;
+
+            static const char *AXIS[DOOR_AXES] = { "up", "down", "x", "z" };
+            at = append(buf, at, cap, "\ndoor ");
+            at = append(buf, at, cap,
+                        (d->axis >= 0 && d->axis < DOOR_AXES) ? AXIS[d->axis] : "up");
+            at = append(buf, at, cap, " ");
+            at = append_int(buf, at, cap, d->amount);
+
+            at = append(buf, at, cap, " speed ");
+            at = append_int(buf, at, cap, d->speed);
+
+            if (d->tag) {
+                at = append(buf, at, cap, " tag ");
+                at = append_int(buf, at, cap, d->tag);
+            }
+            if (d->key != KEY_NONE) {
+                at = append(buf, at, cap, " key ");
+                at = append(buf, at, cap,
+                            d->key == KEY_RED  ? "red" :
+                            d->key == KEY_BLUE ? "blue" : "yellow");
+            }
+        }
+
         at = append(buf, at, cap, "\nmat floor ");
         at = append(buf, at, cap, s->mat_floor);
         at = append(buf, at, cap, "  wall ");
@@ -1054,7 +1087,7 @@ static int serialise(char *buf, int cap) {
  *       것이 바로 그것입니다.
  */
 static int verify_roundtrip(const char *buf) {
-    int n_s = 0, n_e = 0, n_light = 0, bad = 0;
+    int n_s = 0, n_e = 0, n_light = 0, n_door = 0, bad = 0;
     int hurt_seen[LVL_MAX_SECTORS], n_hurt = 0;
     short light_seen[LVL_MAX_LIGHTS][8];
 
@@ -1074,6 +1107,7 @@ static int verify_roundtrip(const char *buf) {
             if (ok && n_hurt < LVL_MAX_SECTORS) hurt_seen[n_hurt++] = v;
             continue;
         }
+        if (txt_is(t, len, "door")) { n_door++; continue; }
         if (txt_is(t, len, "light")) {
             int v[8], ok = 1;
             for (int i = 0; i < 8 && ok; i++) p = txt_read_int(p, &v[i], &ok);
@@ -1091,6 +1125,10 @@ static int verify_roundtrip(const char *buf) {
     }
     if (n_e != g_level.n_ents) {
         printf("  FAIL entities: wrote %d, level has %d\n", n_e, g_level.n_ents);
+        bad++;
+    }
+    if (n_door != g_level.n_doors) {
+        printf("  FAIL doors: wrote %d, level has %d\n", n_door, g_level.n_doors);
         bad++;
     }
     if (n_light != g_level.n_lights) {
@@ -2485,9 +2523,9 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
             levels++;
             serialise(buf, sizeof(buf));
             int lost = verify_roundtrip(buf);
-            printf("  %-12s %2d sectors  %2d entities  %2d lights   %s\n",
+            printf("  %-12s %2d sectors  %2d ents  %2d lights  %2d doors   %s\n",
                    name, g_level.n_sectors, g_level.n_ents, g_level.n_lights,
-                   lost ? "LOSSY" : "ok");
+                   g_level.n_doors, lost ? "LOSSY" : "ok");
             bad += lost;
         }
 

@@ -26,6 +26,16 @@ drawn -- and deleting the file brings it straight back. Nothing else in the
 project changes either way.
 
 
+A WEAPON DRAWING IS THE VIEWMODEL ONLY. The item lying on the floor is NOT
+this sprite -- it is a generated icon, and that is a decision rather than a
+gap waiting to be filled. A viewmodel is drawn to be seen from one angle,
+filling the bottom of the screen; on the floor across a room it is a small
+dark smear, because the detail that sells it up close is the first thing the
+art resolution throws away. The floor icons were designed for that distance
+instead, so colour says which weapon and the shard-vs-box shape says whether
+it is the weapon or its ammunition. See pickup_pixel in src/sprite.c.
+
+
 THE WEAPON FACES FORWARD, NOT SIDEWAYS. You are looking down your own sights,
 so the weapon points AWAY into the screen: the barrel recedes to a muzzle near
 the top-centre of the cell, the receiver and stock are below it, and your hands

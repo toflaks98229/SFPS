@@ -113,6 +113,114 @@ typedef struct MdlRange MdlRange;
  * 이 광원 수에서는 8회 루프가 그것을 피하기 위한 장치보다 저렴하기 때문입니다. 이 값을
  * 올리면 픽셀당 비용이 선형으로 증가하므로 형식적인 상한이 아니라 실제 예산입니다.
  */
+#define LVL_MAX_DOORS   16     ///< @brief Maximum moving sectors per level. / 레벨당 최대 이동 섹터 수.
+
+/* --- Doors and keys / 문과 열쇠 -------------------------------------------
+ *
+ * ENGLISH
+ * -------
+ * A door is a SECTOR that moves, which is how Doom did it and is the only
+ * shape that costs this engine nothing: collision already asks a sector where
+ * its floor and ceiling are and whether a point is inside its outline, so a
+ * sector that moves is a solid that moves, for free. Nothing in level_ground,
+ * open_at or level_trace has to learn what a door is.
+ *
+ * The authored geometry is the CLOSED state -- what you see when you walk up
+ * to it. Opening displaces it by `amount`, and the direction says how:
+ *
+ *   up     the ceiling rises, revealing the gap underneath. The classic door.
+ *   down   the floor sinks, opening a way through what was a step.
+ *   x, z   the whole outline slides along that axis. A slab that opens
+ *          sideways, which needs no vertical room at all.
+ *
+ * `up` and `down` move a height; `x` and `z` move the points. Both are things
+ * the collision routines already read every frame, so the moving door is solid
+ * in exactly the way its drawing says it is at every instant of its travel --
+ * there is no second collision shape to keep in step.
+ *
+ * 한국어
+ * ------
+ * 문은 *움직이는 섹터*입니다. Doom이 그렇게 했고, 이 엔진에서 비용이 들지 않는 유일한
+ * 형태입니다. 충돌 판정은 이미 섹터에게 바닥과 천장이 어디인지, 어떤 점이 외곽선 안에
+ * 있는지를 묻고 있으므로, 움직이는 섹터는 곧 움직이는 고체입니다. level_ground, open_at,
+ * level_trace 중 어느 것도 문이 무엇인지 배울 필요가 없습니다.
+ *
+ * 제작된 지오메트리가 *닫힌* 상태입니다. 다가갔을 때 보이는 모습입니다. 열리면 `amount`
+ * 만큼 변위하며, 방향이 방식을 말합니다.
+ *
+ *   up     천장이 올라가 아래에 틈이 생깁니다. 고전적인 문입니다.
+ *   down   바닥이 내려가 계단이던 곳이 통로가 됩니다.
+ *   x, z   외곽선 전체가 해당 축을 따라 미끄러집니다. 수직 공간이 전혀 필요 없는
+ *          옆으로 열리는 슬래브입니다.
+ *
+ * `up`과 `down`은 높이를, `x`와 `z`는 점을 움직입니다. 둘 다 충돌 루틴이 이미 매 프레임
+ * 읽는 값이므로, 움직이는 문은 이동 중 모든 순간에 그림이 말하는 그대로 고체입니다.
+ * 맞춰 두어야 할 두 번째 충돌 형상이 없습니다.
+ */
+
+/**
+ * @brief Which way a door travels when it opens.
+ * @note The order is the order ::DOOR_AXIS_NAMES lists them, which is what the
+ *       level text is parsed against and what mapedit writes back.
+ *
+ * @brief 문이 열릴 때 이동하는 방향입니다.
+ */
+enum {
+    DOOR_UP,    /**< Ceiling rises. / 천장이 올라갑니다. */
+    DOOR_DOWN,  /**< Floor sinks. / 바닥이 내려갑니다. */
+    DOOR_X,     /**< Outline slides along x. / 외곽선이 x축을 따라 미끄러집니다. */
+    DOOR_Z,     /**< Outline slides along z. / 외곽선이 z축을 따라 미끄러집니다. */
+    DOOR_AXES   /**< How many. / 방향의 수. */
+};
+
+/**
+ * @brief Keys a door can demand, as a bit each.
+ *
+ * A mask rather than an index, because the player holds a set and a door names
+ * one: `held & needed` is the whole check, and a door needing two keys is the
+ * same expression.
+ *
+ * @brief 문이 요구할 수 있는 열쇠이며, 각각 한 비트입니다.
+ * @note 인덱스가 아니라 마스크입니다. 플레이어는 집합을 들고 문은 하나를 지목하므로
+ *       `held & needed`가 검사의 전부이며, 두 개를 요구하는 문도 같은 식입니다.
+ */
+enum {
+    KEY_NONE   = 0,
+    KEY_RED    = 1 << 0,
+    KEY_BLUE   = 1 << 1,
+    KEY_YELLOW = 1 << 2,
+    KEY_KINDS  = 3          /**< How many distinct keys exist. / 존재하는 열쇠의 종류 수. */
+};
+
+/**
+ * @struct DoorDef
+ * @brief One door, as the level text authored it. Runtime state lives in door.c.
+ *
+ * ENGLISH
+ * -------
+ * @note Authored data only. Where a door is in its travel right now is not
+ *       here, for the same reason ::Enemy is not in ::Level: the level is what
+ *       was written down, and a door half open is something that happened
+ *       since. Reloading the level text must not un-open a door by accident,
+ *       and it cannot if the two never share storage.
+ *
+ * 한국어
+ * ------
+ * @brief 레벨 텍스트가 제작한 문 하나입니다. 실행 중 상태는 door.c에 있습니다.
+ * @note 제작 데이터만 담습니다. 문이 지금 어디까지 열렸는지는 이곳에 없으며, ::Enemy가
+ *       ::Level에 없는 것과 같은 이유입니다. 레벨은 기록된 것이고, 반쯤 열린 문은 그
+ *       이후에 벌어진 일입니다. 레벨 텍스트를 다시 읽는 것이 실수로 문을 닫아서는 안
+ *       되며, 둘이 저장 공간을 공유하지 않으면 그럴 수 없습니다.
+ */
+typedef struct {
+    short sector;   /**< Index into ::Level::sectors. / ::Level::sectors의 인덱스. */
+    short axis;     /**< One of the DOOR_* directions. / DOOR_* 방향 중 하나. */
+    short amount;   /**< Travel in file units; signed for x and z. / 이동 거리(파일 단위). x와 z는 부호가 있습니다. */
+    short speed;    /**< File units per second. / 초당 파일 단위. */
+    short tag;      /**< 0 opens on touch; >0 waits for a matching switch. / 0이면 접촉 시 열리고, 0보다 크면 대응하는 스위치를 기다립니다. */
+    short key;      /**< A KEY_* mask, or ::KEY_NONE. / KEY_* 마스크 또는 ::KEY_NONE. */
+} DoorDef;
+
 #define LVL_MAX_LIGHTS  8
 #define LVL_MAT         16     ///< @brief Maximum length of a material or entity kind name. / 재질 또는 엔티티 종류 이름의 최대 길이.
 
@@ -572,6 +680,8 @@ typedef struct {
     int     n_ents;                       /**< Number of entities in use. / 사용 중인 엔티티의 수. */
     Light   lights[LVL_MAX_LIGHTS];       /**< Point lights. / 점광원. */
     int     n_lights;                     /**< Number of lights in use. / 사용 중인 광원의 수. */
+    DoorDef doors[LVL_MAX_DOORS];         /**< Moving sectors. / 이동하는 섹터. */
+    int     n_doors;                      /**< Number of doors in use. / 사용 중인 문의 수. */
     short   start[3];                     /**< x, z, and yaw in millidegrees. / x, z 좌표와 밀리도 단위의 yaw. */
 
     /**

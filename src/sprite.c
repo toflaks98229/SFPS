@@ -414,7 +414,7 @@ static int pickup_pixel(int kind, float nx, float ny, unsigned char *rgb) {
             if (d < 0.11f * 0.11f) { a = 1.0f; r = 0.90f; g = 0.72f; b = 0.22f; }
             if (d < 0.05f * 0.05f) { r = 0.30f; g = 0.16f; b = 0.10f; }  /* primer */
         }
-    } else { /* PK_HEALTH */
+    } else if (kind == PK_HEALTH) {
         float box = rbox(nx, ny, 0.60f, 0.52f, 0.12f);
         if (box > 0.0f) {
             a = 1.0f;
@@ -426,6 +426,156 @@ static int pickup_pixel(int kind, float nx, float ny, unsigned char *rgb) {
             int cross = (fabsf(nx) < 0.14f && fabsf(ny) < 0.34f) ||
                         (fabsf(ny) < 0.14f && fabsf(nx) < 0.34f);
             if (cross) { r = 0.85f; g = 0.10f; b = 0.10f; }
+        }
+    } else {
+        /* --- one belt per weapon, and the weapons themselves --------------
+         *
+         * ENGLISH
+         * -------
+         * Colour is what tells them apart at a glance, so it comes from the
+         * WEAPON rather than from the kind: an ammo box and the weapon it
+         * feeds share a hue, and a player who learns that grenades are orange
+         * has learned it for both. Doom taught its colours the same way.
+         *
+         * The shape says which of the two it is -- a squat box for ammo, an
+         * upright shard for a weapon -- because colour alone cannot be read by
+         * everyone, and at this sprite size a silhouette is more legible than
+         * any detail drawn inside it.
+         *
+         * These stay GENERATED. The obvious next step was to draw the pickup
+         * with the weapon's own viewmodel sprite -- the art already exists, it
+         * would cost no new pixels, and "the thing on the floor is the thing
+         * you pick up" sounds right. It was tried and it is worse, so this is
+         * the decision rather than a stop on the way to that one.
+         *
+         * A viewmodel is drawn to be seen from ONE angle, filling the bottom of
+         * the screen, lit as though it were in your hands. On the floor at a
+         * distance it is a small dark smear: the silhouette that reads as a
+         * weapon when it is 400 pixels tall reads as debris at 40, and the
+         * detail that sells it up close is the first thing the art resolution
+         * throws away. Four of them at range are four smudges you have to walk
+         * onto to identify.
+         *
+         * The generated icons answer the question the floor actually asks --
+         * "what is that, and do I want it" -- from across a room, because they
+         * were designed for that distance instead of borrowed from another one.
+         * Colour carries which weapon; the shard-versus-box silhouette carries
+         * whether it is the weapon or its ammunition. Both survive being small.
+         *
+         * 한국어
+         * ------
+         * 이 아이콘들은 *생성된 채로 유지됩니다*. 뻔한 다음 단계는 무기의 뷰 모델
+         * 스프라이트로 아이템을 그리는 것이었습니다. 아트가 이미 있고, 새 픽셀 비용이 없고,
+         * "바닥에 있는 것이 곧 줍는 것"은 옳게 들립니다. 시도했고 더 나빴으므로, 이것은
+         * 그쪽으로 가는 도중의 정거장이 아니라 결론입니다.
+         *
+         * 뷰 모델은 *한* 각도에서, 화면 아래를 채우며, 손에 든 것처럼 조명된 상태로 보이도록
+         * 그려집니다. 멀리 떨어진 바닥에서 그것은 작고 어두운 얼룩입니다. 400픽셀 높이에서
+         * 무기로 읽히는 실루엣이 40픽셀에서는 잔해로 읽히고, 가까이서 설득력을 만드는 디테일이
+         * 아트 해상도가 가장 먼저 버리는 것입니다. 멀리 있는 네 개는 정체를 알려면 밟아 봐야
+         * 하는 네 개의 얼룩입니다.
+         *
+         * 생성된 아이콘은 바닥이 실제로 던지는 질문("저게 뭐고, 내가 원하는가")에 방 건너에서
+         * 답합니다. 다른 거리에서 빌려 온 것이 아니라 그 거리를 위해 설계되었기 때문입니다.
+         * 색이 어떤 무기인지를, 조각 대 상자의 실루엣이 무기인지 탄약인지를 전달합니다. 둘 다
+         * 작아져도 살아남습니다.
+         *
+         * 한국어
+         * ------
+         * 색이 한눈에 구분해 주므로, 종류가 아니라 *무기*에서 색을 가져옵니다. 탄약 상자와
+         * 그것이 채우는 무기가 같은 색조를 공유하며, 유탄이 주황색임을 익힌 플레이어는
+         * 양쪽 모두를 익힌 셈입니다. Doom이 색을 가르친 방식과 같습니다.
+         *
+         * 둘 중 무엇인지는 형태가 말합니다. 탄약은 납작한 상자, 무기는 세로로 선
+         * 조각입니다. 색만으로는 모두가 읽을 수 없고, 이 크기의 스프라이트에서는 안에 그린
+         * 어떤 디테일보다 실루엣이 잘 읽히기 때문입니다.
+         *
+         * 몬스터와 마찬가지로 *생성*되며, 손으로 그린 아트가 같은 방식으로 대체합니다.
+         * 아무도 그리지 않은 무기라도 레벨에 배치할 수 있게 하는 폴백입니다. */
+        static const float HUE[WP_TYPES][3] = {
+            { 0.85f, 0.66f, 0.24f },   /* shotgun: brass */
+            { 0.90f, 0.45f, 0.14f },   /* grenade: orange */
+            { 0.30f, 0.72f, 0.95f },   /* rapid:   cold blue */
+            { 0.70f, 0.78f, 0.86f },   /* axe:     steel */
+        };
+
+        /* --- keycards ----------------------------------------------------
+           A flat card, wider than tall, in the colour the door asks for by
+           name. Deliberately unlike both other shapes here: a key is neither
+           ammunition nor a weapon, and a player scanning a room for the red
+           one should not have to tell it apart from a red ammo crate.
+           납작한 카드이며 높이보다 폭이 넓고, 문이 이름으로 요구하는 색입니다. 이곳의 다른
+           두 형태와 의도적으로 다릅니다. 열쇠는 탄약도 무기도 아니며, 붉은 열쇠를 찾아 방을
+           훑는 플레이어가 그것을 붉은 탄약 상자와 구별하느라 애쓸 필요는 없습니다. */
+        int km = PK_KEY_MASK(kind);
+        if (km != KEY_NONE) {
+            static const float KEYCOL[KEY_KINDS][3] = {
+                { 0.90f, 0.18f, 0.20f },   /* red */
+                { 0.24f, 0.46f, 0.95f },   /* blue */
+                { 0.94f, 0.82f, 0.22f },   /* yellow */
+            };
+            int ki = kind - PK_KEY0;
+            if (ki < 0 || ki >= KEY_KINDS) ki = 0;
+            const float *K = KEYCOL[ki];
+
+            float card = rbox(nx, ny, 0.56f, 0.34f, 0.07f);
+            if (card > 0.0f) {
+                a = 1.0f;
+                r = K[0]; g = K[1]; b = K[2];
+                float rim = card < 0.06f ? card / 0.06f : 1.0f;
+                r *= 0.5f + 0.5f * rim; g *= 0.5f + 0.5f * rim; b *= 0.5f + 0.5f * rim;
+                /* A pale stripe: a blank slab of colour reads as a wall tile,
+                   and the stripe is what makes it an object.
+                   옅은 줄무늬입니다. 단색 판은 벽 타일로 읽히며, 줄무늬가 그것을 물체로
+                   만듭니다. */
+                if (fabsf(ny - 0.12f) < 0.06f && fabsf(nx) < 0.40f) {
+                    r = 0.95f; g = 0.96f; b = 0.98f;
+                }
+            }
+            if (a <= 0.0f) return 0;
+            rgb[0] = (unsigned char)(r > 1 ? 255 : r * 255);
+            rgb[1] = (unsigned char)(g > 1 ? 255 : g * 255);
+            rgb[2] = (unsigned char)(b > 1 ? 255 : b * 255);
+            return 255;
+        }
+
+        int aw = PK_AMMO_WEAPON(kind), ww = PK_WEAPON_WEAPON(kind);
+        int which = aw >= 0 ? aw : ww;
+        if (which < 0 || which >= WP_TYPES) which = 0;
+        const float *H = HUE[which];
+
+        if (aw >= 0) {
+            /* A squat box, banded in the weapon's colour. */
+            float box = rbox(nx, ny + 0.10f, 0.60f, 0.38f, 0.10f);
+            if (box > 0.0f) {
+                a = 1.0f;
+                r = 0.24f; g = 0.24f; b = 0.26f;              /* dark crate */
+                if (fabsf(ny + 0.08f) < 0.09f) { r = H[0]; g = H[1]; b = H[2]; }
+                float rim = box < 0.06f ? box / 0.06f : 1.0f;
+                r *= 0.5f + 0.5f * rim; g *= 0.5f + 0.5f * rim; b *= 0.5f + 0.5f * rim;
+            }
+        } else {
+            /* An upright shard: taller than it is wide, so it never reads as
+               a box even in silhouette.
+               세로로 선 조각입니다. 폭보다 높이가 커서 실루엣만으로도 상자로 읽히지
+               않습니다. */
+            float body = rbox(nx, ny, 0.26f, 0.66f, 0.09f);
+            if (body > 0.0f) {
+                a = 1.0f;
+                r = H[0]; g = H[1]; b = H[2];
+                /* A lit top face and a dark base, so it has a direction. */
+                float t = (ny + 0.66f) / 1.32f;
+                float sh = 0.55f + 0.55f * t;
+                r *= sh; g *= sh; b *= sh;
+                float rim = body < 0.07f ? body / 0.07f : 1.0f;
+                r *= 0.45f + 0.55f * rim; g *= 0.45f + 0.55f * rim; b *= 0.45f + 0.55f * rim;
+            }
+            /* A pale collar, which is what stops four coloured shards from
+               looking like four of the same object.
+               옅은 띠입니다. 네 개의 색 조각이 같은 물체 네 개로 보이지 않게 합니다. */
+            if (a > 0.0f && fabsf(ny - 0.18f) < 0.07f && fabsf(nx) < 0.24f) {
+                r = 0.92f; g = 0.94f; b = 0.98f;
+            }
         }
     }
 

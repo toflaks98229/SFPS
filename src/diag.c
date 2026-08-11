@@ -77,6 +77,7 @@ static const char *const DIAG_NAMES[DIAG_COUNT] = {
     "pickup",   /* DIAG_PICKUP_CAP   */
     "shot",     /* DIAG_SHOT_CAP     */
     "sound",    /* DIAG_SOUND_CAP    */
+    "door",     /* DIAG_DOOR_CAP     */
     "pass"      /* DIAG_PASS_ORDER   */
 };
 

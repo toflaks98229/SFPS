@@ -241,6 +241,76 @@ void   pickup_uv(int kind, float *u0, float *v0, float *u1, float *v1);
  *          stdio를 끌어들이기 때문입니다.
  */
 int sprite_dump_ppm(const char *path);
+
+/**
+ * @brief Decodes a sprite text into a caller-owned buffer. Tests only.
+ *
+ * ENGLISH
+ * -------
+ * @param[in]     text   Sprite text in bake.ps1's format.
+ * @param[in,out] rgba   Destination, W*H*4 bytes. NOT cleared -- decoding
+ *                       composites, so the caller decides what is underneath.
+ * @param[in]     W,H    Destination size in pixels.
+ * @param[in]     weapon Non-zero to place sprites in weapon cells, zero for
+ *                       monster cells.
+ *
+ * @note Exists because the shipped decoder can only ever see the baked blob:
+ *       there is no file behind DATA_SPRITES, so without this the only way to
+ *       exercise the codec is to rebuild with different art and look at the
+ *       screen. tools/sprtest.c uses it to check the format against pixels it
+ *       computed by hand.
+ * @warning Dev builds only, like ::sprite_dump_ppm.
+ *
+ * 한국어
+ * ------
+ * @brief 스프라이트 텍스트를 호출자 소유 버퍼로 디코딩합니다. 테스트 전용입니다.
+ * @param[in,out] rgba 대상 버퍼(W*H*4 바이트). 비우지 *않습니다*. 디코딩은 합성이므로
+ *                     아래에 무엇이 있을지는 호출자가 정합니다.
+ * @param[in]     weapon 0이 아니면 무기 셀에, 0이면 몬스터 셀에 배치합니다.
+ *
+ * @note 배포되는 디코더는 구워진 텍스트만 볼 수 있기 때문에 존재합니다. DATA_SPRITES
+ *       뒤에는 파일이 없으므로, 이것이 없으면 코덱을 실행해 볼 유일한 방법이 다른 아트로
+ *       다시 빌드해서 화면을 보는 것뿐입니다.
+ * @warning ::sprite_dump_ppm과 같이 개발 빌드 전용입니다.
+ */
+void sprite_decode_text(const char *text, unsigned char *rgba, int W, int H,
+                        int weapon);
+
+/**
+ * @brief The muzzle a weapon frame recorded, in CELL pixels. Tests only.
+ *
+ * @param[in]  frame WPN_* frame.
+ * @param[out] x,y   Cell coordinates, after centring and bottom-seating.
+ * @return Non-zero when that frame recorded one.
+ *
+ * @note ::weapon_muzzle normalises and flips v for the quad it feeds; this
+ *       reports the raw placement so a test can check the seating arithmetic
+ *       without also depending on the flip.
+ *
+ * @brief 무기 프레임이 기록한 총구를 *셀* 픽셀 단위로 반환합니다. 테스트 전용입니다.
+ * @note ::weapon_muzzle은 쿼드에 넣기 위해 정규화하고 v를 뒤집습니다. 이 함수는 배치
+ *       계산만 검사할 수 있도록 원시 좌표를 보고합니다.
+ */
+/**
+ * @brief One character of the sprite alphabet back to its six bits. Tests only.
+ *
+ * @param[in] c A character.
+ * @return 0..63, or -1 when it is not in the alphabet.
+ *
+ * @note Exposed so tools/sprtest.c can check this against the string bake.ps1
+ *       encodes with. The two must describe the same alphabet in the same
+ *       order, one is PowerShell and the other is C, and a mismatch decodes
+ *       every drawing in the game to the wrong palette indices -- which looks
+ *       like the art was drawn wrong.
+ *
+ * @brief 스프라이트 알파벳의 한 문자를 6비트 값으로 되돌립니다. 테스트 전용입니다.
+ * @note bake.ps1이 인코딩에 쓰는 문자열과 대조할 수 있도록 노출합니다. 둘은 같은 알파벳을
+ *       같은 순서로 기술해야 하는데 하나는 PowerShell이고 다른 하나는 C이며, 어긋나면
+ *       게임의 모든 그림이 잘못된 팔레트 인덱스로 디코딩됩니다.
+ */
+int sprite_b64val(char c);
+
+int sprite_weapon_muzzle_px(int frame, int *x, int *y);
 #endif
 
 /* --- The hand-drawn viewmodel / 손으로 그린 뷰 모델 --- */

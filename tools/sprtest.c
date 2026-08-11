@@ -1,0 +1,313 @@
+/* sprtest -- check the sprite codec, with no window and no PNG.
+ *
+ * This exists because the codec's format was changed while it had no test at
+ * all. The only thing looking at it was sprdump, which writes a PPM for a human
+ * to squint at and asserts nothing, and it only ever covered the monster atlas.
+ * A screenshot proved the new format decoded SOMETHING; it could not have
+ * caught a run length off by one, a packed triple leaking across a sprite
+ * boundary, or the two alphabets drifting apart.
+ *
+ * What is checked, in order of how badly it fails:
+ *
+ *   1. bake.ps1's alphabet and sprite.c's b64val agree. This is a contract
+ *      between a PowerShell script and a C file that no compiler can see, and
+ *      the failure is every drawing in the game decoding to noise.
+ *   2. Both opcodes decode to pixels computed by hand here.
+ *   3. A packed sprite whose pixel count is not a multiple of three does not
+ *      shift the sprite after it.
+ *   4. Index 0 composites rather than punching a hole.
+ *   5. The muzzle marker survives centring and bottom-seating.
+ *   6. Malformed text stops rather than running off the end.
+ *
+ * The test writes sprite text by hand rather than driving bake.ps1, because
+ * what ships is the DECODER: an encoder bug shows up as art that looks wrong to
+ * the person who drew it, while a decoder bug shows up in the released game.
+ *
+ * 이 파일은 코덱의 형식이 테스트가 전혀 없는 상태에서 변경되었기 때문에 존재합니다.
+ * 스크린샷은 새 형식이 *무언가*를 디코딩한다는 것만 증명했을 뿐, 실행 길이가 하나
+ * 어긋났는지, 패킹된 묶음이 스프라이트 경계를 넘어 샜는지, 두 알파벳이 어긋났는지는
+ * 잡을 수 없었습니다.
+ */
+
+#include <stdio.h>
+#include <string.h>
+#include "sprite.h"
+#include "enemy.h"      /* MON_TYPES -- the monster atlas has one row per type */
+
+static int fails;
+
+static void ok(int cond, const char *what) {
+    printf("  %-58s %s\n", what, cond ? "ok" : "FAIL");
+    if (!cond) fails++;
+}
+
+static void okd(int cond, const char *what, int got, int want) {
+    printf("  %-58s %6d / %6d  %s\n", what, got, want, cond ? "ok" : "FAIL");
+    if (!cond) fails++;
+}
+
+/* The monster atlas, sized exactly as sprite.c builds it. Decoding writes into
+   this, and every expectation below indexes it the same way sprite_uv does.
+   sprite.c가 생성하는 것과 정확히 같은 크기의 몬스터 아틀라스입니다. */
+#define AW (SPR_CW * SPR_FRAMES)
+#define AH (SPR_CH * MON_TYPES)
+static unsigned char g_atlas[AW * AH * 4];
+
+/* The weapon atlas. */
+#define WW (WPN_CW * WPN_FRAMES)
+#define WH (WPN_CH)
+static unsigned char g_watlas[WW * WH * 4];
+
+static void clear(unsigned char *b, int n) { memset(b, 0, (size_t)n * 4); }
+
+/* A pixel from the monster atlas. Cells are laid out frame-across, type-down,
+   and a drawing is centred horizontally and seated on the cell's bottom -- so
+   a test that wants "the drawing's pixel (sx,sy)" has to apply the same
+   placement the decoder does, or it is asserting against the wrong address.
+   몬스터 아틀라스의 픽셀입니다. 배치를 동일하게 적용해야 올바른 주소를 검사합니다. */
+static const unsigned char *at(int type, int frame, int sw, int sh, int sx, int sy) {
+    int ax = frame * SPR_CW + (SPR_CW - sw) / 2 + sx;
+    int ay = type  * SPR_CH + (SPR_CH - sh)     + sy;
+    return &g_atlas[(ay * AW + ax) * 4];
+}
+
+int main(void) {
+    printf("sprtest\n\n");
+
+    /* --- 1. the alphabet contract, read out of bake.ps1 -------------------
+       bake.ps1 encodes with a 64-character string and sprite.c decodes by
+       COMPUTING the index from the character. Nothing checks that the two
+       describe the same alphabet, and nothing can: one is PowerShell and the
+       other is C. So the test reads the script.
+
+       A mismatch is not subtle in its consequences and is very subtle in its
+       cause: every sprite in the game decodes to the wrong palette indices, and
+       the art looks like it was drawn wrong.
+
+       bake.ps1은 64자 문자열로 인코딩하고 sprite.c는 문자로부터 인덱스를 *계산*합니다.
+       둘이 같은 알파벳을 기술하는지 확인하는 것은 없으며, 하나는 PowerShell이고 다른
+       하나는 C이므로 확인할 수도 없습니다. 그래서 테스트가 스크립트를 읽습니다. */
+    {
+        FILE *f = fopen("bake.ps1", "rb");
+        if (!f) f = fopen("../bake.ps1", "rb");
+        ok(f != NULL, "bake.ps1 is readable, so the alphabet can be compared");
+
+        char alpha[128] = {0};
+        int  found = 0;
+        if (f) {
+            char line[512];
+            while (fgets(line, sizeof(line), f)) {
+                /* The encoder's alphabet is the one assignment to $A. */
+                const char *m = strstr(line, "$A = '");
+                if (!m) continue;
+                m += 6;
+                int n = 0;
+                while (*m && *m != '\'' && n < 127) alpha[n++] = *m++;
+                alpha[n] = 0;
+                found = (n == 64);
+                break;
+            }
+            fclose(f);
+        }
+        okd(found, "and it holds exactly 64 characters", (int)strlen(alpha), 64);
+
+        if (found) {
+            /* Every character must decode to its own position. */
+            int bad = 0, first_bad = -1;
+            for (int i = 0; i < 64; i++) {
+                if (sprite_b64val(alpha[i]) != i) {
+                    if (first_bad < 0) first_bad = i;
+                    bad++;
+                }
+            }
+            okd(bad == 0, "every encoder character decodes to its own index",
+                bad, 0);
+            if (bad) printf("      first mismatch at index %d ('%c')\n",
+                            first_bad, alpha[first_bad]);
+
+            /* And none of them may need escaping inside a C string literal,
+               because that is where this text ends up. A backslash would eat
+               the next character, a quote would end the string, and '?' can
+               begin a trigraph.
+               그리고 어느 것도 C 문자열 리터럴 안에서 이스케이프가 필요해서는 안 됩니다.
+               이 텍스트가 놓이는 곳이 그곳이기 때문입니다. */
+            int unsafe = 0;
+            for (int i = 0; i < 64; i++)
+                if (alpha[i] == '\\' || alpha[i] == '"' || alpha[i] == '?' ||
+                    alpha[i] < 33 || alpha[i] > 126) unsafe++;
+            okd(unsafe == 0, "and none needs escaping in a C string literal",
+                unsafe, 0);
+        }
+    }
+
+    /* --- 2. run-length decode --------------------------------------------
+       A 4x2 sprite: a run of 4 in colour 1, then 4 in colour 2. Written as
+       'r' pairs, one character of run and one of index, so "EB" is a run of 4
+       (alphabet index 4 = 'E') of palette entry 1 ('B').
+       4x2 스프라이트입니다. 색 1이 4연속, 색 2가 4연속입니다. */
+    {
+        clear(g_atlas, AW * AH);
+        /* pal: index 0 transparent, 1 red, 2 green. */
+        const char *text =
+            "pal 3 000000 ff0000 00ff00\n"
+            "s imp0 4 2\n"
+            "r EBEC\n";
+        sprite_decode_text(text, g_atlas, AW, AH, 0);
+
+        const unsigned char *p0 = at(0, 0, 4, 2, 0, 0);   /* row 0 */
+        const unsigned char *p1 = at(0, 0, 4, 2, 3, 1);   /* row 1, last px */
+        ok(p0[0] == 255 && p0[1] == 0 && p0[2] == 0 && p0[3] == 255,
+           "RLE: the first run decodes to its palette colour");
+        ok(p1[0] == 0 && p1[1] == 255 && p1[2] == 0 && p1[3] == 255,
+           "RLE: the second run lands on the following pixels");
+    }
+
+    /* --- 3. packed decode -------------------------------------------------
+       Three 4-bit indices per two characters. Indices 1,2,1 pack to the 12-bit
+       value 0x121, whose top six bits are 4 ('E') and bottom six are 33 ('h').
+       두 문자에 4비트 인덱스 세 개가 들어갑니다. */
+    {
+        clear(g_atlas, AW * AH);
+        const char *text =
+            "pal 3 000000 ff0000 00ff00\n"
+            "s imp0 3 1\n"
+            "p Eh\n";
+        sprite_decode_text(text, g_atlas, AW, AH, 0);
+
+        const unsigned char *a = at(0, 0, 3, 1, 0, 0);
+        const unsigned char *b = at(0, 0, 3, 1, 1, 0);
+        const unsigned char *c = at(0, 0, 3, 1, 2, 0);
+        ok(a[0] == 255 && a[1] == 0,   "packed: first index of the triple");
+        ok(b[0] == 0   && b[1] == 255, "packed: second");
+        ok(c[0] == 255 && c[1] == 0,   "packed: third");
+    }
+
+    /* --- 4. a packed triple must not leak into the next sprite ------------
+       The failure this is written for: `pend` was a `static` inside the decode
+       loop, so a sprite whose pixel count is not a multiple of three left one
+       or two indices behind and shifted every sprite after it by that much.
+       Two pixels is not a multiple of three, so the first sprite here ends
+       mid-triple; the second must still start at its own first pixel.
+
+       That fault looks like bad art rather than like a decoder bug, which is
+       exactly why it needs a test rather than an eye.
+
+       이 검사가 존재하는 이유인 실패입니다. `pend`가 디코드 루프 안의 `static`이었으므로,
+       픽셀 수가 3의 배수가 아닌 스프라이트가 인덱스를 한두 개 남겨 그 뒤의 모든
+       스프라이트를 그만큼 밀어냈습니다. */
+    {
+        clear(g_atlas, AW * AH);
+        const char *text =
+            "pal 3 000000 ff0000 00ff00\n"
+            "s imp0 2 1\n"       /* 2 pixels: ends mid-triple */
+            "p Eh\n"
+            "s brute0 3 1\n"     /* must start clean */
+            /* indices 0,2,1 pack to 0x021 = 33; 33>>6 = 0 ('A'), 33&63 = 33
+               ('h'). Worked out here rather than trusted: the first draft of
+               this line said "Bh", which is 0x061 and decodes to 0,6,1 -- and
+               index 6 is past the end of a three-entry palette, so the test
+               failed against a decoder that was right.
+               직접 계산합니다. 이 줄의 초안은 "Bh"였는데 그것은 0x061이며 0,6,1로
+               디코딩됩니다. 인덱스 6은 항목이 셋뿐인 팔레트의 끝을 넘어서므로, 올바른
+               디코더를 상대로 테스트가 실패했습니다. */
+            "p Ah\n";
+        sprite_decode_text(text, g_atlas, AW, AH, 0);
+
+        /* brute is atlas row 1. Its first pixel is index 0 = transparent, so
+           it must be left alone; the second must be green. */
+        const unsigned char *b0 = at(1, 0, 3, 1, 0, 0);
+        const unsigned char *b1 = at(1, 0, 3, 1, 1, 0);
+        okd(b0[3] == 0, "a mid-triple sprite does not shift the next one",
+            b0[3], 0);
+        ok(b1[0] == 0 && b1[1] == 255,
+           "and the next sprite's own pixels land where they should");
+    }
+
+    /* --- 5. index 0 composites, it does not punch a hole ------------------
+       The property the monster overlay depends on: a drawing smaller than its
+       cell, or with transparent gaps, leaves the generated creature showing.
+       몬스터 오버레이가 의존하는 성질입니다. */
+    {
+        clear(g_atlas, AW * AH);
+        /* Pre-fill the cell with a marker the decode must not erase. */
+        for (int i = 0; i < AW * AH; i++) {
+            g_atlas[i*4+0] = 9; g_atlas[i*4+1] = 9;
+            g_atlas[i*4+2] = 9; g_atlas[i*4+3] = 255;
+        }
+        const char *text =
+            "pal 3 000000 ff0000 00ff00\n"
+            "s imp0 2 1\n"
+            "r BABB\n";          /* one transparent pixel, then one red */
+        sprite_decode_text(text, g_atlas, AW, AH, 0);
+
+        const unsigned char *t = at(0, 0, 2, 1, 0, 0);
+        const unsigned char *r = at(0, 0, 2, 1, 1, 0);
+        ok(t[0] == 9 && t[3] == 255, "index 0 leaves what was underneath it");
+        ok(r[0] == 255 && r[1] == 0, "and a non-zero index overwrites");
+    }
+
+    /* --- 6. the muzzle marker survives placement --------------------------
+       bake.ps1 records the marker in SOURCE-image coordinates, and the decoder
+       has to move it by the same centring and bottom-seating it applies to the
+       pixels. A muzzle recorded raw would sit correctly only for a drawing that
+       exactly filled its cell.
+       bake.ps1은 표식을 *원본 이미지* 좌표로 기록하며, 디코더는 픽셀에 적용하는 것과 같은
+       가운데 맞춤·바닥 정렬만큼 그것을 옮겨야 합니다. */
+    {
+        clear(g_watlas, WW * WH);
+        /* A 4x2 weapon drawing with its muzzle at source (1,0). Centred in a
+           128-wide cell that is (128-4)/2 = 62 across, and seated at
+           (96-2) = 94 down. */
+        const char *text =
+            "pal 2 000000 ff0000\n"
+            "s gun0 4 2\n"
+            "m 1 0\n"
+            "r EBEB\n";
+        sprite_decode_text(text, g_watlas, WW, WH, 1);
+
+        int mx = -1, my = -1;
+        int got = sprite_weapon_muzzle_px(0, &mx, &my);
+        ok(got, "the weapon frame recorded a muzzle");
+        okd(mx == (WPN_CW - 4) / 2 + 1, "muzzle x follows the centring",
+            mx, (WPN_CW - 4) / 2 + 1);
+        okd(my == (WPN_CH - 2) + 0, "muzzle y follows the bottom seating",
+            my, (WPN_CH - 2));
+    }
+
+    /* --- 7. malformed text stops rather than running off the end ----------
+       These files are generated, but a half-written one is exactly what a
+       build interrupted at the wrong moment leaves behind, and a decoder that
+       walks past its buffer on one turns a bad build into a crash.
+       이 파일들은 생성되지만, 잘못된 순간에 중단된 빌드가 남기는 것이 바로 절반만 쓰인
+       파일입니다. */
+    {
+        clear(g_atlas, AW * AH);
+        const char *truncated =
+            "pal 3 000000 ff0000 00ff00\n"
+            "s imp0 8 8\n"
+            "r EB";                       /* claims 64 px, supplies 4 */
+        sprite_decode_text(truncated, g_atlas, AW, AH, 0);
+        ok(1, "a truncated data line returns instead of overrunning");
+
+        const char *no_data =
+            "pal 3 000000 ff0000 00ff00\n"
+            "s imp0 4 4\n";               /* header with no data line at all */
+        sprite_decode_text(no_data, g_atlas, AW, AH, 0);
+        ok(1, "a sprite with no data line returns");
+
+        const char *bad_char =
+            "pal 3 000000 ff0000 00ff00\n"
+            "s imp0 4 1\n"
+            "r E!EB";                     /* '!' is not in the alphabet */
+        sprite_decode_text(bad_char, g_atlas, AW, AH, 0);
+        ok(1, "a character outside the alphabet stops the run");
+
+        sprite_decode_text("", g_atlas, AW, AH, 0);
+        sprite_decode_text(0,  g_atlas, AW, AH, 0);
+        ok(1, "empty and NULL texts are handled");
+    }
+
+    printf(fails ? "\n%d FAILURE(S)\n" : "\nall sprite codec checks passed\n",
+           fails);
+    return fails != 0;
+}

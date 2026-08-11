@@ -657,8 +657,36 @@ static int b64val(char c) {
  *          동작도 하지 않으며, 그림이 존재하기 전까지 이 프로젝트가 배포되는 상태가
  *          바로 그것입니다.
  */
+/* The shipped entry point: decode whatever bake.ps1 produced.
+   배포 진입점입니다. bake.ps1이 생성한 것을 디코딩합니다. */
+static void decode_sprites(const char *p, unsigned char *buf, int W, int H, int dest);
+
 static void overlay_drawn_sprites(unsigned char *buf, int W, int H, int dest) {
-    const char *p = data_text(DATA_SPRITES);
+    decode_sprites(data_text(DATA_SPRITES), buf, W, H, dest);
+}
+
+/* The decoder proper, over a caller-supplied text.
+ *
+ * ENGLISH
+ * -------
+ * Split from ::overlay_drawn_sprites so a test can hand it a sprite it wrote
+ * by hand. The shipped path reads ::data_text, which for sprites is always the
+ * baked blob -- there is no file behind DATA_SPRITES, because the PNGs are
+ * converted at build time -- so without this parameter the only way to exercise
+ * the decoder would be to rebuild the project with different art and look at
+ * the screen. That is how this codec came to have no test at all while its
+ * format was being changed underneath it.
+ *
+ * 한국어
+ * ------
+ * 테스트가 직접 작성한 스프라이트를 넘길 수 있도록 ::overlay_drawn_sprites에서
+ * 분리했습니다. 배포 경로는 ::data_text를 읽는데, 스프라이트의 경우 그것은 항상 구워진
+ * 텍스트입니다. PNG가 빌드 시점에 변환되므로 DATA_SPRITES 뒤에는 파일이 없습니다.
+ * 따라서 이 매개변수가 없으면 디코더를 실행해 볼 유일한 방법은 다른 아트로 프로젝트를
+ * 다시 빌드해서 화면을 보는 것뿐입니다. 이 코덱이 형식이 바뀌는 동안에도 테스트가 전혀
+ * 없었던 경위가 그것입니다.
+ */
+static void decode_sprites(const char *p, unsigned char *buf, int W, int H, int dest) {
     if (!p || !*p) return;
 
     /* One cell size per destination. The parser is shared because the
@@ -804,7 +832,29 @@ static void overlay_drawn_sprites(unsigned char *buf, int W, int H, int dest) {
            잘못된 것처럼 보이는 종류의 결함입니다. */
         int pend[2] = {0, 0}, n_pend = 0;
 
-        for (int i = 0; i < len && px_i < total; ) {
+        /* `n_pend > 0` in the condition, not just `i < len`.
+         *
+         * A packed pair carries THREE pixels and the loop emits one per turn,
+         * so when the last pair is read `i` reaches `len` with two pixels still
+         * held. Testing only `i < len` dropped them -- every packed sprite lost
+         * its final one or two pixels.
+         *
+         * That is a corner of an image, on art that is usually transparent at
+         * its edges, so it survived a screenshot easily. tools/sprtest.c found
+         * it on a three-pixel sprite where two thirds of the picture went
+         * missing and the failure was impossible to miss.
+         *
+         * 조건에 `i < len`뿐 아니라 `n_pend > 0`이 필요합니다.
+         *
+         * 패킹된 한 쌍은 픽셀 *세 개*를 담고 루프는 한 번에 하나씩 내보내므로, 마지막
+         * 쌍을 읽으면 두 픽셀이 남은 채로 `i`가 `len`에 도달합니다. `i < len`만
+         * 검사하면 그것들이 버려졌고, 모든 패킹 스프라이트가 마지막 한두 픽셀을
+         * 잃었습니다.
+         *
+         * 이미지의 모서리이고 대개 가장자리가 투명한 아트이므로 스크린샷으로는 쉽게
+         * 살아남았습니다. tools/sprtest.c가 그림의 3분의 2가 사라져 실패를 놓칠 수 없는
+         * 3픽셀 스프라이트에서 이를 찾아냈습니다. */
+        for (int i = 0; (i < len || n_pend > 0) && px_i < total; ) {
             int count, index;
 
             if (is_rle) {
@@ -1152,3 +1202,31 @@ int weapon_muzzle(int frame, float *u, float *v) {
     *v = 1.0f - (my + 0.5f) / (float)WPN_CH;
     return 1;
 }
+
+#ifdef HOT_RELOAD
+/* Test hook: decode a sprite text the caller wrote, into a buffer it owns.
+   See sprite.h. Guarded like sprite_dump_ppm, so the shipped binary carries
+   neither.
+   테스트 훅입니다. 호출자가 작성한 스프라이트 텍스트를 호출자 소유 버퍼로 디코딩합니다.
+   sprite_dump_ppm과 같이 가드되므로 배포 바이너리에는 둘 다 들어가지 않습니다. */
+void sprite_decode_text(const char *text, unsigned char *rgba, int W, int H,
+                        int weapon) {
+    decode_sprites(text, rgba, W, H, weapon ? SPR_DEST_WEAPON : SPR_DEST_MONSTER);
+}
+
+/* The alphabet, one character at a time, so tools/sprtest.c can hold it against
+   the string bake.ps1 encodes with. That contract is between a PowerShell
+   script and a C file and no compiler can see it.
+   알파벳을 문자 단위로 노출하여 tools/sprtest.c가 bake.ps1이 인코딩에 쓰는 문자열과
+   대조할 수 있게 합니다. 그 계약은 PowerShell 스크립트와 C 파일 사이에 있으며 어떤
+   컴파일러도 볼 수 없습니다. */
+int sprite_b64val(char c) { return b64val(c); }
+
+int sprite_weapon_muzzle_px(int frame, int *x, int *y) {
+    if (frame < 0 || frame >= WPN_FRAMES) return 0;
+    if (g_weapon_muz[frame][0] < 0) return 0;
+    *x = g_weapon_muz[frame][0];
+    *y = g_weapon_muz[frame][1];
+    return 1;
+}
+#endif

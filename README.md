@@ -878,6 +878,32 @@ has to think about which. A four-frame weapon costs about 4KB — 0.3% of the
 budget — and the shipped binary is 148,992 bytes with the 3D gun, 153,088 with
 the drawing.
 
+**The codec had no test while its format was being changed, and that was a
+mistake.** The only thing looking at it was `sprdump`, which writes a PPM for a
+human to squint at and asserts nothing. A screenshot proved the new format
+decoded *something*; it could not catch a run length off by one or a packed
+triple leaking into the next sprite.
+
+`build\sprtest.exe` decodes sprite text written by hand and checks it against
+pixels computed the same way — and it found a real bug on its first run. **A
+packed pair carries three pixels and the loop emitted one per turn, so the last
+pair left two pixels held when the data ended and every packed sprite lost its
+final one or two pixels.** That is a corner of an image, on art that is usually
+transparent at its edges, which is exactly why the screenshot missed it.
+
+The assertion that could not have been written any other way reads `bake.ps1`:
+
+```
+  every encoder character decodes to its own index                0 /      0  ok
+```
+
+The encoder holds a 64-character string and the decoder *computes* the index
+from the character. Nothing can check that the two describe the same alphabet —
+one is PowerShell and the other is C — and a mismatch decodes every drawing in
+the game to the wrong palette indices, which looks like the art was drawn wrong.
+So the test opens the script and compares. Verified by swapping two characters
+in `bake.ps1` and watching it report `2 / 0`.
+
 **Four types, and a new one is a table row plus a `_pixel` function** — no new
 code path. The atlas is a grid, one row per type, one column per frame:
 
@@ -1724,6 +1750,7 @@ is the reason the snap grid is a uniform rather than a compile-time constant.
 | [tools/runtest.c](tools/runtest.c) | headless restart / run-state checks |
 | [tools/ui.h](tools/ui.h) / [tools/ui.c](tools/ui.c) | the editors' immediate-mode widget layer — only `ui_end` touches GL |
 | [tools/uitest.c](tools/uitest.c) | headless widget checks: drags, fields, click handshake |
+| [tools/sprtest.c](tools/sprtest.c) | headless sprite codec checks: both opcodes, the alphabet contract, the muzzle marker |
 | [tools/audiorace.c](tools/audiorace.c) | audio threading contract under contention |
 | [tools/posttest.c](tools/posttest.c) | FBO + dither shader, on a real GL context |
 | [tools/sprdump.c](tools/sprdump.c) | dump the sprite atlas to a PPM (dev builds only) |

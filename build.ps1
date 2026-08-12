@@ -153,6 +153,103 @@ if ($Tool) {
     return
 }
 
+# --- GLSL reserved words, checked before gcc ever runs ----------------------
+#
+# The shaders are C string literals, so the C compiler sees only text and the
+# GLSL compiler sees them at RUN time, on whatever driver the player has. That
+# gap has already cost once: `float patch` in pRust is a reserved word --
+# tessellation, GLSL 4.0 and up -- and a fragment shader that never tessellates
+# still may not use it as a variable. NVIDIA allows it in a #version 330
+# shader; Intel, AMD and Mesa do not. So it built and ran here and failed on
+# somebody else's machine with
+#
+#     ERROR: 1:65: error(#132) Syntax error: "patch" parse error
+#
+# which is the worst shape a bug can have: nothing local reproduces it, and the
+# person who can reproduce it cannot fix it.
+#
+# C COMMENTS ARE STRIPPED FIRST, and a line-by-line regex cannot do that. The
+# first version of this check reported its own explanatory comment, because the
+# comment contains the word `patch` between backticks and a regex looking for
+# quote pairs found some. A comment discussing the bug is not the bug.
+#
+# 셰이더는 C 문자열 리터럴이므로 C 컴파일러는 텍스트만 보고, GLSL 컴파일러는 플레이어가
+# 가진 드라이버에서 *실행 시점에* 봅니다. 이 틈은 이미 한 번 대가를 치렀습니다. 국소적
+# 으로 재현되지 않으며, 재현할 수 있는 사람은 고칠 수 없습니다. C 주석을 먼저 벗겨
+# 내야 하고 줄 단위 정규식으로는 그럴 수 없습니다. 이 검사의 첫 판본은 자기 설명 주석을
+# 신고했습니다.
+$glslReserved = @(
+    'active','asm','attribute','cast','class','common','enum','extern',
+    'external','filter','fixed','goto','half','hvec2','hvec3','hvec4','fvec2',
+    'fvec3','fvec4','inline','input','interface','long','namespace','noinline',
+    'output','partition','patch','public','resource','sample','short','sizeof',
+    'static','subroutine','superp','template','this','typedef','union',
+    'unsigned','using','varying','volatile'
+)
+
+# Walk the file once, tracking whether we are in a C comment or a string, and
+# collect only what is inside string literals -- that and nothing else is
+# shader source.
+function Get-ShaderText([string]$text) {
+    $out = New-Object System.Collections.ArrayList
+    $line = 1
+    $i = 0
+    $n = $text.Length
+    while ($i -lt $n) {
+        $c = $text[$i]
+        if ($c -eq "`n") { $line++; $i++; continue }
+        if ($c -eq '/' -and $i + 1 -lt $n -and $text[$i + 1] -eq '*') {
+            $i += 2
+            while ($i + 1 -lt $n -and -not ($text[$i] -eq '*' -and $text[$i + 1] -eq '/')) {
+                if ($text[$i] -eq "`n") { $line++ }
+                $i++
+            }
+            $i += 2
+            continue
+        }
+        if ($c -eq '/' -and $i + 1 -lt $n -and $text[$i + 1] -eq '/') {
+            while ($i -lt $n -and $text[$i] -ne "`n") { $i++ }
+            continue
+        }
+        if ($c -eq '"') {
+            $i++
+            $sb = New-Object System.Text.StringBuilder
+            while ($i -lt $n -and $text[$i] -ne '"') {
+                if ($text[$i] -eq '\' -and $i + 1 -lt $n) { $i += 2; continue }
+                [void]$sb.Append($text[$i]); $i++
+            }
+            $i++
+            $body = $sb.ToString()
+            # a GLSL // comment inside the literal is prose too
+            $slash = $body.IndexOf('//')
+            if ($slash -ge 0) { $body = $body.Substring(0, $slash) }
+            [void]$out.Add([pscustomobject]@{ Line = $line; Code = $body })
+            continue
+        }
+        $i++
+    }
+    return $out
+}
+
+$glslBad = @()
+foreach ($shaderFile in @('src\render.c', 'src\post.c', 'src\tex.c')) {
+    $path = Join-Path $root $shaderFile
+    if (-not (Test-Path $path)) { continue }
+    foreach ($frag in (Get-ShaderText (Get-Content $path -Raw))) {
+        foreach ($w in $glslReserved) {
+            if ($frag.Code -match ('(?<![A-Za-z0-9_])' + $w + '(?![A-Za-z0-9_])')) {
+                $glslBad += ("  {0}:{1}  '{2}' is reserved: {3}" -f
+                             $shaderFile, $frag.Line, $w, $frag.Code.Trim())
+            }
+        }
+    }
+}
+if ($glslBad.Count -gt 0) {
+    throw ("A shader uses a GLSL reserved word as an identifier. That compiles " +
+           "on some drivers and fails on others, so it cannot be left to " +
+           "whoever happens to have the stricter one:`n" + ($glslBad -join "`n"))
+}
+
 # Compile to named object files first, then link. Compiling and linking in one
 # gcc call makes gcc use temporary object names (ccQKUxGq.o), which turns the
 # linker map into noise -- the per-symbol report needs to know that a symbol

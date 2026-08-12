@@ -625,11 +625,28 @@ static const char *FS_PROC =
 "  return mix(base*0.62, base*1.25, v) * (0.95+0.10*n2(uv*30.0));\n"
 "}\n"
 
+/* `oxide`, not `patch`: patch is a GLSL RESERVED WORD -- tessellation, 4.0
+   and up -- and a fragment shader that never tessellates still may not use it
+   as a variable name. NVIDIA's compiler accepts it in a #version 330 shader
+   and Intel, AMD and Mesa reject it, so this built and ran perfectly here
+   while failing on somebody else's machine with
+
+       ERROR: 1:65: error(#132) Syntax error: "patch" parse error
+
+   which is the worst shape a bug can have: nothing local reproduces it.
+   build.ps1 scans for this now rather than leaving it to whoever has the
+   stricter driver.
+
+   `patch`가 아니라 `oxide`입니다. patch는 GLSL의 *예약어*(테셀레이션, 4.0 이상)이며,
+   테셀레이션을 하지 않는 프래그먼트 셰이더라도 이를 변수명으로 쓸 수 없습니다. NVIDIA
+   컴파일러는 #version 330에서 이를 받아 주고 Intel, AMD, Mesa는 거부합니다. 따라서 이
+   코드는 이곳에서 완벽히 빌드되고 실행되면서 다른 사람의 기계에서는 실패했으며, 이는
+   버그가 가질 수 있는 최악의 형태입니다. 국소적으로 재현되지 않기 때문입니다. */
 "vec3 pRust(vec2 uv, vec3 base){\n"
 "  float r = fbm(uv*2.4);\n"
-"  float patch = smoothstep(0.42,0.72,r);\n"
+"  float oxide = smoothstep(0.42,0.72,r);\n"
 "  vec3 metal = vec3(0.34,0.35,0.38)*(0.85+0.3*n2(uv*22.0));\n"
-"  vec3 c = mix(metal, base, patch);\n"
+"  vec3 c = mix(metal, base, oxide);\n"
 "  return c*(0.90+0.18*fbm(uv*9.0));\n"
 "}\n"
 

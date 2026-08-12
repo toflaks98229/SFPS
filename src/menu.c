@@ -87,6 +87,7 @@ static const char *const OFF_ON[]  = { "OFF", "ON" };
 static const char *const DISPLAYS[] = { "WINDOWED", "BORDERLESS" };
 static const char *const PIXELS[]   = { "CHUNKY", "NORMAL", "FINE" };
 static const char *const DITHERS[]  = { "HEAVY", "NORMAL", "LIGHT", "OFF" };
+static const char *const PATTERNS[] = { "BAYER", "NOISE" };
 
 /* Each name table must have exactly one entry per value the enum can take. A
    short table would index out of bounds the first time the player cycled onto
@@ -101,6 +102,8 @@ _Static_assert(sizeof(PIXELS) / sizeof(PIXELS[0]) == GFX_PIXEL_COUNT,
                "one name per GfxPixelPreset");
 _Static_assert(sizeof(DITHERS) / sizeof(DITHERS[0]) == GFX_DITHER_COUNT,
                "one name per GfxDither");
+_Static_assert(sizeof(PATTERNS) / sizeof(PATTERNS[0]) == GFX_PATTERN_COUNT,
+               "one name per GfxDitherPattern");
 
 /* --- Screens / 화면 --- */
 
@@ -129,6 +132,7 @@ static const Row SETTINGS_ROWS[] = {
     { "POST FX",     ROW_VALUE, 0, FIELD(post_on),   2,                  OFF_ON   },
     { "SCANLINES",   ROW_VALUE, 0, FIELD(scanlines), 2,                  OFF_ON   },
     { "DITHER",      ROW_VALUE, 0, FIELD(dither),    GFX_DITHER_COUNT,   DITHERS  },
+    { "PATTERN",     ROW_VALUE, 0, FIELD(pattern),   GFX_PATTERN_COUNT,  PATTERNS },
     { "BACK",        ROW_SCREEN, MENU_ROOT, 0, 0, 0 },
 };
 
@@ -149,6 +153,7 @@ static MenuSettings g_set = {
     .post_on   = 1,
     .scanlines = 1,
     .dither    = GFX_DITHER_NORMAL,
+    .pattern   = GFX_PATTERN_BAYER,
 };
 
 /* --- Static helpers / 정적 헬퍼 --- */

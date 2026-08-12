@@ -177,6 +177,16 @@
    그 위의 잡음은 함께 움직이지 않기 때문입니다. */
 #define POST_GRAIN_DEFAULT 0.015f
 
+/* Which pattern the dither starts on: 0 Bayer, 1 gradient noise.
+   Bayer, because it is the look this game has had and the level count was what
+   made it unreadable, not the pattern. Noise is the option, not the default --
+   changing both at once would have made it impossible to say which fixed it.
+   디더가 시작하는 패턴입니다. 0이면 Bayer, 1이면 그래디언트 잡음입니다. Bayer인 이유는
+   그것이 이 게임이 지녀 온 룩이고, 읽을 수 없게 만든 것은 패턴이 아니라 단계 수였기
+   때문입니다. 잡음은 기본값이 아니라 선택지입니다. 둘을 한꺼번에 바꿨다면 무엇이 문제를
+   해결했는지 말할 수 없었을 것입니다. */
+#define POST_NOISE_DEFAULT 0.0f
+
 /* --- The single-hue (duotone) look / 단색조 룩 --- */
 
 /**
@@ -494,6 +504,7 @@ void post_set_scanline(float depth);
  * -------
  * @param[in] levels Steps per colour channel, 2..64. Clamped.
  * @param[in] grain  Per-frame noise amplitude, 0..0.5. Clamped.
+ * @param[in] noise  0 for the Bayer matrix, 1 for gradient noise. Clamped.
  * @note `levels` is the one that decides readability. An ordered dither swings
  *       half a quantisation step, so the pattern's amplitude is 1/(2*(levels-1))
  *       of full scale -- the dither constants do not come into it. Four levels
@@ -505,11 +516,12 @@ void post_set_scanline(float depth);
  * @brief 해상 패스가 그림을 얼마나 강하게 양자화하고 거칠게 만들지를 설정합니다.
  * @param[in] levels 색 채널당 단계 수(2..64). 제한됩니다.
  * @param[in] grain  프레임별 잡음의 세기(0..0.5). 제한됩니다.
+ * @param[in] noise  0이면 Bayer 행렬, 1이면 그래디언트 잡음. 제한됩니다.
  * @note 가독성을 결정하는 것은 `levels`입니다. 정렬 디더는 양자화 한 단계의 절반을
  *       흔들므로 패턴의 진폭은 전체 범위의 1/(2*(levels-1))이며, 디더 상수는 여기에
  *       관여하지 않습니다.
  */
-void post_set_dither(float levels, float grain);
+void post_set_dither(float levels, float grain, float noise);
 
 /**
  * @brief The current scanline depth.

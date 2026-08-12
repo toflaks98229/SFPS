@@ -72,6 +72,9 @@ static GLint  g_u_tex, g_u_res, g_u_win, g_u_time, g_u_scan;
 static float g_levels = POST_LEVELS_DEFAULT;
 /** @brief Per-frame grain amplitude. See post_set_dither. / 프레임별 그레인 세기. */
 static float g_grain  = POST_GRAIN_DEFAULT;
+/** @brief 0 Bayer, 1 gradient noise. See post_set_dither. / 0이면 Bayer, 1이면 그래디언트 잡음. */
+static float g_noise  = POST_NOISE_DEFAULT;
+static GLint g_u_noise;
 static GLint g_u_levels, g_u_grain;
 /** @brief Scanline depth, 0..1. See post_set_scanline. / 주사선 세기(0..1). post_set_scanline 참조. */
 static float  g_scan = POST_SCANLINE_DEFAULT;
@@ -257,6 +260,41 @@ static const char *FS =
  * 1.6%를 흔듭니다. */
 "uniform float uLevels;\n"
 "uniform float uGrain;\n"
+/* WHICH PATTERN THE DITHER USES: 0 is the Bayer matrix, 1 is a gradient noise.
+ * A mix rather than a branch, so the shader has no divergence and a value in
+ * between is a legal thing to ask for.
+ *
+ * Bayer is an 8x8 grid, and a grid is exactly what the eye is good at seeing.
+ * At any level count its threshold repeats every eight pixels, so flat
+ * surfaces get a visible weave that reads as dirt on the screen rather than as
+ * shading -- and it survives neither screen scaling nor video compression,
+ * because both smear a regular pattern into moire.
+ *
+ * The alternative here is Jimenez's interleaved gradient noise, which is what
+ * it is called rather than blue noise: it is not spectrally blue, it is a hash
+ * chosen so that neighbouring values are far apart, and it looks organic for
+ * the same practical reason blue noise does. It is used instead of a blue
+ * noise TEXTURE because it is one line of arithmetic and this project ships no
+ * textures it did not generate.
+ *
+ * Obra Dinn made the same trade the other way and documented why: it kept
+ * Bayer for one sphere, where the smooth ramp of shades mattered, and used
+ * blue noise everywhere else.
+ *
+ * 디더가 어느 패턴을 쓰는지입니다. 0이면 Bayer 행렬, 1이면 그래디언트 잡음입니다.
+ * 분기가 아니라 혼합이므로 셰이더에 발산이 없고, 그 사이의 값도 요구할 수 있습니다.
+ *
+ * Bayer는 8x8 격자이며, 격자야말로 눈이 잘 알아보는 것입니다. 단계 수와 무관하게
+ * 임계값이 여덟 픽셀마다 반복되므로 평탄한 면에 눈에 띄는 짜임이 생기고, 그것은 음영이
+ * 아니라 화면에 묻은 얼룩처럼 읽힙니다. 화면 배율에도 영상 압축에도 견디지 못하는데,
+ * 둘 다 규칙적인 패턴을 무아레로 뭉개기 때문입니다.
+ *
+ * 대안은 Jimenez의 interleaved gradient noise이며, blue noise가 아니라 그 이름으로
+ * 부르는 것이 맞습니다. 스펙트럼이 파란 것이 아니라 이웃한 값이 서로 멀도록 고른
+ * 해시이고, blue noise와 같은 실용적 이유로 유기적으로 보입니다. blue noise *텍스처*
+ * 대신 이것을 쓰는 이유는 산술 한 줄이면 되고, 이 프로젝트는 스스로 생성하지 않은
+ * 텍스처를 싣지 않기 때문입니다. */
+"uniform float uNoise;\n"
 
 /* 8x8 Bayer, values 0..63. Written as a flat array indexed by hand because
    GLSL 330 cannot portably initialise a const matrix from a nested list.
@@ -625,8 +663,16 @@ static const char *FS =
    would stop being locked to the pixel grid it belongs to.
    창이 아닌 *오프스크린* 픽셀 좌표로 행렬 셀을 결정합니다. 창 좌표를 쓰면 창이
    커질수록 패턴이 작아져, 디더가 원래 속해야 할 픽셀 격자에서 분리됩니다. */
-"  ivec2 p = ivec2(vUV * uRes / DITHER_SCALE);\n"
-"  float t = BAYER[(p.y & 7) * 8 + (p.x & 7)] / 64.0;\n"
+"  vec2  dp = vUV * uRes / DITHER_SCALE;\n"
+"  ivec2 p = ivec2(dp);\n"
+"  float tBayer = BAYER[(p.y & 7) * 8 + (p.x & 7)] / 64.0;\n"
+/* Interleaved gradient noise, on the dither cell rather than the fragment, so
+   it holds still when the art resolution and the window disagree.
+   프래그먼트가 아니라 디더 셀에 대해 계산하므로, 아트 해상도와 창 크기가 다를 때에도
+   패턴이 가만히 있습니다. */
+"  float tNoise = fract(52.9829189 *\n"
+"                 fract(dot(floor(dp), vec2(0.06711056, 0.00583715))));\n"
+"  float t = mix(tBayer, tNoise, uNoise);\n"
 
 /* Luminance of the already-lit pixel, in LINEAR light -- Rec. 709 weights are
    defined against linear intensity, and applying them to gamma-encoded values
@@ -1012,6 +1058,7 @@ int post_init(int width, int height) {
     g_u_scan = glGetUniformLocation(g_prog, "uScan");
     g_u_levels = glGetUniformLocation(g_prog, "uLevels");
     g_u_grain  = glGetUniformLocation(g_prog, "uGrain");
+    g_u_noise  = glGetUniformLocation(g_prog, "uNoise");
 
     /* An empty VAO is still required: core profile refuses to draw with no
        vertex array bound, even when the shader reads no attributes.
@@ -1027,13 +1074,14 @@ int post_enabled(void) { return g_ready && g_on; }
 
 int post_in_world_pass(void) { return g_in_world; }
 
-void post_set_dither(float levels, float grain) {
+void post_set_dither(float levels, float grain, float noise) {
     /* Clamped rather than trusted: one level makes `steps` zero and every
        pixel divide by it, and a negative grain would brighten as it noises.
        믿지 않고 제한합니다. 단계가 1이면 steps가 0이 되어 모든 픽셀이 그것으로 나누게
        되고, 음수 그레인은 잡음을 넣으면서 화면을 밝히게 됩니다. */
     g_levels = levels < 2.0f ? 2.0f : (levels > 64.0f ? 64.0f : levels);
     g_grain  = grain  < 0.0f ? 0.0f : (grain  > 0.5f  ? 0.5f  : grain);
+    g_noise  = noise  < 0.0f ? 0.0f : (noise  > 1.0f  ? 1.0f  : noise);
 }
 
 void post_set_scanline(float depth) {
@@ -1121,6 +1169,7 @@ void post_end(int win_w, int win_h) {
     glUniform1f(g_u_scan, g_scan);
     glUniform1f(g_u_levels, g_levels);
     glUniform1f(g_u_grain, g_grain);
+    glUniform1f(g_u_noise, g_noise);
 
     glBindVertexArray(g_vao);
     glDrawArrays(GL_TRIANGLES, 0, 3);

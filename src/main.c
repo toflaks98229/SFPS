@@ -1175,7 +1175,10 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
         };
         int di = menu_settings()->dither;
         if (di < 0 || di >= GFX_DITHER_COUNT) di = GFX_DITHER_NORMAL;
-        post_set_dither(DITHER[di].levels, DITHER[di].grain);
+        int pat = menu_settings()->pattern;
+        if (pat < 0 || pat >= GFX_PATTERN_COUNT) pat = GFX_PATTERN_BAYER;
+        post_set_dither(DITHER[di].levels, DITHER[di].grain,
+                        pat == GFX_PATTERN_NOISE ? 1.0f : 0.0f);
 
         /* The world does not advance while the menu is up or the game is won.
            One flag for both, because they freeze exactly the same things and

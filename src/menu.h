@@ -204,6 +204,41 @@ typedef enum {
     GFX_DITHER_COUNT       /**< How many presets there are. / 프리셋의 개수. */
 } GfxDither;
 
+/**
+ * @brief Which pattern the dither uses.
+ *
+ * ENGLISH
+ * -------
+ * A separate setting from ::GfxDither because they are separate questions: how
+ * MUCH the picture is quantised, and what shape the pattern that hides it
+ * takes. Folding them into one list would have meant eight presets describing
+ * two independent axes, and no way to keep a strength while trying a pattern.
+ *
+ * @note ::GFX_PATTERN_BAYER is an 8x8 grid, and a grid is what the eye is best
+ *       at seeing: its threshold repeats every eight pixels, so a flat surface
+ *       gets a weave that reads as dirt rather than as shading, and it survives
+ *       neither screen scaling nor video compression.
+ * @note ::GFX_PATTERN_NOISE is Jimenez's interleaved gradient noise -- named
+ *       for what it is rather than called blue noise, which it is not. It is a
+ *       hash chosen so neighbouring values land far apart, and it is used
+ *       instead of a blue noise texture because it is one line of arithmetic
+ *       and this project ships no texture it did not generate.
+ *
+ * 한국어
+ * ------
+ * @brief 디더가 어느 패턴을 쓰는지입니다.
+ *
+ * ::GfxDither와 별개의 설정인 이유는 서로 다른 질문이기 때문입니다. 그림을 *얼마나*
+ * 양자화하는가와, 그것을 감추는 패턴이 어떤 모양인가입니다. 하나의 목록으로 합치면 독립적인
+ * 두 축을 기술하는 프리셋 여덟 개가 되고, 세기를 유지한 채 패턴만 시험해 볼 방법이
+ * 없어집니다.
+ */
+typedef enum {
+    GFX_PATTERN_BAYER = 0, /**< 8x8 ordered matrix. / 8x8 정렬 행렬. */
+    GFX_PATTERN_NOISE,     /**< Interleaved gradient noise. / 인터리브드 그래디언트 잡음. */
+    GFX_PATTERN_COUNT      /**< How many there are. / 개수. */
+} GfxDitherPattern;
+
 /* --- Type definitions / 타입 정의 --- */
 
 /**
@@ -231,6 +266,7 @@ typedef struct {
     int post_on;    /**< Non-zero to run the pixelise/dither pass. / 픽셀화·디더 패스를 켜려면 0이 아닌 값. */
     int scanlines;  /**< Non-zero to draw CRT scanlines. / CRT 주사선을 그리려면 0이 아닌 값. */
     int dither;     /**< A ::GfxDither. / ::GfxDither 값. */
+    int pattern;    /**< A ::GfxDitherPattern. / ::GfxDitherPattern 값. */
 } MenuSettings;
 
 /* --- Lifecycle / 수명 주기 --- */

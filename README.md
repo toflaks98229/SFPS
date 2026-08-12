@@ -1780,7 +1780,8 @@ is the reason the snap grid is a uniform rather than a compile-time constant.
 | [src/pickup.h](src/pickup.h) / [src/pickup.c](src/pickup.c) | ammo/health pickups: spawn and collection — no GL |
 | [src/sprite.h](src/sprite.h) / [src/sprite.c](src/sprite.c) | procedural monster + pickup sprite atlases (SDF → RGBA silhouette) |
 | [src/run.h](src/run.h) / [src/run.c](src/run.c) | the state one playthrough owns, and the single call that resets it |
-| [src/main.c](src/main.c) | window, input, level, movement, frame loop |
+| [src/world.h](src/world.h) / [src/world.c](src/world.c) | level + player + weapon + run in one struct, and the order one frame advances them — no GL, no Win32, no menu |
+| [src/main.c](src/main.c) | window, GL context, input, graphics settings, the draw passes |
 | [tools/modelview.c](tools/modelview.c) | model viewer and view-model pose tuner |
 | [tools/enemytest.c](tools/enemytest.c) | headless monster AI checks |
 | [tools/pickuptest.c](tools/pickuptest.c) | headless pickup collection checks |
@@ -1790,6 +1791,7 @@ is the reason the snap grid is a uniform rather than a compile-time constant.
 | [tools/hooktest.c](tools/hooktest.c) | headless grapple + momentum checks |
 | [tools/diagtest.c](tools/diagtest.c) | headless diagnostics checks |
 | [tools/runtest.c](tools/runtest.c) | headless restart / run-state checks |
+| [tools/steptest.c](tools/steptest.c) | headless **whole-frame** checks: update order, what a freeze stops, the rebuild handshake |
 | [tools/ui.h](tools/ui.h) / [tools/ui.c](tools/ui.c) | the editors' immediate-mode widget layer — only `ui_end` touches GL |
 | [tools/uitest.c](tools/uitest.c) | headless widget checks: drags, fields, click handshake |
 | [tools/sprtest.c](tools/sprtest.c) | headless sprite codec checks: both opcodes, the alphabet contract, the muzzle marker |

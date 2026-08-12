@@ -22,7 +22,22 @@
  * 그래플 훅 사운드를 추가하며 정확히 그 경계에 도달했으므로, 여유를 두고 24로 올립니다.
  * Sound 하나는 약 100바이트이고 배열은 .bss에 위치하므로 디스크 용량을 소모하지
  * 않습니다. */
-#define MAX_SOUNDS  24      ///< @brief 캐시할 수 있는 최대 사운드 레시피 수.
+/* Raised from 24, which was EXACTLY the number of sounds that existed -- so
+   the first sound added past it was dropped, and the one that went missing was
+   not the new one but `switch`, whichever happened to land last. A cap that
+   equals the current count is a cap with no headroom and no warning: it is
+   indistinguishable from a correct limit right up until someone adds a line to
+   a text file.
+   Reported through DIAG_SOUND_CAP, and reported is not the same as survived:
+   the audible result is a door that stops clicking, which reads as a bug in
+   doors.
+   24에서 올렸습니다. 24는 당시 존재하던 사운드의 수와 *정확히* 같았으므로, 그것을 넘어
+   추가된 첫 사운드가 버려졌고 사라진 것은 새 사운드가 아니라 마지막에 놓인 `switch`
+   였습니다. 현재 개수와 같은 상한은 여유도 경고도 없는 상한입니다. 누군가 텍스트 파일에
+   한 줄을 더할 때까지는 올바른 제한과 구별되지 않습니다. DIAG_SOUND_CAP으로 보고되지만
+   보고와 생존은 다릅니다. 귀에 들리는 결과는 더 이상 딸깍이지 않는 문이며, 그것은 문의
+   결함처럼 읽힙니다. */
+#define MAX_SOUNDS  AUDIO_MAX_SOUNDS  ///< @brief 캐시할 수 있는 최대 사운드 레시피 수.
 #define MAX_VOICES  12      ///< @brief 동시에 재생할 수 있는 최대 사운드 인스턴스 (보이스) 수.
 #define NAME_LEN    16      ///< @brief 사운드 이름의 최대 길이.
 
@@ -774,6 +789,17 @@ static void play_gain(const char *name, int gain) {
 }
 
 void audio_play(const char *name, int gain) { play_gain(name, gain); }
+
+int audio_sound_count(void) {
+    /* Parses on demand, because a tool may ask before anything has played.
+       Everything else that reads the table goes through audio_play, which
+       parses first; this is the one caller that does not.
+       아무것도 재생되기 전에 도구가 물어볼 수 있으므로 필요 시 파싱합니다. 표를 읽는
+       다른 모든 경로는 먼저 파싱하는 audio_play를 거치며, 이것이 그러지 않는 유일한
+       호출자입니다. */
+    if (!g_parsed) parse_sounds();
+    return g_n_sounds;
+}
 
 /* The curve, in one place, so audio_play_at and the test that checks it
    cannot drift apart. Returns what `gain` is worth from `pos`.

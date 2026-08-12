@@ -131,27 +131,37 @@ _Static_assert(TEX_NAME_MAX >= LVL_MAT,
  * 18입니다.
  */
 static const WeaponType WEAPONS[WP_TYPES] = {
-    /* name       model      snd     reload  start max pick dmg  cool   spread  pel  spd   grav  melee  recoil punch hook */
-    { "shotgun", "shotgun", "shot", "pump",     20,  50,   8,   7, 0.50f, 0.040f,  6, 0.0f,  0.0f, 0.0f, 0.055f, 0.085f, 1 },
+    /* EVERY ROW USED TO SAY "shot". The shotgun was the only weapon when this
+       table was written and a row needs some sound, so the other three
+       inherited a 12-gauge blast -- a placeholder that stopped being one the
+       moment there were four weapons and started actively lying: a chainsaw
+       that goes off like a shotgun tells the player their weapon is something
+       it is not, which is the same fault the axe's muzzle flash was.
+       모든 행이 "shot"이었습니다. 이 표를 쓸 당시 무기가 샷건뿐이었고 행에는 어떤 소리든
+       필요했으므로 나머지 셋이 12게이지 발사음을 물려받았습니다. 무기가 넷이 된 순간
+       임시방편이기를 그만두고 적극적으로 거짓말을 시작했습니다. 샷건처럼 터지는 전기톱은
+       플레이어에게 자기 무기가 아닌 것을 말하며, 도끼의 총구 섬광과 같은 결함입니다. */
+    /* name       model      snd      draw     reload  start max pick dmg  cool   spread  pel  spd   grav  melee  recoil punch hook */
+    { "shotgun", "shotgun", "shot",   NULL,    "pump",     20,  50,   8,   7, 0.50f, 0.040f,  6, 0.0f,  0.0f, 0.0f, 0.055f, 0.085f, 1 },
 
     /* Arcs and bounces, so it reaches what you cannot see. The fuse is long
        enough to bank a shot off a wall and short enough that a grenade at your
        feet is your problem.
        곡선을 그리며 튕기므로 보이지 않는 것에 닿습니다. 도화선은 벽에 튕겨 넣을 만큼
        길고, 발밑의 유탄이 스스로의 문제가 될 만큼 짧습니다. */
-    { "grenade", "shotgun", "shot", NULL,        6,  20,   3,  55, 0.85f, 0.010f,  0, 26.0f, 26.0f, 0.0f, 0.075f, 0.130f, 1 },
+    { "grenade", "shotgun", "launch", NULL,    NULL,        6,  20,   3,  55, 0.85f, 0.010f,  0, 26.0f, 26.0f, 0.0f, 0.075f, 0.130f, 1 },
 
     /* No hitscan: the bolts travel, so a moving target has to be led. That is
        the cost of the highest sustained damage in the roster.
        히트스캔이 아닙니다. 탄이 날아가므로 움직이는 표적은 예측 사격이 필요합니다.
        구성 내 최고 지속 피해량의 대가입니다. */
-    { "rapid",   "shotgun", "shot", NULL,       80, 200,  40,   9, 0.085f, 0.030f, 0, 70.0f,  0.0f, 0.0f, 0.012f, 0.022f, 1 },
+    { "rapid",   "shotgun", "plasma", NULL,    NULL,       80, 200,  40,   9, 0.085f, 0.030f, 0, 70.0f,  0.0f, 0.0f, 0.012f, 0.022f, 1 },
 
     /* Melee, and the only row with no hook: right-click leaps instead. Its
        "ammo" is slam charges, which is why it is not simply free.
        근접이며 훅이 없는 유일한 행입니다. 우클릭이 대신 도약합니다. "탄약"은 내려찍기
        충전량이며, 그래서 완전히 공짜는 아닙니다. */
-    { "axe",     "shotgun", "shot", NULL,        3,   6,   2,  45, 0.42f, 0.0f,    0, 0.0f,  0.0f, 2.2f, 0.090f, 0.150f, 0 },
+    { "axe",     "shotgun", "saw",    "sawup", NULL,        3,   6,   2,  45, 0.42f, 0.0f,    0, 0.0f,  0.0f, 2.2f, 0.090f, 0.150f, 0 },
 };
 
 const WeaponType *wp_stats(int type) {
@@ -956,7 +966,15 @@ static void fire_melee(Weapon *w, const WeaponType *S,
            읽힙니다. 이 무기가 가져서는 안 되는 바로 그것입니다. */
         fx_spawn("sawgrind", bite, v3scale(fwd, -1.0f));
         fx_spawn("blood",    bite, v3scale(fwd, -1.0f));
-        audio_play_at("impact", 90, bite);
+        /* The saw's own bite rather than the generic impact. Doom separates
+           DSSAWFUL from DSSAWHIT for exactly the reason the sparks are
+           separate: the swing and the connection are different events, and
+           hearing them as one costs the player the feedback that they landed
+           it.
+           일반 타격음이 아니라 톱 자신의 절삭음입니다. Doom이 DSSAWFUL과 DSSAWHIT를
+           나누는 이유는 불꽃을 나눈 이유와 같습니다. 휘두름과 명중은 서로 다른 사건이며,
+           하나로 들리면 플레이어는 맞혔다는 피드백을 잃습니다. */
+        audio_play_at("sawhit", 95, bite);
     }
     audio_play(S->fire_snd, 80);
 }

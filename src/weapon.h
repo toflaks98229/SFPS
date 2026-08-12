@@ -143,6 +143,17 @@ typedef struct {
     const char *name;       /**< Shown on the HUD; also the sprite prefix and pickup name. / HUD 표시명이자 스프라이트 접두사, 아이템 이름. */
     const char *model;      /**< models.txt entry, drawn when there is no sprite art. / 스프라이트 아트가 없을 때 그리는 models.txt 항목. */
     const char *fire_snd;   /**< sounds.txt entry for the attack. / 공격 사운드. */
+    /** sounds.txt entry played when this weapon is brought up, or NULL.
+        A column rather than a check for WP_AXE, for the same reason
+        ::reload_snd is one: the saw is the only weapon that announces itself
+        today, and the moment a second one does, a check would have to become a
+        table anyway -- with the first weapon's behaviour already written into
+        an if.
+        이 무기를 꺼낼 때 재생할 사운드이며 없으면 NULL입니다. WP_AXE 검사가 아니라 표의
+        열인 이유는 ::reload_snd가 그런 것과 같습니다. 오늘은 톱만이 자기를 알리지만, 두
+        번째가 생기는 순간 검사는 어차피 표가 되어야 하며 그때는 첫 무기의 동작이 이미 if
+        문 안에 적혀 있게 됩니다. */
+    const char *draw_snd;
     /** sounds.txt entry played when the recovery animation finishes, or NULL.
         The shotgun's rack is the reason this is a column rather than a check
         for WP_SHOTGUN: the recovery timer drives every weapon's viewmodel

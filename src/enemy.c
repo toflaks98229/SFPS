@@ -28,15 +28,24 @@ static Shot g_shots[ENEMY_MAX_SHOTS];
  * 행은 MON_* 열거형으로 인덱싱되며, 동일한 인덱스는 스프라이트 행입니다.
  * 순서: hp, spd, rad, hgt, eye, sight, att, dmg, wind, cool, aspct, shot
  */
+/* The last two columns are Quake's: how fast it turns, and how long it is
+   deaf to pain. Both are character rather than tuning -- the brute cannot
+   track a circling player and cannot be stun-locked, and those two facts are
+   the same fact about what a brute is.
+   마지막 두 열은 Quake의 것입니다. 얼마나 빨리 도는가, 그리고 얼마나 오래 고통에
+   무감각한가. 둘 다 조정값이 아니라 성격입니다. 브루트는 원을 그리는 플레이어를 추적하지
+   못하고 스턴 락에도 걸리지 않는데, 그 두 사실은 브루트가 무엇인가에 대한 하나의
+   사실입니다. */
+/*         name     hp  spd   rad    hgt    eye   sight  atk  dmg  wind   cool  aspct shot   yaw    pain */
 static const MonType TYPES[MON_TYPES] = {
     /* IMP: 기준선. 충분히 빠르며, 근접 샷건 한 방에 죽습니다. */
-    { "imp",    40, 3.0f, 0.40f, 1.70f, 1.30f, 34.0f,  1.8f,  9, 0.35f, 1.10f, 0.70f,  0.0f },
+    { "imp",    40, 3.0f, 0.40f, 1.70f, 1.30f, 34.0f,  1.8f,  9, 0.35f, 1.10f, 0.70f,  0.0f, 220.0f, 0.6f },
     /* BRUTE: 체력이 높은 벽. 느리게 다가오지만 강력한 공격을 하므로, 피하기보다 계획적으로 대처해야 하는 위협입니다. */
-    { "brute", 120, 1.9f, 0.62f, 2.35f, 1.80f, 34.0f,  2.3f, 24, 0.55f, 1.50f, 0.85f,  0.0f },
+    { "brute", 120, 1.9f, 0.62f, 2.35f, 1.80f, 34.0f,  2.3f, 24, 0.55f, 1.50f, 0.85f,  0.0f, 130.0f, 2.2f },
     /* HOUND: 빠르고 약한 야수. 가만히 있는 것을 응징합니다. 한 번의 공격 피해는 적지만, 경고를 알아차리기 전에 덮칩니다. */
-    { "hound",  18, 5.3f, 0.38f, 1.25f, 0.70f, 40.0f,  1.5f,  5, 0.18f, 0.65f, 1.00f,  0.0f },
+    { "hound",  18, 5.3f, 0.38f, 1.25f, 0.70f, 40.0f,  1.5f,  5, 0.18f, 0.65f, 1.00f,  0.0f, 400.0f, 0.3f },
     /* CASTER: 계속 움직여야 하는 이유. 접근하지 않고 사정거리를 유지하며 주문을 시전하므로, 발놀림 대신 엄폐와 각도가 중요합니다. */
-    { "caster", 26, 2.4f, 0.42f, 1.90f, 1.45f, 40.0f, 13.0f, 12, 0.85f, 1.40f, 0.80f, 11.0f },
+    { "caster", 26, 2.4f, 0.42f, 1.90f, 1.45f, 40.0f, 13.0f, 12, 0.85f, 1.40f, 0.80f, 11.0f, 180.0f, 0.9f },
 };
 
 /* `spawn`은 종류가 하나뿐이던 시절의 이름이며, 기존 맵들이 여전히 사용합니다.
@@ -275,6 +284,119 @@ static void move_toward(const Level *l, const MonType *S, Enemy *m,
     }
 }
 
+/* --- Quake's ChangeYaw, in radians per second ----------------------------
+ *
+ * Turns `m->yaw` towards `m->ideal_yaw` by at most `yaw_speed`, the short way
+ * round. Quake's version works in degrees on a 0.1s think; this takes a dt so
+ * the turn rate is a property of the monster rather than of the frame rate.
+ *
+ * The short-way-round arithmetic is the part that is easy to get wrong and
+ * invisible when it is: a monster that takes the long way round spins almost
+ * all the way about to face something just behind it, which looks less like a
+ * bug than like a very confused animal.
+ *
+ * `m->yaw`를 `m->ideal_yaw` 쪽으로 최대 `yaw_speed`만큼, *가까운 쪽으로* 돌립니다.
+ * Quake의 것은 0.1초 think에서 도(度)로 동작하지만, 이것은 dt를 받으므로 회전 속도가
+ * 프레임률이 아니라 몬스터의 속성이 됩니다. 가까운 쪽으로 도는 계산이 틀리기 쉽고 틀려도
+ * 눈에 띄지 않는 부분입니다. 먼 쪽으로 도는 몬스터는 바로 뒤에 있는 것을 보려고 거의 한
+ * 바퀴를 도는데, 결함이라기보다 몹시 혼란스러운 짐승처럼 보입니다. */
+static void change_yaw(Enemy *m, float yaw_speed_deg, float dt) {
+    float move = m->ideal_yaw - m->yaw;
+    while (move >  M_PI_F) move -= M_TAU;
+    while (move < -M_PI_F) move += M_TAU;
+
+    float step = yaw_speed_deg * (M_PI_F / 180.0f) * dt;
+    if (move >  step) move =  step;
+    if (move < -step) move = -step;
+
+    m->yaw += move;
+    while (m->yaw >  M_PI_F) m->yaw -= M_TAU;
+    while (m->yaw < -M_PI_F) m->yaw += M_TAU;
+}
+
+/* --- Quake's ai_run_slide ------------------------------------------------
+ *
+ * Circle the player: face them, move at right angles. If that side is blocked,
+ * flip and take the other -- which is the whole of Quake's obstacle handling
+ * here and is enough, because the only thing a circling monster needs to do
+ * about a wall is circle the other way.
+ *
+ * The direction is HELD for MON_SLIDE_HOLD rather than re-picked per frame.
+ * Doom keeps a movecount for the same reason: a monster that re-decides at
+ * frame rate vibrates in place, because the choice flips as fast as the
+ * geometry under it changes.
+ *
+ * 플레이어 주위를 돕니다. 마주 본 채 직각으로 움직이고, 그쪽이 막히면 뒤집어 반대쪽으로
+ * 갑니다. 그것이 여기서 Quake가 하는 장애물 처리의 전부이며 그것으로 충분합니다. 원을
+ * 그리는 몬스터가 벽에 대해 해야 할 일은 반대로 도는 것뿐이기 때문입니다. 방향은 매
+ * 프레임 다시 고르지 않고 MON_SLIDE_HOLD 동안 유지합니다. Doom이 movecount를 두는 이유도
+ * 같습니다. 프레임률로 다시 결정하는 몬스터는 제자리에서 떱니다. */
+static void ai_run_slide(const Level *l, const MonType *S, Enemy *m, float dt) {
+    float step = S->speed * dt;
+
+    if (m->slide_wait <= 0.0f) {
+        m->lefty     = (char)(frand() < 0.5f);
+        m->slide_wait = MON_SLIDE_HOLD;
+    }
+
+    /* Perpendicular to where it is FACING, not to where the player is. The
+       two differ while the monster is still turning, and using the player
+       direction would let a monster strafe correctly around a target it has
+       not managed to look at yet.
+       플레이어 방향이 아니라 *바라보는* 방향의 직각입니다. 아직 도는 중에는 둘이 다르며,
+       플레이어 방향을 쓰면 아직 쳐다보지도 못한 대상 주위를 정확히 도는 몬스터가
+       됩니다. */
+    float side = m->lefty ? (m->yaw + M_PI_F * 0.5f) : (m->yaw - M_PI_F * 0.5f);
+    float dx = -sinf(side) * step;
+    float dz = -cosf(side) * step;
+
+    float before_x = m->pos.x, before_z = m->pos.z;
+    move_toward(l, S, m, dx, dz);
+
+    /* Blocked: flip, and let the next frame take the other side. Measured by
+       whether it actually moved rather than by asking the level again, so the
+       test and the movement can never disagree.
+       막혔습니다. 뒤집어서 다음 프레임이 반대쪽을 쓰게 합니다. 레벨에 다시 묻지 않고
+       실제로 움직였는지로 판정하므로, 검사와 이동이 어긋날 수 없습니다. */
+    float moved = fabsf(m->pos.x - before_x) + fabsf(m->pos.z - before_z);
+    if (moved < step * 0.25f) {
+        m->lefty      = (char)!m->lefty;
+        m->slide_wait = MON_SLIDE_HOLD;
+    }
+}
+
+/* --- Quake's CheckAttack -------------------------------------------------
+ *
+ * Whether to start an attack, given how far away the player is. Returns 1 to
+ * attack, 0 to keep manoeuvring.
+ *
+ * The odds come straight from fight.qc, including its halving for a monster
+ * that also has a melee attack -- something that can bite prefers to close, so
+ * it shoots less on the way in. Our `shot_speed > 0` is already the field that
+ * says "ranged", so it decides here too rather than a second flag.
+ *
+ * 플레이어와의 거리에 따라 공격을 시작할지 결정합니다. 확률은 fight.qc에서 그대로 왔으며,
+ * 근접 공격도 가진 몬스터에 대한 절반 감소도 포함합니다. 물 수 있는 것은 거리를 좁히기를
+ * 선호하므로 다가오는 동안 덜 쏩니다. 우리의 `shot_speed > 0`이 이미 "원거리"를 말하는
+ * 필드이므로, 두 번째 플래그가 아니라 그것이 여기서도 결정합니다. */
+static int check_attack(const MonType *S, Enemy *m, float dist) {
+    if (m->attack_wait > 0.0f) return 0;
+
+    float chance;
+    if      (dist <= MON_RANGE_MELEE) chance = MON_ODDS_MELEE;
+    else if (dist <= MON_RANGE_NEAR)  chance = MON_ODDS_NEAR;
+    else if (dist <= MON_RANGE_MID)   chance = MON_ODDS_MID;
+    else                              return 0;
+
+    /* A melee monster out of its reach cannot attack at all, whatever the dice
+       say. The bands are about willingness; this is about arms.
+       근접 몬스터는 사거리 밖에서는 주사위와 무관하게 공격할 수 없습니다. 대역은
+       의사에 관한 것이고 이것은 팔 길이에 관한 것입니다. */
+    if (S->shot_speed <= 0.0f) return dist <= S->attack;
+
+    return frand() < chance;
+}
+
 /**
  * @brief 몬스터가 플레이어를 볼 수 있는지 (직선 시야가 확보되는지) 확인합니다.
  * @param l 현재 레벨 데이터.
@@ -505,7 +627,24 @@ int enemy_update(const Level *l, v3 player_eye, float dt) {
 
         v3 to = v3sub(player_eye, v3f(m->pos.x, m->pos.y + S->eye, m->pos.z));
         float dist = sqrtf(to.x*to.x + to.z*to.z);
-        m->yaw = atan2f(-to.x, -to.z);
+
+        /* WHERE IT WANTS TO LOOK, which is no longer the same as where it is
+           looking. This line used to be `m->yaw = atan2f(...)` -- a monster
+           faced the player exactly, every frame, however fast the player
+           circled it. Nothing could ever get behind anything, so strafing won
+           no angle and the whole of Quake's manoeuvring had nothing to bite
+           on. change_yaw below turns towards this at the monster's own rate.
+           *보고 싶은* 방향이며, 이제 보고 있는 방향과 같지 않습니다. 이 줄은 원래
+           `m->yaw = atan2f(...)`였습니다. 플레이어가 아무리 빨리 돌아도 몬스터는 매 프레임
+           정확히 플레이어를 향했습니다. 무엇도 무엇의 뒤를 잡을 수 없었으므로 횡이동은
+           어떤 각도도 얻지 못했고, Quake식 기동 전체가 물고 늘어질 것이 없었습니다.
+           아래의 change_yaw가 몬스터 자신의 속도로 이 방향을 향해 돕니다. */
+        m->ideal_yaw = atan2f(-to.x, -to.z);
+        change_yaw(m, S->yaw_speed, dt);
+
+        if (m->pain_wait   > 0.0f) m->pain_wait   -= dt;
+        if (m->attack_wait > 0.0f) m->attack_wait -= dt;
+        if (m->slide_wait  > 0.0f) m->slide_wait  -= dt;
 
         switch (m->state) {
         case E_IDLE:
@@ -539,16 +678,38 @@ int enemy_update(const Level *l, v3 player_eye, float dt) {
                    발사 시점이 실시간으로 다시 검사하며, 벽을 실제로 지키는 것은 그
                    검사입니다. */
                 } else if (sees_player(l, m, player_eye)) {
-                    m->state = E_ATTACK;
-                    m->timer = 0.0f;
-                    m->swung = 0;
+                    /* In its preferred band and looking right at the player --
+                       and it still only sometimes shoots. The rest of the time
+                       it circles, which is what turns a caster from a turret
+                       into something you have to chase around a room.
+                       선호하는 대역 안에서 플레이어를 정면으로 보고 있으면서도, 여전히
+                       *가끔만* 쏩니다. 나머지 시간에는 원을 그립니다. 그것이 캐스터를
+                       포탑에서 방 안을 쫓아다녀야 하는 무언가로 바꿉니다. */
+                    if (check_attack(S, m, dist)) {
+                        m->state = E_ATTACK;
+                        m->timer = 0.0f;
+                        m->swung = 0;
+                    } else {
+                        ai_run_slide(l, S, m, dt);
+                    }
                 } else {
                     move_toward(l, S, m, to.x * inv * step, to.z * inv * step);
                 }
             } else if (dist <= S->attack) {
-                m->state = E_ATTACK;
-                m->timer = 0.0f;
-                m->swung = 0;
+                /* Within reach. The roll here is Quake's 0.9 at melee range --
+                   high enough that closing is still lethal, low enough that a
+                   monster occasionally repositions instead of grinding out its
+                   swing timer nose-to-nose.
+                   사거리 안입니다. 여기의 굴림은 근접 대역에서 Quake의 0.9입니다.
+                   거리를 좁히는 것이 여전히 치명적일 만큼 높고, 몬스터가 코앞에서
+                   공격 타이머만 돌리는 대신 이따금 자리를 바꿀 만큼 낮습니다. */
+                if (check_attack(S, m, dist)) {
+                    m->state = E_ATTACK;
+                    m->timer = 0.0f;
+                    m->swung = 0;
+                } else {
+                    ai_run_slide(l, S, m, dt);
+                }
             } else {
                 move_toward(l, S, m, to.x * inv * step, to.z * inv * step);
             }
@@ -589,6 +750,17 @@ int enemy_update(const Level *l, v3 player_eye, float dt) {
                 }
             }
             if (m->timer >= S->windup + S->cooldown) {
+                /* Quake's SUB_AttackFinished(2*random()): a RANDOM rest before
+                   the next attack is even considered, on top of the animation's
+                   own cooldown. Fixed rests make a group of monsters fire in a
+                   chorus forever, because nothing ever pushes them out of step
+                   once they have fallen into it.
+                   Quake의 SUB_AttackFinished(2*random())입니다. 애니메이션 자체의 대기
+                   시간 위에, 다음 공격을 *고려하기까지*의 무작위 휴식이 더해집니다. 고정
+                   휴식은 몬스터 무리가 영원히 합창하게 만듭니다. 한번 박자가 맞으면 그것을
+                   어긋나게 할 것이 아무것도 없기 때문입니다. */
+                m->attack_wait = frand() * MON_ATTACK_REST;
+
                 if (S->shot_speed > 0.0f)      m->state = E_CHASE;
                 else if (dist <= S->attack)  { m->timer = 0.0f; m->swung = 0; }
                 else                           m->state = E_CHASE;
@@ -684,8 +856,28 @@ void enemy_hurt(int idx, int dmg, v3 dir) {
     fx_spawn("blood", mid, back);
 
     play_at(m->pos, "epain", 70);
-    if (m->state == E_CHASE || m->state == E_IDLE) {
+
+    /* QUAKE'S pain_finished. Every hit used to restart the flinch, so a weapon
+       that fires faster than the flinch lasts held a monster still until it
+       died -- it never got a frame in which it was allowed to act. The rapid
+       gun fires every 0.085s against a 0.16s flinch, so that was already
+       reachable, and raising walking speed to 10.8 made getting into position
+       to do it trivial.
+       Waking a sleeping monster is exempt: a monster shot from across a room it
+       has not noticed still has to notice.
+       Quake의 pain_finished입니다. 이전에는 매 피격이 경직을 다시 시작했으므로, 경직보다
+       빠르게 발사되는 무기는 몬스터가 죽을 때까지 붙잡아 두었습니다. 행동할 수 있는
+       프레임을 한 번도 얻지 못했습니다. 속사 무기는 0.16초 경직에 0.085초마다 발사되므로
+       이미 도달 가능했고, 이동 속도가 10.8이 되면서 그 자리를 잡는 것이 쉬워졌습니다.
+       자고 있던 몬스터를 깨우는 것은 예외입니다. 알아채지 못한 방 건너에서 총을 맞은
+       몬스터는 그래도 알아채야 합니다. */
+    if (m->state == E_IDLE) {
         m->state = E_HURT;
         m->timer = 0.16f;
+        m->pain_wait = S->pain_lock;
+    } else if (m->state == E_CHASE && m->pain_wait <= 0.0f) {
+        m->state = E_HURT;
+        m->timer = 0.16f;
+        m->pain_wait = S->pain_lock;
     }
 }

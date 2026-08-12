@@ -106,6 +106,69 @@ enum MonTypeID {
     MON_TYPES       /**< 몬스터 종류의 총 수 */
 };
 
+/* --- Quake's fight.qc, in metres / Quake의 fight.qc를 미터로 --------------
+ *
+ * ENGLISH
+ * -------
+ * Quake decides what a monster does by which BAND the player is in, not by a
+ * single "in range" test, and then rolls dice inside that band. The bands are
+ * RANGE_MELEE/NEAR/MID/FAR at 120/500/1000 Quake units; a Quake player is 56
+ * units to our 1.8m, so a unit is about 0.032m and those become 3.8/16/32
+ * metres.
+ *
+ * THE DICE ARE THE POINT. A monster that attacks the instant it is in range is
+ * a monster whose behaviour you can compute, and once you can compute it the
+ * fight is a timing puzzle with one answer. Rolling means the same approach
+ * plays differently twice, and it means a monster sometimes closes when you
+ * expected it to shoot -- which is what makes Quake's monsters read as
+ * aggressive rather than as mechanisms.
+ *
+ * The odds are Quake's own numbers from CheckAttack, including the halving for
+ * monsters that also have a melee attack: something that can bite you prefers
+ * to close the distance, so it shoots less often on the way in.
+ *
+ * 한국어
+ * ------
+ * Quake는 몬스터의 행동을 "사거리 안인가" 하나로 정하지 않고 플레이어가 어느 *대역*에
+ * 있는지로 정한 뒤 그 안에서 주사위를 굴립니다. 대역은 Quake 단위로 120/500/1000이며,
+ * Quake 플레이어의 키 56단위가 우리의 1.8m이므로 1단위는 약 0.032m, 따라서
+ * 3.8/16/32미터가 됩니다.
+ *
+ * 주사위가 핵심입니다. 사거리에 들어온 즉시 공격하는 몬스터는 행동을 계산할 수 있는
+ * 몬스터이고, 계산이 가능해지는 순간 전투는 정답이 하나인 타이밍 퍼즐이 됩니다. 굴림이
+ * 있으면 같은 접근이 두 번 다르게 흘러가고, 쏠 줄 알았던 몬스터가 때때로 거리를
+ * 좁힙니다. Quake의 몬스터가 기계가 아니라 공격적으로 읽히는 이유가 그것입니다.
+ *
+ * 확률은 CheckAttack의 Quake 자체 수치이며, 근접 공격도 가진 몬스터에 대한 절반 감소도
+ * 포함합니다. 물 수 있는 것은 거리를 좁히기를 선호하므로 다가오는 동안 덜 쏩니다. */
+#define MON_RANGE_MELEE   3.8f   /**< Quake RANGE_MELEE (120 units). */
+#define MON_RANGE_NEAR   16.0f   /**< Quake RANGE_NEAR (500 units). */
+#define MON_RANGE_MID    32.0f   /**< Quake RANGE_MID (1000 units). */
+
+#define MON_ODDS_MELEE    0.90f  /**< At arm's length, almost always. */
+#define MON_ODDS_NEAR     0.40f  /**< Ranged-only monster, near band. */
+#define MON_ODDS_MID      0.10f  /**< Ranged-only monster, mid band. */
+#define MON_ODDS_ALSO_MELEE 0.5f /**< Halved for anything that can also bite. */
+
+/* HOW LONG A MONSTER RESTS AFTER ATTACKING, before it will even consider
+   attacking again. Quake's SUB_AttackFinished(2*random()) -- a RANDOM rest, not
+   a fixed one, so a pair of monsters that started together drift out of step
+   instead of firing in a chorus forever.
+   공격 후 다음 공격을 *고려하기까지*의 휴식 시간입니다. Quake의
+   SUB_AttackFinished(2*random())이며, 고정이 아니라 *무작위* 휴식입니다. 함께 시작한 두
+   몬스터가 영원히 합창하는 대신 서로 어긋나게 됩니다. */
+#define MON_ATTACK_REST   2.0f
+
+/* HOW LONG A MONSTER COMMITS TO A STRAFE DIRECTION. Doom's movecount and
+   Quake's lefty both exist because a monster that re-decides every frame
+   jitters in place: the choice flips as fast as the geometry under it changes,
+   and the result reads as a bug rather than as movement.
+   몬스터가 하나의 횡이동 방향을 유지하는 시간입니다. Doom의 movecount와 Quake의 lefty가
+   모두 존재하는 이유는, 매 프레임 다시 결정하는 몬스터가 제자리에서 떨기 때문입니다.
+   발밑의 지형이 바뀌는 속도로 선택이 뒤집히고, 그 결과는 움직임이 아니라 결함으로
+   읽힙니다. */
+#define MON_SLIDE_HOLD    1.1f
+
 /**
  * @enum EState
  * @brief 몬스터의 AI 상태를 정의합니다.
@@ -150,6 +213,58 @@ typedef struct {
     float cooldown;     /**< 공격 후 재사용 대기 시간 (초). */
     float aspect;       /**< 스프라이트의 가로/세로 비율. */
     float shot_speed;   /**< 0이 아니면 근접 공격 대신 이 속도(m/s)로 발사체를 발사합니다. */
+
+    /**
+     * @brief How fast this monster can turn, in degrees per second.
+     *
+     * ENGLISH
+     * -------
+     * Quake's `yaw_speed`, and the single biggest reason its monsters feel like
+     * they have mass. Before this the AI wrote `m->yaw = atan2f(...)` every
+     * frame, so a monster faced the player exactly, always, however fast the
+     * player moved around it -- which makes strafing pointless, because there
+     * is no angle you can win. A monster that turns at a finite rate can be
+     * got behind, and that is a whole layer of play that a single assignment
+     * was throwing away.
+     * A per-monster number rather than a constant because it is character: the
+     * brute is a wall that cannot track you, the hound is a beast that can.
+     *
+     * 한국어
+     * ------
+     * Quake의 `yaw_speed`이며, 그 몬스터들이 질량을 가진 것처럼 느껴지는 가장 큰
+     * 이유입니다. 이전에는 AI가 매 프레임 `m->yaw = atan2f(...)`를 썼으므로 플레이어가
+     * 아무리 빨리 돌아도 몬스터는 언제나 정확히 플레이어를 향했습니다. 그러면 횡이동이
+     * 무의미해집니다. 이길 수 있는 각도가 없기 때문입니다. 유한한 속도로 도는 몬스터는
+     * 뒤를 잡을 수 있고, 그것은 대입문 하나가 버리고 있던 플레이의 한 층 전체입니다.
+     * 상수가 아니라 몬스터별 수치인 이유는 그것이 성격이기 때문입니다. 브루트는 당신을
+     * 추적하지 못하는 벽이고, 하운드는 추적하는 짐승입니다.
+     */
+    float yaw_speed;
+
+    /**
+     * @brief Seconds of immunity to the flinch after being hurt.
+     *
+     * ENGLISH
+     * -------
+     * Quake's `pain_finished`. Without it every hit restarts the flinch, so a
+     * fast enough weapon holds a monster still until it dies -- it never gets
+     * a frame in which it is allowed to act. That was already reachable here
+     * and got worse the moment walking speed went to 10.8: the rapid gun fires
+     * every 0.085s and the flinch lasted 0.16s, so two shots a second past the
+     * flinch's own length was a permanent stun.
+     * Per monster because it is the same lever Quake uses it as: the ogre's 5
+     * seconds is what makes an ogre frightening.
+     *
+     * 한국어
+     * ------
+     * Quake의 `pain_finished`입니다. 이것이 없으면 매 피격이 경직을 다시 시작하므로,
+     * 충분히 빠른 무기는 몬스터가 죽을 때까지 붙잡아 둡니다. 행동할 수 있는 프레임을 단
+     * 한 번도 얻지 못합니다. 여기서도 이미 도달 가능했고, 이동 속도가 10.8이 된 순간 더
+     * 나빠졌습니다. 속사 무기는 0.085초마다 발사되고 경직은 0.16초였으므로, 경직 자체의
+     * 길이를 넘는 초당 두 발이면 영구 스턴이었습니다. 몬스터별인 이유는 Quake가 쓰는
+     * 것과 같은 조절 수단이기 때문입니다. 오우거의 5초가 오우거를 무섭게 만듭니다.
+     */
+    float pain_lock;
 } MonType;
 
 /**
@@ -193,6 +308,33 @@ typedef struct {
      * 대신 끊김으로 나타나는 형태입니다.
      */
     short  sight_age;
+
+    /**
+     * @brief Where the monster WANTS to face. Its actual yaw turns towards it.
+     *
+     * Quake's `ideal_yaw`, and the reason it is stored rather than computed at
+     * the point of use: turning is rate-limited, so "where I want to look" and
+     * "where I am looking" are two different facts and both have to survive the
+     * frame.
+     * Quake의 `ideal_yaw`이며, 쓰는 자리에서 계산하지 않고 저장하는 이유는 회전에 속도
+     * 제한이 있기 때문입니다. "보고 싶은 방향"과 "보고 있는 방향"은 서로 다른 두 사실이며
+     * 둘 다 프레임을 넘어 살아남아야 합니다.
+     */
+    float  ideal_yaw;
+
+    /**
+     * @brief Which way this monster is currently circling. Quake's `lefty`.
+     *
+     * Flipped when the chosen side is blocked, and otherwise held for
+     * ::MON_SLIDE_HOLD so the monster commits instead of vibrating.
+     * 선택한 쪽이 막히면 뒤집히고, 그 외에는 ::MON_SLIDE_HOLD 동안 유지되어 몬스터가
+     * 떨지 않고 한 방향을 밀고 나갑니다.
+     */
+    char   lefty;
+
+    float  pain_wait;   /**< Seconds until the flinch can fire again. / 경직이 다시 발동할 수 있기까지의 시간. */
+    float  attack_wait; /**< Seconds until an attack may even be considered. / 공격을 고려할 수 있기까지의 시간. */
+    float  slide_wait;  /**< Seconds left on the current strafe direction. / 현재 횡이동 방향에 남은 시간. */
 } Enemy;
 
 /**

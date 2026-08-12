@@ -158,6 +158,12 @@ static int each_sound(int want_wav) {
  */
 static const char *PLAYED[] = {
     "shot", "dry", "pump", "impact",          /* weapon.c */
+    /* One voice per weapon. Every one of these was "shot" until the roster
+       grew past the gun the table was written for.
+       무기마다 하나씩입니다. 표가 쓰인 그 총을 넘어 구성이 늘어날 때까지 이 전부가
+       "shot"이었습니다. */
+    "launch", "plasma", "saw", "sawup", "sawhit",
+    "blast",                                  /* proj.c -- was "impact" */
     "hook", "hreel", "hland", "hbite", "hbiteb",  /* hook.c */
     "phurt", "pdie", "win", "exit",           /* main.c */
     "pammo", "pmed"                           /* pickup.c */
@@ -165,6 +171,44 @@ static const char *PLAYED[] = {
 
 /* Names the game plays that the recipe file must still define.
    게임이 재생하는 이름 중 레시피 파일이 여전히 정의해야 하는 것들입니다. */
+/* --- the text fits, rather than being trimmed to fit ---------------------
+   MAX_SOUNDS was 24 and there were exactly 24 sounds, so the first one added
+   past it was dropped -- and the one that went missing was not the new sound
+   but whichever landed last, which was `switch`. The symptom was a door that
+   stopped clicking, which reads as a bug in doors.
+
+   The checks below would eventually have caught it, but only by the sound of
+   something else failing. This names the cause: it asks whether the file fits
+   the table, which is a question with a number in it, and it fails while there
+   is still headroom rather than at the moment the last slot is taken.
+
+   MAX_SOUNDS가 24였고 사운드도 정확히 24개였으므로, 그것을 넘어 추가된 첫 사운드가
+   버려졌습니다. 사라진 것은 새 사운드가 아니라 마지막에 놓인 것, 즉 `switch`였습니다.
+   증상은 더 이상 딸깍이지 않는 문이었고 문의 결함처럼 읽힙니다. 아래 검사들도 결국은
+   잡았겠지만 *다른 것이* 실패하는 소리로만 잡았을 것입니다. 이것은 원인을 지목합니다.
+   파일이 표에 들어가는지를 묻고, 그것은 수치를 담은 질문이며, 마지막 칸이 차는 순간이
+   아니라 아직 여유가 있을 때 실패합니다. */
+static int check_capacity(void) {
+    int bad = 0;
+    int n = audio_sound_count();
+
+    printf("\n  --- the recipe text against the table ---\n");
+    printf("  %-30s %4d / %4d  %s\n", "sounds defined", n, AUDIO_MAX_SOUNDS,
+           n < AUDIO_MAX_SOUNDS ? "ok" : "FAIL");
+    if (n >= AUDIO_MAX_SOUNDS) {
+        printf("      the text fills the table -- raise AUDIO_MAX_SOUNDS\n");
+        bad++;
+    }
+
+#ifdef DIAG_ENABLED
+    if (diag_count(DIAG_SOUND_CAP) > 0) {
+        printf("      and sounds were DROPPED reaching it\n");
+        bad++;
+    }
+#endif
+    return bad;
+}
+
 /* --- distance attenuation ------------------------------------------------
    Two things nothing else can see.
 
@@ -344,6 +388,7 @@ int main(int argc, char **argv) {
        열네 개로 실패하는 것은 다른 질문에 답하는 셈입니다. */
     if (!one) fails += check_played();
 
+    if (!one) fails += check_capacity();
     if (!one) fails += check_alphabet();
     if (!one) fails += check_distance();
 

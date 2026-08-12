@@ -441,6 +441,16 @@ static LRESULT CALLBACK wnd_proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
                    진행 중인 공격을 이월하지 않고 취소합니다. 도끼의 대쉬를 샷건이
                    물려받아서는 안 됩니다. */
                 g_weapon.cooldown = 0.0f;
+
+                /* A weapon that announces itself does so here, on the switch
+                   rather than on the first swing: the saw revving up is what
+                   tells the player the change took, and hearing it only once
+                   they attack makes the switch itself feel unacknowledged.
+                   자기를 알리는 무기는 첫 공격이 아니라 *전환 시점*인 이곳에서 그렇게
+                   합니다. 톱이 돌기 시작하는 소리가 전환이 먹혔다는 것을 알려 주며, 공격할
+                   때에야 들린다면 전환 자체가 응답 없는 것처럼 느껴집니다. */
+                const char *dsnd = wp_stats(want)->draw_snd;
+                if (dsnd) audio_play(dsnd, 85);
             }
             return 0;
         }
@@ -671,7 +681,7 @@ static void update(float dt) {
     }
 
     int hooked = (g_weapon.hook_state == HOOK_PULLING);
-    float speed = PLAYER_WALK * (g_keys[VK_SHIFT] ? 1.8f : 1.0f);
+    float speed = PLAYER_WALK;
     /* Being reeled in, WASD stops driving position entirely. Normal walking
        SETS position every frame (see move_axis), so leaving any of it live
        would let the player simply walk out of a pull the velocity system

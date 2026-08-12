@@ -136,10 +136,20 @@ static void detonate(Proj *p, v3 at, v3 normal) {
         fx_spawn("blastsmoke",  at, v3f(0, 1, 0));
         fx_spawn("blastdebris", at, normal);
         fx_spawn("boltburst",   at, normal);
-        audio_play("impact", 100);
+
+        /* ITS OWN SOUND, AND FROM WHERE IT HAPPENED. This was `impact`, which
+           is DSPUNCH -- a punch -- at a flat gain of 100 wherever in the level
+           it went off. Two faults in one line: the wrong sound, and a blast
+           across the map as loud as one at your feet. A grenade you cannot
+           place by ear is one you cannot learn to avoid.
+           자기 소리이며, 일어난 자리에서 납니다. 이것은 `impact`, 즉 DSPUNCH(주먹질)였고,
+           레벨 어디서 터지든 고정 게인 100이었습니다. 한 줄에 결함이 둘입니다. 틀린
+           소리, 그리고 맵 건너편의 폭발이 발밑의 폭발과 같은 크기라는 것. 귀로 위치를
+           짚을 수 없는 유탄은 피하는 법을 배울 수 없는 유탄입니다. */
+        audio_play_at("blast", 100, at);
     } else {
         fx_spawn("spark", at, normal);
-        audio_play("impact", 45);
+        audio_play_at("impact", 45, at);
     }
     p->active = 0;
 }

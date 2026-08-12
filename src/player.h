@@ -23,7 +23,19 @@
 
 #define PLAYER_EYE     1.70f   ///< @brief Eye height above the feet, metres. / 발에서 눈까지의 높이 (미터).
 #define PLAYER_RADIUS  0.35f   ///< @brief Collision cylinder radius, metres. / 충돌 원기둥의 반경 (미터).
-#define PLAYER_WALK    6.0f    ///< @brief Base walking speed, metres per second. / 기본 걷기 속도 (초당 미터).
+/* THE ONLY SPEED. This was 6.0 with Shift multiplying it by 1.8, and the dash
+   was not a choice anybody made: holding Shift was strictly better everywhere
+   -- it cost nothing, ran out of nothing, and traded away nothing -- so the
+   real walking speed of this game was already 10.8 and the key was a tax on
+   the player's left hand for it.
+   Removing the modifier and keeping the number it produced is what makes this
+   a deletion rather than a nerf. 6.0 x 1.8 = 10.8.
+   유일한 속도입니다. 6.0에 Shift가 1.8을 곱하는 구조였고, 대쉬는 누구도 내리지 않는
+   선택이었습니다. 어디서나 Shift를 누르는 편이 엄격히 나았고, 비용도 소모도 대가도
+   없었습니다. 따라서 이 게임의 실제 이동 속도는 이미 10.8이었으며 그 키는 그것을 위해
+   플레이어의 왼손에 매긴 세금이었습니다. 수정자를 없애고 그것이 만들어 내던 수치를
+   유지하는 것이, 이것을 하향이 아니라 삭제로 만듭니다. 6.0 x 1.8 = 10.8입니다. */
+#define PLAYER_WALK    10.8f   ///< @brief Walking speed, metres per second. / 걷기 속도 (초당 미터).
 #define PLAYER_GRAVITY 22.0f   ///< @brief Downward acceleration, m/s^2. Higher than reality for a snappier fall. / 하강 가속도 (m/s^2). 경쾌한 낙하감을 위해 현실보다 높게 설정되었습니다.
 #define PLAYER_JUMP    7.5f    ///< @brief Upward velocity applied on jumping, m/s. / 점프 시 적용되는 상승 속도 (m/s).
 

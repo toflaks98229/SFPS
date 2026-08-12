@@ -55,6 +55,17 @@
    음량이 사는 곳은 정확히 하나입니다. */
 #define AUDIO_MASTER 0.70f
 
+/* HOW MANY SOUNDS THE TABLE HOLDS. Public so a test can check the recipe text
+   against it by NAME rather than discovering the overflow as some unrelated
+   sound going quiet -- which is how the last one was found: the cap was 24 and
+   there were exactly 24 sounds, so adding one dropped `switch`, and the
+   symptom was a door that stopped clicking.
+   표가 담는 사운드 수입니다. 테스트가 레시피 텍스트를 *이름으로* 대조할 수 있도록
+   공개합니다. 상관없는 사운드가 조용해지는 것으로 넘침을 발견하지 않기 위해서입니다.
+   지난번이 그랬습니다. 상한이 24이고 사운드도 정확히 24개여서 하나를 더하자 `switch`가
+   버려졌고, 증상은 더 이상 딸깍이지 않는 문이었습니다. */
+#define AUDIO_MAX_SOUNDS 40
+
 /**
  * @brief 오디오 장치를 열고 믹싱 스레드를 시작합니다.
  *
@@ -165,6 +176,21 @@ int audio_gain_at(int gain, v3 pos);
  * 핫 리로딩 경로에서 호출됩니다. 텍스트가 변경될 수 없는 릴리스 빌드에서는
  * no-op 비용입니다.
  */
+/**
+ * @brief How many sounds the recipe text defined.
+ *
+ * @return The count, at most ::AUDIO_MAX_SOUNDS.
+ * @note For checking the text against the table BY NAME. Anything past the cap
+ *       is parsed and thrown away, so the count saturating is the only sign
+ *       from inside that a sound went missing.
+ *
+ * @brief 레시피 텍스트가 정의한 사운드의 수를 반환합니다.
+ * @note 텍스트를 표와 *이름으로* 대조하기 위한 것입니다. 상한을 넘은 것은 파싱된 뒤
+ *       버려지므로, 개수가 포화되었다는 것이 내부에서 사운드가 사라졌음을 알 수 있는
+ *       유일한 신호입니다.
+ */
+int audio_sound_count(void);
+
 void audio_reload(void);
 
 /**

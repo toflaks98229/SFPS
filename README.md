@@ -1840,26 +1840,90 @@ data proprietary, so "Doom is open source" does not make its sprites usable.
 
 ### Turning a Freedoom sprite into one of ours
 
-Freedoom ships its art as individual PNGs in `sprites/`, named the way Doom
-names them — `NAME` + a frame letter + a rotation digit, so `POSSA1` is the
-zombieman's frame A seen from the front. That is already the shape this
-project's pipeline wants; what it needs is a resize and a redraw pass, because
-these sprites were drawn for a 320×200 screen and this one has its own art
-resolution and a shared 16-colour palette.
+Done, and reproducible: `assets/sprites/import-freedoom.py` rebuilds all 24
+frames from Freedoom's own lumps. The PNGs it writes are committed, so the
+build needs neither Python nor a network; the script is kept because those
+images are the *result* of a conversion and it is the recipe.
 
-| ours | a reasonable Freedoom source | why |
+| ours | Freedoom | frames taken |
 |---|---|---|
-| `imp` | `POSS` | the baseline humanoid |
-| `hound` | `SARG` | low, fast, all mouth |
-| `brute` | `BOSS` / `BOS2` | the big one |
-| `caster` | `HEAD` | floats, attacks at range |
+| `imp` | `POSS` | A, C, F, G, L |
+| `brute` | `BOSS` | A, C, G, H, O |
+| `hound` | `SARG` | A, C, F, H, N |
+| `caster` | `HEAD` | A, B, D, F, L |
+| `gun` | `SHTG` | B, C, D, C |
 
-Drop the result in `assets/sprites/` as `imp0.png` … `imp4.png` (walk-A, walk-B,
-attack, hurt, dead) and rebuild; `bake.ps1` quantises it to the shared palette
-and encodes it. A 128×96 weapon frame measures at about 1.3KB and a 32×32
-monster frame at a small fraction of that, so a full bestiary and weapon set is
-roughly 2% of the budget — see
+Four things the conversion has to get right, and three of them are invisible
+until they are wrong.
+
+**The offsets are the part people get wrong.** Doom crops each sprite to its
+own ink and records the creature's origin separately, in `buildcfg.txt` at the
+repository root. Centring the images instead looks correct until the firing
+frame — which is narrow because the *arm left the box*, not because the body
+moved. `POSSF1` is 4.5px off its neighbours, over a tenth of its width, and
+the zombie appears to flinch sideways every time it shoots. Some PNGs also
+carry a `grAb` chunk but only some, because that chunk is a staging area for
+`buildcfg.txt` rather than the record. X comes from the offsets; Y does not,
+since its drift is a uniform +4 on every frame — a constant shift, not jitter.
+
+**Doom's pixels are 1.2× taller than wide**, because 320×200 was displayed at
+4:3. Drawn square, every creature is squat.
+
+**One scale per subject, set by the living frames, filling the cell height.**
+The cell maps to the collision height in metres, so a sprite that underfills
+it is a creature you can shoot over the head of and still hit. The corpse is
+exempt — Doom's death frames sprawl wider than the cell (the brute's is 90px
+against 64) and at the body's scale a third would be cut off.
+
+**Rotation 1 only.** Monsters are billboards that always face the player, so
+the other seven views are unreachable. Death frames are rotation 0 because a
+corpse looks the same from every angle, which is also how the frame list tells
+you which letters are deaths.
+
+The set costs **66KB, about 4.5% of the floppy** — a shaded 64×96 creature
+frame is ~2,600 bytes and its corpse ~1,100. See
 [Hand-drawn art](#hand-drawn-art-and-the-weapon-that-replaces-its-model).
+
+### What the import cost the codec
+
+Real art broke three things that placeholder art had been hiding, which is
+the argument for importing early rather than late.
+
+**The palette was never chosen, only collected.** Sixteen entries filled
+first-come in filename order, then everything else snapped to the nearest.
+Fine for four flat guns; on the first real import it produced four greens,
+eleven near-identical greys and black, because `brute0.png` sorts first. The
+pink creature, the gold one and the shotgun all became grey. It is median cut
+now, and **per subject** rather than per set: sixteen colours across five
+creatures is three each, and the reason to share a palette — making a set look
+like one game — is already paid for by art that comes from one game. The
+decoder needed no change, since it reads `pal` as a directive in a single
+forward pass and replaces the current palette wherever it appears.
+
+**The packed encoder had never once produced a correct sprite.** PowerShell
+variable names are case-insensitive, so `$a = $idx[$i]` overwrote `$A`, the
+alphabet the next line indexes; `$A` became an integer, indexing an integer
+returns the integer, and every pixel encoded as the character `0`. It went
+unseen because packing had never been *chosen* — all the placeholder art was
+flat, RLE won every time, and the first drawing dense enough to pack was the
+first to be corrupted. `sprtest` could not have caught it: it tests the C
+decoder against hand-written text, which proves the decoder reads the format
+and says nothing about whether the encoder writes it. bake.ps1 now decodes
+each sprite it just encoded and fails the build on any mismatch.
+
+**A drawing composited over the generated creature instead of replacing it.**
+Sensible for a half-drawn bestiary, wrong for any drawing narrower than the
+SDF version underneath — the generated creature showed around the edges as a
+halo, a green shape standing behind the hound and a horn over the caster. The
+clear is per *cell*, so the graceful path survives: a frame nobody drew is
+never reached and keeps its generated creature.
+
+And one thing that was simply left on the table: **the cells were mostly empty
+margin.** RLE barely cares — a run of transparency is two characters however
+long — but packing pays per three pixels whether they are picture or nothing.
+Cropping to the ink and recording the offset is 13% off the set, 34% on the
+frames that pack, with the decoded atlas bit-identical to before.
+
 
 ## Roadmap
 

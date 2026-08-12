@@ -223,13 +223,30 @@ int main(void) {
            "and the next sprite's own pixels land where they should");
     }
 
-    /* --- 5. index 0 composites, it does not punch a hole ------------------
-       The property the monster overlay depends on: a drawing smaller than its
-       cell, or with transparent gaps, leaves the generated creature showing.
-       몬스터 오버레이가 의존하는 성질입니다. */
+    /* --- 5. a drawn frame owns its cell, and only its cell ----------------
+       Two halves of one rule, and the interesting one is the second.
+
+       A drawing REPLACES the generated creature in the cell it fills rather
+       than compositing over it. Compositing was the original behaviour and it
+       is wrong for any drawing narrower than the SDF version underneath: the
+       generated creature shows around the edges as a halo. The first Freedoom
+       import made that concrete -- a green shape standing behind the hound and
+       a horn poking out over the caster.
+
+       But the graceful-degradation property has to survive the fix, so the
+       clear is per CELL: a frame nobody drew is never reached and keeps its
+       generated creature, which is what lets a half-drawn bestiary still show
+       a full one.
+
+       그린 프레임이 자기 셀을 소유하되 *자기 셀만* 소유한다는 규칙의 두 절반이며,
+       흥미로운 쪽은 두 번째입니다. 그림은 셀 안의 생성된 생물을 합성하지 않고
+       *대체*합니다. 합성은 원래 동작이었고 아래의 SDF 버전보다 좁은 모든 그림에
+       대해 틀립니다. 다만 아무도 그리지 않은 프레임은 이 경로에 닿지 않아 생성된
+       생물을 유지하므로, 절반만 그려진 도감도 여전히 온전해 보입니다. */
     {
         clear(g_atlas, AW * AH);
-        /* Pre-fill the cell with a marker the decode must not erase. */
+        /* Pre-fill everything with a marker standing in for the generated
+           creature, so both what is erased and what is not are visible. */
         for (int i = 0; i < AW * AH; i++) {
             g_atlas[i*4+0] = 9; g_atlas[i*4+1] = 9;
             g_atlas[i*4+2] = 9; g_atlas[i*4+3] = 255;
@@ -242,8 +259,20 @@ int main(void) {
 
         const unsigned char *t = at(0, 0, 2, 1, 0, 0);
         const unsigned char *r = at(0, 0, 2, 1, 1, 0);
-        ok(t[0] == 9 && t[3] == 255, "index 0 leaves what was underneath it");
+        ok(t[3] == 0, "a drawn frame clears the generated creature out of its cell");
         ok(r[0] == 255 && r[1] == 0, "and a non-zero index overwrites");
+
+        /* Nothing but imp0's cell may be touched, and the atlas has TWO axes:
+           frames run across and monster types run down. Checking only one of
+           them is not a check -- a clear that ran the full height of the atlas
+           passed a frame-only version of this line while wiping every other
+           creature in the same column. So probe both neighbours. */
+        const unsigned char *nf = at(0, 1, 2, 1, 0, 0);   /* next frame across */
+        const unsigned char *nt = at(1, 0, 2, 1, 0, 0);   /* next type down    */
+        ok(nf[0] == 9 && nf[3] == 255,
+           "a frame nobody drew keeps its generated creature");
+        ok(nt[0] == 9 && nt[3] == 255,
+           "and so does the same frame of another monster");
     }
 
     /* --- 6. the muzzle marker survives placement --------------------------
@@ -272,6 +301,50 @@ int main(void) {
             mx, (WPN_CW - 4) / 2 + 1);
         okd(my == (WPN_CH - 2) + 0, "muzzle y follows the bottom seating",
             my, (WPN_CH - 2));
+    }
+
+    /* --- 6b. `o` places a cropped drawing, and moves the muzzle with it ----
+       bake.ps1 crops each drawing to its ink before encoding, because the
+       packed opcode pays for empty margin at the same rate as picture. That
+       is only safe if the offset it emits puts the pixels back exactly where
+       the uncropped drawing had them -- a size optimisation that moved the art
+       would be a bug that looks like an art mistake.
+
+       The muzzle is the half worth testing hardest. It is stored relative to
+       the drawing, so cropping changes its number too, and a decoder that
+       applied `o` to the pixels but not to the marker would put every muzzle
+       flash off the end of the barrel by exactly the crop.
+
+       bake.ps1은 인코딩 전에 각 그림을 잉크에 맞춰 잘라 냅니다. packed opcode가 빈
+       여백에도 그림과 같은 값을 치르기 때문입니다. 이는 함께 내보내는 오프셋이 픽셀을
+       자르기 전과 정확히 같은 자리에 되돌려 놓을 때에만 안전합니다. 그림을 움직이는
+       크기 최적화는 아트 실수처럼 보이는 버그가 됩니다. */
+    {
+        clear(g_watlas, WW * WH);
+        /* The same 4x2 drawing as above, but declared as already cropped out
+           of a cell at (20,30) instead of being centred and floor-seated. */
+        const char *text =
+            "pal 2 000000 ff0000\n"
+            "s gun1 4 2\n"
+            "o 20 30\n"
+            "m 1 0\n"
+            "r EBEB\n";
+        sprite_decode_text(text, g_watlas, WW, WH, 1);
+
+        const unsigned char *q = &g_watlas[((30) * WW + (1 * WPN_CW + 20)) * 4];
+        ok(q[0] == 255 && q[3] == 255,
+           "an explicit origin puts the pixels where it says");
+
+        /* And nothing landed at the default placement it replaced. */
+        const unsigned char *d = &g_watlas[(((WPN_CH - 2)) * WW +
+                                            (1 * WPN_CW + (WPN_CW - 4) / 2)) * 4];
+        ok(d[3] == 0, "and not at the centred, floor-seated default");
+
+        int mx = -1, my = -1;
+        (void)sprite_weapon_muzzle_px(1, &mx, &my);
+        okd(mx == 20 + 1, "the muzzle moves with the origin, not the centring",
+            mx, 21);
+        okd(my == 30 + 0, "on both axes", my, 30);
     }
 
     /* --- 7. malformed text stops rather than running off the end ----------

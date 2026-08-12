@@ -923,8 +923,27 @@ static void decode_sprites(const char *p, unsigned char *buf, int W, int H, int 
            bake.ps1이 기록하므로 무기만 이를 가지지만, 스트림 동기화를 위해 모든
            스프라이트에 대해 파싱합니다. */
         int muz_x = -1, muz_y = -1;
+        /* Where in the cell the drawing goes. -1 means "not said", and the
+           default below -- centred, sitting on the cell floor -- applies. It
+           is optional because bake.ps1 only writes it for a drawing it cropped
+           to its ink, and cropping is a size optimisation that should not be
+           able to move the picture.
+           그림이 셀의 어디에 놓이는지입니다. -1은 "말하지 않음"이며 아래의 기본값(가로
+           가운데, 셀 바닥)이 적용됩니다. bake.ps1이 잉크에 맞춰 잘라 낸 그림에 대해서만
+           기록하므로 선택적이며, 자르기는 크기 최적화일 뿐 그림을 옮길 수 있어서는
+           안 됩니다. */
+        int org_x = -1, org_y = -1;
         const char *op = txt_token(p, &len);
         if (!op) break;
+        if (txt_is(op, len, "o")) {
+            int ok2 = 1;
+            p = op + len;
+            p = txt_read_int(p, &org_x, &ok2);
+            p = txt_read_int(p, &org_y, &ok2);
+            if (!ok2) break;
+            op = txt_token(p, &len);
+            if (!op) break;
+        }
         if (txt_is(op, len, "m")) {
             int ok2 = 1;
             p = op + len;
@@ -952,16 +971,52 @@ static void decode_sprites(const char *p, unsigned char *buf, int W, int H, int 
         int ox = frame * cell_w, oy = type * cell_h;
         int px_i = 0, total = sw * sh;
 
-        /* Stored in the SAME cell coordinates the pixels land in, so it
-           survives the centring and bottom-seating below rather than
-           being a point in the source image that no longer matches where
-           the drawing ended up.
-           픽셀이 놓이는 것과 *동일한* 셀 좌표로 저장합니다. 그래야 아래의 가운데
-           맞춤과 바닥 정렬을 거친 뒤에도 유효하며, 그림이 실제로 놓인 위치와 더
-           이상 맞지 않는 원본 이미지상의 점이 되지 않습니다. */
+        /* A DRAWN FRAME OWNS ITS CELL: clear the generated creature out of it
+           before painting. The two are not layers of one picture, and leaving
+           the SDF version underneath means every place the drawing is narrower
+           than it shows through as a halo -- which is exactly what the first
+           Freedoom import looked like, a green shape standing behind the
+           hound and a horn poking out above the caster.
+           Cleared per CELL rather than per atlas, so this keeps the property
+           it is named for: a bestiary that is only half drawn still shows
+           creatures, because a frame with no art never reaches this line and
+           keeps its generated one.
+           그려진 프레임이 자기 셀을 소유합니다. 칠하기 전에 생성된 생물을 지웁니다.
+           둘은 한 그림의 레이어가 아니며, SDF 버전을 아래에 남겨 두면 그림이 더 좁은
+           모든 곳에서 그것이 후광처럼 비쳐 나옵니다. 첫 Freedoom 이식이 정확히 그렇게
+           보였습니다. hound 뒤에 선 초록 형체와 caster 위로 튀어나온 뿔이 그것입니다.
+           아틀라스 단위가 아니라 *셀* 단위로 지우므로, 이름이 가리키는 성질은 유지됩니다.
+           절반만 그려진 도감도 여전히 생물을 보여 줍니다. 아트가 없는 프레임은 이 줄에
+           닿지 않아 생성된 것을 그대로 갖기 때문입니다. */
+        for (int cy = 0; cy < cell_h; cy++) {
+            int ay = oy + cy;
+            if (ay < 0 || ay >= H) continue;
+            for (int cx = 0; cx < cell_w; cx++) {
+                int ax = ox + cx;
+                if (ax < 0 || ax >= W) continue;
+                unsigned char *q = &buf[(ay * W + ax) * 4];
+                q[0] = q[1] = q[2] = q[3] = 0;
+            }
+        }
+
+        /* WHERE THE DRAWING SITS IN ITS CELL, decided once. An explicit `o`
+           wins; otherwise centre it and sit it on the cell's floor, so a 32x32
+           sprite in a 64x96 cell stands on the ground rather than floating at
+           the top. A viewmodel wants the same rule for the same reason: it
+           rises from the bottom edge of the screen.
+           The muzzle and the pixels both read these, because they have to
+           agree: a flash computed from a different placement than the barrel
+           it belongs to is the exact failure the marker exists to prevent.
+           그림이 셀 안 어디에 앉는지를 한 번만 정합니다. 명시적인 `o`가 우선하고,
+           없으면 가로로 가운데 맞춰 셀 바닥에 놓습니다. 총구와 픽셀이 둘 다 이 값을
+           읽는 이유는 둘이 일치해야 하기 때문입니다. 총열과 다른 배치로 계산된 화염은
+           바로 이 표식이 막으려는 실패입니다. */
+        int place_x = (org_x >= 0) ? org_x : (cell_w - sw) / 2;
+        int place_y = (org_y >= 0) ? org_y : (cell_h - sh);
+
         if (dest == SPR_DEST_WEAPON && muz_x >= 0 && frame < WPN_FRAMES) {
-            g_weapon_muz[frame][0] = (cell_w - sw) / 2 + muz_x;
-            g_weapon_muz[frame][1] = (cell_h - sh)     + muz_y;
+            g_weapon_muz[frame][0] = place_x + muz_x;
+            g_weapon_muz[frame][1] = place_y + muz_y;
         }
 
         /* Both opcodes spend whole characters rather than hex digits, so a
@@ -1043,17 +1098,8 @@ static void decode_sprites(const char *p, unsigned char *buf, int W, int H, int 
                 if (index == 0) continue;          /* transparent: leave what is under it */
 
                 int sx = px_i % sw, sy = px_i / sw;
-                /* Centre the drawing in its cell horizontally and sit it on
-                   the cell's bottom, so a 32x32 sprite in a 64x96 cell stands
-                   on the ground rather than floating at the top. A viewmodel
-                   wants the same rule for the same reason: it rises from the
-                   bottom edge of the screen.
-                   그림을 셀 안에서 가로로 가운데 맞추고 셀 바닥에 놓습니다. 그래야
-                   64x96 셀 안의 32x32 스프라이트가 위쪽에 떠 있지 않고 지면에
-                   섭니다. 뷰 모델도 같은 이유로 같은 규칙을 원합니다. 화면 아래쪽
-                   가장자리에서 올라오기 때문입니다. */
-                int ax = ox + (cell_w - sw) / 2 + sx;
-                int ay = oy + (cell_h - sh)     + sy;
+                int ax = ox + place_x + sx;
+                int ay = oy + place_y + sy;
                 if (ax < 0 || ax >= W || ay < 0 || ay >= H) continue;
 
                 unsigned char *q = &buf[(ay * W + ax) * 4];

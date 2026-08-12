@@ -159,12 +159,19 @@ foreach ($s in $sets) {
 # roughly 15KB of inflate and filter reconstruction -- to save 3KB of pixels.
 # Converting here means the game contains no image decoder at all.
 #
-# The format is a shared palette plus one data line per sprite:
+# The format is a stream of directives, read in one forward pass:
 #
-#   pal <n> <rrggbb> ...     one palette for every sprite in the set
-#   s <name> <w> <h>         begin a sprite
+#   pal <n> <rrggbb> ...     palette for the sprites that FOLLOW it
+#   s <name> <w> <h>         begin a sprite, w*h being its own size
+#   o <x> <y>                where it sits in its cell  (optional)
+#   m <x> <y>                muzzle, relative to the drawing  (optional)
 #   r <char pairs>           RLE: one char run (1..63), one char index
 #   p <char pairs>           packed: three 4-bit indices per two chars
+#
+# `pal` appearing more than once is not an error and is how each subject gets
+# its own sixteen colours: the decoder replaces the current palette wherever it
+# meets one. Without `o`, a drawing is centred in its cell and sits on the
+# floor, which is what everything did before cropping existed.
 #
 # Both data opcodes use a 64-character printable alphabet, so every byte of
 # .rdata carries six bits of picture instead of a hex digit's four.
@@ -177,13 +184,151 @@ foreach ($s in $sets) {
 # sprite drawn with dithering came out 1048 as RLE and 1024 flat. Both are
 # encoded and the smaller is kept, per sprite.
 #
-# A SHARED palette rather than one per sprite. Two reasons, and the second
-# matters more: it removes a palette header from every sprite, and it forces
-# the art to a common set of colours, which is most of what makes a set of
-# sprites look like they belong to the same game. Aseprite can export an
-# indexed PNG, but this does not require it -- any RGB image is quantised to
-# the nearest palette entry, so a sprite drawn without thinking about the
-# palette still lands in it.
+# ONE PALETTE PER SUBJECT, CHOSEN RATHER THAN COLLECTED.
+#
+# Both halves of that replaced something that only worked by accident.
+#
+# The palette used to be filled first-come: walk the pixels in filename order,
+# take each new colour until sixteen were spent, snap everything after that to
+# the nearest. On four flat placeholder guns it was fine. On real art it is
+# not a quantiser at all -- it is "whatever brute0.png happened to contain",
+# and the first import produced four greens, eleven near-identical greys and
+# black. The pink creature, the gold one and the shotgun all snapped to grey,
+# because nothing red or gold ever got a slot. Median cut instead: split the
+# colour cloud on its widest axis at the median until there are as many boxes
+# as slots, and average each box. Frequency decides what gets resolution, so
+# an unusual colour that covers a lot of pixels keeps its entry.
+#
+# And the palette is per SUBJECT rather than per set. Sixteen colours across a
+# green soldier, silver armour, pink flesh, a gold floater and a grey gun is
+# three colours each, which no amount of clever selection rescues. The
+# original argument for sharing was that a common palette makes a set look
+# like one game -- true, and it is why this held while the art was
+# placeholders, but the art now comes FROM one game and arrives sharing Doom's
+# palette already. Paying for coherence that the source material provides for
+# free costs about three quarters of the colour resolution.
+#
+# The decoder needed nothing for this: it reads `pal` as a directive in a
+# single forward pass and replaces the current palette wherever it appears, so
+# a palette line per group is a bake-side change alone.
+#
+# Aseprite can export an indexed PNG, but this does not require it -- any RGB
+# image is quantised to the nearest entry, so a sprite drawn without thinking
+# about the palette still lands in one.
+
+# Read a PNG once into a flat array of packed RGB, -1 where transparent.
+# Separated from encoding because the palette cannot be chosen until every
+# sprite in the group has been seen, and reading each file twice would double
+# the slowest part of the bake.
+function Get-SpritePixels([string]$path) {
+    Add-Type -AssemblyName System.Drawing
+    $bmp = New-Object System.Drawing.Bitmap $path
+    try {
+        $w = $bmp.Width; $h = $bmp.Height
+        $px = New-Object int[] ($w * $h)
+        $muzX = -1; $muzY = -1
+        for ($y = 0; $y -lt $h; $y++) {
+            for ($x = 0; $x -lt $w; $x++) {
+                $c = $bmp.GetPixel($x, $y)
+                if ($c.A -ge 128 -and $c.R -gt 240 -and $c.G -lt 16 -and $c.B -gt 240) {
+                    $muzX = $x; $muzY = $y
+                    $px[$y * $w + $x] = -1
+                } elseif ($c.A -lt 128) {
+                    $px[$y * $w + $x] = -1
+                } else {
+                    # [int] casts are load-bearing: -shl keeps the type of its
+                    # LEFT operand, and Color.R is a Byte, so [byte]200 -shl 16
+                    # is 0 rather than 13107200. Without these every colour
+                    # packs down to its blue channel alone, and the palette
+                    # comes out as a ramp of pure blues.
+                    # [int] 캐스팅은 반드시 필요합니다. -shl은 *왼쪽* 피연산자의 타입을
+                    # 유지하는데 Color.R은 Byte이므로 [byte]200 -shl 16은 13107200이
+                    # 아니라 0입니다. 이것이 없으면 모든 색이 파랑 채널만 남고, 팔레트는
+                    # 순수한 파랑의 계조로 나옵니다.
+                    $px[$y * $w + $x] = (([int]$c.R) -shl 16) -bor
+                                        (([int]$c.G) -shl 8)  -bor ([int]$c.B)
+                }
+            }
+        }
+        return [pscustomobject]@{ W = $w; H = $h; Px = $px; MuzX = $muzX; MuzY = $muzY }
+    } finally {
+        $bmp.Dispose()
+    }
+}
+
+# Median cut over every opaque pixel of a group, to $slots colours.
+function Select-Palette($frames, [int]$slots) {
+    $hist = @{}
+    foreach ($f in $frames) {
+        foreach ($v in $f.Px) {
+            if ($v -ge 0) { $hist[$v] = 1 + $hist[$v] }
+        }
+    }
+    if ($hist.Count -eq 0) { return @() }
+
+    # One box holding every distinct colour, then split until we run out of
+    # slots or of boxes worth splitting.
+    $boxes = @(, @($hist.Keys))
+    while ($boxes.Count -lt $slots) {
+        # Split the box with the widest spread in any single channel: that is
+        # where two colours are being forced to share one entry.
+        $bi = -1; $bchan = 0; $bspread = 0
+        for ($i = 0; $i -lt $boxes.Count; $i++) {
+            if ($boxes[$i].Count -lt 2) { continue }
+            for ($k = 0; $k -lt 3; $k++) {
+                $sh = 16 - 8 * $k
+                $lo = 255; $hi = 0
+                foreach ($v in $boxes[$i]) {
+                    $c = ($v -shr $sh) -band 255
+                    if ($c -lt $lo) { $lo = $c }
+                    if ($c -gt $hi) { $hi = $c }
+                }
+                if (($hi - $lo) -gt $bspread) { $bspread = $hi - $lo; $bi = $i; $bchan = $k }
+            }
+        }
+        if ($bi -lt 0) { break }
+
+        $sh = 16 - 8 * $bchan
+        $sorted = @($boxes[$bi] | Sort-Object { ($_ -shr $sh) -band 255 })
+        # Split at the median PIXEL, not the median colour, so a hundred
+        # near-identical shades of one colour do not outvote a region that
+        # actually covers the sprite.
+        $total = 0
+        foreach ($v in $sorted) { $total += $hist[$v] }
+        $half = [int]($total / 2)
+        $acc = 0; $cut = 1
+        for ($i = 0; $i -lt $sorted.Count - 1; $i++) {
+            $acc += $hist[$sorted[$i]]
+            if ($acc -ge $half) { $cut = $i + 1; break }
+            $cut = $i + 2
+        }
+        $new = @()
+        for ($i = 0; $i -lt $boxes.Count; $i++) {
+            if ($i -eq $bi) { $new += , @($sorted[0..($cut - 1)]); $new += , @($sorted[$cut..($sorted.Count - 1)]) }
+            else { $new += , $boxes[$i] }
+        }
+        $boxes = $new
+    }
+
+    # Each entry is its box's pixel-weighted average, so it lands where the
+    # pixels are rather than in the middle of the box's extremes.
+    $out = @()
+    foreach ($b in $boxes) {
+        $n = 0; $r = 0.0; $g = 0.0; $bl = 0.0
+        foreach ($v in $b) {
+            $c = $hist[$v]; $n += $c
+            $r  += (($v -shr 16) -band 255) * $c
+            $g  += (($v -shr 8)  -band 255) * $c
+            $bl += ( $v          -band 255) * $c
+        }
+        if ($n -eq 0) { continue }
+        $out += ('{0:x2}{1:x2}{2:x2}' -f [int][math]::Round($r / $n),
+                                         [int][math]::Round($g / $n),
+                                         [int][math]::Round($bl / $n))
+    }
+    return $out
+}
+
 function ConvertFrom-Png([string]$path, [string]$name, [System.Collections.ArrayList]$pal) {
     Add-Type -AssemblyName System.Drawing
     $bmp = New-Object System.Drawing.Bitmap $path
@@ -258,6 +403,56 @@ function ConvertFrom-Png([string]$path, [string]$name, [System.Collections.Array
             }
         }
 
+        # CROP TO THE INK BEFORE ENCODING ANYTHING.
+        #
+        # A drawing is placed in a cell whose size is set by the largest frame,
+        # so most frames carry a margin of nothing. RLE barely notices -- a run
+        # of transparency is two characters however long it is -- but the
+        # packed opcode spends two characters per three pixels whether they are
+        # picture or margin, and packing is what dense art chooses. Measured
+        # over the imported set: 13% overall, 34% on the frames that pack, 0%
+        # on the ones that already RLE. The margins are also partly an artefact
+        # of upscaling a 41x57 drawing to fill a 64x96 cell, which is storing a
+        # result this project would rather not store at all.
+        #
+        # The offset is emitted as its own line so the default -- centre it,
+        # sit it on the floor -- still applies to anything without one.
+        #
+        # 무엇이든 인코딩하기 전에 잉크에 맞춰 잘라 냅니다. 그림은 가장 큰 프레임이 크기를
+        # 정한 셀에 놓이므로 대부분의 프레임은 빈 여백을 함께 나릅니다. RLE는 이를 거의
+        # 개의치 않지만(투명한 런은 길이와 무관하게 두 글자입니다) packed opcode는 그것이
+        # 그림이든 여백이든 픽셀 셋마다 두 글자를 씁니다. 그리고 조밀한 아트가 고르는 것이
+        # 바로 패킹입니다. 이식한 세트에서 측정한 값은 전체 13%, 패킹하는 프레임에서 34%,
+        # 이미 RLE인 프레임에서 0%입니다.
+        $ix0 = $w; $iy0 = $h; $ix1 = -1; $iy1 = -1
+        for ($y = 0; $y -lt $h; $y++) {
+            for ($x = 0; $x -lt $w; $x++) {
+                if ($idx[$y * $w + $x] -ne 0) {
+                    if ($x -lt $ix0) { $ix0 = $x }
+                    if ($x -gt $ix1) { $ix1 = $x }
+                    if ($y -lt $iy0) { $iy0 = $y }
+                    if ($y -gt $iy1) { $iy1 = $y }
+                }
+            }
+        }
+        if ($ix1 -lt 0) { $ix0 = 0; $iy0 = 0; $ix1 = 0; $iy1 = 0 }
+
+        $cellW = $w; $cellH = $h
+        $iw = $ix1 - $ix0 + 1; $ih = $iy1 - $iy0 + 1
+        if ($iw -ne $w -or $ih -ne $h) {
+            $crop = New-Object int[] ($iw * $ih)
+            for ($y = 0; $y -lt $ih; $y++) {
+                for ($x = 0; $x -lt $iw; $x++) {
+                    $crop[$y * $iw + $x] = $idx[($y + $iy0) * $w + ($x + $ix0)]
+                }
+            }
+            $idx = $crop
+            # The muzzle was recorded in cell coordinates; move it with the
+            # pixels or the flash stays where the margin used to be.
+            if ($muzX -ge 0) { $muzX -= $ix0; $muzY -= $iy0 }
+            $w = $iw; $h = $ih
+        }
+
         # Two encodings, and the smaller one wins per sprite.
         #
         # RLE is the obvious choice for pixel art and is usually right, but it
@@ -304,12 +499,27 @@ function ConvertFrom-Png([string]$path, [string]$name, [System.Collections.Array
         # Packed: three 4-bit indices (12 bits) in two 6-bit characters, so 1.5
         # pixels per byte where a hex digit managed 1. This is what wins when
         # the art is noisy enough that runs stop paying for themselves.
+        # $p0/$p1/$p2 rather than $a/$b/$c, and that is not a style choice.
+        # PowerShell variable names are CASE-INSENSITIVE, so `$a = $idx[$i]`
+        # overwrites $A -- the alphabet this loop is about to index. $A then
+        # holds an integer, indexing an integer returns the integer, and every
+        # pixel encodes as the character '0'. It went unseen because a packed
+        # sprite had never actually been produced: all the placeholder art was
+        # flat, RLE won every time, and the first drawing dense enough to
+        # choose packing was the first to be corrupted by it.
+        # $a/$b/$c가 아니라 $p0/$p1/$p2인 것은 취향의 문제가 아닙니다. PowerShell의
+        # 변수명은 *대소문자를 구분하지 않으므로* `$a = $idx[$i]`는 이 루프가 곧
+        # 인덱싱할 알파벳인 $A를 덮어씁니다. 그러면 $A는 정수가 되고, 정수를 인덱싱하면
+        # 그 정수가 돌아오며, 모든 픽셀이 문자 '0'으로 인코딩됩니다. 드러나지 않았던
+        # 이유는 packed 스프라이트가 실제로 만들어진 적이 없었기 때문입니다. 플레이스홀더
+        # 아트가 전부 평면이라 매번 RLE가 이겼고, 패킹을 고를 만큼 조밀한 첫 그림이
+        # 곧 이 버그에 당한 첫 그림이었습니다.
         $packed = New-Object System.Text.StringBuilder
         for ($i = 0; $i -lt $idx.Length; $i += 3) {
-            $a = $idx[$i]
-            $b = if ($i + 1 -lt $idx.Length) { $idx[$i + 1] } else { 0 }
-            $c = if ($i + 2 -lt $idx.Length) { $idx[$i + 2] } else { 0 }
-            $v = ($a -shl 8) -bor ($b -shl 4) -bor $c
+            $p0 = $idx[$i]
+            $p1 = if ($i + 1 -lt $idx.Length) { $idx[$i + 1] } else { 0 }
+            $p2 = if ($i + 2 -lt $idx.Length) { $idx[$i + 2] } else { 0 }
+            $v = ($p0 -shl 8) -bor ($p1 -shl 4) -bor $p2
             [void]$packed.Append($A[$v -shr 6]).Append($A[$v -band 63])
         }
 
@@ -317,6 +527,47 @@ function ConvertFrom-Png([string]$path, [string]$name, [System.Collections.Array
             $op = 'r'; $data = $rle.ToString()
         } else {
             $op = 'p'; $data = $packed.ToString()
+        }
+
+        # DECODE WHAT WAS JUST ENCODED AND COMPARE. sprtest exercises the C
+        # decoder against hand-written text, which proves the decoder reads the
+        # format -- it cannot prove this writes it. The two halves live in
+        # different languages and only meet in the built game, so nothing was
+        # checking the one direction that matters, and the $a/$A collision
+        # above rode along for as long as no sprite chose packing. A round trip
+        # here costs one pass over the indices and fails the build instead.
+        # 방금 인코딩한 것을 되돌려 디코딩해 비교합니다. sprtest는 손으로 쓴 텍스트로 C
+        # 디코더를 검사하므로 디코더가 포맷을 *읽는다*는 것은 증명하지만, 이쪽이 포맷을
+        # *쓴다*는 것은 증명할 수 없습니다. 두 절반은 서로 다른 언어에 살고 빌드된
+        # 게임에서만 만나므로 정작 중요한 방향을 아무도 검사하지 않았고, 위의 $a/$A
+        # 충돌은 어떤 스프라이트도 패킹을 고르지 않는 동안 계속 묻어갔습니다. 여기서의
+        # 왕복 검사는 인덱스를 한 번 훑는 비용으로 대신 빌드를 실패시킵니다.
+        $back = New-Object int[] $idx.Length
+        $n = 0
+        if ($op -eq 'r') {
+            for ($k = 0; $k -lt $data.Length - 1; $k += 2) {
+                $run = $A.IndexOf($data[$k]); $val = $A.IndexOf($data[$k + 1])
+                for ($q = 0; $q -lt $run -and $n -lt $back.Length; $q++) { $back[$n++] = $val }
+            }
+        } else {
+            for ($k = 0; $k -lt $data.Length - 1; $k += 2) {
+                $v = $A.IndexOf($data[$k]) * 64 + $A.IndexOf($data[$k + 1])
+                foreach ($sh2 in 8, 4, 0) {
+                    if ($n -lt $back.Length) { $back[$n++] = ($v -shr $sh2) -band 15 }
+                }
+            }
+        }
+        if ($n -ne $idx.Length) {
+            throw ("$name : '$op' encoding produced $n pixels for a $w x $h sprite " +
+                   "($($idx.Length) expected). bake.ps1 and sprite.c disagree about the format.")
+        }
+        for ($k = 0; $k -lt $idx.Length; $k++) {
+            if ($back[$k] -ne $idx[$k]) {
+                throw ("$name : '$op' encoding does not round-trip. Pixel $k " +
+                       "($($k % $w),$([int]($k / $w))) went in as index $($idx[$k]) and " +
+                       "came back as $($back[$k]). bake.ps1 is writing something " +
+                       "sprite.c will not read back as the same picture.")
+            }
         }
 
         # The muzzle marker, when the drawing carried one. Emitted BEFORE the
@@ -327,10 +578,19 @@ function ConvertFrom-Png([string]$path, [string]$name, [System.Collections.Array
         # 되돌아보지 않습니다.
         $muz = if ($muzX -ge 0) { "m $muzX $muzY`n" } else { '' }
 
+        # Where the cropped drawing goes in its cell. Omitted when the drawing
+        # still fills the cell, so the decoder's default placement -- centred,
+        # sitting on the floor -- keeps serving everything that never needed
+        # an offset, and an older sprite text stays readable.
+        # 잘라 낸 그림이 셀의 어디에 놓이는지입니다. 그림이 여전히 셀을 가득 채우면
+        # 생략하므로, 오프셋이 필요 없던 모든 것에는 디코더의 기본 배치가 그대로
+        # 적용되고 이전의 스프라이트 텍스트도 계속 읽힙니다.
+        $orig = if ($w -ne $cellW -or $h -ne $cellH) { "o $ix0 $iy0`n" } else { '' }
+
         return [pscustomobject]@{
-            Text = "s $name $w $h`n$muz$op $data`n"
-            W    = $w
-            H    = $h
+            Text = "s $name $w $h`n$orig$muz$op $data`n"
+            W    = $cellW
+            H    = $cellH
             Enc  = $op
         }
     } finally {
@@ -506,33 +766,58 @@ if (Test-Path $spriteDirCheck) {
 }
 
 # Every .png under assets\sprites\ becomes one entry in a single sprite
-# library, sharing one palette. Sorted by name so the baked output is stable:
-# a set that reordered itself between builds would produce a different palette
-# and a needless recompile of everything that reads it.
-$palette   = New-Object System.Collections.ArrayList
-[void]$palette.Add('000000')     # index 0 is always transparent -- see below
+# library. Sorted by name so the baked output is stable: a set that reordered
+# itself between builds would produce a different palette and a needless
+# recompile of everything that reads it.
+#
+# Grouped by SUBJECT -- the name with its trailing frame number removed, so
+# imp0..imp4 are one group -- because a palette serves an animation, and the
+# frames of one creature are the thing that must agree about colour. Anything
+# whose name carries no frame number is its own group, which is the harmless
+# reading for a one-off.
 $spriteText = ''
 $spriteDir  = Join-Path $root 'assets\sprites'
 
 if (Test-Path $spriteDir) {
+    $groups = [ordered]@{}
     foreach ($png in (Get-ChildItem $spriteDir -Filter *.png | Sort-Object Name)) {
         $name = [System.IO.Path]::GetFileNameWithoutExtension($png.Name)
-        $conv = ConvertFrom-Png $png.FullName $name $palette
-        $spriteText += $conv.Text
-        $report += [pscustomobject]@{
-            Asset  = "sprites\$($png.Name)"
-            Source = $png.Length
-            Baked  = $conv.Text.Length
-            Saved  = "$([math]::Round((1 - $conv.Text.Length / ($conv.W * $conv.H * 4)) * 100))% vs raw ($($conv.W)x$($conv.H) $($conv.Enc))"
+        $subject = $name -replace '\d+$', ''
+        if (-not $subject) { $subject = $name }
+        if (-not $groups.Contains($subject)) { $groups[$subject] = @() }
+        $groups[$subject] += , [pscustomobject]@{ Png = $png; Name = $name }
+    }
+
+    foreach ($subject in $groups.Keys) {
+        $members = $groups[$subject]
+
+        # Index 0 is reserved for transparent and is never drawn, which is why
+        # the colour stored for it is arbitrary -- so median cut gets 15.
+        $frames = @()
+        foreach ($m in $members) { $frames += , (Get-SpritePixels $m.Png.FullName) }
+
+        $palette = New-Object System.Collections.ArrayList
+        [void]$palette.Add('000000')
+        foreach ($c in (Select-Palette $frames 15)) { [void]$palette.Add($c) }
+        # A group with fewer than 15 distinct colours leaves the palette short.
+        # Pad it: the encoder snaps to the NEAREST entry over the whole array,
+        # and an entry that was never filled would be black and would pull dark
+        # pixels away from the colour median cut actually chose for them.
+        while ($palette.Count -lt 16) { [void]$palette.Add($palette[$palette.Count - 1]) }
+
+        $spriteText += "pal $($palette.Count) $($palette -join ' ')`n"
+
+        foreach ($m in $members) {
+            $conv = ConvertFrom-Png $m.Png.FullName $m.Name $palette
+            $spriteText += $conv.Text
+            $report += [pscustomobject]@{
+                Asset  = "sprites\$($m.Png.Name)"
+                Source = $m.Png.Length
+                Baked  = $conv.Text.Length
+                Saved  = "$([math]::Round((1 - $conv.Text.Length / ($conv.W * $conv.H * 4)) * 100))% vs raw ($($conv.W)x$($conv.H) $($conv.Enc))"
+            }
         }
     }
-}
-
-# The palette goes in front, so the decoder has it before the first sprite.
-# Index 0 is reserved for transparent and is never drawn, which is why the
-# colour stored for it is arbitrary.
-if ($spriteText) {
-    $spriteText = "pal $($palette.Count) $($palette -join ' ')`n" + $spriteText
 }
 
 $escSpr = $spriteText.Replace('\', '\\').Replace('"', '\"').

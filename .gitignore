@@ -18,6 +18,15 @@ build/
 # human ever reads.
 src/gen_assets.h
 
+# Freedoom lumps downloaded by assets/sprites/import-freedoom.py. Upstream art
+# in its original form: the PNGs the importer produces from it ARE committed,
+# so nothing here is needed to build, and re-downloading is one command.
+assets/sprites/.freedoom-cache/
+
+# A contact sheet the importer writes with --preview, for looking at the
+# conversion. Regenerated on demand and never read by the build.
+assets/sprites/_preview.png
+
 # Editor and OS noise.
 .vs/
 *.user

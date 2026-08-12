@@ -52,8 +52,40 @@
 #define SHOT_SPIN       2.3f    /* radians per second of remaining life */
 
 /* --- pickups --- */
-#define PICKUP_SIZE     0.5f    /* billboard edge, metres */
-#define PICKUP_LIFT     0.42f   /* centre height above the floor, metres */
+/* Floor items are drawn as a fixed square in world space, so their apparent
+   size lives HERE rather than in the art: every drawing already fills as much
+   of its 48x48 cell as the one shared scale allows, and a bigger drawing would
+   only clip.
+   Tripled from 0.5m, which had them reading as litter. At 1.5m the set lands
+   close to the sizes Doom drew: the launcher fills its cell and comes out
+   1.50m, the medikit 0.75m, a box of shells 0.34m -- so the item that IS small
+   stays small, which is the whole reason they share one scale.
+
+   바닥 아이템은 월드에서 고정된 정사각형으로 그려지므로, 겉보기 크기는 아트가 아니라
+   *이곳*에 있습니다. 모든 그림은 이미 하나의 공용 배율이 허용하는 만큼 48x48 셀을 채우고
+   있어, 더 크게 그리면 잘리기만 합니다. 0.5m에서 3배로 키웠습니다. 그 크기에서는
+   쓰레기처럼 보였습니다. 1.5m에서 이 세트는 Doom이 그린 크기에 가깝게 떨어집니다.
+   발사기는 셀을 채워 1.50m, 구급상자는 0.75m, 산탄 상자는 0.34m입니다. 작은 것은 작게
+   남으며, 그것이 하나의 배율을 공유하는 이유 전부입니다. */
+#define PICKUP_SIZE     1.5f    /* billboard edge, metres */
+
+/* Clearance under the item. A fixed gap rather than a fraction of the size,
+   because it is a hover cue and not a property of the object -- scaling it
+   with the item would have floated the launcher half a metre off the ground.
+   아이템 아래의 여유입니다. 크기의 비율이 아니라 고정된 간격인 이유는, 이것이 물체의
+   속성이 아니라 떠 있음을 알리는 신호이기 때문입니다. 아이템과 함께 키웠다면 발사기가
+   지면에서 반 미터 떠 있었을 것입니다. */
+#define PICKUP_FLOAT    0.17f
+
+/* DERIVED, so the two cannot disagree. The billboard is centred on this, so a
+   lift written independently has to be kept in step with half the size by
+   hand -- and when it is not, the item's bottom half goes through the floor.
+   That is exactly what tripling the size did before this became a formula.
+   유도된 값이므로 둘이 어긋날 수 없습니다. 빌보드가 이 값을 중심으로 놓이므로, 따로 쓴
+   높이는 크기의 절반과 손으로 맞춰 두어야 하며, 맞지 않으면 아이템의 아래 절반이 바닥을
+   뚫고 내려갑니다. 이것이 수식이 되기 전에 크기를 3배로 했을 때 실제로 벌어진 일입니다. */
+#define PICKUP_LIFT     (PICKUP_SIZE * 0.5f + PICKUP_FLOAT)
+
 #define PICKUP_BOB      0.06f   /* bob amplitude, metres */
 #define PICKUP_BOB_RATE 2.2f
 

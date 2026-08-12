@@ -731,6 +731,17 @@ static void fire_hitscan(Weapon *w, v3 eye, float yaw, float pitch,
                assets\effects.txt가 이 표면 명중이 무엇을 튀기는지 정의한 대로 추가하므로,
                재빌드 없이 룩을 조정할 수 있습니다. */
             fx_spawn(blood ? "blood" : "spark", im->p, im->n);
+            /* Stone gets the other three layers TE_SPIKE has -- the puff and
+               the chip -- which are what make a hit look like it happened TO
+               the surface rather than in front of it. Flesh does not: a puff
+               of dust off a monster reads as missing it.
+               돌에는 TE_SPIKE가 가진 나머지 층인 퍼프와 파편이 붙습니다. 피탄이 표면
+               *앞*이 아니라 표면 *에* 일어난 것처럼 보이게 만드는 것이 그것입니다.
+               살에는 붙이지 않습니다. 몬스터에서 이는 먼지는 빗맞은 것으로 읽힙니다. */
+            if (!blood) {
+                fx_spawn("smokepuff", im->p, im->n);
+                fx_spawn("debris",    im->p, im->n);
+            }
         }
 
         Tracer *tr = &g_tracers[g_tracer_next];
@@ -778,7 +789,23 @@ static void attack_feedback(Weapon *w, const WeaponType *S) {
     w->cooldown = S->cooldown;
     w->recoil  += S->recoil * (0.85f + frand(w) * 0.3f);
     w->punch   += S->punch;
-    w->flash    = FLASH_TIME;
+
+    /* A MUZZLE FLASH NEEDS A MUZZLE. The axe had one because this line did not
+       ask, and a burst of fire at the end of a swinging blade reads as the
+       weapon discharging -- it tells the player the wrong thing about what
+       their weapon is. `melee_range` is already the field that says a weapon
+       has no barrel, so it decides here too rather than a second flag that can
+       disagree with it.
+       The animation is unaffected: `pump_timer` below is the clock every
+       weapon's cycle runs on, and the flash fallback in weapon_sprite_frame()
+       only applies when that clock is stopped.
+       총구 화염에는 총구가 필요합니다. 이 줄이 묻지 않았기 때문에 도끼에도 있었고,
+       휘두르는 날 끝의 불꽃은 무기가 발사된 것으로 읽힙니다. 플레이어에게 자기 무기가
+       무엇인지 틀리게 말하는 것입니다. `melee_range`가 이미 총열이 없다는 것을 말하는
+       필드이므로, 그것과 어긋날 수 있는 두 번째 플래그가 아니라 그것이 여기서도
+       결정합니다. 애니메이션에는 영향이 없습니다. 아래의 `pump_timer`가 모든 무기의
+       주기가 도는 시계이고, 화염 대체 경로는 그 시계가 멈춰 있을 때만 쓰입니다. */
+    if (S->melee_range <= 0) w->flash = FLASH_TIME;
 
     /* The recovery animation, for every weapon rather than the shotgun alone.
        It lands partway through the cooldown rather than on the trigger pull,
@@ -842,6 +869,18 @@ static void fire_projectile(Weapon *w, const WeaponType *S,
               arcs ? PROJ_BLAST_RADIUS : 0.0f,
               arcs ? PROJ_FUSE : 0.0f);
 
+    /* Smoke at the muzzle, for the launcher only. `arcs` is already the field
+       that tells a grenade from a bolt, so it decides this too -- a bolt is
+       energy and leaves nothing behind, and giving it a puff would say it
+       burns propellant, which is a claim about the weapon that is not true.
+       Thrown a little ahead of the eye so it does not hang in the near plane,
+       and along the aim so it drifts the way the shot went.
+       총구의 연기이며 유탄 발사기에만 붙습니다. `arcs`가 이미 유탄과 탄을 구분하는
+       필드이므로 이것도 그것이 결정합니다. 탄은 에너지이고 아무것도 남기지 않으며, 퍼프를
+       주면 추진제를 태운다고 말하게 되는데 그것은 이 무기에 대한 사실이 아닙니다. 근평면에
+       걸리지 않도록 눈보다 조금 앞에, 발사한 방향으로 흐르도록 조준선을 따라 던집니다. */
+    if (arcs) fx_spawn("smokepuff", v3add(eye, v3scale(dir, 0.6f)), dir);
+
     audio_play(S->fire_snd, arcs ? 100 : 70);
 }
 
@@ -893,9 +932,31 @@ static void fire_melee(Weapon *w, const WeaponType *S,
        휘두르기 자체입니다. 짧은 사거리에 대한 히트스캔이 곧 휘두르기입니다. 호는
        애니메이션이며, 실제 스윕 판정은 그림이 분명히 지나간 것을 빗나가게 됩니다. */
     float et; int eidx;
+    /* A SWING THAT CONNECTS AND ONE THAT DOES NOT ARE DIFFERENT EVENTS, and
+       the player has to be able to tell them apart without waiting for a
+       health bar to move. So the swing always throws a thin spray along the
+       aim -- the saw is running -- and contact adds the hard cone of sparks
+       and the blood, at the point the blade actually reached.
+       맞은 스윙과 빗나간 스윙은 서로 다른 사건이며, 플레이어는 체력 표시가 움직이기를
+       기다리지 않고 둘을 구분할 수 있어야 합니다. 그래서 스윙은 언제나 조준 방향으로
+       옅은 분사를 던지고(톱이 돌고 있다는 뜻입니다), 접촉은 날이 실제로 닿은 지점에
+       단단한 불꽃 원뿔과 피를 더합니다. */
+    v3 reach = v3add(eye, v3scale(fwd, S->melee_range * 0.6f));
+    fx_spawn("sawspark", reach, fwd);
+
     if (enemy_hitscan(eye, fwd, S->melee_range, &et, &eidx)) {
         enemy_hurt(eidx, S->damage, fwd);
-        audio_play_at("impact", 90, v3add(eye, v3scale(fwd, et)));
+        v3 bite = v3add(eye, v3scale(fwd, et));
+        /* Sparks back ALONG the blade rather than away from it: steel grinding
+           into something throws them at the person holding it, and thrown
+           forward they read as a muzzle flash, which is the thing this weapon
+           should not have.
+           날에서 멀어지는 방향이 아니라 날을 *따라 되돌아오는* 방향입니다. 무언가에
+           갈리는 강철은 그것을 쥔 사람 쪽으로 불꽃을 던지며, 앞으로 던지면 총구 섬광처럼
+           읽힙니다. 이 무기가 가져서는 안 되는 바로 그것입니다. */
+        fx_spawn("sawgrind", bite, v3scale(fwd, -1.0f));
+        fx_spawn("blood",    bite, v3scale(fwd, -1.0f));
+        audio_play_at("impact", 90, bite);
     }
     audio_play(S->fire_snd, 80);
 }

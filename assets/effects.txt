@@ -277,3 +277,158 @@ e lavasmoke
   gravity -95            # NEGATIVE: it rises, and keeps accelerating
   blend alpha            # must be able to be darker than the lava behind it
   face camera
+
+# --- the blast, in layers ---------------------------------------------------
+#
+# One effect cannot be an explosion. DarkPlaces builds TE_EXPLOSION out of six
+# passes -- a scorch decal, a light, big embers, a core, a rising smoke plume
+# and small sparks -- and the reason is that each one answers a different
+# question: how big, how hot, how long ago, and how far.
+#
+# Ours answers the one that matters for play first: HOW FAR. `blastdome` is
+# authored for a radius of one metre and fx_spawn_scaled multiplies it by the
+# real blast radius, so the shell arrives exactly where the damage stops.
+#
+# 하나의 이펙트는 폭발이 될 수 없습니다. DarkPlaces는 TE_EXPLOSION을 여섯 겹으로 쌓으며,
+# 이유는 각 겹이 서로 다른 질문에 답하기 때문입니다. 얼마나 큰가, 얼마나 뜨거운가,
+# 얼마나 지났는가, 그리고 얼마나 먼가. 우리 것은 플레이에 중요한 것부터 답합니다.
+# 얼마나 먼가입니다.
+
+# The dome. Speed x life = 100cm, so at scale 1 it stops at one metre and at
+# the grenade's 4.2m radius it stops there instead. `dome` gives every particle
+# the same speed over an even hemisphere, which is what makes the front an edge
+# you can see rather than a smear.
+e blastdome
+count 44
+life 300
+size 14 3
+rgb 255 214 130
+rgb2 190 60 20
+alpha 85 0
+speed 333 0
+dome 1
+blend 1
+
+# The core: short, bright, and it does not travel. Without it the dome reads as
+# a ring of sparks with a hole in the middle.
+# 코어입니다. 짧고 밝으며 이동하지 않습니다. 이것이 없으면 돔이 가운데가 빈 불꽃 고리로
+# 보입니다.
+e blastcore
+count 10
+life 170
+size 44 8
+rgb 255 240 200
+rgb2 255 110 30
+alpha 95 0
+speed 40 30
+spawn 18
+blend 1
+
+# Smoke, and it RISES -- DarkPlaces gives its plume a negative gravity for the
+# same reason. Smoke that falls with the debris reads as dust, not as burning.
+# 연기이며 *떠오릅니다*. DarkPlaces가 기둥에 음의 중력을 주는 것과 같은 이유입니다.
+# 파편과 함께 떨어지는 연기는 타는 것이 아니라 먼지로 읽힙니다.
+e blastsmoke
+count 14
+life 900
+size 26 74
+rgb 60 54 50
+rgb2 26 24 24
+alpha 62 0
+speed 120 90
+spawn 26
+gravity -40
+drag 2
+
+# Debris, which falls and bounces the way thrown matter does. This is the layer
+# that says something was destroyed rather than merely lit up.
+# 파편이며, 던져진 물질처럼 떨어집니다. 무언가가 단지 밝아진 것이 아니라 부서졌다고
+# 말하는 층입니다.
+e blastdebris
+count 16
+life 1100
+size 5 2
+rgb 90 78 66
+rgb2 44 38 34
+alpha 100 0
+speed 420 320
+spawn 12
+gravity 900
+drag 1
+
+# --- the chainsaw -----------------------------------------------------------
+#
+# A saw has no muzzle, so it gets no flash; what it has is contact. These are
+# two effects because a swing that hits and a swing that does not are different
+# events, and the player has to be able to tell them apart without waiting for
+# a health bar to move.
+#
+# 톱에는 총구가 없으므로 섬광도 없습니다. 톱이 가진 것은 접촉입니다. 맞은 스윙과 빗나간
+# 스윙은 서로 다른 사건이므로 이펙트가 둘이며, 플레이어는 체력 표시가 움직이기를 기다리지
+# 않고도 둘을 구분할 수 있어야 합니다.
+
+# The swing itself: a thin spray thrown along the aim, dim and short. It says
+# the saw is running, not that it bit.
+e sawspark
+count 7
+life 190
+size 4 1
+rgb 255 196 120
+rgb2 200 70 20
+alpha 70 0
+speed 260 200
+spawn 8
+gravity 500
+drag 1
+
+# Contact: a hard cone of sparks back along the blade, the way steel on
+# anything throws them -- fast, gravity-bound and bouncing, which is what
+# DarkPlaces' TE_SPIKE sparks do too.
+# 접촉입니다. 강철이 무엇에든 부딪힐 때처럼 날을 따라 되튀는 단단한 불꽃 원뿔이며,
+# 빠르고 중력을 받고 튕깁니다. DarkPlaces의 TE_SPIKE 불꽃도 같습니다.
+e sawgrind
+count 22
+life 340
+size 6 1
+rgb 255 236 170
+rgb2 230 80 20
+alpha 95 0
+speed 620 420
+spawn 6
+gravity 1100
+drag 1
+blend 1
+
+# --- what a bullet leaves behind -------------------------------------------
+#
+# TE_SPIKE is four layers: a decal, a smoke puff, sharp sparks and a chip of
+# debris. We had the sparks and the decal. These are the other two, and they
+# are what makes a hit look like it happened TO the surface rather than in
+# front of it.
+#
+# TE_SPIKE는 네 겹입니다. 데칼, 연기 퍼프, 날카로운 불꽃, 파편 조각. 우리에게는 불꽃과
+# 데칼이 있었습니다. 나머지 둘이 이것이며, 피탄이 표면 *앞*이 아니라 표면 *에* 일어난
+# 것처럼 보이게 만듭니다.
+e smokepuff
+count 4
+life 520
+size 7 22
+rgb 96 90 84
+rgb2 40 38 36
+alpha 44 0
+speed 70 55
+spawn 5
+gravity -25
+drag 3
+
+e debris
+count 3
+life 700
+size 3 1
+rgb 116 104 92
+rgb2 52 46 42
+alpha 90 0
+speed 220 180
+spawn 4
+gravity 850
+drag 1

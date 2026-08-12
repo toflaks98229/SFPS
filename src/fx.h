@@ -87,7 +87,15 @@ typedef struct MeshBuf MeshBuf;
 
 /* --- Capacity limits / 용량 제한 --- */
 
-#define FX_MAX_DEFS      16   ///< @brief Effect definitions the text may hold. / 텍스트가 담을 수 있는 이펙트 정의 수.
+/* Raised from 16 when the blast became four layers and the saw got two of its
+   own. A definition past the cap is DROPPED -- reported through DIAG_FX_CAP,
+   but dropped -- so the symptom is an effect that silently does nothing, and
+   the ones that go missing are the ones added last, which are the ones nobody
+   has looked at yet.
+   폭발이 네 겹이 되고 톱이 자기 것 둘을 얻으면서 16에서 올렸습니다. 상한을 넘는 정의는
+   *버려집니다*. DIAG_FX_CAP으로 보고되기는 하지만 버려지므로, 증상은 아무 일도 하지 않는
+   이펙트이며, 사라지는 것은 가장 나중에 추가된 것, 즉 아직 아무도 보지 않은 것입니다. */
+#define FX_MAX_DEFS      32   ///< @brief Effect definitions the text may hold. / 텍스트가 담을 수 있는 이펙트 정의 수.
 
 /**
  * @brief Particles alive at once, across every effect.
@@ -119,7 +127,15 @@ typedef struct MeshBuf MeshBuf;
  * 로드 시 0으로 채워지며 디스크 용량을 소모하지 않습니다. LVL_MAX_RANGES의 크기를 정한
  * 것과 동일한 근거입니다.
  */
-#define FX_MAX_PARTICLES 640
+/* Raised from 640: one layered blast is 84 particles, and the pool evicts the
+   OLDEST, so two explosions close together used to eat the first one's dome
+   while it was still expanding -- which removes exactly the thing the dome is
+   there to show. .bss, so it is zeroed at load and costs the floppy nothing.
+   640에서 올렸습니다. 여러 겹의 폭발 하나가 84개이고 풀은 *가장 오래된* 것을 밀어내므로,
+   가까이서 두 번 터지면 첫 번째의 돔이 아직 팽창하는 중에 잡아먹혔습니다. 돔이 보여
+   주려던 바로 그것이 사라집니다. .bss이므로 로드 시 0으로 채워지고 플로피 용량은 들지
+   않습니다. */
+#define FX_MAX_PARTICLES 1536
 #define FX_NAME_LEN      16   ///< @brief Longest effect name. / 이펙트 이름의 최대 길이.
 
 /* --- Public function prototypes / 공개 함수 프로토타입 --- */
@@ -159,6 +175,38 @@ typedef struct MeshBuf MeshBuf;
  *          안전하며, 이 덕분에 생성 로직을 컨텍스트 없이 테스트할 수 있습니다.
  */
 void fx_spawn(const char *name, v3 pos, v3 normal);
+
+/**
+ * @brief Spawns an effect with its speeds multiplied.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] name   The effect's name.
+ * @param[in] pos    Where it happens.
+ * @param[in] normal The surface normal, or the direction it travels.
+ * @param[in] scale  Multiplies every particle's speed. 1 is the authored size.
+ * @note Exists so an effect that has to MEASURE something can be authored once
+ *       for a unit radius and then sized by the caller. The blast dome is the
+ *       case: a grenade and the axe's slam have different radii, and a dome
+ *       drawn at the wrong one is worse than no dome, because it states a
+ *       gameplay number that is not true.
+ * @note Speeds only, not sizes or lifetimes. A dome reaches `speed * life`, so
+ *       scaling the speed alone moves the edge while leaving the particles the
+ *       size the artist drew them -- scaling the size too would make a big
+ *       blast look like a near one seen close up.
+ *
+ * 한국어
+ * ------
+ * @brief 속력에 배율을 곱해 이펙트를 생성합니다.
+ * @param[in] scale 모든 입자의 속력에 곱해집니다. 1이 작성된 크기입니다.
+ * @note 무언가를 *측정해야* 하는 이펙트를 단위 반경으로 한 번만 작성하고 호출자가 크기를
+ *       정할 수 있도록 존재합니다. 폭발 돔이 그 경우입니다. 유탄과 도끼의 내려찍기는
+ *       반경이 다르며, 틀린 반경으로 그린 돔은 돔이 없는 것보다 나쁩니다. 사실이 아닌
+ *       게임플레이 수치를 말하기 때문입니다.
+ * @note 크기나 수명이 아니라 속력만 조절합니다. 돔은 `speed * life`까지 도달하므로,
+ *       속력만 조절하면 가장자리가 움직이되 입자는 작성된 크기 그대로 남습니다.
+ */
+void fx_spawn_scaled(const char *name, v3 pos, v3 normal, float scale);
 
 /**
  * @brief Advances every live particle one frame.
@@ -276,5 +324,43 @@ int fx_def_count(void);
  *          데이터가 필요한 쪽은 이 함수를 거쳐서는 안 됩니다.
  */
 float fx_mean_height(void);
+
+/**
+ * @brief Mean distance from a point, and the near-to-far spread.
+ *
+ * ENGLISH
+ * -------
+ * @param[in]  origin Where the effect was spawned.
+ * @param[out] mean   Mean distance of every live particle from `origin`.
+ * @param[out] width  Farthest any particle got from the vertical axis
+     *                    through `origin`. 0 if nothing is alive.
+ * @note Exists because the blast dome makes a claim with a NUMBER in it -- that
+ *       it stops where the damage stops -- and ::fx_mean_height cannot see it.
+ *       A dome drawn at the wrong radius is worse than no dome, because it
+ *       states a gameplay fact that is not true, and it would look perfectly
+ *       convincing while doing so.
+ * @note `width` is the half that proves it is a HEMISPHERE. The mean alone
+ *       passes for every particle flying straight up in a column, which has
+ *       the right average distance and shows the player no radius at all.
+ *       Measured as distance from the axis rather than as a spread of radii,
+ *       because a spread of radii cannot distinguish them: with one speed for
+ *       every particle they sit at the same distance whichever way they go, so
+ *       that number reads ~0 for a dome and a column alike.
+ *
+ * 한국어
+ * ------
+ * @brief 한 점으로부터의 평균 거리와 원근 편차.
+ * @param[out] width  `origin`을 지나는 수직축에서 입자가 도달한 최대 거리.
+ * @note 폭발 돔이 *수치*를 담은 주장(데미지가 멈추는 곳에서 멈춘다)을 하는데
+ *       ::fx_mean_height로는 그것을 볼 수 없기 때문에 존재합니다. 틀린 반경으로 그린
+ *       돔은 돔이 없는 것보다 나쁩니다. 사실이 아닌 게임플레이 정보를 말하면서도 완벽히
+ *       그럴듯해 보이기 때문입니다.
+ * @note `width`는 그것이 *반구*임을 증명하는 쪽입니다. 평균만으로는 모든 입자가 곧장
+ *       위로 솟는 기둥도 통과합니다. 평균 거리는 맞지만 플레이어에게 반경을 전혀 보여
+ *       주지 못합니다. 반지름의 편차가 아니라 축으로부터의 거리로 재는 이유는, 편차로는
+ *       둘을 구분할 수 없기 때문입니다. 모든 입자의 속력이 같으면 어느 방향으로 가든 같은
+ *       거리에 있으므로, 그 값은 돔에서도 기둥에서도 ~0입니다.
+ */
+void fx_radius_spread(v3 origin, float *mean, float *width);
 
 #endif

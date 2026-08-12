@@ -115,8 +115,27 @@ int proj_blast(v3 at, float radius, int damage) {
 static void detonate(Proj *p, v3 at, v3 normal) {
     if (p->blast > 0.0f) {
         proj_blast(at, p->blast, p->damage);
-        fx_spawn("boltburst", at, normal);
-        fx_spawn("spark", at, normal);
+
+        /* THE DOME IS SCALED BY THE RADIUS IT IS DRAWING. Its speed is
+           authored so speed x life reaches one metre, so passing the blast
+           radius makes the shell stop exactly where the damage does -- the
+           point of drawing it at all is that the radius is a gameplay number
+           and a player who cannot see it is guessing.
+           Spawned along +Y rather than the surface normal: a blast is a
+           hemisphere standing on the ground, and one leaning off a wall's
+           normal would claim a shape the damage does not have.
+           돔은 자신이 그리는 반경으로 배율이 정해집니다. speed x life가 1미터에 닿도록
+           작성했으므로 폭발 반경을 넘기면 껍질이 데미지가 멈추는 바로 그 자리에서
+           멈춥니다. 애초에 이것을 그리는 이유가, 반경이 게임플레이 수치이고 그것을 볼 수
+           없는 플레이어는 짐작하게 되기 때문입니다. 표면 법선이 아니라 +Y로 생성하는
+           이유는, 폭발이 지면에 선 반구이고 벽의 법선을 따라 기울어진 돔은 데미지가 갖지
+           않은 모양을 주장하기 때문입니다. */
+        fx_spawn_scaled("blastdome", at, v3f(0, 1, 0), p->blast);
+
+        fx_spawn("blastcore",   at, normal);
+        fx_spawn("blastsmoke",  at, v3f(0, 1, 0));
+        fx_spawn("blastdebris", at, normal);
+        fx_spawn("boltburst",   at, normal);
         audio_play("impact", 100);
     } else {
         fx_spawn("spark", at, normal);

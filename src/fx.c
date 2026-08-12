@@ -68,6 +68,11 @@ typedef struct {
     short alpha0, alpha1;   /**< Opacity at birth and death, percent. / 생성/소멸 시 불투명도 (퍼센트). */
     short speed, spread;    /**< Initial speed and its variation, cm/s. / 초기 속도와 그 편차 (cm/s). */
     short spawn_r;          /**< Radius the burst starts from, 1/100 units. / 폭발이 시작되는 반경 (1/100 단위). */
+    /** Non-zero to spread evenly over the hemisphere at one exact speed, so
+        the particles form an expanding shell with a readable edge instead of
+        a burst that smears. / 0이 아니면 반구에 균일하게, 정확히 하나의 속력으로
+        퍼뜨려 가장자리가 읽히는 팽창하는 껍질을 만듭니다. */
+    int   dome;
     short drag;             /**< Speed lost per second, percent. / 초당 속도 손실 (퍼센트). */
     short spin;             /**< Roll rate, degrees per second. / 회전 속도 (초당 도). */
     short gravity;          /**< Downward acceleration, cm/s^2. / 하향 가속도 (cm/s^2). */
@@ -231,6 +236,8 @@ static void parse_defs(void) {
             { p = txt_read_int(p, &v[0], &ok); if (ok) cur->gravity = (short)v[0]; }
         else if (txt_is(t, len, "spawn"))
             { p = txt_read_int(p, &v[0], &ok); if (ok) cur->spawn_r = (short)v[0]; }
+        else if (txt_is(t, len, "dome"))
+            p = txt_read_int(p, &cur->dome, &ok);
         else if (txt_is(t, len, "drag"))
             { p = txt_read_int(p, &v[0], &ok); if (ok) cur->drag = (short)v[0]; }
         else if (txt_is(t, len, "spin"))
@@ -285,6 +292,10 @@ static int find_def(const char *name) {
 /* --- Public API / 공개 API --- */
 
 void fx_spawn(const char *name, v3 pos, v3 normal) {
+    fx_spawn_scaled(name, pos, normal, 1.0f);
+}
+
+void fx_spawn_scaled(const char *name, v3 pos, v3 normal, float scale) {
     if (!g_parsed) parse_defs();
 
     int di = find_def(name);
@@ -310,9 +321,40 @@ void fx_spawn(const char *name, v3 pos, v3 normal) {
         if (q->life > 0.0f) DIAG(DIAG_FX_CAP);
         g_next = (g_next + 1) % FX_MAX_PARTICLES;
 
-        float sp = (d->speed + d->spread * frand_signed()) * 0.01f;
+        float sp = (d->speed + d->spread * frand_signed()) * 0.01f * scale;
         v3 dir = n;
-        if (d->spread) {
+
+        /* A SHELL, not a burst. Every particle gets the same speed and a
+           direction spread evenly over the hemisphere around the normal, so
+           they all reach the same distance at the same moment and the cloud
+           reads as an expanding dome with an edge.
+           `spread` cannot do this: it scatters the direction but keeps the
+           speed varying, so the front smears out and the thing you are trying
+           to show -- where the blast stops -- is the one part that is not
+           visible. Which is the whole reason the dome is drawn: the radius is
+           a gameplay number, and a player who cannot see it is guessing.
+           폭발이 아니라 *껍질*입니다. 모든 입자가 같은 속력과, 법선 주위 반구에 고르게
+           퍼진 방향을 받으므로 같은 순간에 같은 거리에 도달하고, 구름이 가장자리를 가진
+           팽창하는 돔으로 읽힙니다. `spread`로는 이것이 되지 않습니다. 방향은 흩뜨리되
+           속력이 계속 변하므로 앞면이 번지고, 정작 보여 주려던 것(폭발이 멈추는 지점)이
+           보이지 않는 유일한 부분이 됩니다. 돔을 그리는 이유가 바로 그것입니다. 반경은
+           게임플레이 수치이고, 그것을 볼 수 없는 플레이어는 짐작하게 됩니다. */
+        if (d->dome) {
+            /* Uniform over the hemisphere: cos is uniform in [0,1] rather than
+               the angle, or the particles bunch at the pole and the dome comes
+               out with a bright cap and a thin skirt.
+               반구에 균일하게 분포시킵니다. 각도가 아니라 코사인을 [0,1]에서 균일하게
+               뽑습니다. 그러지 않으면 입자가 극에 몰려 돔의 꼭대기만 밝고 자락이
+               얇아집니다. */
+            float c   = frand();
+            float s2  = sqrtf(1.0f - c * c);
+            float phi = frand() * 6.2831853f;
+            dir = v3norm(v3add(v3scale(n, c),
+                               v3add(v3scale(t, s2 * cosf(phi)),
+                                     v3scale(b, s2 * sinf(phi)))));
+            sp = d->speed * 0.01f * scale;  /* no jitter: the edge is the point */
+        }
+        else if (d->spread) {
             /* Scatter around the normal by up to the spread's own share of a
                right angle, so a wide spread reads as a burst and a narrow one
                as a jet. */
@@ -400,6 +442,25 @@ float fx_mean_height(void) {
     for (int i = 0; i < FX_MAX_PARTICLES; i++)
         if (g_parts[i].life > 0.0f) { sum += g_parts[i].pos.y; n++; }
     return n ? sum / (float)n : 0.0f;
+}
+
+void fx_radius_spread(v3 origin, float *mean, float *width) {
+    float sum = 0.0f, wide = 0.0f;
+    int   n   = 0;
+    for (int i = 0; i < FX_MAX_PARTICLES; i++) {
+        if (g_parts[i].life <= 0.0f) continue;
+        v3 d = v3sub(g_parts[i].pos, origin);
+        sum += v3len(d); n++;
+        /* Distance from the vertical axis, not from the point. A dome's
+           equator goes sideways; a burst thrown along one direction does not,
+           however far it travels.
+           점이 아니라 *수직축*으로부터의 거리입니다. 돔의 적도는 옆으로 뻗지만, 한 방향으로
+           던져진 폭발은 아무리 멀리 가도 그렇지 않습니다. */
+        float h = sqrtf(d.x * d.x + d.z * d.z);
+        if (h > wide) wide = h;
+    }
+    if (mean)  *mean  = n ? sum / (float)n : 0.0f;
+    if (width) *width = wide;
 }
 
 int fx_def_count(void) {

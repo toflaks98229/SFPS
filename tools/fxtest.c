@@ -93,18 +93,108 @@ int main(void) {
     {
         fx_reload();
         /* Far more than the pool can hold. The excess must overwrite rather
-           than overflow, and the count must never exceed the cap. */
-        for (int i = 0; i < 200; i++)
+           than overflow, and the count must never exceed the cap.
+
+           THE COUNT IS DERIVED FROM THE POOL, not written down. It was 200,
+           which overflowed a pool of 640 and did not overflow the 1536 the
+           blast layers needed -- so the moment the cap was raised this test
+           stopped exercising the overflow branch and said nothing about it.
+           One spawn is at least one particle, so FX_MAX_PARTICLES spawns
+           cannot fail to fill it whatever the cap becomes.
+           개수를 적어 두지 않고 풀 크기에서 *유도합니다*. 200이었고, 640짜리 풀은
+           넘쳤지만 폭발 레이어에 필요했던 1536은 넘지 못했습니다. 상한을 올린 순간 이
+           테스트는 넘침 분기를 시험하기를 멈췄고 그에 대해 아무 말도 하지 않았습니다.
+           한 번의 생성은 최소 한 개의 입자이므로, FX_MAX_PARTICLES번 생성하면 상한이
+           무엇이 되든 풀을 채우지 못할 수 없습니다. */
+        for (int i = 0; i < FX_MAX_PARTICLES; i++)
             fx_spawn("spark", v3f(0, 0, 0), v3f(0, 1, 0));
 
         okd(fx_live_count() <= FX_MAX_PARTICLES,
             "a flood never exceeds the particle pool",
             fx_live_count(), FX_MAX_PARTICLES);
 
+        /* That the flood REACHED the cap, so the check above is a ceiling
+           being tested rather than one merely not approached.
+           넘침이 상한에 *도달했음*을 확인합니다. 위의 검사가 다가가지도 못한 천장이
+           아니라 실제로 시험된 천장이 되도록 합니다. */
+        okd(fx_live_count() == FX_MAX_PARTICLES,
+            "and the flood is big enough to actually reach it",
+            fx_live_count(), FX_MAX_PARTICLES);
+
 #ifdef DIAG_ENABLED
         ok(diag_count(DIAG_FX_CAP) > 0,
            "and the overflow is reported rather than silent");
 #endif
+    }
+
+    /* --- the dome measures the radius it was given -------------------------
+       This is the only effect in the file that makes a claim with a NUMBER in
+       it: the shell stops where the blast damage stops. Everything else here
+       would pass just as well if fx_spawn_scaled ignored its scale entirely --
+       the particles would spawn, move, and retire on time, and the dome would
+       simply be the wrong size, which is the one failure that looks completely
+       convincing on screen while telling the player something untrue.
+
+       Checked at two radii rather than one, because a dome hard-coded to any
+       single size passes a single-radius test.
+
+       이 파일에서 *수치*를 담은 주장을 하는 유일한 이펙트입니다. 껍질은 폭발 데미지가
+       멈추는 곳에서 멈춥니다. 여기의 다른 모든 검사는 fx_spawn_scaled가 scale을 통째로
+       무시해도 통과합니다. 입자는 생성되고 움직이고 제때 사라질 것이며, 돔은 그저 크기가
+       틀릴 뿐입니다. 화면에서는 완벽히 그럴듯해 보이면서 플레이어에게 사실이 아닌 것을
+       말하는 유일한 실패입니다. 반경 하나가 아니라 둘로 검사하는 이유는, 특정 크기로
+       고정된 돔도 반경 하나짜리 검사는 통과하기 때문입니다. */
+    {
+        const v3 AT = { 3.0f, 2.0f, -4.0f };
+        float reached[2], width[2];
+        const float WANT[2] = { 1.0f, 4.2f };   /* unit, and the grenade's */
+
+        for (int k = 0; k < 2; k++) {
+            fx_reload();
+            fx_spawn_scaled("blastdome", AT, v3f(0, 1, 0), WANT[k]);
+            ok(fx_live_count() > 0, k ? "blastdome spawns at 4.2m"
+                                      : "blastdome spawns at 1m");
+            /* Its life is 300ms; run just past it so the shell is at full
+               extent, and stop before the particles retire.
+               수명이 300ms이므로 껍질이 최대로 퍼지도록 그 직전까지 돌리고, 입자가
+               사라지기 전에 멈춥니다. */
+            for (int i = 0; i < 17; i++) fx_update(DT);
+            fx_radius_spread(AT, &reached[k], &width[k]);
+        }
+
+        okf(reached[1] > reached[0] * 3.0f,
+            "a 4.2m dome reaches far beyond a 1m one",
+            reached[1], reached[0]);
+
+        /* The ratio, not the absolute distance: drag and gravity both eat into
+           how far a particle actually gets, so the authored speed x life is a
+           ceiling rather than a promise. What must hold is that asking for 4.2
+           times the radius produces 4.2 times the shell.
+           절대 거리가 아니라 *비율*입니다. 항력과 중력이 실제 도달 거리를 깎으므로 작성된
+           speed x life는 약속이 아니라 상한입니다. 반드시 성립해야 하는 것은, 반경을
+           4.2배로 요구하면 껍질도 4.2배가 된다는 것입니다. */
+        float ratio = reached[0] > 0.0f ? reached[1] / reached[0] : 0.0f;
+        okf(ratio > 4.2f * 0.9f && ratio < 4.2f * 1.1f,
+            "and does so in proportion to the radius asked for", ratio, 4.2f);
+
+        /* A HEMISPHERE, not a column. Both checks above pass for an effect
+           that fires every particle straight up: the mean distance is right,
+           and it scales with the radius, and the player is shown no radius at
+           all. What makes the dome legible is that it reaches sideways as far
+           as it reaches upward, so that is the thing to measure.
+           A dome's widest particles sit on its equator, at the full radius, so
+           the width should approach the radius itself. Half of it is a
+           comfortable floor that a column (width ~0) cannot reach.
+           기둥이 아니라 *반구*입니다. 위의 두 검사는 모든 입자를 곧장 위로 쏘는 이펙트도
+           통과합니다. 평균 거리는 맞고, 반경에 비례해 늘어나고, 플레이어에게는 반경이 전혀
+           보이지 않습니다. 돔을 읽히게 만드는 것은 위로 뻗는 만큼 옆으로도 뻗는다는
+           것이므로, 그것이 재야 할 값입니다. 돔에서 가장 넓은 입자는 적도에 있고 반경
+           전체에 해당하므로, 폭은 반경 자체에 가까워야 합니다. 그 절반이면 기둥(폭 ~0)이
+           결코 넘을 수 없는 여유 있는 하한입니다. */
+        float cover = reached[1] > 0.0f ? width[1] / reached[1] : 0.0f;
+        okf(cover > 0.5f,
+            "and covers the hemisphere rather than firing a column",
+            cover, 0.5f);
     }
 
     /* --- gravity actually acts --------------------------------------------
@@ -189,9 +279,38 @@ int main(void) {
        A parser that lost its place would drop the later ones. */
     {
         fx_reload();
+        /* EVERY NAME THE GAME PASSES TO fx_spawn BELONGS HERE. A name is a
+           string, so a typo or a renamed effect costs a silent nothing at the
+           call site -- fx_spawn treats an unknown name as a no-op on purpose,
+           which is right for authoring and useless for catching mistakes. This
+           list is the only thing that turns that into a failure, and it is only
+           as good as its last update.
+           게임이 fx_spawn에 넘기는 *모든* 이름이 여기 있어야 합니다. 이름은 문자열이므로
+           오타나 이름이 바뀐 이펙트는 호출부에서 조용한 무동작이 됩니다. fx_spawn은 모르는
+           이름을 의도적으로 무시하며, 그것은 작성 중에는 옳고 실수를 잡는 데는 쓸모가
+           없습니다. 이 목록만이 그것을 실패로 바꾸며, 마지막으로 갱신된 만큼만
+           유효합니다. */
         const char *NAMES[] = { "spark", "blood", "bullethole", "gib",
-                                "boltburst", "bolttrail", "hookbite", "pickup",
-                                "lavasmoke" };
+                                "boltburst", "bolttrail", "pickup",
+                                "lavasmoke",
+                                /* All three hook effects. The list had only
+                                   `hookbite` while the code spawned all three,
+                                   so two of them were never checked -- which is
+                                   the failure this list is for, arriving in the
+                                   list itself.
+                                   갈고리 이펙트 셋 모두입니다. 코드는 셋을 생성하는데
+                                   목록에는 `hookbite`만 있어 둘은 검사된 적이 없었습니다.
+                                   이 목록이 막으려던 실패가 목록 자신에게서 일어난
+                                   것입니다. */
+                                "hookbite", "hookbiteb", "hookland",
+                                /* the blast, in layers */
+                                "blastdome", "blastcore", "blastsmoke",
+                                "blastdebris",
+                                /* the saw, which has contact instead of a
+                                   muzzle */
+                                "sawspark", "sawgrind",
+                                /* the rest of what a bullet leaves */
+                                "smokepuff", "debris" };
         int found = 0;
         for (int i = 0; i < (int)(sizeof(NAMES)/sizeof(NAMES[0])); i++) {
             fx_reload();

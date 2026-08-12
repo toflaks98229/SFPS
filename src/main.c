@@ -1207,10 +1207,12 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
        World를 구동할 수 있게 하는 이유입니다. */
     wp_init(&g_world.weapon, &g_world.level);
 
-    /* carry_state=0: a fresh start begins at full health with a starting belt,
-       which is what wp_init just set. The geometry this makes stale is uploaded
-       by the world_take_geometry in the loop below, on the first frame. */
-    world_load_level(&g_world, g_world.cur_level, 0);
+    /* WORLD_ENTER_NEW: a fresh start begins at full health with the boot belt,
+       which is what wp_init just set. It also leaves the stage checkpoint a
+       restart replays, so restarting the first stage lands exactly here. The
+       geometry this makes stale is uploaded by the world_take_geometry in the
+       loop below, on the first frame. */
+    world_load_level(&g_world, g_world.cur_level, WORLD_ENTER_NEW);
 
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
@@ -1315,10 +1317,12 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
                level_tex holding deleted texture names. The rebuild below
                resolves them, so it has to follow wp_reload_texture.
 
-               carry_state=0: an edit to the map is an authoring action, so the
-               player is respawned at the (possibly moved) start with a full
-               belt rather than left standing wherever the old geometry put them
-               -- which could now be inside a wall.
+               WORLD_ENTER_NEW: an edit to the map is an authoring action, so
+               the player is respawned at the (possibly moved) start with the
+               boot belt rather than left standing wherever the old geometry put
+               them -- which could now be inside a wall. It resets the stage
+               checkpoint too, which is what an author wants: the map they just
+               changed is the one being started, not the one they walked in from.
 
                플러시 이후여야 합니다. tex_flush는 캐시된 모든 재질을 삭제하므로, 레벨의
                재질을 먼저 해석하면 level_tex가 삭제된 텍스처 이름을 보유하게 됩니다. 아래의
@@ -1327,7 +1331,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
                맵 편집은 제작 행위이므로 플레이어를 (옮겨졌을 수 있는) 시작 지점에 탄약을
                채워 다시 스폰합니다. 예전 지오메트리 기준의 위치에 그대로 두면 이제 벽 속일
                수도 있습니다. */
-            world_load_level(&g_world, g_world.cur_level, 0);
+            world_load_level(&g_world, g_world.cur_level, WORLD_ENTER_NEW);
         }
 
         /* --- the drawn geometry catches up with the sectors -----------------

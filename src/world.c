@@ -445,40 +445,18 @@ static void step_exit(World *w) {
 
     /* An unknown target changes nothing and leaves the player where they are;
        a typo does not win the game. */
-    if (world_load_level(w, w->level.next, 1))
+    if (world_load_level(w, w->level.next, WORLD_ENTER_CARRY))
         audio_play("exit", 90);
 }
 
 /* --------------------------------------------------------------------- api */
 
-void world_init(World *w) {
-    World zero = {0};
-    *w = zero;
-
-    /* The declared spawn, overwritten by player_spawn on the first load. Here
-       so that a World is never observably uninitialised -- a caller that reads
-       the player before loading a level gets a standing body at full health
-       rather than one at the origin with no hit points.
-       선언된 스폰 지점이며 첫 로드 시 player_spawn이 덮어씁니다. World가 관측 가능하게
-       미초기화된 상태를 갖지 않도록 이곳에 둡니다. 레벨을 로드하기 전에 플레이어를 읽는
-       호출자는 원점에 체력 0으로 있는 몸이 아니라 체력이 가득한 서 있는 몸을 받습니다. */
-    w->player.pos    = v3f(0.0f, PLAYER_EYE, 12.0f);
-    w->player.health = PLAYER_MAX_HP;
-    w->player.keys   = KEY_NONE;
-
-    txt_copy(w->cur_level, sizeof(w->cur_level), WORLD_START_LEVEL, -1);
-
-    /* title=1: a fresh World comes up on the title screen, and the same call
-       seeds the smoke rng and zeroes every clock. Startup and a restart
-       therefore begin from a state produced by one function rather than by a
-       declaration here and an assignment there -- which is how the two drifted
-       apart in the first place. See ::RunState.
-       title=1입니다. 새 World는 타이틀 화면으로 시작하며, 같은 호출이 연기 난수의 시드를
-       설정하고 모든 시계를 0으로 만듭니다. 따라서 시작과 재시작은 이곳의 선언과 저곳의
-       대입이 아니라 하나의 함수가 만들어 낸 상태에서 출발합니다. 애초에 그 둘이 어긋난
-       이유가 바로 그것이었습니다. ::RunState를 참조하십시오. */
-    run_reset(&w->run, 1);
-}
+/* Progress first, because it is the vocabulary the rest of this file speaks:
+   world_init seeds a checkpoint with it, world_load_level chooses one, and
+   world_progress_for_stage builds one from the level chain.
+   진행 상태를 먼저 둡니다. 이 파일의 나머지가 사용하는 어휘이기 때문입니다. world_init이
+   이것으로 체크포인트를 심고, world_load_level이 그중 하나를 고르며,
+   world_progress_for_stage가 레벨 사슬로부터 하나를 만듭니다. */
 
 /* ---------------------------------------------------------------- progress */
 
@@ -522,9 +500,69 @@ void world_progress_write(World *w, const PlayerProgress *p) {
     }
 }
 
+/* What a new game starts with. Assembled by asking the weapon module rather
+   than by naming a shotgun and twenty shells here: WEAPON_START_AMMO lives
+   beside wp_start_belt, and a second copy of the starting belt would be a
+   starting belt that drifts from the one the game boots with.
+   새 게임이 시작하는 상태입니다. 이곳에서 샷건과 탄환 20발을 지명하지 않고 무기 모듈에게
+   물어서 조립합니다. WEAPON_START_AMMO는 wp_start_belt 옆에 있으며, 시작 탄약대의 두 번째
+   사본은 게임이 부팅하는 것과 어긋나는 시작 탄약대가 됩니다. */
+static void progress_boot(PlayerProgress *out) {
+    Weapon belt = {0};
+    wp_start_belt(&belt);
+
+    out->health = PLAYER_MAX_HP;
+    out->keys   = KEY_NONE;
+    out->cur    = belt.cur;
+    for (int i = 0; i < WP_TYPES; i++) {
+        out->ammo[i]  = belt.ammo[i];
+        out->owned[i] = belt.owned[i];
+    }
+}
+
+void world_init(World *w) {
+    World zero = {0};
+    *w = zero;
+
+    /* The declared spawn, overwritten by player_spawn on the first load. Here
+       so that a World is never observably uninitialised -- a caller that reads
+       the player before loading a level gets a standing body at full health
+       rather than one at the origin with no hit points.
+       선언된 스폰 지점이며 첫 로드 시 player_spawn이 덮어씁니다. World가 관측 가능하게
+       미초기화된 상태를 갖지 않도록 이곳에 둡니다. 레벨을 로드하기 전에 플레이어를 읽는
+       호출자는 원점에 체력 0으로 있는 몸이 아니라 체력이 가득한 서 있는 몸을 받습니다. */
+    w->player.pos    = v3f(0.0f, PLAYER_EYE, 12.0f);
+    w->player.health = PLAYER_MAX_HP;
+    w->player.keys   = KEY_NONE;
+
+    txt_copy(w->cur_level, sizeof(w->cur_level), WORLD_START_LEVEL, -1);
+
+    /* A checkpoint for a stage that has not been loaded yet. Zeroing a World
+       would leave it at no health and no weapons, and a ::WORLD_ENTER_REPLAY
+       against that -- a restart asked for before anything was loaded -- would
+       spawn a corpse. The boot belt is the honest answer to "what would you
+       have been carrying", and the first real load overwrites it anyway.
+       아직 로드되지 않은 스테이지를 위한 체크포인트입니다. World를 0으로 두면 체력도 무기도
+       없는 상태가 되고, 그에 대한 ::WORLD_ENTER_REPLAY(무엇도 로드되기 전에 요청된 재시작)는
+       시체를 스폰합니다. "무엇을 들고 있었겠는가"에 대한 정직한 답은 부팅 구성이며, 첫 실제
+       로드가 어차피 이것을 덮어씁니다. */
+    progress_boot(&w->entry);
+
+    /* title=1: a fresh World comes up on the title screen, and the same call
+       seeds the smoke rng and zeroes every clock. Startup and a restart
+       therefore begin from a state produced by one function rather than by a
+       declaration here and an assignment there -- which is how the two drifted
+       apart in the first place. See ::RunState.
+       title=1입니다. 새 World는 타이틀 화면으로 시작하며, 같은 호출이 연기 난수의 시드를
+       설정하고 모든 시계를 0으로 만듭니다. 따라서 시작과 재시작은 이곳의 선언과 저곳의
+       대입이 아니라 하나의 함수가 만들어 낸 상태에서 출발합니다. 애초에 그 둘이 어긋난
+       이유가 바로 그것이었습니다. ::RunState를 참조하십시오. */
+    run_reset(&w->run, 1);
+}
+
 /* ------------------------------------------------------------ level loading */
 
-int world_load_level(World *w, const char *name, int carry_state) {
+int world_load_level(World *w, const char *name, WorldEnter how) {
     /* Copied before anything is parsed. `name` may be w->cur_level, and it may
        be w->level.next -- which level_load blanks before it parses, so a name
        read out of it mid-call would be an empty string. One copy here removes
@@ -551,7 +589,7 @@ int world_load_level(World *w, const char *name, int carry_state) {
 
     /* What the player keeps, taken before the spawn and put back after it. Read
        unconditionally, because reading is free and a branch here would be a
-       second place `carry_state` means something.
+       second place ::WorldEnter is interpreted.
        플레이어가 가져가는 것입니다. 스폰 전에 가져오고 스폰 후에 되돌려 놓습니다. 조건 없이
        읽는 이유는 읽기가 공짜이고, 이곳의 분기는 `carry_state`가 의미를 갖는 두 번째 장소가
        되기 때문입니다. */
@@ -561,30 +599,41 @@ int world_load_level(World *w, const char *name, int carry_state) {
     w->yaw   = player_spawn(&w->player, &w->level);   /* resets health */
     w->pitch = 0.0f;
 
-    if (carry_state) {
-        world_progress_write(w, &carried);            /* ...so put it back */
-    } else {
-        /* --- a fresh start -------------------------------------------------
-           player_spawn has just reset health, and health was the ONLY thing it
-           reset. The belt and the keycards had nobody at all: this branch was
-           empty, so a restart returned the player to the start of the level
-           holding every weapon, every shell and every keycard they had found --
-           on a map whose doors door_reset had just re-locked behind them.
-
-           Naming what a transition CARRIES is what made the hole visible. The
-           two branches are the same list read in opposite directions, and one
-           of them was not being read.
-
-           player_spawn이 방금 체력을 초기화했으며, 그것이 초기화한 것은 체력뿐이었습니다.
-           탄약대와 키카드에는 아무도 없었습니다. 이 분기가 비어 있었으므로, 재시작은
-           플레이어를 레벨의 시작 지점으로 되돌리면서 그들이 찾아낸 모든 무기와 탄환과
-           키카드를 쥐여 주었습니다. door_reset이 방금 다시 잠근 문들이 있는 맵에서 말입니다.
-
-           전환이 *가져가는* 것에 이름을 붙인 것이 이 구멍을 보이게 만들었습니다. 두 분기는
-           같은 목록을 반대 방향으로 읽는 것이며, 그중 하나는 읽히지 않고 있었습니다. */
-        w->player.keys = KEY_NONE;
-        wp_start_belt(&w->weapon);
+    /* --- where the belt comes from ---------------------------------------
+       player_spawn has just reset health, and health is the ONLY thing it
+       resets: the belt and the keycards have nobody but this switch. Every arm
+       writes the whole progress, so none of them can leave half of it behind
+       from whoever was playing a moment ago.
+       player_spawn이 방금 체력을 초기화했으며, 그것이 초기화하는 것은 체력뿐입니다. 탄약대와
+       키카드에는 이 switch 외에 아무도 없습니다. 모든 갈래가 진행 상태 전체를 쓰므로, 어느
+       것도 조금 전에 플레이하던 사람의 절반을 남겨 둘 수 없습니다. */
+    PlayerProgress start;
+    switch (how) {
+    case WORLD_ENTER_CARRY:
+        start = carried;      /* the exit is a reward you arrive at */
+        break;
+    case WORLD_ENTER_REPLAY:
+        start = w->entry;     /* put me back where I started this stage */
+        break;
+    case WORLD_ENTER_NEW:
+    default:
+        progress_boot(&start);
+        break;
     }
+    world_progress_write(w, &start);
+
+    /* Whatever the arm above decided, the player is now standing in this stage
+       holding it -- and THAT is the checkpoint a restart of this stage
+       restores. Read back out of the world rather than copied from `start`,
+       because the world is what the player actually has: if anything between
+       here and the write ever adjusted the belt, the checkpoint would follow it
+       instead of describing a state that no longer exists.
+       위의 갈래가 무엇을 결정했든, 플레이어는 이제 그것을 들고 이 스테이지에 서 있습니다.
+       그리고 *그것이* 이 스테이지의 재시작이 복원하는 체크포인트입니다. `start`에서 복사하지
+       않고 월드에서 다시 읽는 이유는, 플레이어가 실제로 가진 것은 월드이기 때문입니다.
+       이곳과 쓰기 사이에서 무엇이든 탄약대를 조정한다면, 체크포인트는 더 이상 존재하지 않는
+       상태를 서술하는 대신 그것을 따라가야 합니다. */
+    world_progress_read(w, &w->entry);
 
     /* Monsters and pickups are placed from the level's own entities. */
     enemy_spawn_level(&w->level);
@@ -613,9 +662,148 @@ int world_load_level(World *w, const char *name, int carry_state) {
     return 1;
 }
 
+/* --------------------------------------------------- starting part way in */
+
+/**
+ * @brief Are two NUL-terminated level names the same?
+ *
+ * ENGLISH: txt_is compares a counted token to a literal, which is what the
+ * parsers need; both sides here are already whole strings.
+ *
+ * 한국어: txt_is는 길이가 주어진 토큰을 리터럴과 비교하며, 파서가 필요로 하는 형태가
+ * 그것입니다. 이곳의 양쪽은 이미 완전한 문자열입니다.
+ */
+static int name_same(const char *a, const char *b) {
+    int i = 0;
+    while (a[i] && a[i] == b[i]) i++;
+    return a[i] == b[i];
+}
+
+/**
+ * @brief Grants every weapon `l` hands out, into an in-progress belt.
+ *
+ * ENGLISH
+ * -------
+ * @param[in]     l   A stage to read the pickups of.
+ * @param[in,out] out Weapons found are marked owned. Nothing is taken away.
+ *
+ * @note Asked of the stage's ENTITIES rather than of a table of "what stage two
+ *       gives you". The entities are what the stage actually contains; a table
+ *       is a second answer that goes stale the first time somebody moves a
+ *       weapon between maps in the editor.
+ * @note Accumulates -- never clears -- because that is what carrying a weapon
+ *       through an episode means. See ::world_progress_for_stage.
+ *
+ * 한국어
+ * ------
+ * @brief `l`이 내주는 모든 무기를 작성 중인 탄약대에 부여합니다.
+ * @param[in]     l   아이템을 읽어 낼 스테이지.
+ * @param[in,out] out 발견된 무기를 보유 상태로 표시합니다. 무엇도 회수하지 않습니다.
+ *
+ * @note "2스테이지가 무엇을 주는가"라는 표가 아니라 스테이지의 *엔티티*에게 묻습니다.
+ *       엔티티는 그 스테이지가 실제로 담고 있는 것이고, 표는 누군가 에디터에서 무기를 다른
+ *       맵으로 옮기는 순간 낡아 버리는 두 번째 답입니다.
+ * @note 지우지 않고 *누적*합니다. 에피소드 전체에 걸쳐 무기를 지니고 다닌다는 것이 뜻하는
+ *       바가 그것입니다. ::world_progress_for_stage를 참조하십시오.
+ */
+static void grant_weapons_of(const Level *l, PlayerProgress *out) {
+    for (int i = 0; i < l->n_ents; i++) {
+        const char *k = l->ents[i].kind;
+        int n = 0;
+        while (n < LVL_MAT && k[n]) n++;
+
+        int wp = PK_WEAPON_WEAPON(pickup_kind_for_n(k, n));
+        if (wp >= 0 && wp < WP_TYPES) out->owned[wp] = 1;
+    }
+}
+
+int world_progress_for_stage(const char *name, PlayerProgress *out) {
+    PlayerProgress p;
+    progress_boot(&p);
+
+    char at[WORLD_LEVEL_MAX];
+    txt_copy(at, sizeof(at), WORLD_START_LEVEL, -1);
+
+    /* One scratch level, reused for every hop. Zeroed once: level_load resets
+       the counts and names it fills, so nothing stale is ever read, but a
+       19KB local that begins as whatever was on the stack is a bad habit to
+       leave lying around next to a parser.
+       모든 구간에 재사용하는 임시 레벨 하나입니다. 한 번만 0으로 만듭니다. level_load가
+       자신이 채우는 개수와 이름을 초기화하므로 낡은 값을 읽을 일은 없지만, 스택에 있던
+       무엇으로 시작하는 19KB 지역 변수를 파서 옆에 남겨 두는 것은 나쁜 습관입니다. */
+    Level scan = {0};
+
+    /* Bounded because `next` is authored text and may point backwards. A cycle
+       would otherwise walk for ever, and a stage-select menu is not a place to
+       hang.
+       `next`가 제작된 텍스트이고 뒤를 가리킬 수도 있으므로 상한을 둡니다. 그렇지 않으면
+       순환이 영원히 돌게 되며, 스테이지 선택 메뉴는 멈춰 있을 자리가 아닙니다. */
+    for (int hop = 0; hop < WORLD_STAGE_MAX_HOPS; hop++) {
+        /* Reached it. Everything before it has already been folded in, and the
+           target's own weapons are deliberately NOT -- they are what the player
+           is about to go and find.
+           도달했습니다. 그 이전의 모든 것은 이미 접혀 들어갔고, 대상 자신의 무기는
+           의도적으로 포함하지 *않습니다*. 그것은 플레이어가 이제 가서 찾을 것입니다. */
+        if (name_same(at, name)) {
+            /* Half of what each belt holds, for every weapon the walk granted.
+               Applied at the end rather than per stage, so a weapon that
+               appears in two stages is not counted twice.
+               순회가 부여한 모든 무기에 대해 각 탄약대 용량의 절반입니다. 스테이지마다가
+               아니라 마지막에 적용하므로, 두 스테이지에 등장하는 무기가 두 번 세어지지
+               않습니다. */
+            for (int i = 0; i < WP_TYPES; i++)
+                p.ammo[i] = p.owned[i] ? wp_stats(i)->max_ammo / 2 : 0;
+
+            *out = p;
+            return 1;
+        }
+
+        if (!level_load(at, &scan)) return 0;   /* a broken link in the chain */
+
+        grant_weapons_of(&scan, &p);
+
+        if (!scan.next[0]) return 0;            /* the chain ended first */
+        txt_copy(at, sizeof(at), scan.next, -1);
+    }
+
+    return 0;   /* longer than any episode, or a loop */
+}
+
+int world_start_stage(World *w, const char *name) {
+    PlayerProgress want;
+    if (!world_progress_for_stage(name, &want)) return 0;
+
+    /* Seed the checkpoint and enter as a replay of it. That is one mechanism
+       doing two jobs: the player starts the stage with this belt, and a restart
+       of the stage puts them back with it rather than with the boot one.
+       The old checkpoint is kept until the load has succeeded, because a stage
+       that does not load must change nothing -- the same contract
+       world_load_level keeps about the level itself.
+       체크포인트를 심고 그것의 재생으로 진입합니다. 하나의 기구가 두 가지 일을 합니다.
+       플레이어는 이 탄약대로 스테이지를 시작하고, 그 스테이지를 재시작하면 부팅 구성이
+       아니라 같은 것으로 되돌아갑니다.
+       로드가 성공하기 전까지 이전 체크포인트를 보관하는 이유는, 로드되지 않는 스테이지는
+       아무것도 바꾸지 말아야 하기 때문입니다. world_load_level이 레벨 자체에 대해 지키는
+       것과 같은 계약입니다. */
+    PlayerProgress prev = w->entry;
+    w->entry = want;
+
+    if (world_load_level(w, name, WORLD_ENTER_REPLAY)) return 1;
+
+    w->entry = prev;
+    return 0;
+}
+
 void world_restart(World *w) {
-    /* carry_state=0: a restart is a fresh run, so health and ammo reset. */
-    world_load_level(w, w->cur_level, 0);
+    /* REPLAY, not NEW: a retry means "put me back where I started this stage",
+       which for the first stage IS the boot belt and for every stage after it
+       is what the player walked in with. NEW here is what stripped a player who
+       died in stage two of the axe they earned in stage one.
+       NEW가 아니라 REPLAY입니다. 재시도는 "이 스테이지를 시작했던 자리로 되돌려 놓아라"를
+       뜻하며, 첫 스테이지에서 그것은 곧 부팅 구성이고 그 이후의 모든 스테이지에서는
+       플레이어가 걸어 들어온 상태입니다. 이곳의 NEW가, 2스테이지에서 죽은 플레이어에게서
+       1스테이지에서 얻은 도끼를 빼앗은 것입니다. */
+    world_load_level(w, w->cur_level, WORLD_ENTER_REPLAY);
 
     /* title=0: the player asked to play, so a restart goes straight back into
        the run rather than showing the title again. */

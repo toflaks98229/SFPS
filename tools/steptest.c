@@ -28,6 +28,7 @@
 #include "proj.h"     /* proj_reset, likewise */
 #include "door.h"     /* door_reset, and the DOOR_* axes */
 #include "diag.h"     /* diag_count -- a stale door is counted, not printed */
+#include "txt.h"      /* txt_copy -- walking the level chain by name */
 
 #define DT     (1.0f / 60.0f)
 #define ASPECT 1.7777f          /* 16:9. Only the muzzle solve reads it. */
@@ -86,6 +87,26 @@ static void fixture(World *w, short hurt) {
 static Input idle(void) {
     Input in = {0};
     return in;
+}
+
+/* Two whole level names, compared. The parsers use txt_is, which wants a
+   counted token on one side; both of these are already strings. */
+static int same_name(const char *a, const char *b) {
+    int i = 0;
+    while (a[i] && a[i] == b[i]) i++;
+    return a[i] == b[i];
+}
+
+/* Marks every weapon `l` hands out. Written independently of the one in
+   world.c so that comparing the two is a check rather than a tautology. */
+static void weapons_in(const Level *l, int *owned) {
+    for (int i = 0; i < l->n_ents; i++) {
+        const char *k = l->ents[i].kind;
+        int n = 0;
+        while (n < LVL_MAT && k[n]) n++;
+        int wp = PK_WEAPON_WEAPON(pickup_kind_for_n(k, n));
+        if (wp >= 0 && wp < WP_TYPES) owned[wp] = 1;
+    }
 }
 
 /* ------------------------------------------------------------------ main */
@@ -396,7 +417,8 @@ int main(void) {
         World w;
         world_init(&w);
         w.run.title = 0;
-        ok(world_load_level(&w, WORLD_START_LEVEL, 0), "the start level loads");
+        ok(world_load_level(&w, WORLD_START_LEVEL, WORLD_ENTER_NEW),
+           "the start level loads");
 
         /* Something distinguishable in every field PlayerProgress claims. */
         const int LAST = WP_TYPES - 1;
@@ -425,7 +447,8 @@ int main(void) {
         }
 
         /* carry_state=1: the exit is a reward you arrive at, not a reset. */
-        ok(world_load_level(&w, WORLD_START_LEVEL, 1), "a transition loads");
+        ok(world_load_level(&w, WORLD_START_LEVEL, WORLD_ENTER_CARRY),
+           "a transition loads");
         ok(w.player.health == 42,           "a transition carries health");
         ok(w.player.keys == (KEY_RED | KEY_BLUE), "and the keycards");
         ok(w.weapon.cur == LAST && w.weapon.ammo[LAST] == 17
@@ -435,7 +458,8 @@ int main(void) {
            the keycards used to have nobody at all, so a restart handed back
            every weapon and key the player had found on a map whose doors had
            just been re-locked. */
-        ok(world_load_level(&w, WORLD_START_LEVEL, 0), "a fresh start loads");
+        ok(world_load_level(&w, WORLD_START_LEVEL, WORLD_ENTER_NEW),
+           "a fresh start loads");
         okf(w.player.health == PLAYER_MAX_HP, "a fresh start restores health",
             (float)w.player.health, (float)PLAYER_MAX_HP);
         ok(w.player.keys == KEY_NONE,        "and takes the keycards back");
@@ -486,6 +510,199 @@ int main(void) {
 
         /* Put the shared module back the way the next case expects it. */
         door_reset(&b.level);
+    }
+
+    /* --- a restart is a retry of THIS stage --------------------------------
+       The reported bug. Reaching stage two with the axe and dying handed back
+       the boot belt: not a retry of the stage, a demotion out of it. A restart
+       has to put the player back where they started the stage they are in --
+       which for the first stage is still the boot belt, and for every stage
+       after it is whatever they walked in with. */
+    printf("\nrestarting a stage you did not start the game in\n");
+    {
+        const int LAST = WP_TYPES - 1;
+
+        World w;
+        world_init(&w);
+        w.run.title = 0;
+        world_load_level(&w, WORLD_START_LEVEL, WORLD_ENTER_NEW);
+
+        /* Earn something on the way through the first stage. */
+        w.weapon.owned[LAST] = 1;
+        w.weapon.ammo[LAST]  = 30;
+        w.weapon.cur         = LAST;
+        w.player.health      = 70;
+
+        /* Cross into the next one. The name is the same map on purpose: what is
+           under test is the entry snapshot, not which level follows which. */
+        ok(world_load_level(&w, WORLD_START_LEVEL, WORLD_ENTER_CARRY),
+           "an exit carries the earned weapon into the next stage");
+        ok(w.weapon.owned[LAST] && w.weapon.ammo[LAST] == 30, "...it did");
+
+        /* Spend it all and die. */
+        w.weapon.ammo[LAST] = 0;
+        w.player.health     = 0;
+        w.run.dead          = 1;
+
+        world_restart(&w);
+
+        ok(w.weapon.owned[LAST],
+           "a restart keeps the weapon the stage was ENTERED with");
+        okf(w.weapon.ammo[LAST] == 30,
+            "and its ammo as it was on arrival, not as it was on death",
+            (float)w.weapon.ammo[LAST], 30.0f);
+        okf(w.player.health == 70, "and the health it was entered with",
+            (float)w.player.health, 70.0f);
+        ok(w.weapon.cur == LAST, "with the same weapon in hand");
+        ok(!w.run.dead, "and the death cleared");
+
+        /* The first stage is the case the old behaviour got right, and it still
+           is: entering it NEW makes the boot belt its checkpoint. */
+        World f;
+        world_init(&f);
+        f.run.title = 0;
+        world_load_level(&f, WORLD_START_LEVEL, WORLD_ENTER_NEW);
+        f.weapon.owned[LAST] = 1;
+        f.weapon.ammo[LAST]  = 30;
+        world_restart(&f);
+        ok(!f.weapon.owned[LAST] && f.weapon.ammo[WP_SHOTGUN] == WEAPON_START_AMMO,
+           "restarting the FIRST stage still hands back the boot belt");
+    }
+
+    /* --- starting part way into the episode --------------------------------
+       Asserts the SHAPE of the answer rather than its contents: which weapons a
+       given map contains is a thing somebody edits, and a test that named them
+       would go red on every edit. What must hold whatever the maps say is that
+       the grant accumulates over the whole chain rather than reading only the
+       stage before, that a granted weapon carries half its belt, and that the
+       first stage grants nothing at all. */
+    printf("\nstarting from a cleared stage\n");
+    {
+        PlayerProgress first;
+        ok(world_progress_for_stage(WORLD_START_LEVEL, &first),
+           "the first stage is reachable from itself");
+        {
+            /* Nothing precedes it, so there is nothing to have been given. */
+            World boot;
+            world_init(&boot);
+            PlayerProgress b;
+            world_progress_read(&boot, &b);
+            ok(first.owned[WP_SHOTGUN] && first.health == PLAYER_MAX_HP
+               && first.keys == KEY_NONE && first.cur == b.cur,
+               "and grants exactly the belt the game boots with");
+        }
+
+        /* Walk the shipped chain, checking the invariants at every stage. */
+        char at[WORLD_LEVEL_MAX];
+        txt_copy(at, sizeof(at), WORLD_START_LEVEL, -1);
+
+        PlayerProgress prev = first;
+        int stages = 0, shrank = 0, wrong_ammo = 0, grew = 0;
+
+        for (int hop = 0; hop < 8; hop++) {
+            PlayerProgress p;
+            if (!world_progress_for_stage(at, &p)) break;
+            stages++;
+
+            for (int i = 0; i < WP_TYPES; i++) {
+                int want = p.owned[i] ? wp_stats(i)->max_ammo / 2 : 0;
+                if (p.ammo[i] != want) wrong_ammo++;
+                /* A weapon granted at one stage may never be missing from a
+                   later one. Reading only the immediately previous stage would
+                   drop stage one's axe the moment stage two did not contain it,
+                   and this is what catches that. */
+                if (prev.owned[i] && !p.owned[i]) shrank++;
+                if (!prev.owned[i] && p.owned[i]) grew++;
+            }
+            prev = p;
+
+            Level scan = {0};
+            if (!level_load(at, &scan)) break;
+            if (!scan.next[0]) break;
+            txt_copy(at, sizeof(at), scan.next, -1);
+        }
+
+        okf(stages >= 2, "the shipped chain has stages to walk",
+            (float)stages, 2.0f);
+        okf(shrank == 0, "the grant never loses a weapon an earlier stage gave",
+            (float)shrank, 0.0f);
+        okf(wrong_ammo == 0, "and every granted weapon carries half its belt",
+            (float)wrong_ammo, 0.0f);
+        printf("  %-58s %d stage(s), %d weapon grant(s)\n",
+               "(walked)", stages, grew);
+
+        /* --- the accumulation, checked differentially ----------------------
+           The grant for the deepest stage must equal the boot belt plus the
+           UNION of the weapons in every stage before it -- built here by a loop
+           written independently of the one in world.c, so agreeing is evidence
+           rather than a tautology.
+
+           With the two stages shipped today this reduces to "stage one's
+           weapons", which an implementation reading only the immediately
+           previous stage would also satisfy. It starts to bite the moment a
+           third stage exists, which is exactly when the difference between
+           "the previous stage" and "every previous stage" begins to matter --
+           and it is cheaper to write the check now than to notice its absence
+           after somebody has lost an axe. */
+        {
+            /* Walk to the end of the chain. */
+            char deep[WORLD_LEVEL_MAX];
+            txt_copy(deep, sizeof(deep), WORLD_START_LEVEL, -1);
+            for (int hop = 0; hop < 8; hop++) {
+                Level scan = {0};
+                if (!level_load(deep, &scan) || !scan.next[0]) break;
+                txt_copy(deep, sizeof(deep), scan.next, -1);
+            }
+
+            /* The union of everything strictly before it. */
+            int want[WP_TYPES];
+            for (int i = 0; i < WP_TYPES; i++) want[i] = 0;
+
+            char cur[WORLD_LEVEL_MAX];
+            txt_copy(cur, sizeof(cur), WORLD_START_LEVEL, -1);
+            int before = 0;
+            for (int hop = 0; hop < 8 && !same_name(cur, deep); hop++) {
+                Level scan = {0};
+                if (!level_load(cur, &scan)) break;
+                weapons_in(&scan, want);
+                before++;
+                if (!scan.next[0]) break;
+                txt_copy(cur, sizeof(cur), scan.next, -1);
+            }
+
+            PlayerProgress d;
+            ok(world_progress_for_stage(deep, &d), "the deepest stage is reachable");
+
+            int mismatch = 0;
+            for (int i = 0; i < WP_TYPES; i++) {
+                int expect = want[i] || first.owned[i];   /* union, plus the boot belt */
+                if (!d.owned[i] != !expect) mismatch++;
+            }
+            okf(mismatch == 0,
+                "the deepest stage grants the union of every stage before it",
+                (float)mismatch, 0.0f);
+            printf("  %-58s %d stage(s) folded in\n", "(union built from)", before);
+        }
+
+        /* Unreachable names change nothing. */
+        PlayerProgress untouched;
+        untouched.health = 1234;
+        ok(!world_progress_for_stage("no-such-stage-exists", &untouched),
+           "a stage not on the chain is refused");
+        okf(untouched.health == 1234, "and the caller's buffer is left alone",
+            (float)untouched.health, 1234.0f);
+
+        /* And entering one leaves a checkpoint, so a restart of a stage started
+           this way replays the granted belt rather than the boot one. */
+        World s;
+        world_init(&s);
+        s.run.title = 0;
+        ok(world_start_stage(&s, WORLD_START_LEVEL), "a stage can be started directly");
+        s.weapon.ammo[WP_SHOTGUN] = 0;
+        world_restart(&s);
+        okf(s.weapon.ammo[WP_SHOTGUN] == first.ammo[WP_SHOTGUN],
+            "and restarting it replays what it was started with",
+            (float)s.weapon.ammo[WP_SHOTGUN], (float)first.ammo[WP_SHOTGUN]);
     }
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall frame-order checks passed\n", fails);

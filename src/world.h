@@ -117,6 +117,30 @@
 /** @brief The level a fresh ::World starts in. / 새 ::World가 시작하는 레벨. */
 #define WORLD_START_LEVEL "arena"
 
+/**
+ * @brief How far ::world_progress_for_stage will walk the `next` chain.
+ *
+ * ENGLISH
+ * -------
+ * A bound rather than a trust. `next` is authored text and nothing stops one
+ * stage naming an earlier one -- a hub that loops back is a reasonable thing to
+ * build -- so the walk has to end whether or not the target is on the chain. A
+ * number far past any episode this game will ship, because being too small is a
+ * stage that cannot be selected and being too large costs a few loads that were
+ * going to fail anyway.
+ *
+ * 한국어
+ * ------
+ * @brief ::world_progress_for_stage가 `next` 사슬을 따라갈 최대 횟수입니다.
+ *
+ * 신뢰가 아니라 상한입니다. `next`는 제작된 텍스트이고 한 스테이지가 앞선 스테이지를
+ * 지목하는 것을 막는 것은 없습니다(되돌아오는 허브는 만들 만한 구조입니다). 따라서 대상이
+ * 사슬 위에 있든 없든 순회는 끝나야 합니다. 이 게임이 출시할 어떤 에피소드보다도 훨씬 큰
+ * 값인 이유는, 너무 작으면 고를 수 없는 스테이지가 생기고 너무 크면 어차피 실패할 로드를 몇
+ * 번 더 하는 비용에 그치기 때문입니다.
+ */
+#define WORLD_STAGE_MAX_HOPS 64
+
 /* ------------------------------------------------------------------- input */
 
 /**
@@ -339,6 +363,45 @@ typedef struct {
      */
     char cur_level[WORLD_LEVEL_MAX];
 
+    /**
+     * @brief What the player was carrying when they ARRIVED in ::cur_level.
+     *
+     * ENGLISH
+     * -------
+     * The stage checkpoint, and what ::world_restart restores.
+     *
+     * A restart used to be handed the boot belt -- a shotgun and twenty shells
+     * -- which is right for the first stage and wrong for every stage after it.
+     * Reach stage two with the axe and the launcher, die, and the game took them
+     * away: not a retry of the stage, a demotion out of it. The other obvious
+     * answer, restoring what the player held at the moment they died, is worse
+     * still -- it hands back the ammo they spent on the attempt that failed.
+     *
+     * What a retry means is "put me back where I started this stage", so this is
+     * a snapshot taken on arrival and never touched again until the next
+     * arrival. Written by ::world_load_level for whatever reason it loaded, so a
+     * transition, a new game and a stage picked from a menu all leave a
+     * checkpoint behind without any of them being asked to.
+     *
+     * 한국어
+     * ------
+     * @brief 플레이어가 ::cur_level에 *도착했을 때* 들고 있던 것.
+     *
+     * 스테이지 체크포인트이며, ::world_restart가 복원하는 값입니다.
+     *
+     * 재시작은 이전에 부팅 구성(샷건과 탄환 20발)을 받았습니다. 첫 스테이지에는 맞고 그
+     * 이후의 모든 스테이지에는 틀립니다. 도끼와 유탄 발사기를 들고 2스테이지에 도달해서
+     * 죽으면 게임이 그것들을 빼앗았습니다. 스테이지의 재시도가 아니라 스테이지에서의
+     * 강등이었습니다. 또 하나의 자명한 답인 "죽은 순간에 들고 있던 것"은 더 나쁩니다. 실패한
+     * 시도에서 소모한 탄약을 그대로 돌려주기 때문입니다.
+     *
+     * 재시도가 뜻하는 것은 "이 스테이지를 시작했던 자리로 되돌려 놓아라"이므로, 이것은
+     * 도착 시점에 찍은 스냅숏이며 다음 도착까지 다시 건드리지 않습니다. ::world_load_level이
+     * 무슨 이유로 로드했든 기록하므로, 전환·새 게임·메뉴에서 고른 스테이지 모두가 요청하지
+     * 않아도 체크포인트를 남깁니다.
+     */
+    PlayerProgress entry;
+
     /* --- what the platform still has to do about this world -------------- */
 
     /**
@@ -374,6 +437,69 @@ typedef struct {
     /** @brief Non-zero once the level mesh has been uploaded at least once. / 레벨 메시가 최소 한 번 업로드되었으면 0이 아닙니다. */
     int geometry_uploaded;
 } World;
+
+/* ------------------------------------------------------------ entering one */
+
+/**
+ * @enum WorldEnter
+ * @brief Where the belt comes from when a level is loaded.
+ *
+ * ENGLISH
+ * -------
+ * This was a `carry_state` flag, and a flag has two answers to a question that
+ * turned out to have three. Carrying what the player holds is right for an exit
+ * and wrong for a restart; the boot belt is right for a new game and wrong for a
+ * restart of anything but the first stage. The third answer -- the stage's own
+ * checkpoint -- had nowhere to be expressed, so a restart took the second one
+ * and stripped the player of everything they had earned.
+ *
+ * A row rather than a flag, for the reason the weapon table is one: the next
+ * reason to load a level is a case here, not a second boolean parameter that
+ * has to be read together with the first.
+ *
+ * 한국어
+ * ------
+ * @brief 레벨을 로드할 때 탄약대가 어디에서 오는지를 나타냅니다.
+ *
+ * 이것은 `carry_state` 플래그였고, 플래그는 답이 셋인 질문에 두 개의 답만 갖습니다.
+ * 플레이어가 든 것을 이어 가는 것은 출구에는 맞고 재시작에는 틀립니다. 부팅 구성은 새
+ * 게임에는 맞고 첫 스테이지가 아닌 무엇의 재시작에도 틀립니다. 세 번째 답인 스테이지 자신의
+ * 체크포인트는 표현될 곳이 없었으므로, 재시작이 두 번째 답을 가져가 플레이어가 얻어 낸 모든
+ * 것을 벗겨 냈습니다.
+ *
+ * 플래그가 아니라 표의 행인 이유는 무기 표가 그런 것과 같습니다. 레벨을 로드할 다음 이유는
+ * 이곳의 한 경우이며, 첫 번째와 함께 읽어야 하는 두 번째 불리언 매개변수가 아닙니다.
+ */
+typedef enum {
+    /**
+     * @brief A new game, or an authoring reload: the belt the game boots with.
+     * / 새 게임 또는 제작용 리로드. 게임이 부팅하는 탄약대입니다.
+     */
+    WORLD_ENTER_NEW,
+    /**
+     * @brief An exit transition: whatever the player is holding right now.
+     *
+     * ENGLISH: The exit is a reward you arrive at, not a reset -- the way a Doom
+     * episode runs.
+     *
+     * 한국어: 출구는 도달하는 보상이지 초기화가 아닙니다. Doom 에피소드가 진행되는
+     * 방식입니다.
+     */
+    WORLD_ENTER_CARRY,
+    /**
+     * @brief A restart: what the player entered this stage with.
+     *
+     * ENGLISH: Reads ::World::entry, which is also how a caller enters a stage
+     * with a progress of its own choosing -- seed `entry`, then replay it. That
+     * is what ::world_start_stage does.
+     *
+     * 한국어: ::World::entry를 읽습니다. 호출자가 자신이 정한 진행 상태로 스테이지에
+     * 진입하는 방법도 이것입니다. `entry`를 심고 그것을 재생하십시오. ::world_start_stage가
+     * 하는 일이 그것입니다.
+     */
+    WORLD_ENTER_REPLAY,
+    WORLD_ENTER_MODES   /**< How many. / 개수. */
+} WorldEnter;
 
 /* --------------------------------------------------------------------- api */
 
@@ -414,15 +540,19 @@ void world_init(World *w);
  *
  * ENGLISH
  * -------
- * @param[in,out] w           The world to load into.
- * @param[in]     name        Level name. May alias ::World::cur_level or
- *                            ::Level::next; both are safe.
- * @param[in]     carry_state Non-zero to keep health, ammo, the roster and the
- *                            keycards across the load, the way a Doom episode
- *                            runs. Zero for a fresh belt.
+ * @param[in,out] w    The world to load into.
+ * @param[in]     name Level name. May alias ::World::cur_level or
+ *                     ::Level::next; both are safe.
+ * @param[in]     how  Where the belt comes from. See ::WorldEnter.
  * @return 1 on success. 0 if no level of that name exists, in which case
  *         NOTHING has changed and the caller stays where it is -- a typo must
  *         not drop the player into a void, and it must not win the game either.
+ *
+ * @note Whatever `how` decides, the result is recorded in ::World::entry: the
+ *       progress the player is standing there with IS the checkpoint for this
+ *       stage. Read back out of the world rather than copied from the branch
+ *       that set it, so the checkpoint cannot disagree with what the player
+ *       actually has.
  *
  * @note The steps below have to happen together and in this order. They used to
  *       be written out at three call sites -- startup, an exit transition and a
@@ -441,14 +571,18 @@ void world_init(World *w);
  * 한국어
  * ------
  * @brief 레벨을 로드하고, 레벨에 속한 모든 것을 제자리에 놓습니다.
- * @param[in,out] w           로드 대상 월드.
- * @param[in]     name        레벨 이름. ::World::cur_level이나 ::Level::next와 별칭이어도
- *                            안전합니다.
- * @param[in]     carry_state 0이 아니면 체력·탄약·무기 구성·열쇠를 로드 이후로 이어 갑니다.
- *                            Doom 에피소드가 진행되는 방식입니다. 0이면 새 구성입니다.
+ * @param[in,out] w    로드 대상 월드.
+ * @param[in]     name 레벨 이름. ::World::cur_level이나 ::Level::next와 별칭이어도
+ *                     안전합니다.
+ * @param[in]     how  탄약대가 어디에서 오는지. ::WorldEnter를 참조하십시오.
  * @return 성공하면 1. 해당 이름의 레벨이 없으면 0이며, 이 경우 *아무것도* 바뀌지 않고
  *         호출자는 있던 자리에 머무릅니다. 오타가 플레이어를 빈 공간에 떨어뜨려서도, 게임을
  *         이기게 해서도 안 됩니다.
+ *
+ * @note `how`가 무엇을 결정했든 그 결과는 ::World::entry에 기록됩니다. 플레이어가 그곳에 서
+ *       있는 상태 그 자체가 이 스테이지의 체크포인트입니다. 그것을 설정한 분기에서 복사하지
+ *       않고 월드에서 다시 읽어 오므로, 체크포인트가 플레이어가 실제로 가진 것과 어긋날 수
+ *       없습니다.
  *
  * @note 아래 단계들은 반드시 함께, 이 순서로 수행되어야 합니다. 이전에는 시작·출구 전환·핫
  *       리로드 세 곳에 각각 작성되어 있었고 이미 어긋나 있었습니다. 리로드는 플레이어를
@@ -460,7 +594,109 @@ void world_init(World *w);
  * @note ::door_reset은 섹터가 존재한 뒤, 첫 ::door_update 이전에 실행되어야 합니다. 각 문의
  *       *닫힌* 형상을 레벨에서 복사하며, 레벨이 아직 그것을 담고 있는 동안에만 가능합니다.
  */
-int world_load_level(World *w, const char *name, int carry_state);
+int world_load_level(World *w, const char *name, WorldEnter how);
+
+/**
+ * @brief What a player arriving at `name` for the first time would be carrying.
+ *
+ * ENGLISH
+ * -------
+ * @param[in]  name Stage to arrive at. Need not be reachable; see the return.
+ * @param[out] out  The belt to start there with. Untouched on failure.
+ * @return 1 if `name` was found on the chain from ::WORLD_START_LEVEL. 0 if the
+ *         chain ends, breaks or loops before reaching it.
+ *
+ * For "start from a stage you have cleared". Every stage before the target is
+ * walked -- ALL of them, not merely the one immediately before it -- and every
+ * weapon any of them hands out is granted, at half that weapon's belt capacity.
+ *
+ * Accumulating across the whole run is the point. Weapons are found once and
+ * kept for the rest of the episode, so a player who reaches stage four honestly
+ * is holding what stages one, two and three gave them. Reading only the
+ * previous stage would hand them whatever stage three happened to contain and
+ * silently take back the axe they picked up in stage one.
+ *
+ * The chain is the level text's own: each stage names its successor in `next`,
+ * and that is the only ordering this game has. No table of stages is kept
+ * beside it -- a second list of what follows what is a second thing to get
+ * wrong, and this one is already the thing the exit uses.
+ *
+ * Half of maximum rather than a full belt or the pickup amount: a full belt
+ * makes the granted start easier than the earned one, and reproducing what the
+ * player "would have had" exactly is not a thing the level text knows. Half is
+ * the honest approximation -- enough to fight with, not enough to skip the
+ * stage's own supply.
+ *
+ * @note Keycards are deliberately NOT granted. They are per-stage: ::door_reset
+ *       re-locks every door on load, and the cards for those doors are in the
+ *       stage the player is about to play.
+ * @note Loads each stage on the chain into a scratch ::Level to read its
+ *       entities. That is ~19KB of stack for the duration of the call, and the
+ *       call happens once when a stage is picked, never in a frame.
+ *
+ * 한국어
+ * ------
+ * @brief `name`에 처음 도착하는 플레이어가 들고 있을 것.
+ * @param[in]  name 도착할 스테이지. 도달 가능하지 않아도 됩니다. 반환값을 참조하십시오.
+ * @param[out] out  그곳에서 시작할 탄약대. 실패 시에는 건드리지 않습니다.
+ * @return `name`이 ::WORLD_START_LEVEL에서 이어지는 사슬 위에서 발견되면 1. 사슬이 그
+ *         전에 끝나거나 끊기거나 순환하면 0.
+ *
+ * "클리어한 스테이지부터 시작하기"를 위한 것입니다. 대상 이전의 *모든* 스테이지를
+ * 순회하며(직전 하나가 아니라 전부입니다), 그중 어느 것이든 내주는 무기를 그 무기의 최대
+ * 탄약의 절반과 함께 부여합니다.
+ *
+ * 플레이 전체에 걸쳐 누적하는 것이 핵심입니다. 무기는 한 번 획득하면 에피소드의 나머지 동안
+ * 유지되므로, 4스테이지에 정직하게 도달한 플레이어는 1·2·3스테이지가 준 것을 들고 있습니다.
+ * 직전 스테이지만 읽으면 3스테이지가 우연히 담고 있던 것만 주게 되고, 1스테이지에서 주운
+ * 도끼를 조용히 회수하게 됩니다.
+ *
+ * 사슬은 레벨 텍스트 자신의 것입니다. 각 스테이지가 `next`에 자신의 다음을 적으며, 이
+ * 게임이 가진 순서는 그것뿐입니다. 그 옆에 스테이지 표를 따로 두지 않습니다. 무엇 다음에
+ * 무엇이 오는지에 대한 두 번째 목록은 틀릴 수 있는 두 번째 대상이며, 이 사슬은 이미 출구가
+ * 사용하는 바로 그것입니다.
+ *
+ * 가득 채우거나 아이템 획득량이 아니라 최대치의 절반인 이유는, 가득 채우면 부여된 시작이
+ * 직접 얻어 낸 시작보다 쉬워지고, 플레이어가 "가지고 있었을" 양을 정확히 재현하는 것은 레벨
+ * 텍스트가 아는 일이 아니기 때문입니다. 절반은 정직한 근사입니다. 싸우기에는 충분하고
+ * 그 스테이지 자신의 보급을 건너뛰기에는 부족합니다.
+ *
+ * @note 키카드는 의도적으로 부여하지 *않습니다*. 키카드는 스테이지별입니다. ::door_reset이
+ *       로드 시 모든 문을 다시 잠그며, 그 문들의 카드는 플레이어가 이제부터 플레이할 스테이지
+ *       안에 있습니다.
+ * @note 사슬 위의 각 스테이지를 임시 ::Level로 로드하여 엔티티를 읽습니다. 호출이 지속되는
+ *       동안 약 19KB의 스택을 사용하며, 이 호출은 스테이지를 고를 때 한 번 일어나고 프레임
+ *       안에서는 결코 일어나지 않습니다.
+ */
+int world_progress_for_stage(const char *name, PlayerProgress *out);
+
+/**
+ * @brief Begins a run at `name`, as though the player had played their way there.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] w    The world.
+ * @param[in]     name Stage to start in.
+ * @return 1 on success. 0 if the stage is unreachable or does not load, in
+ *         which case nothing has changed.
+ *
+ * @note Seeds ::World::entry and then enters as a ::WORLD_ENTER_REPLAY of it,
+ *       which is what makes a restart of a stage started this way put the player
+ *       back with the same belt rather than the boot one.
+ *
+ * 한국어
+ * ------
+ * @brief 플레이어가 직접 플레이해 도달한 것처럼 `name`에서 플레이를 시작합니다.
+ * @param[in,out] w    월드.
+ * @param[in]     name 시작할 스테이지.
+ * @return 성공하면 1. 스테이지에 도달할 수 없거나 로드되지 않으면 0이며, 이 경우 아무것도
+ *         바뀌지 않습니다.
+ *
+ * @note ::World::entry를 심은 뒤 그것의 ::WORLD_ENTER_REPLAY로 진입합니다. 이 방식으로
+ *       시작한 스테이지를 재시작하면 부팅 구성이 아니라 같은 탄약대로 되돌아가는 이유가
+ *       그것입니다.
+ */
+int world_start_stage(World *w, const char *name);
 
 /**
  * @brief Reads out what the player would keep across a level boundary.

@@ -79,4 +79,30 @@ int audio_render(const char *name, short *out, int max_frames);
  */
 int audio_rate(void);
 
+#ifdef HOT_RELOAD
+/**
+ * @brief Decodes one character of the sampled-sound alphabet.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] c A character from a `w` data line.
+ * @return Its 0-63 value, or -1 if it is not in the alphabet.
+ * @note Exposed so a test can compare this against the alphabet bake.ps1
+ *       encodes with. That contract spans PowerShell and C, no compiler can
+ *       see it, and if the two ever disagree every sampled sound decodes to
+ *       noise -- which sounds like a bad recording rather than like a bug.
+ *
+ * 한국어
+ * ------
+ * @brief 샘플 사운드 알파벳의 한 문자를 해석합니다.
+ * @param[in] c `w` 데이터 줄의 문자.
+ * @return 0-63 값, 알파벳에 없으면 -1.
+ * @note bake.ps1이 인코딩에 쓰는 알파벳과 비교할 수 있도록 노출합니다. 이 계약은
+ *       PowerShell과 C에 걸쳐 있어 어떤 컴파일러도 볼 수 없으며, 둘이 어긋나면 모든
+ *       샘플 사운드가 잡음으로 디코딩됩니다. 그것은 버그가 아니라 녹음이 나쁜 것처럼
+ *       들립니다.
+ */
+int audio_b64val(char c);
+#endif
+
 #endif

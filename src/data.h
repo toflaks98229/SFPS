@@ -43,6 +43,33 @@ enum DataAsset {
  * @return 데이터 텍스트를 담고 있는 const char 포인터.
  */
 const char *data_text(int which);
+/**
+ * @brief The BUILT-IN text for an asset kind, ignoring any hot-reloaded file.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] which One of the DATA_* kinds.
+ * @return The string bake.ps1 embedded, never a file's contents.
+ * @note Exists for data that cannot come from a file even in a dev build.
+ *       The sampled sounds are the case: they are ADPCM produced from WAVs by
+ *       the bake, so assets/sounds.txt has only the synthesised recipes and a
+ *       hot-reload build that read only the file heard the recipes while the
+ *       shipped build played the samples. Two builds that sound different is
+ *       the kind of gap that gets found by shipping.
+ *
+ * 한국어
+ * ------
+ * @brief 핫 리로드된 파일을 무시하고 에셋 종류의 *내장* 텍스트를 반환합니다.
+ * @param[in] which DATA_* 종류 중 하나.
+ * @return bake.ps1이 삽입한 문자열이며 결코 파일의 내용이 아닙니다.
+ * @note 개발 빌드에서도 파일에서 올 수 없는 데이터를 위해 존재합니다. 샘플 사운드가 그
+ *       경우입니다. 베이크가 WAV로부터 만든 ADPCM이므로 assets/sounds.txt에는 합성
+ *       레시피만 있고, 파일만 읽는 핫 리로드 빌드는 레시피를 듣는 반면 배포 빌드는
+ *       샘플을 재생했습니다. 두 빌드가 다르게 들리는 것은 출시하고 나서야 발견되는
+ *       종류의 틈입니다.
+ */
+const char *data_baked(int which);
+
 
 /**
  * @brief 감시 중인 파일이 이전 호출 이후 변경되었는지 확인합니다.

@@ -1,8 +1,26 @@
 # SFPS sound library -- edit freely, the dev build reloads this on save.
 #
-# No samples are stored. A sound is a handful of integers describing how to
-# synthesise it, and the mixer builds the waveform as it plays. Same idea as
-# the texture recipes: keep the instructions, not the result.
+# A SOUND IS A RECIPE OR A SAMPLE, whichever exists for its name.
+#
+# What is here is the recipes: a handful of integers describing how to
+# synthesise a sound, which the mixer turns into a waveform as it plays. Same
+# idea as the texture recipes -- keep the instructions, not the result.
+#
+# Freedoom's recordings sit alongside them in assets/sounds/, and bake.ps1
+# turns those into 4-bit ADPCM and appends them AFTER these recipes, so a name
+# that has both ends up with the sample. Deleting the WAV brings the recipe
+# straight back, which is the same bargain the drawn sprites strike with the
+# generated creatures.
+#
+# Three of these have no sample and never will: Doom has no pump-action rack,
+# no grapple and no reel, so `pump`, `hook` and `hreel` are synthesised for
+# good. That is why both kinds exist rather than one replacing the other.
+#
+# 사운드는 이름에 대해 존재하는 쪽에 따라 레시피이거나 샘플입니다. 이 파일에 있는 것은
+# 레시피이며, Freedoom의 녹음은 assets/sounds/에 함께 있습니다. bake.ps1이 그것을 4비트
+# ADPCM으로 바꿔 이 레시피들 *뒤에* 붙이므로, 둘 다 가진 이름은 샘플을 갖게 됩니다.
+# WAV를 지우면 레시피가 곧바로 돌아옵니다. Doom에는 펌프 장전도, 갈고리도, 릴도 없으므로
+# `pump`, `hook`, `hreel`은 영영 합성으로 남습니다.
 #
 # Grammar (integers only, as everywhere else in this project):
 #   s <name>                              begin a sound

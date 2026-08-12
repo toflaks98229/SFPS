@@ -2011,6 +2011,76 @@ timer that was already there, for a **share** of its own cooldown — they span
 when it was ready to fire again. The shotgun's rack became a table column,
 because once every weapon set the timer, every weapon racked a shotgun.
 
+### Sound: Freedoom's recordings, at four bits a sample
+
+Sound was the last thing here still entirely synthesised, and importing real
+audio is a genuine departure from *keep the recipe, not the result*. So it pays
+its way:
+
+| | bytes | of the floppy |
+|---|---|---|
+| 8-bit raw at 11025 Hz, as text | 253,533 | 17% |
+| **4-bit IMA ADPCM** | **84,630** | 5.7% |
+
+Half the data for a decoder that costs about forty lines. And 11025 Hz is not a
+compromise — it is Doom's own rate and exactly a quarter of the mixer's 44100,
+so playback holds each source sample for four output samples with no resampler
+and no accumulating phase error. The nibbles pack three per two characters in
+the sprite codec's alphabet: 12 bits into 12, no waste.
+
+**A sound is a recipe or a sample**, whichever exists for its name, and both
+kinds live in one library. The bake emits samples *after* the recipes and
+`s <name>` became select-or-create, so a sample attaches to the sound the
+recipe already made — and deleting a WAV brings the recipe straight back. Three
+sounds have no sample and never will: Doom has no pump-action rack, no grapple
+and no reel, so `pump`, `hook` and `hreel` stay synthesised. That is the reason
+to keep both kinds rather than have one replace the other.
+
+Seventeen lumps serve twenty-one names — `impact`, `ehit`, `hbite` and `hbiteb`
+are all the same punch, encoded once. Resampling averages pairs rather than
+dropping every other sample, because dropping is a brick-wall decimation that
+folds everything above 5.5kHz back into the audible band and turns a shotgun
+into a hiss.
+
+Measured against the source WAVs by decoding the shipped header with a third
+implementation: **RMS error 0.3%–5.2%** of full scale, with the peaks being
+mid-sound transient smear rather than the codec's start-up ramp — the first 32
+samples carry only 0.1%–2.4% of the total error. That is what 4-bit ADPCM costs
+on percussive content.
+
+**The round-trip guard paid for itself on its first run.** `$codes` was a
+`byte[]`, and `-shl` keeps the type of its *left* operand, so a byte shifted up
+by 8 is 0 and every packed pair lost its first nibble. That is the **third**
+time this project has been bitten by that rule, after the sprite palette and
+the sprite packer — so the array's type is the fix, not a cast at the shift.
+The IMA tables are `$AdpcmStep` and `$AdpcmNext` for a related reason:
+PowerShell variable names are case-insensitive, and `$step = $STEP[$i]`
+overwrites the table with its own first lookup.
+
+### Two builds that sounded different
+
+Recipes hot-reload from `assets/sounds.txt`. Samples cannot — they are ADPCM
+the bake produces from WAVs, and the file has none. So a dev build read only
+the file and heard the *recipes* while the shipped build played the *samples*:
+`sndtest` rendered `shot` at 319ms where the game played 986.
+
+That is worse than a bug in either build, because it means the test was
+exercising something the player never gets. `parse_sounds` makes two passes
+now, the second over the baked text with layers disabled, so both builds carry
+the same audio.
+
+The licence guard had the same shape of gap: it watched `assets/sprites/` only,
+and the notice is owed for the audio on identical terms. A check written
+against the example rather than against the rule goes quiet exactly when the
+example stops being the whole of it.
+
+`sndtest` reads bake's alphabet and compares it against `audio.c`'s, as
+`sprtest` already does for sprites — the contract spans PowerShell and C, no
+compiler can see it, and a divergence makes every sampled sound decode to
+noise, which sounds like a bad recording rather than a bug. Verified by
+changing one character and watching it report `1 of 64 characters decode to the
+wrong value (first at 62, '+')`.
+
 ### Which frame is the idle comes from Doom's state table, not from the art
 
 Two weapons were animating with the wrong frames, and both shipped, because I

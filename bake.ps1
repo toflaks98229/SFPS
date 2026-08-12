@@ -113,6 +113,175 @@ function ConvertTo-Minified([string]$text) {
     return $out.ToString().Trim()
 }
 
+# WAV -> 4-bit IMA ADPCM, in the same 6-bit alphabet the sprites use.
+#
+# Sound was the last thing in this project still entirely synthesised, and
+# importing real audio is a genuine departure from "keep the recipe, not the
+# result" -- so it pays its way. Raw 8-bit at 11025Hz would be 1.33 characters
+# per sample and 253KB of a 1.44MB budget; ADPCM is 4 bits, which is exactly
+# two thirds of a character, and 78KB. Half the data for a codec the decoder
+# spends about forty lines on.
+#
+# 11025Hz is not a compromise, it is Doom's own rate, and the mixer runs at
+# 44100 -- exactly four times it. So playback steps one source sample every
+# four output samples with no resampler and no accumulating phase error.
+#
+# The nibbles pack three per two characters, which is the sprite codec's `p`
+# opcode arithmetic: 12 bits into 12 bits, no waste.
+#
+# A sound is a RECIPE OR A SAMPLE, whichever exists, and both kinds live in one
+# library. `pump`, `hook` and `hreel` have no Doom equivalent -- there is no
+# pump-action rack, no grapple and no reel in Doom -- so they keep the
+# synthesised layers in assets/sounds.txt, and nothing had to choose between
+# the two approaches wholesale.
+#
+# 사운드는 이 프로젝트에서 마지막까지 전부 합성으로 남아 있던 것이며, 실제 오디오를
+# 들여오는 일은 "결과가 아니라 레시피를 보관한다"는 원칙에서 진짜로 벗어나는 일입니다.
+# 그래서 값을 치릅니다. 11025Hz 8비트 원본은 샘플당 1.33자, 1.44MB 예산 중 253KB이고,
+# ADPCM은 4비트이니 정확히 3분의 2자, 78KB입니다. 디코더 마흔 줄로 데이터가 절반이 됩니다.
+#
+# 11025Hz는 타협이 아니라 Doom 자신의 레이트이며, 믹서는 그 정확히 네 배인 44100으로
+# 돕니다. 따라서 재생은 출력 네 샘플마다 원본 한 샘플을 내보내며 리샘플러도, 누적되는
+# 위상 오차도 없습니다.
+
+# The IMA tables. Named $AdpcmStep and $AdpcmNext rather than $STEP and $INDEX
+# because PowerShell variable names are CASE-INSENSITIVE, so `$step = $STEP[$i]`
+# overwrites the table with its own first lookup -- the identical bug that made
+# every packed sprite decode to the character '0' for as long as one existed.
+# Twice is a pattern: a lookup table here never shares a name with the local
+# that reads it, whatever the case.
+# 테이블 이름이 $STEP/$INDEX가 아닌 이유는 PowerShell의 변수명이 *대소문자를 구분하지
+# 않기* 때문입니다. `$step = $STEP[$i]`는 테이블을 자기 자신의 첫 조회 결과로 덮어쓰며,
+# 이는 패킹된 스프라이트가 존재하는 내내 모두 문자 '0'으로 디코딩되게 만든 바로 그
+# 버그입니다. 두 번이면 패턴이므로, 조회 테이블은 그것을 읽는 지역 변수와 대소문자를
+# 불문하고 이름을 공유하지 않습니다.
+$AdpcmStep = @(
+    7,8,9,10,11,12,13,14,16,17,19,21,23,25,28,31,34,37,41,45,50,55,60,66,73,
+    80,88,97,107,118,130,143,157,173,190,209,230,253,279,307,337,371,408,449,
+    494,544,598,658,724,796,876,963,1060,1166,1282,1411,1552,1707,1878,2066,
+    2272,2499,2749,3024,3327,3660,4026,4428,4871,5358,5894,6484,7132,7845,
+    8630,9493,10442,11487,12635,13899,15289,16818,18500,20350,22385,24623,
+    27086,29794,32767)
+$AdpcmNext = @(-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8)
+
+# 8-bit mono PCM out of a RIFF file. Only the shape Doom's lumps come in is
+# handled, and anything else is an error rather than a guess -- a stereo or
+# 16-bit file silently misread is a sound that plays as static.
+function Get-WavSamples([string]$path) {
+    $b = [System.IO.File]::ReadAllBytes($path)
+    if ($b.Length -lt 44 -or
+        [System.Text.Encoding]::ASCII.GetString($b, 0, 4) -ne 'RIFF' -or
+        [System.Text.Encoding]::ASCII.GetString($b, 8, 4) -ne 'WAVE') {
+        throw "$path is not a RIFF/WAVE file"
+    }
+    $i = 12
+    $channels = 0; $rate = 0; $bits = 0
+    $data = $null
+    while ($i + 8 -le $b.Length) {
+        $id  = [System.Text.Encoding]::ASCII.GetString($b, $i, 4)
+        $len = [BitConverter]::ToInt32($b, $i + 4)
+        $body = $i + 8
+        if ($id -eq 'fmt ') {
+            $channels = [BitConverter]::ToInt16($b, $body + 2)
+            $rate     = [BitConverter]::ToInt32($b, $body + 4)
+            $bits     = [BitConverter]::ToInt16($b, $body + 14)
+        } elseif ($id -eq 'data') {
+            $data = New-Object byte[] $len
+            [Array]::Copy($b, $body, $data, 0, $len)
+        }
+        $i = $body + $len + ($len -band 1)
+    }
+    if ($null -eq $data) { throw "$path has no data chunk" }
+    if ($channels -ne 1 -or $bits -ne 8) {
+        throw ("$path is ${channels}ch/${bits}-bit; this bake only handles the " +
+               "8-bit mono Doom lumps that assets/sounds/import-freedoom.py writes")
+    }
+    return [pscustomobject]@{ Rate = $rate; Data = $data }
+}
+
+function ConvertTo-Adpcm([byte[]]$pcm8) {
+    $alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-'
+    $n = $pcm8.Length
+    # int[], not byte[]. -shl keeps the type of its LEFT operand, so a byte
+    # code shifted up by 8 is 0 and the packed pair loses its first nibble --
+    # the third time this project has been bitten by that rule, after the
+    # sprite palette and the sprite packer. The array's type is the fix
+    # because a cast at the shift is something to remember.
+    # byte[]가 아니라 int[]입니다. -shl은 *왼쪽* 피연산자의 타입을 유지하므로 byte 코드를
+    # 8비트 올리면 0이 되고 묶인 쌍은 첫 니블을 잃습니다. 스프라이트 팔레트와 패커에 이어
+    # 이 규칙에 당한 세 번째입니다. 시프트 지점의 캐스팅은 기억해야 하는 것이므로 배열의
+    # 타입 자체를 고칩니다.
+    $codes = New-Object int[] $n
+
+    $pred = 0; $ix = 0
+    for ($i = 0; $i -lt $n; $i++) {
+        # 8-bit unsigned centres on 128; the codec works in signed 16.
+        $target = ($pcm8[$i] - 128) * 256
+        $st = $AdpcmStep[$ix]
+        $diff = $target - $pred
+        $code = 0
+        if ($diff -lt 0) { $code = 8; $diff = -$diff }
+        $t = $st
+        if ($diff -ge $t) { $code = $code -bor 4; $diff -= $t }
+        $t = $t -shr 1
+        if ($diff -ge $t) { $code = $code -bor 2; $diff -= $t }
+        $t = $t -shr 1
+        if ($diff -ge $t) { $code = $code -bor 1 }
+
+        # Reconstruct exactly as the decoder will, and track THAT rather than
+        # the input: an open-loop encoder drifts away from the decoder's state
+        # and the error compounds over a whole second of audio.
+        # 입력이 아니라 디코더가 재구성할 값을 따라갑니다. 개루프 인코더는 디코더의 상태
+        # 에서 멀어지고 그 오차는 1초짜리 오디오 전체에 걸쳐 누적됩니다.
+        $d = $st -shr 3
+        if ($code -band 4) { $d += $st }
+        if ($code -band 2) { $d += $st -shr 1 }
+        if ($code -band 1) { $d += $st -shr 2 }
+        if ($code -band 8) { $pred -= $d } else { $pred += $d }
+        if ($pred -gt 32767) { $pred = 32767 }
+        elseif ($pred -lt -32768) { $pred = -32768 }
+        $ix += $AdpcmNext[$code]
+        if ($ix -lt 0) { $ix = 0 } elseif ($ix -gt 88) { $ix = 88 }
+
+        $codes[$i] = $code
+    }
+
+    # Three nibbles per two characters, the sprite codec's packing.
+    $out = New-Object System.Text.StringBuilder
+    for ($i = 0; $i -lt $n; $i += 3) {
+        $c0 = $codes[$i]
+        $c1 = if ($i + 1 -lt $n) { $codes[$i + 1] } else { 0 }
+        $c2 = if ($i + 2 -lt $n) { $codes[$i + 2] } else { 0 }
+        $v = ($c0 -shl 8) -bor ($c1 -shl 4) -bor $c2
+        [void]$out.Append($alphabet[$v -shr 6]).Append($alphabet[$v -band 63])
+    }
+
+    # DECODE WHAT WAS JUST ENCODED. The C decoder is a separate implementation
+    # in a separate language and they only meet in the built game, so the one
+    # direction nothing else checks is checked here -- the same round trip the
+    # sprites get, and for the same reason.
+    # 방금 인코딩한 것을 되돌려 디코딩합니다. C 디코더는 다른 언어의 별개 구현이며 둘은
+    # 빌드된 게임에서만 만나므로, 다른 무엇도 검사하지 않는 방향을 이곳에서 검사합니다.
+    $s2 = $out.ToString()
+    $back = New-Object int[] $n
+    $k = 0
+    for ($i = 0; $i -lt $s2.Length - 1; $i += 2) {
+        $v = $alphabet.IndexOf($s2[$i]) * 64 + $alphabet.IndexOf($s2[$i + 1])
+        foreach ($sh in 8, 4, 0) {
+            if ($k -lt $n) { $back[$k++] = ($v -shr $sh) -band 15 }
+        }
+    }
+    for ($i = 0; $i -lt $n; $i++) {
+        if ($back[$i] -ne $codes[$i]) {
+            throw ("ADPCM packing does not round-trip: nibble $i went in as " +
+                   "$($codes[$i]) and came back as $($back[$i]).")
+        }
+    }
+
+    return $s2
+}
+
+
 $sb = New-Object System.Text.StringBuilder
 [void]$sb.AppendLine('/* GENERATED by bake.ps1 from the assets directory -- do not edit.')
 [void]$sb.AppendLine('   Edit the .txt files and rebuild; a HOT_RELOAD build reads them live. */')
@@ -121,12 +290,92 @@ $sb = New-Object System.Text.StringBuilder
 [void]$sb.AppendLine()
 
 $report = @()
+
+# Sampled sounds, appended to the synthesised library.
+#
+# Emitted AFTER the recipes so a name that has both ends up with the sample:
+# the loader takes `s <name>` as "select or create", and a `w` line attaches
+# audio to whichever sound that is. So importing a sample for `shot` overrides
+# the shotgun recipe without deleting it, and deleting the WAV brings the
+# recipe straight back -- the same bargain the drawn sprites strike with the
+# generated creatures.
+#
+# 합성 라이브러리 뒤에 붙입니다. 그래야 둘 다 가진 이름은 샘플을 갖게 됩니다. 로더는
+# `s <name>`을 "선택하거나 생성"으로 취급하고 `w` 줄이 그 사운드에 오디오를 붙입니다.
+# 따라서 `shot`의 샘플을 들여와도 샷건 레시피는 지워지지 않고, WAV를 지우면 레시피가
+# 곧바로 돌아옵니다. 그려진 스프라이트가 생성된 생물과 맺는 것과 같은 거래입니다.
+$soundDir = Join-Path $root 'assets\sounds'
+$sampleText = ''
+$mapPath = Join-Path $soundDir 'sounds.map'
+if ((Test-Path $soundDir) -and (Test-Path $mapPath)) {
+    # One lump can serve several of our sounds -- `impact`, `ehit`, `hbite` and
+    # `hbiteb` are all the same punch -- so encode each WAV once and let the
+    # names share it. Encoding per name would carry the same audio four times.
+    # 하나의 럼프가 우리 사운드 여럿을 담당할 수 있으므로 WAV마다 한 번만 인코딩하고
+    # 이름들이 그것을 공유합니다. 이름마다 인코딩하면 같은 오디오를 네 번 나릅니다.
+    $encoded = @{}
+    $sampleCount = @{}
+    foreach ($wav in (Get-ChildItem $soundDir -Filter *.wav | Sort-Object Name)) {
+        $lump = [System.IO.Path]::GetFileNameWithoutExtension($wav.Name)
+        $w = Get-WavSamples $wav.FullName
+        if ($w.Rate -ne 11025) {
+            throw ("$($wav.Name) is $($w.Rate)Hz. The mixer runs at 44100 and " +
+                   "steps one source sample every four, so 11025 is the only rate " +
+                   "that needs no resampler -- re-run assets/sounds/import-freedoom.py.")
+        }
+        $encoded[$lump]     = ConvertTo-Adpcm $w.Data
+        $sampleCount[$lump] = $w.Data.Length
+    }
+
+    $used = @{}
+    foreach ($line in (Get-Content $mapPath)) {
+        $line = $line.Trim()
+        if (-not $line -or $line.StartsWith('#')) { continue }
+        $t = $line -split '\s+'
+        if ($t.Count -lt 2) { continue }
+        $name = $t[0]; $lump = $t[1]
+        if (-not $encoded.ContainsKey($lump)) {
+            throw ("sounds.map points '$name' at '$lump', which has no WAV in " +
+                   "assets/sounds. Re-run assets/sounds/import-freedoom.py.")
+        }
+        $sampleText += "s $name`nw $($sampleCount[$lump]) $($encoded[$lump])`n"
+        $used[$lump] = $true
+    }
+
+    foreach ($lump in $encoded.Keys) {
+        if (-not $used.ContainsKey($lump)) {
+            Write-Host ("  note: assets/sounds/$lump.wav is not named by " +
+                        "sounds.map, so nothing plays it") -ForegroundColor Yellow
+        }
+    }
+
+    if ($sampleText) {
+        $report += [pscustomobject]@{
+            Asset  = 'sounds\*.wav'
+            Source = ($sampleCount.Values | Measure-Object -Sum).Sum
+            Baked  = $sampleText.Length
+            Saved  = ("{0} lumps, {1} names, 4-bit ADPCM at 11025Hz" -f
+                      $encoded.Count, $used.Count)
+        }
+    }
+}
+
+
 foreach ($s in $sets) {
     $path = Join-Path $root $s.File
     if (-not (Test-Path $path)) { throw "Missing asset file: $path" }
 
     $raw  = Get-Content $path -Raw
     $mini = ConvertTo-Minified $raw
+    # The recipe's own size, before the samples are appended: they are reported
+    # on their own row, and counting them twice would put 84KB into the total
+    # that is not there.
+    # 샘플을 붙이기 전 레시피 자체의 크기입니다. 샘플은 자기 행에서 보고되며, 두 번 세면
+    # 실제로는 없는 84KB가 합계에 들어갑니다.
+    $recipeLen = $mini.Length
+    if ($s.Name -eq 'ASSET_SOUNDS' -and $sampleText) {
+        $mini = $mini + ' ' + (ConvertTo-Minified $sampleText)
+    }
 
     # No escaping table needed beyond these two: the grammar is integers and
     # bare words, so a quote or backslash would be a mistake anyway.
@@ -146,8 +395,8 @@ foreach ($s in $sets) {
     $report += [pscustomobject]@{
         Asset = Split-Path $s.File -Leaf
         Source = $raw.Length
-        Baked  = $mini.Length
-        Saved  = "$([math]::Round((1 - $mini.Length / $raw.Length) * 100))%"
+        Baked  = $recipeLen
+        Saved  = "$([math]::Round((1 - $recipeLen / $raw.Length) * 100))%"
     }
 }
 
@@ -654,13 +903,28 @@ if ($escMesh.Length -eq 0) {
 # 달라지는 것은 배포가 더 이상 허용되지 않는다는 사실뿐입니다. 바로 이런 종류의 결함을 이
 # 프로젝트는 기억에 맡기지 않으므로, 빌드가 이를 단언합니다. 고지 없는 아트는 나중에 발견될
 # 라이선스 위반이 아니라 실패한 빌드입니다.
-$spriteDirCheck = Join-Path $root 'assets\sprites'
-if (Test-Path $spriteDirCheck) {
-    $art = @(Get-ChildItem $spriteDirCheck -Filter *.png -ErrorAction SilentlyContinue)
-    if ($art.Count -gt 0) {
+# ANY Freedoom asset triggers this, not just the artwork. The notice is owed
+# for the audio on exactly the same terms, and a guard that only watches
+# assets\sprites\ would have gone quiet the moment the art was the only thing
+# it covered -- which is the failure mode of writing a check against the
+# example rather than against the rule.
+# 아트뿐 아니라 *어떤* Freedoom 에셋이든 이 검사를 발동시킵니다. 고지는 오디오에 대해서도
+# 정확히 같은 조건으로 요구되며, assets\sprites\만 지켜보는 가드는 아트가 그것이 다루는
+# 유일한 대상이 아니게 되는 순간 조용해졌을 것입니다. 규칙이 아니라 사례에 대고 검사를
+# 쓰는 일의 전형적인 실패입니다.
+$freedoomAssets = @()
+foreach ($d in @('assets\sprites', 'assets\sounds')) {
+    $dir = Join-Path $root $d
+    if (Test-Path $dir) {
+        $freedoomAssets += @(Get-ChildItem $dir -Include *.png, *.wav -File `
+                             -ErrorAction SilentlyContinue |
+                             Where-Object { $_.Name -notlike '_*' })
+    }
+}
+if ($freedoomAssets.Count -gt 0) {
         $licPath = Join-Path $root 'docs\LICENSE-Freedoom.txt'
         if (-not (Test-Path $licPath)) {
-            throw ("Freedoom artwork is present but docs/LICENSE-Freedoom.txt is " +
+            throw ("Freedoom assets are present but docs/LICENSE-Freedoom.txt is " +
                    "missing. The licence text must be kept with the project.")
         }
 
@@ -762,7 +1026,6 @@ if (Test-Path $spriteDirCheck) {
                    "The BSD licence requires this text to be reproduced with the " +
                    "binary, and this game IS the binary -- see docs/LICENSE-Freedoom.txt.")
         }
-    }
 }
 
 # Every .png under assets\sprites\ becomes one entry in a single sprite

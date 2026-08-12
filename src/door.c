@@ -201,7 +201,23 @@ int door_update(Level *l, v3 player_pos, int keys, float dt) {
 
         if (asked && !st->opening && st->t < 1.0f) {
             st->opening = 1;
-            audio_play("pump", 70);
+            /* Its own sound now. This was the shotgun's rack, because that was
+               the nearest thing the synthesised library had and a door has to
+               make SOME noise -- a stand-in that stopped being one the moment
+               there was a door sound to play.
+               이제 자기 사운드를 갖습니다. 이전에는 샷건의 장전음이었는데, 합성
+               라이브러리에 있던 것 중 가장 가까웠고 문은 *어떤* 소리든 내야 했기
+               때문입니다. 문 사운드가 생긴 순간 그것은 대역이기를 멈췄습니다. */
+            /* A tagged door was opened by a switch, so the clack comes
+               with it. Played on the door's opening EDGE rather than at the
+               switch, because the switch handler runs every frame the player
+               stands on it and would machine-gun the sound; this fires once
+               per activation and already knows which case it is.
+               태그가 있는 문은 스위치가 연 것이므로 그 소리가 함께 납니다. 스위치가
+               아니라 문이 *열리기 시작하는 경계*에서 재생하는 이유는, 스위치 처리기가
+               플레이어가 밟고 있는 매 프레임 실행되어 소리를 연발하기 때문입니다. */
+            if (d->tag > 0) audio_play("switch", 80);
+            audio_play("door", 75);
         }
         if (asked) st->wait = DOOR_OPEN_TIME;
 

@@ -48,6 +48,17 @@ typedef struct {
     char  name[NAME_LEN];        /**< 사운드의 이름 */
     Layer layers[MAX_LAYERS];    /**< 이 사운드를 구성하는 레이어들 */
     int   n;                     /**< 레이어의 수 */
+    /* A RECIPE OR A SAMPLE, whichever the library gave this name.
+       pcm_n > 0 means Freedoom recorded this one and the layers are ignored;
+       the layers stay because deleting the WAV brings the recipe straight
+       back, which is the same bargain the drawn sprites strike with the
+       generated creatures. `pump`, `hook` and `hreel` have no Doom equivalent
+       and are recipes for good.
+       레시피이거나 샘플입니다. pcm_n > 0이면 Freedoom이 녹음한 것이고 레이어는
+       무시됩니다. 레이어를 남겨 두는 이유는 WAV를 지우면 레시피가 곧바로 돌아오기
+       때문이며, 그려진 스프라이트가 생성된 생물과 맺는 것과 같은 거래입니다. */
+    int   pcm_at;                /**< g_pcm 내의 시작 위치. / offset into g_pcm */
+    int   pcm_n;                 /**< 샘플 수. 0이면 레시피입니다. / samples; 0 = recipe */
 } Sound;
 
 /**
@@ -112,6 +123,7 @@ static volatile LONG g_running;
 
 /* --- 정적 함수 선언 --- */
 static void parse_sounds(void);
+static void parse_text(const char *text, int want_layers);
 static const Sound *find_sound(const char *name);
 static float frand(unsigned *s);
 static float osc(int wave, float phase, float *hold, unsigned *rng);
@@ -121,6 +133,96 @@ static void mix(short *out, int frames);
 static DWORD WINAPI mixer_thread(LPVOID param);
 
 /* --- 정적 함수 구현 --- */
+
+/* --- Sampled sounds / 샘플 사운드 -----------------------------------------
+ *
+ * 4-bit IMA ADPCM at 11025Hz, decoded once at load into one shared buffer.
+ * Decoding per voice instead would redo the same work for every shot fired,
+ * and ADPCM is inherently serial -- you cannot start in the middle, because
+ * each sample is a delta from the one before it. That also means a voice
+ * cannot seek, which is fine: these are one-shot effects.
+ *
+ * 11025 is a quarter of the mixer's 44100, so playback holds each source
+ * sample for four output samples. No resampler, no accumulating phase error,
+ * and the ratio is Doom's own rather than a number chosen here.
+ *
+ * 4비트 IMA ADPCM(11025Hz)이며, 로드 시 한 번 디코딩해 공유 버퍼에 넣습니다. 보이스마다
+ * 디코딩하면 발사할 때마다 같은 일을 되풀이하게 되고, ADPCM은 본질적으로 순차적이라
+ * 중간에서 시작할 수 없습니다. 각 샘플이 앞 샘플로부터의 차이이기 때문입니다.
+ * 11025는 믹서의 44100의 정확히 4분의 1이므로 재생은 원본 샘플 하나를 출력 네 샘플 동안
+ * 유지합니다. 리샘플러도, 누적되는 위상 오차도 없습니다. */
+
+#define PCM_MAX     220000   /**< 디코딩된 샘플의 상한. / decoded sample ceiling */
+#define PCM_STEP    (RATE / 11025)  /**< 출력 샘플 당 원본 샘플. / 4 */
+
+static short g_pcm[PCM_MAX];
+static int   g_pcm_used;
+
+/* The IMA tables, shared by encoder and decoder. bake.ps1 holds the only other
+   copy, and sndtest compares the two by decoding text the script produced.
+   IMA 테이블입니다. 다른 사본은 bake.ps1에만 있으며, sndtest가 그 스크립트가 만든
+   텍스트를 디코딩해 둘을 비교합니다. */
+static const short PCM_STEP_TAB[89] = {
+    7,8,9,10,11,12,13,14,16,17,19,21,23,25,28,31,34,37,41,45,50,55,60,66,73,
+    80,88,97,107,118,130,143,157,173,190,209,230,253,279,307,337,371,408,449,
+    494,544,598,658,724,796,876,963,1060,1166,1282,1411,1552,1707,1878,2066,
+    2272,2499,2749,3024,3327,3660,4026,4428,4871,5358,5894,6484,7132,7845,
+    8630,9493,10442,11487,12635,13899,15289,16818,18500,20350,22385,24623,
+    27086,29794,32767
+};
+static const signed char PCM_NEXT_TAB[16] = {
+    -1,-1,-1,-1, 2, 4, 6, 8, -1,-1,-1,-1, 2, 4, 6, 8
+};
+
+/* The same 64-character alphabet the sprite codec uses; sndtest asserts that
+   this and bake.ps1's agree, because nothing else can. */
+static int pcm_b64(char c) {
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    if (c == '+') return 62;
+    if (c == '-') return 63;
+    return -1;
+}
+
+#ifdef HOT_RELOAD
+int audio_b64val(char c) { return pcm_b64(c); }
+#endif
+
+/* Decode `n` samples of packed ADPCM into g_pcm. Returns how many landed,
+   which is short of `n` only when the buffer is full or the text ran out --
+   both reported, neither fatal, because a truncated sound is better than a
+   silent game. */
+static int pcm_decode(const char *data, int len, int n, int at) {
+    int pred = 0, ix = 0, got = 0;
+
+    for (int i = 0; i + 1 < len && got < n; i += 2) {
+        int hi = pcm_b64(data[i]), lo = pcm_b64(data[i + 1]);
+        if (hi < 0 || lo < 0) break;
+        int v = (hi << 6) | lo;                    /* three nibbles, 12 bits */
+
+        for (int k = 8; k >= 0 && got < n; k -= 4) {
+            int code = (v >> k) & 15;
+            int st   = PCM_STEP_TAB[ix];
+
+            int d = st >> 3;
+            if (code & 4) d += st;
+            if (code & 2) d += st >> 1;
+            if (code & 1) d += st >> 2;
+            pred += (code & 8) ? -d : d;
+            if (pred >  32767) pred =  32767;
+            if (pred < -32768) pred = -32768;
+
+            ix += PCM_NEXT_TAB[code];
+            if (ix < 0)  ix = 0;
+            if (ix > 88) ix = 88;
+
+            if (at + got < PCM_MAX) g_pcm[at + got] = (short)pred;
+            got++;
+        }
+    }
+    return got;
+}
 
 /**
  * @brief assets/sounds.txt에서 사운드 레시피를 파싱합니다.
@@ -153,14 +255,48 @@ static DWORD WINAPI mixer_thread(LPVOID param);
  *       읽기였습니다.
  */
 static void parse_sounds(void) {
-    const char *p = data_text(DATA_SOUNDS);
+    /* Recipes come from data_text, which a dev build points at the file so
+       they can be tuned live. Samples come from the BAKED text either way:
+       they are ADPCM the bake produced from WAVs, so the file has none, and
+       reading only the file made a hot-reload build hear recipes where the
+       shipped build played samples.
+       Parsed second so its `s <name>` lines reopen the recipes rather than
+       replacing them -- select-or-create is what lets a sample attach to the
+       sound the recipe already made.
+       레시피는 data_text에서 옵니다. 개발 빌드는 이를 파일로 향하게 해 실시간 조정을
+       가능하게 합니다. 샘플은 어느 쪽이든 *베이크된* 텍스트에서 옵니다. 베이크가 WAV로
+       만든 ADPCM이라 파일에는 없으며, 파일만 읽으면 핫 리로드 빌드는 레시피를, 배포
+       빌드는 샘플을 재생하게 됩니다. */
+    parse_text(data_text(DATA_SOUNDS), 1);
+    if (data_text(DATA_SOUNDS) != data_baked(DATA_SOUNDS))
+        parse_text(data_baked(DATA_SOUNDS), 0);
+    g_parsed = 1;
+}
+
+/* want_layers is 0 for the second pass over the baked text: the recipes there
+   are the same ones already parsed, and appending their layers again would
+   overflow MAX_LAYERS and report a cap that was never really reached.
+   두 번째 패스에서는 want_layers가 0입니다. 그곳의 레시피는 이미 파싱한 것과 같으며,
+   레이어를 다시 덧붙이면 MAX_LAYERS를 넘겨 실제로는 닿은 적 없는 한계를 보고합니다. */
+static void parse_text(const char *text, int want_layers) {
+    const char *p = text;
     Sound *cur = 0;
 
-    /* Drop every voice before the recipes they point into are rewritten.
-       보이스가 가리키는 레시피가 재작성되기 전에 모든 보이스를 정지시킵니다. */
-    for (int i = 0; i < MAX_VOICES; i++) g_voices[i].snd = 0;
-
-    g_n_sounds = 0;
+    /* Only the first pass clears. The second exists to ATTACH samples to the
+       sounds the first made, so clearing again would throw them away and then
+       recreate them from the baked recipes -- which works, but silently makes
+       the file's edits irrelevant in the build that exists to honour them.
+       첫 번째 패스만 초기화합니다. 두 번째 패스는 첫 번째가 만든 사운드에 샘플을
+       *붙이기* 위해 존재하므로, 다시 초기화하면 그것을 버리고 베이크된 레시피로부터
+       다시 만들게 됩니다. 동작은 하지만, 파일의 수정을 존중하려고 존재하는 빌드에서
+       그 수정을 조용히 무의미하게 만듭니다. */
+    if (want_layers) {
+        /* Drop every voice before the recipes they point into are rewritten.
+           보이스가 가리키는 레시피가 재작성되기 전에 모든 보이스를 정지시킵니다. */
+        for (int i = 0; i < MAX_VOICES; i++) g_voices[i].snd = 0;
+        g_n_sounds = 0;
+        g_pcm_used = 0;
+    }
 
     for (;;) {
         int len;
@@ -182,19 +318,58 @@ static void parse_sounds(void) {
                용량 한계가 원인이라는 단서를 얻을 수 없어 보고합니다. 이 위치에서의
                보고는 안전합니다. parse_sounds는 오직 게임 스레드에서만 실행되며 믹서
                스레드에서는 결코 실행되지 않습니다(스레딩 계약 참조). */
-            cur = (g_n_sounds < MAX_SOUNDS) ? &g_sounds[g_n_sounds++] : 0;
-            if (!cur) DIAG(DIAG_SOUND_CAP);
-            if (cur) {
-                int i = 0;
-                for (; i < len && i < NAME_LEN - 1; i++) cur->name[i] = nm[i];
-                cur->name[i] = 0;
-                cur->n = 0;
+            /* SELECT OR CREATE. A name that already has a recipe is
+               reopened rather than duplicated, which is how a sampled sound
+               attaches itself to the entry the recipe made: bake emits the
+               samples after the recipes, so `s shot` here finds the shotgun
+               recipe and the `w` line below gives it audio.
+               선택하거나 생성합니다. 이미 레시피를 가진 이름은 복제되지 않고 다시
+               열리며, 그것이 샘플 사운드가 레시피가 만든 항목에 붙는 방법입니다. */
+            cur = 0;
+            for (int i = 0; i < g_n_sounds; i++) {
+                int j = 0;
+                while (j < len && g_sounds[i].name[j] &&
+                       g_sounds[i].name[j] == nm[j]) j++;
+                if (j == len && !g_sounds[i].name[j]) { cur = &g_sounds[i]; break; }
+            }
+            if (!cur) {
+                cur = (g_n_sounds < MAX_SOUNDS) ? &g_sounds[g_n_sounds++] : 0;
+                if (!cur) DIAG(DIAG_SOUND_CAP);
+                if (cur) {
+                    int i = 0;
+                    for (; i < len && i < NAME_LEN - 1; i++) cur->name[i] = nm[i];
+                    cur->name[i] = 0;
+                    cur->n = 0;
+                    cur->pcm_at = cur->pcm_n = 0;
+                }
+            }
+            continue;
+        }
+
+        /* w <samples> <packed ADPCM> -- see pcm_decode. */
+        if (txt_is(t, len, "w")) {
+            int n = 0, ok = 1;
+            p = txt_read_int(p, &n, &ok);
+            const char *d = txt_token(p, &len);
+            if (!ok || !d) break;
+            p = d + len;
+            if (cur && n > 0) {
+                int got = pcm_decode(d, len, n, g_pcm_used);
+                if (got < n) DIAG(DIAG_SOUND_CAP);
+                cur->pcm_at = g_pcm_used;
+                cur->pcm_n  = got;
+                g_pcm_used += got;
             }
             continue;
         }
 
         if (txt_is(t, len, "l")) {
             int v[7] = {0}, ok = 1;
+            if (!want_layers) {
+                /* Consume it so the stream stays in sync, then discard. */
+                for (int i = 0; i < 7 && ok; i++) p = txt_read_int(p, &v[i], &ok);
+                continue;
+            }
             for (int i = 0; i < 7 && ok; i++) p = txt_read_int(p, &v[i], &ok);
             if (ok && cur && cur->n >= MAX_LAYERS) DIAG(DIAG_SOUND_CAP);
             if (ok && cur && cur->n < MAX_LAYERS) {
@@ -207,7 +382,6 @@ static void parse_sounds(void) {
             continue;
         }
     }
-    g_parsed = 1;
 }
 
 /**
@@ -303,6 +477,25 @@ static float envelope(const Layer *L, float t_ms) {
  */
 static int render_voice(Voice *V, short *out, int frames) {
     int still_alive = 0;
+
+    /* A SAMPLE PLAYS ITSELF; the oscillators below are for recipes only.
+       One source sample every PCM_STEP output samples, held rather than
+       interpolated: at 11025 into 44100 the alternative is a lowpass nobody
+       asked for, and Doom's own sounds were authored to be heard this way.
+       샘플은 스스로 재생됩니다. 아래의 오실레이터는 레시피 전용입니다. 출력
+       PCM_STEP 샘플마다 원본 한 샘플을 내보내며, 보간하지 않고 유지합니다. */
+    if (V->snd->pcm_n > 0) {
+        for (int i = 0; i < frames; i++) {
+            int idx = (V->pos + i) / PCM_STEP;
+            if (idx >= V->snd->pcm_n) { V->pos += i; return 0; }
+            int s = out[i] + (int)(g_pcm[V->snd->pcm_at + idx] *
+                                   (V->gain / 100.0f) * 0.55f);
+            out[i] = (short)(s >  32767 ?  32767 :
+                             s < -32768 ? -32768 : s);
+        }
+        V->pos += frames;
+        return 1;
+    }
 
     for (int i = 0; i < frames; i++) {
         float t_ms = (V->pos + i) * 1000.0f / RATE;

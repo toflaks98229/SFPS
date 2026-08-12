@@ -165,13 +165,78 @@ static const char *PLAYED[] = {
 
 /* Names the game plays that the recipe file must still define.
    게임이 재생하는 이름 중 레시피 파일이 여전히 정의해야 하는 것들입니다. */
+/* --- the alphabet contract, read out of bake.ps1 ------------------------
+   bake.ps1 encodes sampled sounds with a 64-character string and audio.c
+   decodes by COMPUTING the value from the character. Nothing checks that the
+   two describe the same alphabet, and nothing can: one is PowerShell and the
+   other is C. So the test reads the script, exactly as sprtest does for the
+   sprite codec -- the two share the alphabet, and a divergence in either
+   would be silent until something sounded or looked wrong.
+
+   The failure is not subtle in its effect and is very subtle in its cause:
+   every sampled sound decodes to the wrong deltas, which sounds like a bad
+   recording rather than like a bug.
+
+   bake.ps1은 64자 문자열로 샘플 사운드를 인코딩하고 audio.c는 문자로부터 값을
+   *계산*합니다. 둘이 같은 알파벳을 기술하는지 확인할 방법은 없습니다. 하나는
+   PowerShell이고 다른 하나는 C이기 때문입니다. 그래서 테스트가 스크립트를 읽습니다. */
+static int check_alphabet(void) {
+    FILE *f = fopen("bake.ps1", "rb");
+    if (!f) f = fopen("../bake.ps1", "rb");
+    if (!f) { printf("  bake.ps1 unreadable, cannot compare alphabets\n"); return 1; }
+
+    char alpha[128] = {0};
+    int  found = 0;
+    char line[512];
+    while (fgets(line, sizeof(line), f)) {
+        const char *m = strstr(line, "$alphabet = '");
+        if (!m) continue;
+        m += 13;
+        int n = 0;
+        while (*m && *m != '\'' && n < 127) alpha[n++] = *m++;
+        alpha[n] = 0;
+        found = (n == 64);
+        break;
+    }
+    fclose(f);
+
+    if (!found) {
+        printf("  bake.ps1's ADPCM alphabet is not 64 characters (%d)\n",
+               (int)strlen(alpha));
+        return 1;
+    }
+
+    int bad = 0, first = -1;
+    for (int i = 0; i < 64; i++)
+        if (audio_b64val(alpha[i]) != i) { if (first < 0) first = i; bad++; }
+
+    if (bad) {
+        printf("  %d of 64 characters decode to the wrong value "
+               "(first at %d, '%c')\n", bad, first, alpha[first]);
+        return 1;
+    }
+    printf("  alphabet          bake.ps1 and audio.c agree on all 64\n");
+
+    /* And nothing outside it may decode to something. A stray character in a
+       data line has to stop the decoder, not be read as index 0. */
+    if (audio_b64val('!') >= 0 || audio_b64val(' ') >= 0 ||
+        audio_b64val('\n') >= 0) {
+        printf("  a character outside the alphabet decodes to a value\n");
+        return 1;
+    }
+    printf("  alphabet          a character outside it is rejected\n");
+    return 0;
+}
+
+
+
 static int check_played(void) {
     int missing = 0;
     int n = (int)(sizeof(PLAYED) / sizeof(PLAYED[0]));
 
     printf("\n  --- names the code plays ---\n");
     for (int i = 0; i < n; i++) {
-        /* audio_render is the offline half of the same lookup audio_play does,
+/* audio_render is the offline half of the same lookup audio_play does,
            and it needs no device -- it returns 0 frames for a name the recipe
            text does not define, which is exactly the question being asked.
            audio_render는 audio_play가 수행하는 것과 동일한 조회의 오프라인 버전이며
@@ -206,6 +271,8 @@ int main(int argc, char **argv) {
        사운드 하나를 지정한 경우에는 건너뜁니다. 호출자가 그것에 대해 물었으므로, 나머지
        열네 개로 실패하는 것은 다른 질문에 답하는 셈입니다. */
     if (!one) fails += check_played();
+
+    if (!one) fails += check_alphabet();
 
     printf(fails ? "\n%d problem(s)\n" : "\nall sounds produced audio\n", fails);
     return fails != 0;

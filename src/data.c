@@ -7,7 +7,7 @@
  * @param which 가져올 데이터 에셋의 종류.
  * @return 빌드에 포함된 데이터 텍스트를 담고 있는 const char 포인터.
  */
-static const char *baked(int which) {
+const char *data_baked(int which) {
     if (which == DATA_MODELS)  return ASSET_MODELS;
     if (which == DATA_RECIPES) return ASSET_RECIPES;
     if (which == DATA_SOUNDS)  return ASSET_SOUNDS;
@@ -24,7 +24,7 @@ static const char *baked(int which) {
  * 또는 다른 사람의 컴퓨터에서 경로가 틀릴 위험이 없습니다.
  */
 
-const char *data_text(int which) { return baked(which); }
+const char *data_text(int which) { return data_baked(which); }
 int data_poll(void) { return 0; }
 int data_from_file(int which) { (void)which; return 0; }
 
@@ -144,14 +144,14 @@ static int reload(Slot *s) {
 }
 
 const char *data_text(int which) {
-    if (!FILENAMES[which]) return baked(which);
+    if (!FILENAMES[which]) return data_baked(which);
 
     Slot *s = &g_slots[which];
     if (!s->resolved) {
         resolve(s, FILENAMES[which]);
         if (reload(s)) stamp_of(s->path, &s->stamp);
     }
-    return s->text ? s->text : baked(which);
+    return s->text ? s->text : data_baked(which);
 }
 
 int data_from_file(int which) {

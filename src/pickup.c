@@ -126,7 +126,7 @@ void pickup_update(v3 player_eye, int *health, int health_max,
                놓아두면 아직 찾지 못한 열쇠처럼 보이고, 그것을 위해 되돌아온 플레이어는
                속은 것입니다. */
             *keys |= PK_KEY_MASK(p->kind);
-            audio_play("pammo", 100);
+            audio_play("key", 95);
         } else if (PK_WEAPON_WEAPON(p->kind) >= 0) {
             /* --- a weapon lying on the floor ------------------------------
                Taken even when already owned, because it carries ammunition and

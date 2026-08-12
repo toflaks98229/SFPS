@@ -27,6 +27,11 @@ assets/sprites/.freedoom-cache/
 # conversion. Regenerated on demand and never read by the build.
 assets/sprites/_preview.png
 
+# Freedoom lumps downloaded by assets/sounds/import-freedoom.py, at their
+# original rates. The 11025Hz WAVs the importer writes from them ARE committed,
+# so nothing here is needed to build.
+assets/sounds/.freedoom-cache/
+
 # Editor and OS noise.
 .vs/
 *.user

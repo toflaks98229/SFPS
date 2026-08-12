@@ -56,6 +56,15 @@
 /** @brief Metres from a switch that counts as touching it. / 스위치를 건드린 것으로 인정되는 거리 (미터). */
 #define DOOR_SWITCH_DIST 1.1f
 
+/* HOW LONG A REFUSAL STAYS ON SCREEN, in seconds. Long enough to read a short
+   line and look back at the door, short enough that it is gone before the
+   player has found the key and returned -- a message still up when the door
+   finally opens would be describing something that is no longer true.
+   거절 메시지가 화면에 남는 시간(초)입니다. 짧은 문장을 읽고 문을 다시 볼 만큼 길고,
+   플레이어가 열쇠를 찾아 돌아오기 전에 사라질 만큼 짧습니다. 문이 마침내 열릴 때까지 떠
+   있는 메시지는 더 이상 참이 아닌 것을 설명하게 됩니다. */
+#define DOOR_NOTICE_TIME 2.4f
+
 /* --- Lifecycle / 수명 주기 --- */
 
 /**
@@ -133,5 +142,91 @@ float door_openness(int i);
  *       것이며, 이 모듈은 폰트도 언어도 소유하지 않습니다.
  */
 int door_refused(void);
+
+/**
+ * @brief The key of the most recent refusal, while its message should be up.
+ *
+ * ENGLISH
+ * -------
+ * @return A KEY_* mask, or ::KEY_NONE once ::DOOR_NOTICE_TIME has run out.
+ * @note ::door_refused answers "was the player turned away THIS FRAME", which
+ *       is the right question for logic and the wrong one for a message: it is
+ *       true for one frame at 60Hz, and nobody reads that. This one stays true
+ *       long enough to be read.
+ * @note Re-armed to the full time on every touch rather than only when it has
+ *       expired, so leaning on a locked door holds the message steady instead
+ *       of making it blink.
+ *
+ * 한국어
+ * ------
+ * @brief 가장 최근 거절의 열쇠이며, 메시지가 떠 있어야 하는 동안 유효합니다.
+ * @return KEY_* 마스크. ::DOOR_NOTICE_TIME이 지나면 ::KEY_NONE입니다.
+ * @note ::door_refused는 "*이번 프레임에* 거절당했는가"에 답하며, 로직에는 맞고 메시지에는
+ *       틀린 질문입니다. 60Hz에서 한 프레임만 참이고 아무도 읽지 못합니다. 이것은 읽을 수
+ *       있을 만큼 오래 참으로 남습니다.
+ * @note 만료되었을 때만이 아니라 닿을 때마다 시간을 가득 채우므로, 잠긴 문에 붙어 있으면
+ *       메시지가 깜빡이지 않고 유지됩니다.
+ */
+int door_notice_key(void);
+
+/**
+ * @brief Seconds left on the refusal message, for fading it out.
+ *
+ * @return ::DOOR_NOTICE_TIME down to 0, and 0 when there is nothing to show.
+ * @note Separate from ::door_notice_key so the caller can fade rather than cut.
+ *       A line that vanishes between one frame and the next reads as a glitch;
+ *       one that fades reads as an answer that has been given.
+ *
+ * @brief 거절 메시지에 남은 시간(초)이며, 서서히 사라지게 하는 데 씁니다.
+ * @note ::door_notice_key와 분리되어 있어 호출자가 잘라내지 않고 페이드할 수 있습니다.
+ *       한 프레임 만에 사라지는 문장은 결함처럼 읽히고, 서서히 사라지는 것은 답을 받은
+ *       것처럼 읽힙니다.
+ */
+float door_notice_left(void);
+
+/**
+ * @brief The name of a single KEY_* bit, for the HUD to print.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] key A KEY_* mask. Only the lowest set bit is named.
+ * @return "RED", "BLUE", "YELLOW", or "" for ::KEY_NONE. Never NULL.
+ * @note Here rather than in the HUD because the key bits are defined here, and
+ *       a name table beside the drawing code is one that can fall out of step
+ *       with the enum it names without anything noticing.
+ *
+ * 한국어
+ * ------
+ * @param[in] key KEY_* 마스크입니다. 가장 낮은 비트만 이름을 얻습니다.
+ * @return "RED", "BLUE", "YELLOW", ::KEY_NONE이면 "". NULL이 아닙니다.
+ * @note HUD가 아니라 여기 있는 이유는 열쇠 비트가 여기서 정의되기 때문입니다. 그리는 코드
+ *       옆의 이름표는 자신이 이름 붙이는 enum과 아무도 모르게 어긋날 수 있습니다.
+ */
+const char *door_key_name(int key);
+
+/**
+ * @brief Every key this level's doors can demand, as one KEY_* mask.
+ *
+ * ENGLISH
+ * -------
+ * @return The union of every door's key, or ::KEY_NONE for a level with no
+ *         locked doors. Valid after ::door_reset.
+ * @note Lets the HUD draw a keycard row only where one means something. Three
+ *       greyed names that never light up are three words telling the player
+ *       about a mechanic the map does not use.
+ * @note Asked of the DOORS, not of the keys lying around: the question is which
+ *       cards can be DEMANDED. A level that scatters a key no door wants would
+ *       otherwise light a row the player never needs.
+ *
+ * 한국어
+ * ------
+ * @brief 이 레벨의 문들이 요구할 수 있는 모든 열쇠를 하나의 KEY_* 마스크로 반환합니다.
+ * @return 모든 문의 열쇠의 합집합. 잠긴 문이 없으면 ::KEY_NONE입니다.
+ * @note HUD가 의미 있는 곳에서만 키카드 행을 그릴 수 있게 합니다. 끝내 켜지지 않는 흐린
+ *       이름 셋은 이 맵이 쓰지 않는 장치를 설명하는 단어 셋입니다.
+ * @note 굴러다니는 열쇠가 아니라 *문*에게 묻습니다. 질문은 어떤 카드가 *요구될 수*
+ *       있는가입니다.
+ */
+int door_keys_used(void);
 
 #endif

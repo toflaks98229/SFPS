@@ -33,6 +33,7 @@
 #include "font.h"
 #include "post.h"     /* post_in_world_pass -- the pass-boundary guards */
 #include "menu.h"     /* the rows the ESC menu draws, read rather than copied */
+#include "door.h"     /* the refusal notice, and the names of the key bits */
 #include "diag.h"
 
 /* ------------------------------------------------------------------ tuning */
@@ -106,6 +107,20 @@
 #define HUD_MARGIN      18.0f
 #define HUD_BASELINE    40.0f   /* up from the bottom edge */
 #define HUD_TEXT_SIZE   3.5f
+
+/* The locked-door notice. Above centre rather than on it: a crosshair sits at
+   the middle and a line printed through it is read as part of the reticle.
+   HUD_NOTICE_FADE is shorter than DOOR_NOTICE_TIME so the message holds at full
+   strength first and only fades over its last moments -- fading across the
+   whole life would start it already dimmed, and the instant it appears is the
+   instant it is most needed.
+   잠긴 문 알림입니다. 정중앙이 아니라 그 위입니다. 가운데에는 조준점이 있고 그것을 통과해
+   찍힌 문장은 조준선의 일부로 읽힙니다. HUD_NOTICE_FADE는 DOOR_NOTICE_TIME보다 짧으므로
+   메시지는 먼저 온전한 밝기로 머물고 마지막 순간에만 사라집니다. 수명 전체에 걸쳐
+   페이드하면 시작부터 흐릿한데, 나타나는 순간이야말로 가장 필요한 순간입니다. */
+#define HUD_NOTICE_SIZE 2.2f
+#define HUD_NOTICE_Y    0.34f   /* fraction of viewport height */
+#define HUD_NOTICE_FADE 0.6f    /* seconds of fade at the tail */
 #define HURT_FLASH_MAX  0.4f    /* alpha of the full-screen wash at full hurt */
 
 /* --- win screen --- */
@@ -595,6 +610,119 @@ void scene_draw_hud(Scene *s, int vw, int vh, const Player *p, const Weapon *w) 
             else
                 text_run(s, x, y, 1.0f, nm, 0.55f, 0.58f, 0.64f, 1.0f);
             x += wd + 10.0f;
+        }
+    }
+
+    /* --- the keycards, under the roster ----------------------------------
+     *
+     * ENGLISH
+     * -------
+     * Same idiom as the weapon row above, for the same reason: what you are
+     * carrying should be answerable at a glance rather than by trying a door.
+     * A player who cannot see which cards they hold has to walk back to a
+     * locked door to find out, and the walk teaches them nothing.
+     *
+     * Each name is drawn in ITS OWN COLOUR when held, because the card, the
+     * door and this label are the same colour in the world -- naming a red key
+     * in white would make the player translate. Unheld cards go to the same
+     * dim grey the unowned weapons use, so "dim means you do not have it" is
+     * one rule the HUD applies twice rather than two conventions to learn.
+     *
+     * The whole row is skipped when the level has no locked doors at all.
+     * Three greyed words that never light up are three words of clutter
+     * telling the player about a mechanic this map does not use.
+     *
+     * 한국어
+     * ------
+     * 위의 무기 행과 같은 방식이며 이유도 같습니다. 무엇을 지니고 있는지는 문을 열어 보는
+     * 것이 아니라 한눈에 답할 수 있어야 합니다. 어떤 카드를 가졌는지 볼 수 없는
+     * 플레이어는 잠긴 문까지 되돌아가야 알 수 있고, 그 왕복은 아무것도 가르치지 않습니다.
+     *
+     * 보유한 이름은 *자기 색*으로 그립니다. 카드와 문과 이 글자가 세계 안에서 같은
+     * 색이기 때문입니다. 빨간 열쇠를 흰색으로 쓰면 플레이어가 머릿속에서 번역해야 합니다.
+     * 없는 카드는 보유하지 않은 무기와 같은 흐린 회색이므로, "흐리면 없는 것"은 HUD가 두
+     * 번 적용하는 하나의 규칙이지 배워야 할 두 가지 관례가 아닙니다.
+     *
+     * 잠긴 문이 하나도 없는 레벨에서는 행 전체를 건너뜁니다. 끝내 켜지지 않는 흐린 단어
+     * 셋은 이 맵이 쓰지 않는 장치를 설명하는 잡동사니입니다.
+     */
+    {
+        static const float KEY_RGB[KEY_KINDS][3] = {
+            { 0.92f, 0.24f, 0.24f },   /* RED    */
+            { 0.36f, 0.55f, 0.95f },   /* BLUE   */
+            { 0.95f, 0.85f, 0.30f },   /* YELLOW */
+        };
+
+        /* Which kinds this level can ask for. A door needing a key the map
+           never places would be a design fault, but it would show up here as a
+           name that stays grey, which is information rather than clutter.
+           이 레벨이 요구할 수 있는 종류입니다. 맵이 배치하지 않는 열쇠를 요구하는 문은
+           설계 결함이지만, 여기서는 계속 회색인 이름으로 드러나므로 잡동사니가 아니라
+           정보입니다. */
+        int wanted = door_keys_used();
+
+        if (wanted != KEY_NONE) {
+            float x = HUD_MARGIN;
+            float y = vh - HUD_BASELINE - HUD_TEXT_SIZE * 7.4f;
+            for (int i = 0; i < KEY_KINDS; i++) {
+                int bit = 1 << i;
+                if (!(wanted & bit)) continue;
+                const char *nm = door_key_name(bit);
+                float wd = font_width(1.0f, nm);
+                if (p->keys & bit)
+                    text_run(s, x, y, 1.0f, nm,
+                             KEY_RGB[i][0], KEY_RGB[i][1], KEY_RGB[i][2], 1.0f);
+                else
+                    text_run(s, x, y, 1.0f, nm, 0.30f, 0.32f, 0.36f, 1.0f);
+                x += wd + 10.0f;
+            }
+        }
+    }
+
+    /* --- the refusal, centred and fading ---------------------------------
+     *
+     * ENGLISH
+     * -------
+     * The door already reported this and nothing was listening: door_refused
+     * has existed since doors did, with a comment saying "so the HUD can say
+     * which key", and the HUD never said anything. A locked door that gives no
+     * reason is indistinguishable from a door that is broken, and the player's
+     * next move -- shoot it, look for a switch, walk away -- depends entirely
+     * on knowing which.
+     *
+     * Centred rather than tucked into a corner, because it answers something
+     * the player just did and their eyes are on the door, not on the HUD.
+     * Faded over its last moments so it reads as an answer being given rather
+     * than a glitch.
+     *
+     * 한국어
+     * ------
+     * 문은 이미 이것을 보고하고 있었고 아무도 듣지 않았습니다. door_refused는 문이 생긴
+     * 이래로 "HUD가 어떤 열쇠인지 말할 수 있도록"이라는 주석과 함께 존재했지만 HUD는
+     * 아무 말도 하지 않았습니다. 이유를 말하지 않는 잠긴 문은 고장 난 문과 구별되지
+     * 않으며, 플레이어의 다음 행동(쏜다, 스위치를 찾는다, 떠난다)은 전적으로 그 구분에
+     * 달려 있습니다.
+     *
+     * 구석이 아니라 가운데인 이유는 방금 한 행동에 대한 답이고 시선이 HUD가 아니라 문에
+     * 있기 때문입니다. 마지막 순간에 서서히 사라져 결함이 아니라 주어진 답으로 읽힙니다.
+     */
+    {
+        int k = door_notice_key();
+        if (k != KEY_NONE) {
+            char line[48];
+            wsprintfA(line, "%s KEYCARD REQUIRED", door_key_name(k));
+            float lw = font_width(HUD_NOTICE_SIZE, line);
+
+            /* Fades only over the tail. Fading across the whole life would
+               start it already dimmed, and the moment it is most needed is the
+               moment it appears.
+               *끝부분*에서만 사라집니다. 수명 전체에 걸쳐 페이드하면 시작부터 흐릿하며,
+               가장 필요한 순간은 나타나는 그 순간입니다. */
+            float a = door_notice_left() / HUD_NOTICE_FADE;
+            if (a > 1.0f) a = 1.0f;
+
+            text_run(s, (vw - lw) * 0.5f, vh * HUD_NOTICE_Y, HUD_NOTICE_SIZE,
+                     line, 0.95f, 0.80f, 0.35f, a);
         }
     }
 

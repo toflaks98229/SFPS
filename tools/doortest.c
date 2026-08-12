@@ -224,6 +224,76 @@ int main(void) {
         ok(door_refused() == KEY_NONE, "and nothing is refused once it is open");
     }
 
+    /* --- the refusal outlives the frame, and then stops -------------------
+       door_refused is true for ONE FRAME, which is right for logic and useless
+       for a message: at 60Hz nobody reads it. door_notice_key is the same fact
+       held long enough to be printed, and the two ways it can be wrong are
+       opposites -- expiring too soon shows the player nothing, never expiring
+       leaves a stale line up over a door they have since opened.
+
+       Both are checked here, and the second is the one that would otherwise go
+       unnoticed: a notice that never clears looks perfectly correct in every
+       screenshot taken while standing at the door.
+
+       door_refused는 *한 프레임* 동안만 참이며, 로직에는 맞지만 메시지로는 쓸모없습니다.
+       60Hz에서는 아무도 읽지 못합니다. door_notice_key는 같은 사실을 인쇄할 수 있을 만큼
+       오래 붙잡아 둔 것이고, 틀릴 수 있는 두 방향은 서로 반대입니다. 너무 빨리 만료되면
+       아무것도 보여 주지 못하고, 만료되지 않으면 이미 열어 버린 문 위에 낡은 문장이
+       남습니다. 둘 다 검사하며, 두 번째가 그러지 않으면 놓치는 쪽입니다. 지워지지 않는
+       알림은 문 앞에 선 채로 찍은 모든 스크린숏에서 완벽히 정상으로 보입니다. */
+    {
+        build(DOOR_UP, 400, 0, KEY_RED);
+        run(0.5f, 0.0f, 2.6f, KEY_NONE);
+        ok(door_notice_key() == KEY_RED,
+           "a refusal raises a notice naming the key");
+
+        /* Walked away, so nothing re-arms it. One frame later door_refused has
+           already gone quiet while the notice has not.
+           멀어졌으므로 아무것도 다시 채우지 않습니다. 한 프레임 뒤 door_refused는 이미
+           조용해졌지만 알림은 아직 남아 있습니다. */
+        run(1.0f / 60.0f, 0.0f, 40.0f, KEY_NONE);
+        ok(door_refused() == KEY_NONE,
+           "which survives the frame door_refused itself does not");
+        ok(door_notice_key() == KEY_RED, "and still names the key a frame later");
+
+        /* Past its life, still standing well clear. */
+        run(DOOR_NOTICE_TIME + 0.2f, 0.0f, 40.0f, KEY_NONE);
+        ok(door_notice_key() == KEY_NONE, "and expires once its time is up");
+        okf(door_notice_left() == 0.0f, "reporting no time left with it",
+            door_notice_left(), 0.0f);
+
+        /* Leaning on the door holds it steady rather than letting it blink:
+           after far longer than its life, spent entirely against a door that
+           keeps refusing, it must still be up.
+           문에 계속 붙어 있으면 깜빡이지 않고 유지됩니다. 수명보다 훨씬 오래, 계속 거절하는
+           문에 붙어서 보낸 뒤에도 여전히 떠 있어야 합니다. */
+        run(DOOR_NOTICE_TIME * 3.0f, 0.0f, 2.6f, KEY_NONE);
+        ok(door_notice_key() == KEY_RED,
+           "and leaning on a locked door keeps it up rather than blinking");
+    }
+
+    /* --- the HUD only draws a keycard row where one means something ------- */
+    {
+        build(DOOR_UP, 400, 0, KEY_RED);
+        ok(door_keys_used() == KEY_RED, "a level's demanded keys are reported");
+
+        build(DOOR_UP, 400, 0, KEY_NONE);
+        ok(door_keys_used() == KEY_NONE,
+           "and a level with no locked door demands none");
+    }
+
+    /* --- every key bit has a name ----------------------------------------
+       The _Static_assert in door.c ties the table's LENGTH to KEY_KINDS, which
+       catches a missing row and not a blank one. This catches the blank.
+       door.c의 _Static_assert는 표의 *길이*를 KEY_KINDS에 묶으며, 빠진 행은 잡지만 빈
+       행은 잡지 못합니다. 이것이 빈 행을 잡습니다. */
+    {
+        int named = 0;
+        for (int i = 0; i < KEY_KINDS; i++)
+            if (door_key_name(1 << i)[0]) named++;
+        ok(named == KEY_KINDS, "every key bit has a printable name");
+    }
+
     /* --- a door with no def, and an out-of-range sector, are survivable --- */
     {
         Level zero = {0};

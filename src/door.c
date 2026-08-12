@@ -37,9 +37,47 @@ static DoorState g_door[LVL_MAX_DOORS];
 static int       g_n;
 static int       g_refused;
 
+/* THE REFUSAL HAS TO OUTLIVE THE FRAME IT HAPPENED IN. `g_refused` is cleared
+   at the top of every door_update, which is right for asking "was the player
+   turned away just now" and useless for telling them so: a message that is
+   true for one frame at 60Hz is a message nobody reads.
+   Kept here rather than in the HUD because the door is what knows, and a timer
+   on the drawing side would be a second copy of an event that already has an
+   owner. door_update is also the only place with a dt to count down.
+   거절은 그것이 일어난 프레임보다 오래 살아남아야 합니다. `g_refused`는 door_update의
+   맨 위에서 초기화되며, "방금 거절당했는가"를 묻기에는 맞지만 그것을 *알리기에는*
+   쓸모없습니다. 60Hz에서 한 프레임 동안만 참인 메시지는 아무도 읽지 못합니다. HUD가
+   아니라 여기에 두는 이유는 아는 쪽이 문이기 때문이며, 그리는 쪽의 타이머는 이미 주인이
+   있는 사건의 사본이 됩니다. door_update는 셀 dt를 가진 유일한 곳이기도 합니다. */
+static int       g_notice_key;
+static float     g_notice_t;
+
+/* The union of every door's key, folded once at ::door_reset. Derived rather
+   than stored per door, because the key is the LEVEL's and does not change:
+   copying it into DoorState beside floor0 and pts0 would look like the same
+   pattern and is not. Those are snapshots of fields door_update overwrites,
+   and this one nothing ever writes -- a copy of it would be a second source of
+   truth kept in step by nothing.
+   모든 문의 열쇠를 합집합으로 ::door_reset에서 한 번 접어 둡니다. 문마다 저장하지 않고
+   유도하는 이유는 열쇠가 *레벨*의 것이고 변하지 않기 때문입니다. floor0나 pts0 옆에
+   DoorState로 복사하면 같은 패턴처럼 보이지만 아닙니다. 그것들은 door_update가 덮어쓰는
+   필드의 스냅숏이고, 이것은 아무도 쓰지 않습니다. 사본을 두면 무엇으로도 일치가 유지되지
+   않는 두 번째 진실이 됩니다. */
+static int       g_keys_used;
+
 void door_reset(const Level *l) {
     g_n = l->n_doors > LVL_MAX_DOORS ? LVL_MAX_DOORS : l->n_doors;
     g_refused = KEY_NONE;
+
+    /* Cleared with everything else: a message about the last level's locked
+       door has no business surviving into the next one.
+       나머지와 함께 초기화합니다. 이전 레벨의 잠긴 문에 대한 메시지가 다음 레벨까지
+       살아남을 이유는 없습니다. */
+    g_notice_key = KEY_NONE;
+    g_notice_t   = 0.0f;
+
+    g_keys_used = KEY_NONE;
+    for (int i = 0; i < g_n; i++) g_keys_used |= l->doors[i].key;
 
     for (int i = 0; i < g_n; i++) {
         DoorState *st = &g_door[i];
@@ -63,6 +101,43 @@ float door_openness(int i) {
 }
 
 int door_refused(void) { return g_refused; }
+
+/* Indexed by BIT POSITION, so KEY_RED (1<<0) is [0]. Ordered to match the
+   KEY_* enum, which is also the order pickup.h's PK_KEY0..PK_KEY_LAST run in,
+   so a keycard's colour, its pickup sprite and this name are all the same
+   index rather than three lists agreeing by habit.
+   *비트 위치*로 색인하므로 KEY_RED(1<<0)는 [0]입니다. KEY_* enum의 순서와 같고, 그것은
+   pickup.h의 PK_KEY0..PK_KEY_LAST 순서이기도 하므로, 키카드의 색·아이템 스프라이트·이
+   이름이 습관으로 일치하는 세 목록이 아니라 같은 색인이 됩니다. */
+static const char *const KEY_NAME[] = { "RED", "BLUE", "YELLOW" };
+
+/* The table and the enum have to end together. Adding a key without a name
+   here would print an empty string on a door nobody can open, which looks like
+   a bug in the door rather than a missing line in a table.
+   표와 enum은 함께 끝나야 합니다. 여기에 이름 없이 열쇠를 추가하면 아무도 열 수 없는 문에
+   빈 문자열이 표시되며, 표에 빠진 한 줄이 아니라 문의 결함처럼 보입니다. */
+_Static_assert(sizeof(KEY_NAME) / sizeof(KEY_NAME[0]) == KEY_KINDS,
+               "KEY_NAME must name every KEY_* bit");
+
+const char *door_key_name(int key) {
+    for (int i = 0; i < KEY_KINDS; i++)
+        if (key & (1 << i)) return KEY_NAME[i];
+    return "";
+}
+
+int door_keys_used(void) {
+    /* Asked of the DOORS rather than of the level's pickups: the question the
+       HUD is answering is "which cards can this map demand", and a level that
+       scatters a key no door wants would light a row the player never needs.
+       아이템이 아니라 *문*에게 묻습니다. HUD가 답하는 질문은 "이 맵이 요구할 수 있는
+       카드는 무엇인가"이며, 어떤 문도 원하지 않는 열쇠를 뿌린 레벨은 플레이어에게 결코
+       필요 없는 행을 켜게 됩니다. */
+    return g_keys_used;
+}
+
+int door_notice_key(void) { return g_notice_t > 0.0f ? g_notice_key : KEY_NONE; }
+
+float door_notice_left(void) { return g_notice_t > 0.0f ? g_notice_t : 0.0f; }
 
 /* The closest a point gets to the door's closed outline, in metres. Measured
    against the CLOSED shape rather than the current one, so a door that has
@@ -161,6 +236,14 @@ int door_update(Level *l, v3 player_pos, int keys, float dt) {
     int moved = 0;
     g_refused = KEY_NONE;
 
+    /* Counted down before the touch tests below, which may re-arm it. Order
+       matters only in that a refusal this frame must not be shortened by this
+       frame's own dt.
+       아래의 접촉 검사보다 먼저 감소시킵니다. 검사가 다시 채울 수 있기 때문입니다. 순서가
+       중요한 이유는, 이번 프레임의 거절이 이번 프레임의 dt만큼 깎여서는 안 되기
+       때문입니다. */
+    if (g_notice_t > 0.0f) g_notice_t -= dt;
+
     /* Switch entities, gathered once: a tagged door asks whether anything is
        standing on a switch that names it. Touch-activated, so there is no key
        to press and no aim to get right -- see the request this was built for.
@@ -214,6 +297,14 @@ int door_update(Level *l, v3 player_pos, int keys, float dt) {
                거절되었습니다. HUD가 어떤 열쇠인지 말할 수 있도록 프레임당 한 번
                보고하며, 문은 움직이지 않습니다. */
             g_refused = d->key;
+
+            /* Re-armed to the full time on every touch rather than only when
+               it has run out, so leaning on a locked door keeps the message up
+               instead of letting it blink.
+               이미 떠 있든 아니든 닿을 때마다 시간을 가득 채웁니다. 잠긴 문에 계속 붙어
+               있으면 메시지가 깜빡이지 않고 유지됩니다. */
+            g_notice_key = d->key;
+            g_notice_t   = DOOR_NOTICE_TIME;
             asked = 0;
         }
 

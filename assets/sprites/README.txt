@@ -64,6 +64,40 @@ modeledit puts a draggable muzzle on the 3D model. The marker is the same idea
 for a drawing -- redraw the gun and the flash follows it.
 
 
+USING FREEDOOM ART. Freedoom (https://freedoom.github.io/) is BSD-3 licensed
+and is the intended source for this project's art; its sprites live in the
+repository's sprites/ directory as individual PNGs. Their names are Doom's
+convention -- a four-letter subject, a frame LETTER, and a rotation DIGIT:
+
+    POSSA1     zombieman, frame A, rotation 1 = seen from the front
+    POSSA2A8   one file serving two rotations, mirrored
+
+Take rotation 1 only. This engine draws monsters as billboards that always
+face the player, so the other seven views are never visible, and a set that
+included them would spend its budget on frames the game cannot reach.
+
+    ours     Freedoom      why
+    imp      POSS          the baseline humanoid
+    hound    SARG          low, fast, all mouth
+    brute    BOSS / BOS2   the big one
+    caster   HEAD          floats, attacks at range
+
+Frame letters do not map to our frame numbers by position -- A and B are a walk
+cycle, but which letter is the attack differs per monster, so open the sheet
+and look. Rename to <subject><0-4> as above.
+
+Two conversion steps are not optional. These were drawn for a 320x200 screen
+with non-square pixels, so scale to about 32x32 and expect to repair the
+result by hand; and they carry Doom's own 256-colour palette, which this
+project re-quantises to its shared 16 automatically -- so check the baked
+output rather than the PNG, because sixteen entries shared across every sprite
+is a much harder constraint than the one the art was drawn for.
+
+The moment a Freedoom-derived PNG lands here, the build begins requiring the
+attribution notice in src/scene.c; see docs/LICENSE-Freedoom.txt and the
+Credits section of README.md. That is a licence obligation, not a style rule.
+
+
 SIZE is 32x32 by convention for monsters, but anything up to the 64x96 cell
 works. Weapons use the 128x96 cell. A drawing is centred horizontally and sits
 on the BOTTOM of its cell.
@@ -78,5 +112,7 @@ game, and it is why the files are read in sorted order: a set that reordered
 itself between builds would produce a different palette every time.
 
 The PNG is never shipped. bake.ps1 converts it to palette-indexed text at
-build time, so the game contains no image decoder. Each 128x96 weapon frame
-costs about 1.2KB; see the size report that build.ps1 prints.
+build time, so the game contains no image decoder. A 128x96 weapon frame
+measures at about 1.3KB -- flat-shaded placeholder art, so busier drawings run
+dearer, since the encoding pays per run of same-coloured pixels. See the size
+report that build.ps1 prints.

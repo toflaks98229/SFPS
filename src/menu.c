@@ -105,7 +105,19 @@ static const Row ROOT_ROWS[] = {
     { "RESUME",    ROW_SCREEN, MENU_CLOSED,      0, 0, 0 },
     { "SETTINGS",  ROW_SCREEN, MENU_SETTINGS,    0, 0, 0 },
     { "RESTART",   ROW_ACTION, MENU_ACT_RESTART, 0, 0, 0 },
+    { "CREDITS",   ROW_SCREEN, MENU_CREDITS,     0, 0, 0 },
     { "QUIT",      ROW_ACTION, MENU_ACT_QUIT,    0, 0, 0 },
+};
+
+/* The credits screen has one row, and it is the way back. The notices
+   themselves are text scene.c draws, not rows: they are paragraphs to read
+   rather than things to choose between, and a row per line would make the
+   highlight walk down a licence.
+   크레딧 화면의 행은 하나이며 그것은 돌아가는 길입니다. 고지 자체는 행이 아니라 scene.c가
+   그리는 텍스트입니다. 고르는 대상이 아니라 읽는 문단이며, 줄마다 행을 두면 강조 표시가
+   라이선스를 따라 내려가게 됩니다. */
+static const Row CREDITS_ROWS[] = {
+    { "BACK",      ROW_SCREEN, MENU_ROOT,        0, 0, 0 },
 };
 
 static const Row SETTINGS_ROWS[] = {
@@ -139,6 +151,10 @@ static const Row *rows_of(MenuScreen s, int *count) {
     if (s == MENU_SETTINGS) {
         *count = (int)(sizeof(SETTINGS_ROWS) / sizeof(SETTINGS_ROWS[0]));
         return SETTINGS_ROWS;
+    }
+    if (s == MENU_CREDITS) {
+        *count = (int)(sizeof(CREDITS_ROWS) / sizeof(CREDITS_ROWS[0]));
+        return CREDITS_ROWS;
     }
     *count = 0;
     return 0;
@@ -306,6 +322,7 @@ void menu_escape(void) {
        뒤로, 닫기입니다. 그중 어느 것도 "종료"가 아니라는 점이 핵심입니다. */
     if (g_screen == MENU_CLOSED)        g_screen = MENU_ROOT;
     else if (g_screen == MENU_SETTINGS) g_screen = MENU_ROOT;
+    else if (g_screen == MENU_CREDITS)  g_screen = MENU_ROOT;
     else                                g_screen = MENU_CLOSED;
     g_cursor = 0;
 }

@@ -138,7 +138,17 @@ void scene_init(Scene *s) {
     mb_init(&s->enemy_buf,  ENEMY_MAX * 6);
     mb_init(&s->pickup_buf, PICKUP_MAX * 6);
     mb_init(&s->shot_buf,   ENEMY_MAX_SHOTS * (SHOT_HALOS + SHOT_CORES) * 6);
-    mb_init(&s->hud_buf,    256);
+    /* 1024 vertices = 170 glyphs, because text_run draws a whole line through
+       this buffer and mb_vtx DROPS vertices rather than growing. At the old
+       256 a line was cut at 42 characters, which the credits notice hit in the
+       middle of a word -- a licence that visibly trails off is worse than none.
+       Reported by DIAG_VERTEX_BUF, but a HUD nobody profiles is where a
+       reported overflow goes unread.
+       1024 정점 = 글리프 170개입니다. text_run이 이 버퍼로 한 줄 전체를 그리는데 mb_vtx는
+       확장하지 않고 정점을 *버리기* 때문입니다. 이전의 256에서는 42자에서 줄이 잘렸고,
+       크레딧 고지가 단어 중간에서 그 한계에 걸렸습니다. 눈에 띄게 끊기는 라이선스는 없는
+       것보다 나쁩니다. */
+    mb_init(&s->hud_buf,    1024);
     mb_init(&s->level_buf,  LEVEL_BUF_VERTS);
 
     s->enemy_mesh  = (Mesh){0};
@@ -700,10 +710,143 @@ void scene_draw_menu(Scene *s, int vw, int vh) {
        모든 위치를 이곳에서 다시 계산하지 않고 menu_row_bounds에서 가져옵니다. 마우스
        히트 판정이 같은 함수를 읽으므로, 눈에 보이는 것과 클릭이 선택하는 것이 어긋날 수
        없습니다. menu.h의 참고 사항을 확인하십시오. */
-    const char *title = (menu_screen() == MENU_SETTINGS) ? "SETTINGS" : "PAUSED";
+    const char *title = (menu_screen() == MENU_SETTINGS) ? "SETTINGS"
+                      : (menu_screen() == MENU_CREDITS)  ? "CREDITS"
+                      : "PAUSED";
     float tw = font_width(MENU_TITLE_SIZE, title);
     text_run(s, cx - tw * 0.5f, menu_title_y(vw, vh), MENU_TITLE_SIZE, title,
              1.0f, 0.85f, 0.30f, 1.0f);
+
+    /* --- the notices ----------------------------------------------------
+     *
+     * ENGLISH
+     * -------
+     * This is the licence obligation being met, not a vanity screen. SFPS
+     * ships as one executable with nothing beside it, so "accompany the binary
+     * distribution" can only mean "be inside the game", and a notice the
+     * player cannot reach is a weaker claim than one they can read from the
+     * menu.
+     *
+     * Held as a table of lines rather than one string with newlines, because
+     * font_text draws a line at a time and a wrapper that split on '
+' would
+     * be a second place deciding where the breaks go. The lines are written
+     * pre-broken to the width this screen has.
+     *
+     * 한국어
+     * ------
+     * 이것은 허영을 위한 화면이 아니라 이행되고 있는 라이선스 의무입니다. SFPS는 옆에
+     * 아무것도 없는 실행 파일 하나로 배포되므로 "바이너리 배포에 동반한다"는 것은 "게임
+     * 안에 있다"는 뜻일 수밖에 없으며, 플레이어가 닿을 수 없는 고지는 메뉴에서 읽을 수
+     * 있는 것보다 약한 주장입니다.
+     *
+     * 개행이 든 하나의 문자열이 아니라 줄의 표로 보관합니다. font_text가 한 번에 한 줄을
+     * 그리므로, '
+'으로 나누는 래퍼는 줄바꿈 위치를 정하는 두 번째 장소가 됩니다. */
+    if (menu_screen() == MENU_CREDITS) {
+        static const char *NOTICE[] = {
+            "Artwork from the Freedoom project.",
+            "Copyright (c) 2001-2024 Contributors to",
+            "the Freedoom project. All rights reserved.",
+            "",
+            "Redistribution and use in source and binary",
+            "forms, with or without modification, are",
+            "permitted provided that the following",
+            "conditions are met:",
+            "",
+            "* Redistributions of source code must retain",
+            "  the above copyright notice, this list of",
+            "  conditions and the following disclaimer.",
+            "",
+            "* Redistributions in binary form must",
+            "  reproduce the above copyright notice, this",
+            "  list of conditions and the following",
+            "  disclaimer in the documentation and/or",
+            "  other materials provided with the",
+            "  distribution.",
+            "",
+            "* Neither the name of the Freedoom project",
+            "  nor the names of its contributors may be",
+            "  used to endorse or promote products derived",
+            "  from this software without specific prior",
+            "  written permission.",
+            /* The second column starts here; see NOTICE_SPLIT. */
+            "THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT",
+            "HOLDERS AND CONTRIBUTORS \"AS IS\" AND ANY",
+            "EXPRESS OR IMPLIED WARRANTIES, INCLUDING,",
+            "BUT NOT LIMITED TO, THE IMPLIED WARRANTIES",
+            "OF MERCHANTABILITY AND FITNESS FOR A",
+            "PARTICULAR PURPOSE ARE DISCLAIMED. IN NO",
+            "EVENT SHALL THE COPYRIGHT OWNER OR",
+            "CONTRIBUTORS BE LIABLE FOR ANY DIRECT,",
+            "INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR",
+            "CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT",
+            "LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS",
+            "OR SERVICES; LOSS OF USE, DATA, OR PROFITS;",
+            "OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND",
+            "ON ANY THEORY OF LIABILITY, WHETHER IN",
+            "CONTRACT, STRICT LIABILITY, OR TORT",
+            "(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING",
+            "IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,",
+            "EVEN IF ADVISED OF THE POSSIBILITY OF SUCH",
+            "DAMAGE.",
+            "",
+            "Contributors: freedoom.github.io  /  CREDITS",
+            "Full licence text: docs/LICENSE-Freedoom.txt",
+        };
+        /* Where the block breaks into two columns. An index into NOTICE
+           rather than a count of the lines before it, so moving a line across
+           the break is a one-number edit and cannot disagree with the array.
+           본문이 두 단으로 갈라지는 지점. 앞선 줄의 개수가 아니라 NOTICE의 인덱스이므로,
+           줄 하나를 단 너머로 옮기는 일이 숫자 하나를 고치는 일이 되고 배열과 어긋날 수
+           없습니다. */
+        static const int NOTICE_SPLIT = 25;
+       const int n = (int)(sizeof(NOTICE) / sizeof(NOTICE[0]));
+
+        /* Below the last row, not over it. The row positions come from
+           menu_row_bounds -- the same function the mouse hit test reads -- so
+           the notice cannot end up on top of the button that dismisses it
+           however the menu's layout constants change.
+           마지막 행 위가 아니라 *아래*에 둡니다. 행 위치는 마우스 히트 판정이 읽는 것과
+           같은 menu_row_bounds에서 가져오므로, 메뉴의 배치 상수가 어떻게 바뀌어도 고지가
+           그것을 닫는 버튼 위에 놓일 수 없습니다. */
+        float bx0, by0, bx1, by1;
+        float ny = menu_title_y(vw, vh) + 60.0f;
+        if (menu_row_bounds(rows - 1, vw, vh, &bx0, &by0, &bx1, &by1))
+            ny = by1 + 16.0f;
+
+        /* Two columns, because the whole licence in one is taller than the
+           screen and the part that would fall off the bottom is the warranty
+           disclaimer -- the one paragraph the licence says must be reproduced
+           in full. Both columns are as wide as the widest line and are
+           left-aligned, measured rather than assumed, so re-wrapping the text
+           moves the columns instead of overflowing them.
+           두 단으로 놓습니다. 라이선스 전문을 한 단에 넣으면 화면보다 길어지고, 아래로
+           잘려 나가는 부분이 하필 보증 부인 조항 -- 라이선스가 전문 그대로 실으라고
+           명시한 그 문단 -- 이기 때문입니다. 두 단의 너비는 가정하지 않고 가장 긴 줄을
+           실제로 재서 정하므로, 본문을 다시 줄바꿈하면 단이 넘치는 대신 움직입니다. */
+        float wmax = 0.0f;
+        for (int i = 0; i < n; i++) {
+            float w = font_width(1.0f, NOTICE[i]);
+            if (w > wmax) wmax = w;
+        }
+        const float gutter = 28.0f;
+        float lx = cx - wmax - gutter * 0.5f;
+        float rx = cx + gutter * 0.5f;
+
+        for (int i = 0; i < n; i++) {
+            int second = (i >= NOTICE_SPLIT);
+            float x = second ? rx : lx;
+            float y = ny + (i - (second ? NOTICE_SPLIT : 0)) * 11.0f;
+
+            /* Brighter for the attribution, dimmer for the licence body: the
+               notice must be present and legible, not shouted.
+               귀속 표시는 밝게, 라이선스 본문은 흐리게 합니다. 고지는 존재하고 읽을 수
+               있어야 하지 소리쳐야 하는 것은 아닙니다. */
+            float t = (i <= 2) ? 0.84f : 0.56f;
+            text_run(s, x, y, 1.0f, NOTICE[i], t, t * 0.98f, t * 0.92f, 1.0f);
+        }
+    }
 
     for (int i = 0; i < rows; i++) {
         const char *value;
@@ -762,12 +905,21 @@ void scene_draw_menu(Scene *s, int vw, int vh) {
        cursor appears. The keys stay listed -- both drive the same menu.
        커서가 나타나면 플레이어가 먼저 잡는 것이 마우스이므로 마우스를 먼저 적습니다.
        키도 계속 표시하며, 둘 다 같은 메뉴를 조작합니다. */
-    const char *hint = (menu_screen() == MENU_SETTINGS)
-        ? "CLICK to change   RIGHT-CLICK reverses   W/S A/D   ESC back"
-        : "CLICK to choose   W/S select   ENTER   ESC resume";
-    float hw = font_width(MENU_HINT_SIZE, hint);
-    text_run(s, cx - hw * 0.5f, menu_hint_y(vw, vh), MENU_HINT_SIZE, hint,
-             0.52f, 0.52f, 0.56f, 1.0f);
+    /* The credits screen gets no hint. Its hint would be drawn where the
+       notice now is, and there is nothing to explain: one row that says BACK,
+       and ESC does the same. A line of help over a licence is worse than no
+       line of help.
+       크레딧 화면에는 안내를 두지 않습니다. 안내가 지금 고지가 있는 자리에 그려지며,
+       설명할 것도 없습니다. BACK이라고 적힌 행 하나가 있고 ESC도 같은 일을 합니다.
+       라이선스 위에 겹친 도움말 한 줄은 도움말이 없는 것보다 나쁩니다. */
+    if (menu_screen() != MENU_CREDITS) {
+        const char *hint = (menu_screen() == MENU_SETTINGS)
+            ? "CLICK to change   RIGHT-CLICK reverses   W/S A/D   ESC back"
+            : "CLICK to choose   W/S select   ENTER   ESC resume";
+        float hw = font_width(MENU_HINT_SIZE, hint);
+        text_run(s, cx - hw * 0.5f, menu_hint_y(vw, vh), MENU_HINT_SIZE, hint,
+                 0.52f, 0.52f, 0.56f, 1.0f);
+    }
 
     ui_end();
 }

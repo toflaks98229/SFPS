@@ -65,7 +65,30 @@
 typedef enum {
     MENU_CLOSED = 0,  /**< Playing; the menu is not up. / 플레이 중이며 메뉴가 없습니다. */
     MENU_ROOT,        /**< The root menu: resume, settings, restart, quit. / 최상위 메뉴. */
-    MENU_SETTINGS     /**< The settings page. / 설정 화면. */
+    MENU_SETTINGS,    /**< The settings page. / 설정 화면. */
+
+    /**
+     * @brief The credits, and the licence notices the game is obliged to show.
+     *
+     * ENGLISH
+     * -------
+     * Not decoration. SFPS ships as a single executable with no files beside
+     * it, and the BSD licence on the artwork it uses requires the notice to
+     * accompany a BINARY distribution -- so with nothing else in the folder,
+     * the only place it can accompany anything is inside the game. A licence
+     * that is present in the .rdata but unreachable by the player is a weaker
+     * claim than one you can read from the menu.
+     *
+     * 한국어
+     * ------
+     * @brief 크레딧, 그리고 게임이 표시할 의무가 있는 라이선스 고지입니다.
+     *
+     * 장식이 아닙니다. SFPS는 옆에 아무 파일도 없는 단일 실행 파일로 배포되며, 사용하는
+     * 아트의 BSD 라이선스는 *바이너리* 배포에도 고지가 동반될 것을 요구합니다. 폴더에 다른
+     * 것이 없다면 무언가에 동반될 수 있는 유일한 장소는 게임 안입니다. .rdata에는 있지만
+     * 플레이어가 닿을 수 없는 라이선스는 메뉴에서 읽을 수 있는 것보다 약한 주장입니다.
+     */
+    MENU_CREDITS
 } MenuScreen;
 
 /**

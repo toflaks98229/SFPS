@@ -1790,6 +1790,77 @@ makes the *stock* sweep across the screen while the muzzle sits still — exactl
 backwards from a shouldered weapon. The pivot constants live in
 [src/weapon.c](src/weapon.c).
 
+## Credits and licences
+
+**Artwork from the [Freedoom](https://freedoom.github.io/) project**, used under
+the 3-clause BSD licence. The full text is in
+[docs/LICENSE-Freedoom.txt](docs/LICENSE-Freedoom.txt), reproduced verbatim
+because a tidied licence is not the licence that was granted.
+
+> Copyright © 2001-2024 Contributors to the Freedoom project. All rights
+> reserved. Redistribution and use in source and binary forms, with or without
+> modification, are permitted provided that the conditions of the 3-clause BSD
+> licence are met. Neither the name of the Freedoom project nor the names of its
+> contributors may be used to endorse or promote products derived from this
+> software without specific prior written permission.
+
+**The notice ships inside the binary, and that is not decoration.** The licence
+requires it to accompany *binary* distributions, and this game is one executable
+with nothing beside it — so the only thing it can accompany is the game itself.
+It is on the `CREDITS` screen in the ESC menu, where a player can actually read
+it; a notice sitting in `.rdata` that nothing displays is a weaker claim.
+
+**The build asserts it rather than trusting anyone to remember.** Deleting the
+notice breaks nothing: the game compiles, runs and looks identical, and the only
+difference is that shipping it is no longer permitted. `bake.ps1` therefore
+fails the build when `assets/sprites/` holds artwork and the notice in
+`src/scene.c` does not match:
+
+```
+Freedoom artwork is present in assets\sprites\ but the attribution notice in
+src/scene.c is missing the line: 'Artwork from the Freedoom project.'
+```
+
+Keyed on artwork actually being present, so a checkout with none — which is how
+this ships today — is under no obligation and pays nothing. Verified by removing
+the line and watching the build stop.
+
+### Why Freedoom and not the alternatives
+
+The trap worth stating: **an engine's licence is not its assets' licence.** Doom
+and Quake both released their *source* under the GPL and both keep their game
+data proprietary, so "Doom is open source" does not make its sprites usable.
+
+| | licence | verdict |
+|---|---|---|
+| **Freedoom** | BSD-3, single, at the repo root | **chosen** — 25 years, prior commercial use, and 2D sprites, which is the format this game is in |
+| LibreQuake | BSD-3 art *plus* GPL-2 game code, in `docs/` | legitimate, but mixed, younger, and mostly 3D models |
+| OpenArena, Xonotic | GPL for code *and* assets | copyleft reaches the whole game |
+| Doom, Quake data | proprietary | not usable at any price |
+
+### Turning a Freedoom sprite into one of ours
+
+Freedoom ships its art as individual PNGs in `sprites/`, named the way Doom
+names them — `NAME` + a frame letter + a rotation digit, so `POSSA1` is the
+zombieman's frame A seen from the front. That is already the shape this
+project's pipeline wants; what it needs is a resize and a redraw pass, because
+these sprites were drawn for a 320×200 screen and this one has its own art
+resolution and a shared 16-colour palette.
+
+| ours | a reasonable Freedoom source | why |
+|---|---|---|
+| `imp` | `POSS` | the baseline humanoid |
+| `hound` | `SARG` | low, fast, all mouth |
+| `brute` | `BOSS` / `BOS2` | the big one |
+| `caster` | `HEAD` | floats, attacks at range |
+
+Drop the result in `assets/sprites/` as `imp0.png` … `imp4.png` (walk-A, walk-B,
+attack, hurt, dead) and rebuild; `bake.ps1` quantises it to the shared palette
+and encodes it. A 128×96 weapon frame measures at about 1.3KB and a 32×32
+monster frame at a small fraction of that, so a full bestiary and weapon set is
+roughly 2% of the budget — see
+[Hand-drawn art](#hand-drawn-art-and-the-weapon-that-replaces-its-model).
+
 ## Roadmap
 
 - [x] Win32 + GL 3.3 core, zero external libraries

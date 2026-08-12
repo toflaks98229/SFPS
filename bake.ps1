@@ -369,6 +369,142 @@ if ($escMesh.Length -eq 0) {
 [void]$sb.AppendLine('    ;')
 [void]$sb.AppendLine()
 
+# --- attribution, checked rather than remembered ---------------------------
+#
+# The artwork this project uses comes from Freedoom, whose 3-clause BSD licence
+# requires its notice to accompany BINARY distributions as well as source. SFPS
+# ships as one executable with nothing beside it, so the only place the notice
+# can accompany anything is inside the game -- it is drawn on the CREDITS screen
+# in src/scene.c.
+#
+# Nothing about the build breaks if that notice is deleted. The game compiles,
+# runs and looks identical; the only difference is that shipping it is no longer
+# permitted. That is precisely the kind of fault this project refuses to leave
+# to memory, so the build asserts it: art present without its notice is a failed
+# build rather than a licence violation discovered later.
+#
+# Keyed on sprites actually being present, so a checkout with no art -- which is
+# how this ships today -- is under no obligation and pays nothing.
+#
+# 이 프로젝트가 사용하는 아트는 Freedoom에서 왔으며, 그 3-clause BSD 라이선스는 소스뿐
+# 아니라 *바이너리* 배포에도 고지가 동반될 것을 요구합니다. SFPS는 옆에 아무것도 없는 실행
+# 파일 하나로 배포되므로, 고지가 동반될 수 있는 유일한 장소는 게임 안입니다.
+#
+# 그 고지를 지워도 빌드는 아무 문제 없이 됩니다. 게임은 컴파일되고 실행되며 겉보기도 같고,
+# 달라지는 것은 배포가 더 이상 허용되지 않는다는 사실뿐입니다. 바로 이런 종류의 결함을 이
+# 프로젝트는 기억에 맡기지 않으므로, 빌드가 이를 단언합니다. 고지 없는 아트는 나중에 발견될
+# 라이선스 위반이 아니라 실패한 빌드입니다.
+$spriteDirCheck = Join-Path $root 'assets\sprites'
+if (Test-Path $spriteDirCheck) {
+    $art = @(Get-ChildItem $spriteDirCheck -Filter *.png -ErrorAction SilentlyContinue)
+    if ($art.Count -gt 0) {
+        $licPath = Join-Path $root 'docs\LICENSE-Freedoom.txt'
+        if (-not (Test-Path $licPath)) {
+            throw ("Freedoom artwork is present but docs/LICENSE-Freedoom.txt is " +
+                   "missing. The licence text must be kept with the project.")
+        }
+
+        # Checking that a few lines are PRESENT is not enough, and the first
+        # version of this guard proved it: the notice passed while its warranty
+        # disclaimer had been shortened to "ANY WARRANTIES ARE DISCLAIMED",
+        # which is a summary of the paragraph the licence requires verbatim. So
+        # compare against the licence file itself -- pull the string literals
+        # out of the NOTICE table, flatten both to single spaces, and require
+        # the whole span from the copyright line to SUCH DAMAGE. to appear
+        # word for word. Line breaks and indentation are free to differ,
+        # because those are layout; the words are not.
+        #
+        # 몇 줄이 *존재하는지* 확인하는 것으로는 부족하며, 이 가드의 첫 판본이 그것을
+        # 증명했습니다. 보증 부인 조항이 "ANY WARRANTIES ARE DISCLAIMED"로 요약된
+        # 상태에서 고지가 검사를 통과했는데, 그 문단이야말로 라이선스가 전문 그대로
+        # 실으라고 요구하는 부분입니다. 그래서 라이선스 파일 자체와 대조합니다. 줄바꿈과
+        # 들여쓰기는 배치이므로 달라도 되지만, 단어는 그렇지 않습니다.
+        # -Encoding UTF8 on both reads is required, not tidiness. Windows
+        # PowerShell defaults Get-Content to the ANSI codepage, which turns the
+        # licence's © into mojibake -- and a comparison against mojibake fails
+        # on the copyright line every time, reporting a violation that is not
+        # there. A guard with false positives gets switched off.
+        # 두 읽기 모두 -Encoding UTF8이 필요하며 이는 단정함의 문제가 아닙니다. Windows
+        # PowerShell의 Get-Content는 ANSI 코드페이지를 기본값으로 삼아 라이선스의 ©를
+        # 깨뜨리고, 깨진 문자와의 비교는 매번 저작권 줄에서 실패해 있지도 않은 위반을
+        # 보고합니다. 거짓 양성을 내는 가드는 꺼지게 됩니다.
+        $sceneSrc = Get-Content (Join-Path $root 'src\scene.c') -Raw -Encoding UTF8
+
+        $block = [regex]::Match($sceneSrc,
+                                'static const char \*NOTICE\[\] = \{(.*?)\n\s*\};',
+                                'Singleline')
+        if (-not $block.Success) {
+            throw ("Freedoom artwork is present in assets\sprites\ but the NOTICE " +
+                   "table has gone from src/scene.c. That table is the attribution " +
+                   "the BSD licence requires to ship with the binary.")
+        }
+
+        $notice = (
+            [regex]::Matches($block.Groups[1].Value, '"((?:[^"\\]|\\.)*)"') |
+                ForEach-Object { $_.Groups[1].Value.Replace('\"', '"') }
+        ) -join ' '
+
+        # Curly quotes and the (c) glyph differ between the licence file and a
+        # 5x7 bitmap font that has neither. Everything else must match.
+        # [string] casts are load-bearing: String.Replace has a (char,char)
+        # overload, and PowerShell binds it on a char first argument -- so
+        # replacing © with the two-character '(c)' fails to convert rather
+        # than replacing anything.
+        # [string] 캐스팅은 반드시 필요합니다. String.Replace에는 (char,char) 오버로드가
+        # 있고 PowerShell은 첫 인자가 char이면 그쪽에 바인딩하므로, ©를 두 글자인 '(c)'로
+        # 바꾸려 하면 치환이 아니라 변환 실패가 됩니다.
+        function Normalise-Licence([string] $t) {
+            $t = $t.Replace([string][char]0x201C, '"')
+            $t = $t.Replace([string][char]0x201D, '"')
+            $t = $t.Replace([string][char]0x00A9, '(c)')
+            return ([regex]::Replace($t, '\s+', ' ')).Trim()
+        }
+
+        $licSrc = Get-Content $licPath -Raw -Encoding UTF8
+        $span = [regex]::Match($licSrc, 'Copyright .*?SUCH DAMAGE\.', 'Singleline')
+        if (-not $span.Success) {
+            throw ("docs/LICENSE-Freedoom.txt no longer contains the BSD text this " +
+                   "build checks the in-game notice against. Restore it from " +
+                   "https://github.com/freedoom/freedoom/blob/master/COPYING.adoc")
+        }
+
+        $want = Normalise-Licence $span.Value
+        $have = Normalise-Licence $notice
+
+        if (-not $have.Contains($want)) {
+            # Say WHERE it diverges. "The notice is wrong" sends someone
+            # diffing 47 lines by eye; the first differing word does not.
+            $w = $want.Split(' '); $h = $have.Split(' ')
+            $at = [Array]::IndexOf($h, $w[0])
+            $detail = 'the notice does not contain the licence text at all'
+            if ($at -ge 0) {
+                for ($i = 0; $i -lt $w.Length; $i++) {
+                    $got = if (($at + $i) -lt $h.Length) { $h[$at + $i] } else { '<end of notice>' }
+                    if ($got -ne $w[$i]) {
+                        # The words BEFORE the divergence, so the quoted
+                        # context is the part that still matched and the
+                        # divergence is what follows it.
+                        # 어긋나기 *직전*까지의 단어들입니다. 인용된 맥락은 아직 일치하던
+                        # 부분이고, 어긋난 지점은 그 다음에 옵니다.
+                        $ctx = ''
+                        if ($i -gt 0) {
+                            $lo = [Math]::Max(0, $i - 6)
+                            $ctx = '...' + (($w[$lo..($i - 1)]) -join ' ') + ' '
+                        }
+                        $detail = ("after '$ctx' the licence says '" + $w[$i] +
+                                   "' but the notice says '" + $got + "'")
+                        break
+                    }
+                }
+            }
+            throw ("Freedoom artwork is present in assets\sprites\ but the NOTICE " +
+                   "table in src/scene.c is not the licence verbatim: $detail. " +
+                   "The BSD licence requires this text to be reproduced with the " +
+                   "binary, and this game IS the binary -- see docs/LICENSE-Freedoom.txt.")
+        }
+    }
+}
+
 # Every .png under assets\sprites\ becomes one entry in a single sprite
 # library, sharing one palette. Sorted by name so the baked output is stable:
 # a set that reordered itself between builds would produce a different palette

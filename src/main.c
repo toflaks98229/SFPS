@@ -920,30 +920,24 @@ static void frame_draw(const World *w, Scene *sc, int vw, int vh, int frozen) {
         cam_roll    = DEATH_ROLL * e;
     }
 
-    mat4 proj = mat4_perspective(WORLD_FOV, aspect, 0.05f, 200.0f);
-    mat4 view = mat4_fps_view_roll(eye_pos, w->yaw, cam_pitch, cam_roll);
-    mat4 vp   = mat4_mul(proj, view);
+    /* One derivation, two users. The billboards below span along `cam.right`
+       and `cam.up`, and they have to be the axes the view matrix was built
+       from: this used to call mat4_fps_view_roll and then re-derive the
+       identical trigonometry by hand, roll included, a dozen lines later. The
+       drift that invites is silent and specific -- sprites keep facing where
+       the camera used to be and turn edge-on as it rolls, so the monsters
+       vanish exactly as the player dies. See ::CamBasis.
+       하나의 유도, 두 사용처입니다. 아래의 빌보드는 `cam.right`와 `cam.up`을 따라
+       펼쳐지며, 그것은 뷰 행렬이 만들어진 축이어야 합니다. 이곳은 이전에
+       mat4_fps_view_roll을 호출한 뒤 열두 줄 아래에서 롤까지 포함해 동일한 삼각함수
+       계산을 손으로 다시 유도하고 있었습니다. 그것이 부르는 어긋남은 조용하고
+       구체적입니다. 스프라이트가 카메라가 있던 곳을 계속 향하다가 롤링에 따라 옆으로
+       서 버리므로, 플레이어가 죽는 바로 그 순간에 몬스터가 사라집니다. ::CamBasis를
+       참조하십시오. */
+    CamBasis cam = cam_basis(w->yaw, cam_pitch, cam_roll);
 
-    /* The basis the billboards face along. Derived from the SAME pitch and
-       roll the view matrix uses, or the sprites would keep facing where the
-       camera used to be and turn edge-on as it rolls -- monsters vanishing
-       as the player dies is exactly the wrong thing to lose sight of.
-       빌보드가 향하는 기저입니다. 뷰 행렬이 사용하는 것과 *동일한* 피치와 롤에서
-       유도합니다. 그렇지 않으면 스프라이트가 카메라가 있던 곳을 계속 향하다가 롤링에
-       따라 옆으로 서 버립니다. 플레이어가 죽는 순간 몬스터가 사라지는 것은 시야에서
-       놓쳐서는 안 될 바로 그것입니다. */
-    float cy = cosf(w->yaw), sy = sinf(w->yaw);
-    float cp = cosf(cam_pitch), sp = sinf(cam_pitch);
-    v3 cam_fwd   = v3f(-sy * cp, sp, -cy * cp);
-    v3 cam_right = v3f(cy, 0, -sy);
-    v3 cam_up    = v3cross(cam_right, cam_fwd);
-    if (cam_roll != 0.0f) {
-        float cr = cosf(cam_roll), sr = sinf(cam_roll);
-        v3 r2 = v3add(v3scale(cam_right, cr), v3scale(cam_up, sr));
-        v3 u2 = v3add(v3scale(cam_right, -sr), v3scale(cam_up, cr));
-        cam_right = r2;
-        cam_up    = u2;
-    }
+    mat4 proj = mat4_perspective(WORLD_FOV, aspect, 0.05f, 200.0f);
+    mat4 vp   = mat4_mul(proj, mat4_view_of(eye_pos, cam));
 
     /* --- world ---
        Lit and fogged from the camera's real position, which during the
@@ -956,15 +950,15 @@ static void frame_draw(const World *w, Scene *sc, int vw, int vh, int frozen) {
        Sprite passes, each building its billboards on the CPU and uploading
        once. They stay on the world side of the pass boundary so they are
        pixelised and dithered along with everything else -- see scene.h. */
-    scene_draw_enemies(sc, vp, eye_pos, cam_right);
-    scene_draw_pickups(sc, vp, eye_pos, cam_right);
-    scene_draw_shots  (sc, vp, cam_right, cam_up);
-    scene_draw_proj   (sc, vp, cam_right, cam_up);
-    fx_draw(vp, cam_right, cam_up);
+    scene_draw_enemies(sc, vp, eye_pos, cam.right);
+    scene_draw_pickups(sc, vp, eye_pos, cam.right);
+    scene_draw_shots  (sc, vp, cam.right, cam.up);
+    scene_draw_proj   (sc, vp, cam.right, cam.up);
+    fx_draw(vp, cam.right, cam.up);
 
     /* --- bullet holes and tracers, still in world space --- */
     glDisable(GL_CULL_FACE);
-    wp_draw_world(&w->weapon, vp, eye_pos, cam_right, cam_up);
+    wp_draw_world(&w->weapon, vp, eye_pos, cam.right, cam.up);
 
     /* --- the gun, over a cleared depth buffer ---
        Dropped the moment the player dies. The view model is drawn in its own

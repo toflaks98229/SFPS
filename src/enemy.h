@@ -184,6 +184,62 @@ typedef enum {
 /* --- 구조체 --- */
 
 /**
+ * @enum MonBehaviour
+ * @brief How a monster fights, which is a different question from its stats.
+ *
+ * ENGLISH
+ * -------
+ * The AI used to ask `S->shot_speed > 0.0f` at three separate points -- the
+ * chase, the release of an attack, and the transition out of one -- and mean
+ * "is this a caster?" every time. That works only while "has a projectile
+ * speed" and "fights at range" are the same fact, and it is one table row away
+ * from not being: a brawler that also lobs something, or a caster whose bolt is
+ * a hitscan, and three unrelated pieces of code quietly change together.
+ *
+ * So the archetype is a column and the stats are stats. ::MonType::shot_speed
+ * is now read only where a caster reads it, and adding a third way to fight is
+ * a value here, a row in the table and one case in ::enemy_update -- rather
+ * than a fourth reading of a number that was never about that.
+ *
+ * @note Not a table of function pointers, and that is deliberate. This project
+ *       links with `-ffunction-sections -Wl,--gc-sections`, and a pointer table
+ *       is a reference: every behaviour it names is kept in the binary whether
+ *       or not anything reaches it. A switch over an enum lets the linker drop
+ *       what a build does not use -- the same reason the loader in gl.h resolves
+ *       only the entry points actually called. Two archetypes do not pay for
+ *       indirection; if this grows to where they would, the switch is what a
+ *       table replaces.
+ *
+ * 한국어
+ * ------
+ * @brief 몬스터가 *어떻게 싸우는가*이며, 이는 그 몬스터의 수치와는 다른 질문입니다.
+ *
+ * AI는 이전에 세 곳(추격, 공격 발동, 공격에서의 전이)에서 각각 `S->shot_speed > 0.0f`를
+ * 물었고, 매번 "이것은 캐스터인가"를 뜻했습니다. 그것은 "발사체 속도를 가진다"와 "원거리에서
+ * 싸운다"가 같은 사실인 동안에만 성립하며, 그렇지 않게 되기까지 표의 한 행 거리입니다.
+ * 무언가를 던지기도 하는 근접형이나 볼트가 히트스캔인 캐스터가 생기면, 서로 무관한 코드 세
+ * 곳이 조용히 함께 바뀝니다.
+ *
+ * 그래서 아키타입은 열이고 수치는 수치입니다. ::MonType::shot_speed는 이제 캐스터가 읽는
+ * 곳에서만 읽힙니다. 세 번째 전투 방식을 추가하는 것은 이곳의 값 하나, 표의 행 하나,
+ * ::enemy_update의 case 하나이며, 애초에 그것에 관한 것이 아니었던 숫자에 대한 네 번째
+ * 해석이 아닙니다.
+ *
+ * @note 함수 포인터 표가 아니며, 이는 의도적입니다. 이 프로젝트는
+ *       `-ffunction-sections -Wl,--gc-sections`로 링크하며, 포인터 표는 곧 참조입니다.
+ *       표가 지목하는 모든 동작은 무엇도 그곳에 도달하지 않더라도 바이너리에 남습니다.
+ *       열거형에 대한 switch는 링커가 그 빌드가 쓰지 않는 것을 버릴 수 있게 하며, 이는
+ *       gl.h의 로더가 실제로 호출하는 엔트리포인트만 해석하는 것과 같은 이유입니다.
+ *       아키타입 두 개는 간접화의 값을 치르지 않습니다. 그 값을 치를 만큼 늘어난다면, 그때
+ *       표가 대체할 대상이 바로 이 switch입니다.
+ */
+typedef enum {
+    AI_BRAWLER,     /**< Closes to arm's length and swings. / 팔 길이까지 붙어 휘두릅니다. */
+    AI_CASTER,       /**< Keeps a band of distance and shoots. / 일정 거리를 유지하며 발사합니다. */
+    AI_BEHAVIOURS   /**< How many. / 개수. */
+} MonBehaviour;
+
+/**
  * @struct MonType
  * @brief 한 종류의 몬스터를 다른 몬스터와 다르게 만드는 모든 특성을 정의합니다.
  *
@@ -201,6 +257,7 @@ typedef struct {
      * 없습니다.
      */
     const char *name;
+    int   behaviour;    /**< A ::MonBehaviour: how this kind fights. / ::MonBehaviour 값. 이 종류가 어떻게 싸우는가. */
     int   hp;           /**< 체력. */
     float speed;        /**< 이동 속도 (m/s). */
     float radius;       /**< 충돌 반경 (미터). */

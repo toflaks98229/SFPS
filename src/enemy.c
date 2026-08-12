@@ -47,17 +47,33 @@ static Shot g_shots[ENEMY_MAX_SHOTS];
    무감각한가. 둘 다 조정값이 아니라 성격입니다. 브루트는 원을 그리는 플레이어를 추적하지
    못하고 스턴 락에도 걸리지 않는데, 그 두 사실은 브루트가 무엇인가에 대한 하나의
    사실입니다. */
-/*         name     hp  spd   rad    hgt    eye   sight  atk  dmg  wind   cool  aspct shot   yaw    pain */
+/*         name     behaviour     hp  spd   rad    hgt    eye   sight  atk  dmg  wind   cool  aspct shot   yaw    pain */
 static const MonType TYPES[MON_TYPES] = {
     /* IMP: 기준선. 충분히 빠르며, 근접 샷건 한 방에 죽습니다. */
-    { "imp",    40, 3.0f, 0.40f, 1.70f, 1.30f, 34.0f,  1.8f,  9, 0.35f, 1.10f, 0.70f,  0.0f, 220.0f, 0.6f },
+    { "imp",    AI_BRAWLER,  40, 3.0f, 0.40f, 1.70f, 1.30f, 34.0f,  1.8f,  9, 0.35f, 1.10f, 0.70f,  0.0f, 220.0f, 0.6f },
     /* BRUTE: 체력이 높은 벽. 느리게 다가오지만 강력한 공격을 하므로, 피하기보다 계획적으로 대처해야 하는 위협입니다. */
-    { "brute", 120, 1.9f, 0.62f, 2.35f, 1.80f, 34.0f,  2.3f, 24, 0.55f, 1.50f, 0.85f,  0.0f, 130.0f, 2.2f },
+    { "brute",  AI_BRAWLER, 120, 1.9f, 0.62f, 2.35f, 1.80f, 34.0f,  2.3f, 24, 0.55f, 1.50f, 0.85f,  0.0f, 130.0f, 2.2f },
     /* HOUND: 빠르고 약한 야수. 가만히 있는 것을 응징합니다. 한 번의 공격 피해는 적지만, 경고를 알아차리기 전에 덮칩니다. */
-    { "hound",  18, 5.3f, 0.38f, 1.25f, 0.70f, 40.0f,  1.5f,  5, 0.18f, 0.65f, 1.00f,  0.0f, 400.0f, 0.3f },
+    { "hound",  AI_BRAWLER,  18, 5.3f, 0.38f, 1.25f, 0.70f, 40.0f,  1.5f,  5, 0.18f, 0.65f, 1.00f,  0.0f, 400.0f, 0.3f },
     /* CASTER: 계속 움직여야 하는 이유. 접근하지 않고 사정거리를 유지하며 주문을 시전하므로, 발놀림 대신 엄폐와 각도가 중요합니다. */
-    { "caster", 26, 2.4f, 0.42f, 1.90f, 1.45f, 40.0f, 13.0f, 12, 0.85f, 1.40f, 0.80f, 11.0f, 180.0f, 0.9f },
+    { "caster", AI_CASTER,     26, 2.4f, 0.42f, 1.90f, 1.45f, 40.0f, 13.0f, 12, 0.85f, 1.40f, 0.80f, 11.0f, 180.0f, 0.9f },
 };
+
+/* A caster that cannot throw anything stands in its band and does nothing, and
+   a brawler with a bolt speed is a stat nobody reads -- both are the kind of
+   silent wrong the behaviour column exists to make impossible to write by
+   accident. Checked here rather than trusted, because the table is the one
+   place a new monster is authored and this is the one place that can object.
+   던질 것이 없는 캐스터는 자기 대역에 서서 아무것도 하지 않고, 볼트 속도를 가진 근접형은
+   아무도 읽지 않는 수치입니다. 둘 다 behaviour 열이 실수로 작성될 수 없게 만들려는 바로 그
+   조용한 오류입니다. 신뢰하지 않고 이곳에서 검사하는 이유는, 표가 새 몬스터를 저작하는 유일한
+   곳이고 이곳이 이의를 제기할 수 있는 유일한 곳이기 때문입니다. */
+static void types_check(void) {
+    for (int i = 0; i < MON_TYPES; i++) {
+        int caster = TYPES[i].behaviour == AI_CASTER;
+        if (caster != (TYPES[i].shot_speed > 0.0f)) DIAG(DIAG_MON_TABLE);
+    }
+}
 
 /* `spawn`은 종류가 하나뿐이던 시절의 이름이며, 기존 맵들이 여전히 사용합니다.
    TYPES에 넣지 않고 별칭으로 두는 이유는, 그것이 실제로 별칭이기 때문입니다. 테이블에
@@ -562,6 +578,13 @@ const Enemy *enemy_at(int i) {
 }
 
 void enemy_spawn_level(const Level *l) {
+    /* Cheap, and this is the one call every level load and every headless test
+       goes through, so a table that contradicts itself is reported on the first
+       map anybody opens rather than on the one where somebody notices.
+       비용이 적고, 이곳은 모든 레벨 로드와 모든 헤드리스 테스트가 반드시 거치는 호출입니다.
+       그래서 자기모순인 표는 누군가 알아채는 맵이 아니라 처음 여는 맵에서 보고됩니다. */
+    types_check();
+
     enemy_reset();
     /* Runs over every entity even once full, rather than breaking out on the
        cap. Stopping early is the same amount of spawning but loses the count
@@ -603,6 +626,192 @@ void enemy_spawn_level(const Level *l) {
            갱신되는지가 그 앞에 몇 마리가 생성되었는지에 좌우됩니다. */
         m->sight_age = (short)((g_count - 1) % SIGHT_PERIOD);
     }
+}
+
+/* ------------------------------------------------------------- archetypes */
+
+/**
+ * @brief A brawler chasing: close to arm's length, then swing or reposition.
+ *
+ * ENGLISH
+ * -------
+ * @param[in]     l    The level, for the walk.
+ * @param[in]     S    This monster's type.
+ * @param[in,out] m    The monster.
+ * @param[in]     to   Vector from the monster's eye to the player's.
+ * @param[in]     dist Horizontal distance to the player, metres.
+ * @param[in]     dt   Timestep in seconds.
+ *
+ * 한국어
+ * ------
+ * @brief 추격 중인 근접형입니다. 팔 길이까지 붙은 뒤 휘두르거나 자리를 바꿉니다.
+ * @param[in]     l    이동에 사용할 레벨.
+ * @param[in]     S    이 몬스터의 종류.
+ * @param[in,out] m    몬스터.
+ * @param[in]     to   몬스터의 눈에서 플레이어의 눈으로 향하는 벡터.
+ * @param[in]     dist 플레이어까지의 수평 거리 (미터).
+ * @param[in]     dt   시간 간격 (초).
+ */
+static void chase_brawler(const Level *l, const MonType *S, Enemy *m,
+                          v3 to, float dist, float dt) {
+    float inv  = dist > 0.001f ? 1.0f / dist : 0.0f;
+    float step = S->speed * dt;
+
+    if (dist > S->attack) {
+        move_toward(l, S, m, to.x * inv * step, to.z * inv * step);
+        return;
+    }
+
+    /* Within reach. The roll here is Quake's 0.9 at melee range -- high enough
+       that closing is still lethal, low enough that a monster occasionally
+       repositions instead of grinding out its swing timer nose-to-nose.
+       사거리 안입니다. 여기의 굴림은 근접 대역에서 Quake의 0.9입니다. 거리를 좁히는 것이
+       여전히 치명적일 만큼 높고, 몬스터가 코앞에서 공격 타이머만 돌리는 대신 이따금 자리를
+       바꿀 만큼 낮습니다. */
+    if (check_attack(S, m, dist)) {
+        m->state = E_ATTACK;
+        m->timer = 0.0f;
+        m->swung = 0;
+    } else {
+        ai_run_slide(l, S, m, dt);
+    }
+}
+
+/**
+ * @brief A caster chasing: hold a band of distance, and only sometimes fire.
+ *
+ * ENGLISH
+ * -------
+ * @param[in]     l    The level, for the walk and the sight test.
+ * @param[in]     S    This monster's type.
+ * @param[in,out] m    The monster.
+ * @param[in]     to   Vector from the monster's eye to the player's.
+ * @param[in]     dist Horizontal distance to the player, metres.
+ * @param[in]     dt   Timestep in seconds.
+ *
+ * 한국어
+ * ------
+ * @brief 추격 중인 캐스터입니다. 일정 거리 대역을 유지하며 가끔만 발사합니다.
+ * @param[in]     l    이동과 시야 판정에 사용할 레벨.
+ * @param[in]     S    이 몬스터의 종류.
+ * @param[in,out] m    몬스터.
+ * @param[in]     to   몬스터의 눈에서 플레이어의 눈으로 향하는 벡터.
+ * @param[in]     dist 플레이어까지의 수평 거리 (미터).
+ * @param[in]     dt   시간 간격 (초).
+ */
+static void chase_caster(const Level *l, const MonType *S, Enemy *m,
+                         v3 to, float dist, v3 player_eye, float dt) {
+    float inv  = dist > 0.001f ? 1.0f / dist : 0.0f;
+    float step = S->speed * dt;
+
+    if (dist > S->attack) {
+        move_toward(l, S, m, to.x * inv * step, to.z * inv * step);
+        return;
+    }
+    if (dist < S->attack * CASTER_KEEP) {
+        move_toward(l, S, m, -to.x * inv * step, -to.z * inv * step);
+        return;
+    }
+
+    /* Cached: this decides whether to PLANT and begin a wind-up, and the
+       wind-up is long enough that a frame or two of staleness cannot matter --
+       ::release_bolt checks again, live, and that is the check that actually
+       guards the wall.
+       캐시를 씁니다. 이것은 자리를 잡고 시전을 *시작할지*를 결정하며, 시전 시간이 충분히
+       길어 한두 프레임의 지연은 문제가 될 수 없습니다. ::release_bolt가 실시간으로 다시
+       검사하며, 벽을 실제로 지키는 것은 그 검사입니다. */
+    if (!sees_player(l, m, player_eye)) {
+        move_toward(l, S, m, to.x * inv * step, to.z * inv * step);
+        return;
+    }
+
+    /* In its preferred band and looking right at the player -- and it still
+       only sometimes shoots. The rest of the time it circles, which is what
+       turns a caster from a turret into something you have to chase around a
+       room.
+       선호하는 대역 안에서 플레이어를 정면으로 보고 있으면서도, 여전히 *가끔만* 쏩니다.
+       나머지 시간에는 원을 그립니다. 그것이 캐스터를 포탑에서 방 안을 쫓아다녀야 하는
+       무언가로 바꿉니다. */
+    if (check_attack(S, m, dist)) {
+        m->state = E_ATTACK;
+        m->timer = 0.0f;
+        m->swung = 0;
+    } else {
+        ai_run_slide(l, S, m, dt);
+    }
+}
+
+/**
+ * @brief A brawler's swing lands, if the player is still inside it.
+ *
+ * ENGLISH
+ * -------
+ * @param[in]     S    This monster's type.
+ * @param[in,out] m    The monster, for the sound's position.
+ * @param[in]     dist Horizontal distance to the player, metres.
+ * @return Damage to deal to the player. 0 if they got clear in time.
+ * @note Returned rather than applied, for the reason ::enemy_update returns a
+ *       total rather than subtracting one: this module does not own the
+ *       player's health, and one place noticing an emptied bar is what stops a
+ *       new damage source forgetting to kill them.
+ *
+ * 한국어
+ * ------
+ * @brief 근접형의 공격이 적중합니다. 플레이어가 아직 그 안에 있다면 말입니다.
+ * @param[in]     S    이 몬스터의 종류.
+ * @param[in,out] m    몬스터. 소리의 위치에 사용합니다.
+ * @param[in]     dist 플레이어까지의 수평 거리 (미터).
+ * @return 플레이어에게 줄 피해량. 제때 벗어났으면 0입니다.
+ * @note 적용하지 않고 반환하는 이유는 ::enemy_update가 차감하지 않고 합계를 반환하는 것과
+ *       같습니다. 이 모듈은 플레이어의 체력을 소유하지 않으며, 비워진 체력을 한 곳에서
+ *       감지하는 것이 새로운 피해원이 플레이어를 죽이는 것을 잊지 않게 합니다.
+ */
+static int release_swing(const MonType *S, Enemy *m, float dist) {
+    if (dist > S->attack + 0.3f) return 0;
+    play_at(m->pos, "eatt", 90);
+    return S->damage;
+}
+
+/**
+ * @brief A caster's bolt leaves, if the shot is still there to take.
+ *
+ * ENGLISH
+ * -------
+ * @param[in]     l          The level, for the sight test.
+ * @param[in]     S          This monster's type.
+ * @param[in,out] m          The monster.
+ * @param[in]     player_eye Where to aim.
+ *
+ * @warning The visibility test here is NOT cached and must never be. It exists
+ *          because a target can duck DURING the wind-up: answering from a
+ *          reading taken up to SIGHT_PERIOD frames ago is answering from before
+ *          the duck, which is a caster shooting through a wall -- the exact bug
+ *          this second check was added to prevent. Once per released bolt is
+ *          also a rate the trace can afford; it is the per-frame polling in
+ *          ::chase_caster that could not.
+ *
+ * 한국어
+ * ------
+ * @brief 캐스터의 볼트가 발사됩니다. 쏠 수 있는 상황이 아직 유지된다면 말입니다.
+ * @param[in]     l          시야 판정에 사용할 레벨.
+ * @param[in]     S          이 몬스터의 종류.
+ * @param[in,out] m          몬스터.
+ * @param[in]     player_eye 조준 대상.
+ *
+ * @warning 이곳의 가시성 검사는 캐시를 쓰지 *않으며* 앞으로도 써서는 안 됩니다. 이 검사는
+ *          시전 *도중에* 대상이 숨을 수 있기 때문에 존재합니다. 최대 SIGHT_PERIOD 프레임 전에
+ *          측정한 값으로 답하는 것은 숨기 이전의 상황으로 답하는 것이며, 그것은 벽을 관통해
+ *          쏘는 캐스터입니다. 이 두 번째 검사가 추가된 이유가 바로 그 버그입니다. 또한 발사된
+ *          볼트당 한 번이라면 판정 비용을 감당할 수 있습니다. 감당할 수 없었던 것은
+ *          ::chase_caster의 매 프레임 폴링입니다.
+ */
+static void release_bolt(const Level *l, const MonType *S, Enemy *m, v3 player_eye) {
+    if (!can_see(l, m, player_eye)) return;
+
+    v3 from = v3f(m->pos.x, m->pos.y + S->eye, m->pos.z);
+    v3 at   = v3f(player_eye.x, player_eye.y - PLAYER_EYE * 0.35f, player_eye.z);
+    shot_fire(from, at, S->shot_speed, S->damage);
+    play_at(m->pos, "ecast", 90);
 }
 
 int enemy_update(const Level *l, v3 player_eye, float dt) {
@@ -670,110 +879,40 @@ int enemy_update(const Level *l, v3 player_eye, float dt) {
             }
             break;
 
-        case E_CHASE: {
-            float inv = dist > 0.001f ? 1.0f / dist : 0.0f;
-            float step = S->speed * dt;
-
-            if (S->shot_speed > 0.0f) {
-                if (dist > S->attack) {
-                    move_toward(l, S, m, to.x * inv * step, to.z * inv * step);
-                } else if (dist < S->attack * CASTER_KEEP) {
-                    move_toward(l, S, m, -to.x * inv * step, -to.z * inv * step);
-                /* Cached: this decides whether to PLANT and begin a wind-up,
-                   and the wind-up is long enough that a frame or two of
-                   staleness cannot matter -- the release below checks again,
-                   live, which is the check that actually guards the wall.
-                   캐시를 씁니다. 이것은 자리를 잡고 시전을 *시작할지*를 결정하며, 시전
-                   시간이 충분히 길어 한두 프레임의 지연은 문제가 될 수 없습니다. 아래의
-                   발사 시점이 실시간으로 다시 검사하며, 벽을 실제로 지키는 것은 그
-                   검사입니다. */
-                } else if (sees_player(l, m, player_eye)) {
-                    /* In its preferred band and looking right at the player --
-                       and it still only sometimes shoots. The rest of the time
-                       it circles, which is what turns a caster from a turret
-                       into something you have to chase around a room.
-                       선호하는 대역 안에서 플레이어를 정면으로 보고 있으면서도, 여전히
-                       *가끔만* 쏩니다. 나머지 시간에는 원을 그립니다. 그것이 캐스터를
-                       포탑에서 방 안을 쫓아다녀야 하는 무언가로 바꿉니다. */
-                    if (check_attack(S, m, dist)) {
-                        m->state = E_ATTACK;
-                        m->timer = 0.0f;
-                        m->swung = 0;
-                    } else {
-                        ai_run_slide(l, S, m, dt);
-                    }
-                } else {
-                    move_toward(l, S, m, to.x * inv * step, to.z * inv * step);
-                }
-            } else if (dist <= S->attack) {
-                /* Within reach. The roll here is Quake's 0.9 at melee range --
-                   high enough that closing is still lethal, low enough that a
-                   monster occasionally repositions instead of grinding out its
-                   swing timer nose-to-nose.
-                   사거리 안입니다. 여기의 굴림은 근접 대역에서 Quake의 0.9입니다.
-                   거리를 좁히는 것이 여전히 치명적일 만큼 높고, 몬스터가 코앞에서
-                   공격 타이머만 돌리는 대신 이따금 자리를 바꿀 만큼 낮습니다. */
-                if (check_attack(S, m, dist)) {
-                    m->state = E_ATTACK;
-                    m->timer = 0.0f;
-                    m->swung = 0;
-                } else {
-                    ai_run_slide(l, S, m, dt);
-                }
-            } else {
-                move_toward(l, S, m, to.x * inv * step, to.z * inv * step);
-            }
+        case E_CHASE:
+            /* One question, asked once, of the column that answers it. The
+               three `shot_speed > 0` tests this replaces each meant "is this a
+               caster?" and each would have had to be found again the day a
+               third archetype arrived.
+               하나의 질문을, 그에 답하는 열에게, 한 번 묻습니다. 이것이 대체하는 세 개의
+               `shot_speed > 0` 검사는 각각 "이것은 캐스터인가"를 뜻했고, 세 번째 아키타입이
+               생기는 날 각각을 다시 찾아내야 했을 것입니다. */
+            if (S->behaviour == AI_CASTER) chase_caster(l, S, m, to, dist, player_eye, dt);
+            else                            chase_brawler(l, S, m, to, dist, dt);
             break;
-        }
 
         case E_ATTACK:
             m->timer += dt;
             if (!m->swung && m->timer >= S->windup) {
                 m->swung = 1;
-                if (S->shot_speed > 0.0f) {
-                    /* NOT cached, and must never be. This is the check that
-                       exists because a target can duck DURING the wind-up:
-                       answering it from a reading taken up to SIGHT_PERIOD
-                       frames ago is answering it from before the duck, which
-                       is a caster shooting through a wall -- the exact bug the
-                       second check was added to prevent. Once per released
-                       bolt is also a rate the trace can afford; it is the
-                       per-frame polling above that could not.
-                       캐시를 쓰지 않으며 앞으로도 써서는 안 됩니다. 이 검사는 시전
-                       *도중에* 대상이 숨을 수 있기 때문에 존재합니다. 최대 SIGHT_PERIOD
-                       프레임 전에 측정한 값으로 답하는 것은 숨기 이전의 상황으로
-                       답하는 것이며, 그것은 벽을 관통해 쏘는 캐스터입니다. 두 번째
-                       검사가 추가된 이유가 바로 그 버그입니다. 또한 발사된 볼트당 한
-                       번이라면 판정 비용을 감당할 수 있습니다. 감당할 수 없었던 것은
-                       위쪽의 매 프레임 폴링입니다. */
-                    if (can_see(l, m, player_eye)) {
-                        v3 from = v3f(m->pos.x, m->pos.y + S->eye, m->pos.z);
-                        v3 at   = v3f(player_eye.x,
-                                      player_eye.y - PLAYER_EYE * 0.35f,
-                                      player_eye.z);
-                        shot_fire(from, at, S->shot_speed, S->damage);
-                        play_at(m->pos, "ecast", 90);
-                    }
-                } else if (dist <= S->attack + 0.3f) {
-                    player_damage += S->damage;
-                    play_at(m->pos, "eatt", 90);
-                }
+                if (S->behaviour == AI_CASTER) release_bolt(l, S, m, player_eye);
+                else                            player_damage += release_swing(S, m, dist);
             }
             if (m->timer >= S->windup + S->cooldown) {
                 /* Quake's SUB_AttackFinished(2*random()): a RANDOM rest before
                    the next attack is even considered, on top of the animation's
                    own cooldown. Fixed rests make a group of monsters fire in a
                    chorus forever, because nothing ever pushes them out of step
-                   once they have fallen into it.
-                   Quake의 SUB_AttackFinished(2*random())입니다. 애니메이션 자체의 대기
-                   시간 위에, 다음 공격을 *고려하기까지*의 무작위 휴식이 더해집니다. 고정
-                   휴식은 몬스터 무리가 영원히 합창하게 만듭니다. 한번 박자가 맞으면 그것을
-                   어긋나게 할 것이 아무것도 없기 때문입니다. */
+                   once they have fallen into it. */
                 m->attack_wait = frand() * MON_ATTACK_REST;
 
-                if (S->shot_speed > 0.0f)      m->state = E_CHASE;
-                else if (dist <= S->attack)  { m->timer = 0.0f; m->swung = 0; }
-                else                           m->state = E_CHASE;
+                /* A caster always returns to its band; a brawler that is still
+                   in reach swings again without paying for the walk back.
+                   캐스터는 언제나 자기 대역으로 돌아갑니다. 아직 사거리 안에 있는 근접형은
+                   되돌아오는 비용을 치르지 않고 다시 휘두릅니다. */
+                if (S->behaviour == AI_CASTER)  m->state = E_CHASE;
+                else if (dist <= S->attack)    { m->timer = 0.0f; m->swung = 0; }
+                else                             m->state = E_CHASE;
             }
             break;
 
@@ -796,7 +935,6 @@ int enemy_update(const Level *l, v3 player_eye, float dt) {
             }
         }
     }
-
     return player_damage;
 }
 

@@ -658,12 +658,81 @@ static inline mat4 mat4_perspective(float fov_y, float aspect, float zn, float z
  * @note 롤이 0이면 기저가 ::mat4_fps_view의 것과 동등한 정도가 아니라 *동일*하므로,
  *       프레임 도중에 둘을 전환해도 화면이 튀지 않습니다.
  */
-static inline mat4 mat4_fps_view_roll(v3 eye, float yaw, float pitch, float roll) {
+/**
+ * @struct CamBasis
+ * @brief The three axes a camera looks along: forward, right and up.
+ *
+ * ENGLISH
+ * -------
+ * A view matrix is not the only thing a frame needs out of a camera's
+ * orientation. Every billboard in the world -- monsters, pickups, projectiles,
+ * particles, decals -- is built from `right` and `up`, and they have to be the
+ * SAME right and up the matrix was made from. They were not: main.c called
+ * ::mat4_fps_view_roll and then re-derived the identical trigonometry by hand,
+ * roll rotation included, twelve lines below it. Two derivations of one fact,
+ * agreeing only for as long as nobody edited one of them -- and the failure is
+ * silent and specific: the sprites keep facing where the camera used to be and
+ * turn edge-on as it rolls, so the monsters vanish exactly as the player dies.
+ *
+ * So the basis is the thing that gets computed, and the matrix is made from it.
+ * ::mat4_view_of takes one; ::cam_basis makes one. There is no way to ask for
+ * the matrix and the axes and be given two different answers.
+ *
+ * 한국어
+ * ------
+ * @brief 카메라가 바라보는 세 축입니다. 전방, 우측, 상향.
+ *
+ * 한 프레임이 카메라의 방향에서 필요로 하는 것은 뷰 행렬만이 아닙니다. 월드의 모든
+ * 빌보드(몬스터, 아이템, 발사체, 입자, 자국)가 `right`와 `up`으로 만들어지며, 그것은 행렬이
+ * 만들어진 것과 *같은* right와 up이어야 합니다. 그렇지 않았습니다. main.c는
+ * ::mat4_fps_view_roll을 호출한 뒤, 그 열두 줄 아래에서 롤 회전까지 포함해 동일한 삼각함수
+ * 계산을 손으로 다시 유도하고 있었습니다. 하나의 사실에 대한 두 개의 유도이며, 아무도 그중
+ * 하나를 수정하지 않는 동안에만 일치합니다. 그리고 그 실패는 조용하고 구체적입니다.
+ * 스프라이트가 카메라가 있던 곳을 계속 향하다가 롤링에 따라 옆으로 서 버리므로, 플레이어가
+ * 죽는 바로 그 순간에 몬스터가 사라집니다.
+ *
+ * 그래서 계산되는 것은 기저이고, 행렬은 그것으로부터 만들어집니다. ::mat4_view_of가 기저를
+ * 받고 ::cam_basis가 기저를 만듭니다. 행렬과 축을 함께 요청해서 서로 다른 두 답을 받을 방법이
+ * 없습니다.
+ */
+typedef struct {
+    v3 fwd;    /**< Where the camera looks. / 카메라가 바라보는 방향. */
+    v3 right;  /**< Screen right; billboards span along it. / 화면 우측. 빌보드가 이 축을 따라 펼쳐집니다. */
+    v3 up;     /**< Screen up. / 화면 상향. */
+} CamBasis;
+
+/**
+ * @brief The basis for a first-person camera at these angles.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] yaw   Yaw in radians.
+ * @param[in] pitch Pitch in radians. The caller must keep it short of +/-pi/2;
+ *                  exactly vertical makes forward parallel to world up and the
+ *                  basis degenerates.
+ * @param[in] roll  Roll in radians about the view axis. 0 for a camera the
+ *                  player is steering.
+ *
+ * 한국어
+ * ------
+ * @brief 주어진 각도에서의 1인칭 카메라 기저입니다.
+ * @param[in] yaw   요 (라디안).
+ * @param[in] pitch 피치 (라디안). 호출자는 +/-pi/2 미만으로 제한해야 합니다. 정확히
+ *                  수직이 되면 전방 벡터가 월드 상향과 평행해져 기저가 퇴화됩니다.
+ * @param[in] roll  시선 축을 중심으로 한 롤 (라디안). 플레이어가 조종하는 카메라에서는 0.
+ */
+static inline CamBasis cam_basis(float yaw, float pitch, float roll) {
     float cy = cosf(yaw), sy = sinf(yaw);
     float cp = cosf(pitch), sp = sinf(pitch);
-    v3 fwd   = v3f(-sy * cp, sp, -cy * cp);
-    v3 right = v3f(cy, 0, -sy);
-    v3 up    = v3cross(right, fwd);
+
+    CamBasis b;
+    b.fwd = v3f(-sy * cp, sp, -cy * cp);
+    /* The right vector ignores pitch entirely, which is what keeps the horizon
+       level however far the view tilts up or down.
+       우측 벡터는 피치를 완전히 무시하며, 그것이 시점이 아무리 위아래로 기울어도
+       수평선을 유지하게 합니다. */
+    b.right = v3f(cy, 0, -sy);
+    b.up    = v3cross(b.right, b.fwd);
 
     /* Rotate the right/up pair about the forward axis. Forward is untouched,
        so the camera keeps looking where it was looking and only the horizon
@@ -673,46 +742,59 @@ static inline mat4 mat4_fps_view_roll(v3 eye, float yaw, float pitch, float roll
        일이 그것입니다. */
     if (roll != 0.0f) {
         float cr = cosf(roll), sr = sinf(roll);
-        v3 r2 = v3add(v3scale(right, cr), v3scale(up, sr));
-        v3 u2 = v3add(v3scale(right, -sr), v3scale(up, cr));
-        right = r2;
-        up    = u2;
+        v3 r2 = v3add(v3scale(b.right, cr), v3scale(b.up, sr));
+        v3 u2 = v3add(v3scale(b.right, -sr), v3scale(b.up, cr));
+        b.right = r2;
+        b.up    = u2;
     }
-
-    mat4 r = mat4_identity();
-    r.m[0] = right.x; r.m[4] = right.y; r.m[8]  = right.z;
-    r.m[1] = up.x;    r.m[5] = up.y;    r.m[9]  = up.z;
-    r.m[2] = -fwd.x;  r.m[6] = -fwd.y;  r.m[10] = -fwd.z;
-    r.m[12] = -v3dot(right, eye);
-    r.m[13] = -v3dot(up, eye);
-    r.m[14] =  v3dot(fwd, eye);
-    return r;
+    return b;
 }
 
-static inline mat4 mat4_fps_view(v3 eye, float yaw, float pitch) {
-    float cy = cosf(yaw), sy = sinf(yaw);
-    float cp = cosf(pitch), sp = sinf(pitch);
-    v3 fwd   = v3f(-sy * cp, sp, -cy * cp);
-    /* The right vector ignores pitch entirely, so the camera can never roll.
-       우측 벡터는 피치를 완전히 무시하므로 카메라는 절대 롤링하지 않습니다. */
-    v3 right = v3f(cy, 0, -sy);
-    v3 up    = v3cross(right, fwd);
+/**
+ * @brief The view matrix for a camera at `eye` with basis `b`.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] eye Camera position.
+ * @param[in] b   Orientation, from ::cam_basis.
+ * @return World-space to view-space.
+ *
+ * 한국어
+ * ------
+ * @brief `eye`에 있고 기저가 `b`인 카메라의 뷰 행렬입니다.
+ * @param[in] eye 카메라 위치.
+ * @param[in] b   ::cam_basis가 만든 방향.
+ * @return 월드 공간에서 뷰 공간으로의 변환.
+ */
+static inline mat4 mat4_view_of(v3 eye, CamBasis b) {
     mat4 r = mat4_identity();
     /* The basis is written transposed, which inverts the rotation -- a view
        matrix maps the world into the camera, not the reverse.
        기저는 전치된 형태로 기록되며, 이는 회전을 역으로 만듭니다. 뷰 행렬은
        월드를 카메라 공간으로 매핑하는 것이지 그 반대가 아니기 때문입니다. */
-    r.m[0] = right.x; r.m[4] = right.y; r.m[8]  = right.z;
-    r.m[1] = up.x;    r.m[5] = up.y;    r.m[9]  = up.z;
-    r.m[2] = -fwd.x;  r.m[6] = -fwd.y;  r.m[10] = -fwd.z;
+    r.m[0] = b.right.x; r.m[4] = b.right.y; r.m[8]  = b.right.z;
+    r.m[1] = b.up.x;    r.m[5] = b.up.y;    r.m[9]  = b.up.z;
+    r.m[2] = -b.fwd.x;  r.m[6] = -b.fwd.y;  r.m[10] = -b.fwd.z;
     /* Translation expressed in the rotated basis, equivalent to rotating the
        negated eye position.
        회전된 기저로 표현된 이동 성분이며, 부호를 반전한 시점 위치를 회전시킨
        것과 동일합니다. */
-    r.m[12] = -v3dot(right, eye);
-    r.m[13] = -v3dot(up, eye);
-    r.m[14] =  v3dot(fwd, eye);
+    r.m[12] = -v3dot(b.right, eye);
+    r.m[13] = -v3dot(b.up, eye);
+    r.m[14] =  v3dot(b.fwd, eye);
     return r;
+}
+
+static inline mat4 mat4_fps_view_roll(v3 eye, float yaw, float pitch, float roll) {
+    return mat4_view_of(eye, cam_basis(yaw, pitch, roll));
+}
+
+static inline mat4 mat4_fps_view(v3 eye, float yaw, float pitch) {
+    /* Roll 0, through the same basis, so "identical rather than merely
+       equivalent" is a fact about the code and not a claim in a comment.
+       같은 기저를 통과하는 롤 0입니다. 그래야 "동등한 정도가 아니라 동일하다"가 주석의
+       주장이 아니라 코드에 관한 사실이 됩니다. */
+    return mat4_fps_view_roll(eye, yaw, pitch, 0.0f);
 }
 
 #endif

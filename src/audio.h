@@ -29,6 +29,32 @@
 #define AUDIO_NEAR  5.0f
 #define AUDIO_FAR  34.0f
 
+/* HOW LOUD EVERYTHING IS, as a fraction of what the mixer would otherwise
+   produce. The game was simply too loud, and 0.70 is that judgement written
+   down where it can be found and changed.
+
+   ONE CONSTANT BECAUSE THERE ARE TWO MIXING PATHS. A sampled sound and a
+   generated recipe reach the output through different code with different
+   scale factors -- 0.55 against a decoded sample, 8000 against an oscillator
+   sum -- and those two numbers set the BALANCE between the two kinds, which is
+   tuned and must not move. Turning the volume down by editing both is two
+   edits that have to agree, and the last time this file had one rule living in
+   two places (the `!s->n` test for a sampled sound) the copies disagreed and
+   samples went silent. This multiplies both, so the balance is preserved by
+   construction and loudness has exactly one home.
+
+   전체 음량이며, 믹서가 원래 낼 소리에 대한 비율입니다. 게임이 너무 시끄러웠고, 0.70은
+   그 판단을 찾고 바꿀 수 있는 곳에 적어 둔 것입니다.
+
+   믹싱 경로가 둘이기 때문에 상수는 하나입니다. 샘플 사운드와 생성된 레시피는 서로 다른
+   코드와 서로 다른 배율(디코딩된 샘플에 0.55, 오실레이터 합에 8000)로 출력에 도달하며,
+   그 두 숫자는 두 종류 사이의 *균형*을 정합니다. 이미 조정된 값이므로 움직여서는 안
+   됩니다. 둘을 각각 편집해 음량을 낮추는 것은 서로 일치해야 하는 편집 두 번입니다. 이
+   파일에서 하나의 규칙이 두 곳에 살았을 때(샘플 사운드에 대한 `!s->n` 검사) 사본이
+   어긋나 샘플이 무음이 되었습니다. 이것은 둘 다에 곱해지므로 균형은 구조적으로 보존되고
+   음량이 사는 곳은 정확히 하나입니다. */
+#define AUDIO_MASTER 0.70f
+
 /**
  * @brief 오디오 장치를 열고 믹싱 스레드를 시작합니다.
  *

@@ -489,7 +489,7 @@ static int render_voice(Voice *V, short *out, int frames) {
             int idx = (V->pos + i) / PCM_STEP;
             if (idx >= V->snd->pcm_n) { V->pos += i; return 0; }
             int s = out[i] + (int)(g_pcm[V->snd->pcm_at + idx] *
-                                   (V->gain / 100.0f) * 0.55f);
+                                   (V->gain / 100.0f) * 0.55f * AUDIO_MASTER);
             out[i] = (short)(s >  32767 ?  32767 :
                              s < -32768 ? -32768 : s);
         }
@@ -521,7 +521,7 @@ static int render_voice(Voice *V, short *out, int frames) {
         if (!alive) return 0;
         still_alive = 1;
 
-        int s = out[i] + (int)(acc * (V->gain / 100.0f) * 8000.0f);
+        int s = out[i] + (int)(acc * (V->gain / 100.0f) * 8000.0f * AUDIO_MASTER);
         out[i] = (short)(s >  32767 ?  32767 :
                          s < -32768 ? -32768 : s);
     }

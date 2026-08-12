@@ -933,6 +933,41 @@ int wp_axe_leaping(const Weapon *w);
 void wp_init(Weapon *w, const Level *level);
 
 /**
+ * @brief Sets the belt to what a fresh run starts with: a shotgun and shells.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] w Weapon whose `ammo`, `owned` and `cur` are overwritten.
+ *                  Nothing else is touched.
+ *
+ * @note Split out of ::wp_init so that a fresh run can have a starting belt
+ *       without a GL context. ::wp_init uploads the view model's texture and so
+ *       runs exactly once; a level loaded with `carry_state = 0` is also a fresh
+ *       start and had nothing to call. It got health back from ::player_spawn
+ *       and kept every weapon, shell and keycard it had -- which meant a restart
+ *       handed the player the roster they had earned on a map whose doors had
+ *       just been re-locked behind them.
+ * @note One definition of "what you start with", here, beside
+ *       ::WEAPON_START_AMMO. A second copy in the level loader would be a
+ *       starting belt that drifted from the one the game boots with.
+ *
+ * 한국어
+ * ------
+ * @brief 탄약대를 새 플레이의 시작 상태(샷건과 탄환)로 설정합니다.
+ * @param[in,out] w `ammo`, `owned`, `cur`가 덮어써집니다. 그 밖에는 아무것도 건드리지
+ *                  않습니다.
+ *
+ * @note GL 컨텍스트 없이도 새 플레이가 시작 탄약대를 가질 수 있도록 ::wp_init에서 분리했습니다.
+ *       ::wp_init은 뷰 모델의 텍스처를 업로드하므로 정확히 한 번만 실행됩니다. `carry_state`가
+ *       0인 레벨 로드도 새 시작이지만 호출할 것이 없었습니다. ::player_spawn에게서 체력만
+ *       돌려받고 보유하던 모든 무기·탄환·키카드를 그대로 유지했으며, 그 결과 재시작은 방금 다시
+ *       잠긴 문 뒤에서 플레이어가 얻어 낸 구성을 그대로 손에 쥐여 주었습니다.
+ * @note "무엇을 갖고 시작하는가"의 정의는 ::WEAPON_START_AMMO 옆인 이곳 하나입니다. 레벨
+ *       로더에 둔 두 번째 사본은 게임이 부팅하는 것과 어긋나는 시작 탄약대가 됩니다.
+ */
+void wp_start_belt(Weapon *w);
+
+/**
  * @brief Advances one frame of weapon logic: timers, firing, bob and sway.
  *
  * ENGLISH

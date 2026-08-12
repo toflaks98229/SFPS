@@ -5,6 +5,7 @@
 
 #include "door.h"
 #include "audio.h"
+#include "diag.h"   /* DIAG_DOOR_STALE -- state that outlived the level it described */
 #include <math.h>
 
 /**
@@ -31,6 +32,47 @@ typedef struct {
     short floor0, ceil0;            /**< Closed heights. / 닫힌 상태의 높이. */
     short pts0[LVL_MAX_PTS * 2];    /**< Closed outline. / 닫힌 상태의 외곽선. */
     int   n0;                       /**< Points in `pts0`. / `pts0`의 점 개수. */
+    /**
+     * @brief Which sector the shape above was copied from, or -1.
+     *
+     * ENGLISH
+     * -------
+     * PROVENANCE, NOT A SECOND COPY OF THE TRUTH. The note on ::g_keys_used
+     * below argues against copying a door's `key` into this struct, and the
+     * argument is right: nothing writes `key`, so a copy of it would be a
+     * second source kept in step by nothing. This field is the opposite case
+     * and has to be read as such. It is not the sector the door acts on --
+     * ::apply still asks the definition for that, and always will. It is a
+     * record of where the snapshot beside it came from, which is a fact about
+     * `pts0` and belongs with `pts0`.
+     *
+     * A snapshot that does not know what it is a snapshot OF is the actual
+     * defect here. This array and the level's `doors[]` are matched by index
+     * and by nothing else; ::door_reset is what agrees them, and until this
+     * field existed, a ::door_update run against a level that reset never saw
+     * would write one sector's geometry out of another's closed shape and look
+     * exactly like a door working. Now it is a ::DIAG_DOOR_STALE and a door
+     * that does not move.
+     *
+     * 한국어
+     * ------
+     * @brief 위의 형상을 복사해 온 섹터, 또는 -1.
+     *
+     * *출처*이지 진실의 두 번째 사본이 아닙니다. 아래 ::g_keys_used의 주석은 문의 `key`를 이
+     * 구조체로 복사하는 것에 반대하며, 그 주장은 옳습니다. `key`는 아무도 쓰지 않으므로 그
+     * 사본은 무엇으로도 일치가 유지되지 않는 두 번째 진실이 됩니다. 이 필드는 정반대의
+     * 경우이며 그렇게 읽어야 합니다. 이것은 문이 작용하는 섹터가 아닙니다. ::apply는 여전히
+     * 그것을 정의에게 묻고 앞으로도 그럴 것입니다. 이것은 옆에 있는 스냅숏이 어디에서 왔는지에
+     * 대한 기록이며, `pts0`에 관한 사실이므로 `pts0` 옆에 있어야 합니다.
+     *
+     * 자신이 무엇의 스냅숏인지 모르는 스냅숏이 이곳의 실제 결함입니다. 이 배열과 레벨의
+     * `doors[]`는 인덱스로만 대응하며 다른 무엇으로도 대응하지 않습니다. 둘을 일치시키는 것은
+     * ::door_reset이고, 이 필드가 생기기 전에는 reset이 본 적 없는 레벨에 대해 실행된
+     * ::door_update가 한 섹터의 지오메트리를 다른 섹터의 닫힌 형상으로부터 쓰면서도 정확히
+     * 정상 동작하는 문처럼 보였습니다. 이제 그것은 ::DIAG_DOOR_STALE이며 움직이지 않는
+     * 문입니다.
+     */
+    short sector;
 } DoorState;
 
 static DoorState g_door[LVL_MAX_DOORS];
@@ -86,7 +128,14 @@ void door_reset(const Level *l) {
         st->opening = 0;
 
         int si = l->doors[i].sector;
-        if (si < 0 || si >= l->n_sectors) { st->n0 = 0; continue; }
+        if (si < 0 || si >= l->n_sectors) { st->n0 = 0; st->sector = -1; continue; }
+
+        /* Recorded with the shape, not before it: the two are one fact, and a
+           slot that carried a sector index but no outline would claim a
+           provenance for nothing.
+           형상과 함께 기록하며 그 전에 하지 않습니다. 둘은 하나의 사실이며, 섹터 인덱스는
+           있고 외곽선은 없는 슬롯은 아무것도 아닌 것에 대한 출처를 주장하게 됩니다. */
+        st->sector = (short)si;
 
         const Sector *s = &l->sectors[si];
         st->floor0 = s->floor;
@@ -244,6 +293,22 @@ int door_update(Level *l, v3 player_pos, int keys, float dt) {
        때문입니다. */
     if (g_notice_t > 0.0f) g_notice_t -= dt;
 
+    /* --- how many doors are there, really? --------------------------------
+       Two answers, and they are allowed to disagree only because nothing made
+       them agree: `g_n` is how many states door_reset captured, and the level in
+       hand says how many definitions it has. Walking to the larger reads a slot
+       nobody filled in -- a DoorDef past n_doors, or a DoorState past whatever
+       the last reset saw -- so the loops below walk to the smaller and the
+       disagreement is counted rather than absorbed.
+       답이 둘이며, 둘을 일치시킨 것이 없기 때문에만 어긋날 수 있습니다. `g_n`은 door_reset이
+       포착한 상태의 수이고, 손에 든 레벨은 자신의 정의가 몇 개인지 말합니다. 큰 쪽까지
+       순회하면 아무도 채우지 않은 슬롯을 읽게 됩니다(n_doors를 넘은 DoorDef, 또는 마지막
+       reset이 본 것을 넘은 DoorState). 그래서 아래의 루프들은 작은 쪽까지만 돌고, 그 불일치는
+       흡수되지 않고 계수됩니다. */
+    int n_level = l->n_doors > LVL_MAX_DOORS ? LVL_MAX_DOORS : l->n_doors;
+    if (n_level != g_n) DIAG(DIAG_DOOR_STALE);
+    int n = n_level < g_n ? n_level : g_n;
+
     /* Switch entities, gathered once: a tagged door asks whether anything is
        standing on a switch that names it. Touch-activated, so there is no key
        to press and no aim to get right -- see the request this was built for.
@@ -270,14 +335,37 @@ int door_update(Level *l, v3 player_pos, int keys, float dt) {
         float dz = player_pos.z - en->z * 0.01f;
         if (dx*dx + dz*dz > DOOR_SWITCH_DIST * DOOR_SWITCH_DIST) continue;
 
-        for (int i = 0; i < g_n; i++)
+        for (int i = 0; i < n; i++)
             if (l->doors[i].tag == tag) touched_tag[i] = 1;
     }
 
-    for (int i = 0; i < g_n; i++) {
+    for (int i = 0; i < n; i++) {
         const DoorDef *d = &l->doors[i];
         DoorState *st = &g_door[i];
         if (st->n0 <= 0) continue;
+
+        /* --- is this state still about this door? --------------------------
+           The two arrays are matched by index and by nothing else. door_reset
+           is what agrees them, and a level stepped without one -- a second Level
+           in play, an editor that rewrote the doors, a load path that forgot --
+           lands here holding somebody else's closed shape. apply() would write
+           it into d->sector: a wall in the wrong place, moving, and looking for
+           all the world like a door that works.
+
+           Skipped rather than guessed at, and counted so it is not silent. A
+           stale door that does nothing is a bug you can find; a stale door that
+           moves the wrong geometry is one you chase through the renderer.
+
+           두 배열은 인덱스로만 대응하며 다른 무엇으로도 대응하지 않습니다. 둘을 일치시키는
+           것은 door_reset이고, 그것 없이 진행된 레벨은(진행 중인 두 번째 Level, 문을 다시
+           쓴 에디터, 잊어버린 로드 경로) 남의 닫힌 형상을 든 채로 이곳에 도달합니다.
+           apply()는 그것을 d->sector에 씁니다. 엉뚱한 자리에서 움직이는 벽이며, 어느 모로
+           보나 정상 동작하는 문처럼 보입니다.
+
+           추측하지 않고 건너뛰며, 조용하지 않도록 셉니다. 아무것도 하지 않는 낡은 문은
+           찾을 수 있는 버그이고, 엉뚱한 지오메트리를 움직이는 낡은 문은 렌더러를 헤매며
+           쫓아야 하는 버그입니다. */
+        if (st->sector != d->sector) { DIAG(DIAG_DOOR_STALE); continue; }
 
         /* --- what wants this door open right now --------------------------
            An untagged door opens to a touch on itself; a tagged one opens only

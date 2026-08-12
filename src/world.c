@@ -480,6 +480,50 @@ void world_init(World *w) {
     run_reset(&w->run, 1);
 }
 
+/* ---------------------------------------------------------------- progress */
+
+/* The three lists that have to agree -- the struct's fields and the two
+   functions below -- are all within twenty lines of each other, and this is
+   what makes disagreeing a compile error. Add `int armour;` to PlayerProgress
+   and the size changes, the assert fires, and its message names the two
+   functions that now need a line each.
+   It checks the SIZE rather than the field count because that is the thing C
+   will tell us: a struct of nothing but ints has no padding, so the arithmetic
+   is exact, and a field of any other type changes it too.
+
+   서로 일치해야 하는 세 목록(구조체의 필드와 아래 두 함수)이 모두 서로 20줄 안에 있으며,
+   불일치를 컴파일 오류로 만드는 것이 이것입니다. PlayerProgress에 `int armour;`를 추가하면
+   크기가 바뀌고 어서션이 발동하며, 그 메시지가 이제 한 줄씩 필요한 두 함수의 이름을
+   말해 줍니다.
+   필드 개수가 아니라 *크기*를 검사하는 이유는 C가 알려 줄 수 있는 것이 그것이기 때문입니다.
+   int만으로 이루어진 구조체에는 패딩이 없으므로 산술이 정확하고, 다른 타입의 필드가 들어와도
+   크기가 바뀝니다. */
+_Static_assert(sizeof(PlayerProgress) == sizeof(int) * (3 + 2 * WP_TYPES),
+               "PlayerProgress gained or lost a field. Teach world_progress_read "
+               "and world_progress_write about it, then update this assert.");
+
+void world_progress_read(const World *w, PlayerProgress *out) {
+    out->health = w->player.health;
+    out->keys   = w->player.keys;
+    out->cur    = w->weapon.cur;
+    for (int i = 0; i < WP_TYPES; i++) {
+        out->ammo[i]  = w->weapon.ammo[i];
+        out->owned[i] = w->weapon.owned[i];
+    }
+}
+
+void world_progress_write(World *w, const PlayerProgress *p) {
+    w->player.health = p->health;
+    w->player.keys   = p->keys;
+    w->weapon.cur    = p->cur;
+    for (int i = 0; i < WP_TYPES; i++) {
+        w->weapon.ammo[i]  = p->ammo[i];
+        w->weapon.owned[i] = p->owned[i];
+    }
+}
+
+/* ------------------------------------------------------------ level loading */
+
 int world_load_level(World *w, const char *name, int carry_state) {
     /* Copied before anything is parsed. `name` may be w->cur_level, and it may
        be w->level.next -- which level_load blanks before it parses, so a name
@@ -505,23 +549,41 @@ int world_load_level(World *w, const char *name, int carry_state) {
        See ::World::geometry_dirty. */
     w->geometry_dirty = 1;
 
-    int hp = w->player.health, held_keys = w->player.keys;
-    int ammo[WP_TYPES], owned[WP_TYPES], cur = w->weapon.cur;
-    for (int i = 0; i < WP_TYPES; i++) {
-        ammo[i]  = w->weapon.ammo[i];
-        owned[i] = w->weapon.owned[i];
-    }
+    /* What the player keeps, taken before the spawn and put back after it. Read
+       unconditionally, because reading is free and a branch here would be a
+       second place `carry_state` means something.
+       플레이어가 가져가는 것입니다. 스폰 전에 가져오고 스폰 후에 되돌려 놓습니다. 조건 없이
+       읽는 이유는 읽기가 공짜이고, 이곳의 분기는 `carry_state`가 의미를 갖는 두 번째 장소가
+       되기 때문입니다. */
+    PlayerProgress carried;
+    world_progress_read(w, &carried);
 
     w->yaw   = player_spawn(&w->player, &w->level);   /* resets health */
     w->pitch = 0.0f;
+
     if (carry_state) {
-        w->player.health = hp;                        /* ...so restore it */
-        for (int i = 0; i < WP_TYPES; i++) {
-            w->weapon.ammo[i]  = ammo[i];
-            w->weapon.owned[i] = owned[i];
-        }
-        w->weapon.cur  = cur;
-        w->player.keys = held_keys;
+        world_progress_write(w, &carried);            /* ...so put it back */
+    } else {
+        /* --- a fresh start -------------------------------------------------
+           player_spawn has just reset health, and health was the ONLY thing it
+           reset. The belt and the keycards had nobody at all: this branch was
+           empty, so a restart returned the player to the start of the level
+           holding every weapon, every shell and every keycard they had found --
+           on a map whose doors door_reset had just re-locked behind them.
+
+           Naming what a transition CARRIES is what made the hole visible. The
+           two branches are the same list read in opposite directions, and one
+           of them was not being read.
+
+           player_spawn이 방금 체력을 초기화했으며, 그것이 초기화한 것은 체력뿐이었습니다.
+           탄약대와 키카드에는 아무도 없었습니다. 이 분기가 비어 있었으므로, 재시작은
+           플레이어를 레벨의 시작 지점으로 되돌리면서 그들이 찾아낸 모든 무기와 탄환과
+           키카드를 쥐여 주었습니다. door_reset이 방금 다시 잠근 문들이 있는 맵에서 말입니다.
+
+           전환이 *가져가는* 것에 이름을 붙인 것이 이 구멍을 보이게 만들었습니다. 두 분기는
+           같은 목록을 반대 방향으로 읽는 것이며, 그중 하나는 읽히지 않고 있었습니다. */
+        w->player.keys = KEY_NONE;
+        wp_start_belt(&w->weapon);
     }
 
     /* Monsters and pickups are placed from the level's own entities. */

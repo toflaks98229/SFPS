@@ -27,6 +27,7 @@
 #include "pickup.h"   /* pickup_spawn_level, for the same reason */
 #include "proj.h"     /* proj_reset, likewise */
 #include "door.h"     /* door_reset, and the DOOR_* axes */
+#include "diag.h"     /* diag_count -- a stale door is counted, not printed */
 
 #define DT     (1.0f / 60.0f)
 #define ASPECT 1.7777f          /* 16:9. Only the muzzle solve reads it. */
@@ -384,6 +385,107 @@ int main(void) {
         okf(w.player.health == PLAYER_MAX_HP, "a fresh run starts at full health",
             (float)w.player.health, (float)PLAYER_MAX_HP);
         ok(w.geometry_dirty, "and the level it reloaded needs its geometry rebuilt");
+    }
+
+    /* --- what the player carries, and what they do not ----------------------
+       Loads WORLD_START_LEVEL twice and asserts nothing about what is inside it.
+       The question is only which fields survive a load and which are handed
+       back to what a fresh run starts with. */
+    printf("\nwhat crosses a level boundary\n");
+    {
+        World w;
+        world_init(&w);
+        w.run.title = 0;
+        ok(world_load_level(&w, WORLD_START_LEVEL, 0), "the start level loads");
+
+        /* Something distinguishable in every field PlayerProgress claims. */
+        const int LAST = WP_TYPES - 1;
+        w.player.health     = 42;
+        w.player.keys       = KEY_RED | KEY_BLUE;
+        w.weapon.owned[LAST] = 1;
+        w.weapon.ammo[LAST]  = 17;
+        w.weapon.cur         = LAST;
+
+        /* read and write are inverses, across a World that shares nothing with
+           the one the progress came from. */
+        {
+            PlayerProgress p;
+            world_progress_read(&w, &p);
+
+            World blank;
+            world_init(&blank);
+            world_progress_write(&blank, &p);
+
+            ok(blank.player.health == 42
+               && blank.player.keys == (KEY_RED | KEY_BLUE)
+               && blank.weapon.cur == LAST
+               && blank.weapon.ammo[LAST] == 17
+               && blank.weapon.owned[LAST] == 1,
+               "read and write are inverses over every field");
+        }
+
+        /* carry_state=1: the exit is a reward you arrive at, not a reset. */
+        ok(world_load_level(&w, WORLD_START_LEVEL, 1), "a transition loads");
+        ok(w.player.health == 42,           "a transition carries health");
+        ok(w.player.keys == (KEY_RED | KEY_BLUE), "and the keycards");
+        ok(w.weapon.cur == LAST && w.weapon.ammo[LAST] == 17
+           && w.weapon.owned[LAST] == 1,   "and the whole belt, weapon in hand included");
+
+        /* carry_state=0: a fresh run. player_spawn resets health; the belt and
+           the keycards used to have nobody at all, so a restart handed back
+           every weapon and key the player had found on a map whose doors had
+           just been re-locked. */
+        ok(world_load_level(&w, WORLD_START_LEVEL, 0), "a fresh start loads");
+        okf(w.player.health == PLAYER_MAX_HP, "a fresh start restores health",
+            (float)w.player.health, (float)PLAYER_MAX_HP);
+        ok(w.player.keys == KEY_NONE,        "and takes the keycards back");
+        ok(w.weapon.owned[LAST] == 0 && w.weapon.ammo[LAST] == 0,
+           "and the weapons that were earned");
+        ok(w.weapon.cur == WP_SHOTGUN && w.weapon.owned[WP_SHOTGUN]
+           && w.weapon.ammo[WP_SHOTGUN] == WEAPON_START_AMMO,
+           "leaving exactly the belt the game boots with");
+    }
+
+    /* --- door state that outlived the level it described --------------------
+       The runtime array and the level's door definitions are matched by index
+       and by nothing else. Stepping a level door_reset never saw used to write
+       one sector's geometry out of another sector's closed shape, silently. */
+    printf("\nstale door state\n");
+    {
+        World a;
+        fixture(&a, 0);
+        box(&a.level, 100, -100, 200, 100, 0, 200, 0);
+        DoorDef *d = &a.level.doors[a.level.n_doors++];
+        d->sector = 1; d->axis = DOOR_UP; d->amount = 200; d->speed = 100;
+        d->tag = 0; d->key = KEY_NONE;
+        door_reset(&a.level);
+
+        /* A SECOND world whose door names a different sector, stepped without a
+           reset of its own -- exactly what a level load that forgot, or a second
+           Level in play, produces. */
+        World b;
+        fixture(&b, 0);
+        box(&b.level, 100, -100, 200, 100, 0, 200, 0);
+        box(&b.level, 400, -100, 500, 100, 0, 200, 0);
+        DoorDef *d2 = &b.level.doors[b.level.n_doors++];
+        d2->sector = 2; d2->axis = DOOR_UP; d2->amount = 200; d2->speed = 100;
+        d2->tag = 0; d2->key = KEY_NONE;
+        /* deliberately NO door_reset(&b.level) */
+
+        int before = diag_count(DIAG_DOOR_STALE);
+        short ceil_before = b.level.sectors[2].ceil;
+
+        Input in = idle();
+        world_step(&b, &in, ASPECT, DT);
+
+        ok(diag_count(DIAG_DOOR_STALE) > before,
+           "a door whose snapshot is another sector's is reported");
+        okf(b.level.sectors[2].ceil == ceil_before,
+            "and is left alone rather than moved from the wrong shape",
+            (float)b.level.sectors[2].ceil, (float)ceil_before);
+
+        /* Put the shared module back the way the next case expects it. */
+        door_reset(&b.level);
     }
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall frame-order checks passed\n", fails);

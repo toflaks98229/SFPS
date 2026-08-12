@@ -487,10 +487,7 @@ void wp_set_model(const char *name) {
                    m.muzzle[2] / 100.0f);
 }
 
-void wp_init(Weapon *w, const Level *level) {
-    Weapon zero = {0};
-    *w = zero;
-    w->rng = 0x2545f491u;
+void wp_start_belt(Weapon *w) {
     /* Every weapon's own belt, and only the shotgun is in hand at the start.
        A roster the player is handed complete has no pickups worth finding.
        무기마다 자신의 탄약이며, 시작 시 손에 든 것은 샷건뿐입니다. 처음부터 전부 쥐여 준
@@ -502,6 +499,15 @@ void wp_init(Weapon *w, const Level *level) {
     w->cur = WP_SHOTGUN;
     w->owned[WP_SHOTGUN] = 1;
     w->ammo[WP_SHOTGUN]  = WEAPON_START_AMMO;
+}
+
+void wp_init(Weapon *w, const Level *level) {
+    Weapon zero = {0};
+    *w = zero;
+    w->rng = 0x2545f491u;
+
+    wp_start_belt(w);
+
     /* Not zero: 0 is a valid monster index, so a zeroed struct would read as
        "hooked to monster 0" and deal damage to a bystander on the first
        arrival. HOOK_IDLE makes that unreachable, but the field should still

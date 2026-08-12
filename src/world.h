@@ -203,6 +203,76 @@ typedef struct {
     int paused;
 } Input;
 
+/* ---------------------------------------------------------------- progress */
+
+/**
+ * @struct PlayerProgress
+ * @brief Everything the player keeps when they cross into the next level.
+ *
+ * ENGLISH
+ * -------
+ * Health, keycards, and the belt: which weapons are owned, how much each holds,
+ * and which one is in hand. Not position, not facing, and not the hurt flash --
+ * those are the new level's start to decide, or a frame's to forget.
+ *
+ * This exists because ::world_load_level used to spell the list out twice, in
+ * two halves of a function with a ::player_spawn between them:
+ *
+ * @code
+ *     int hp = w->player.health, held_keys = w->player.keys;
+ *     int ammo[WP_TYPES], owned[WP_TYPES], cur = w->weapon.cur;
+ *     ... 12 lines ...
+ *     if (carry_state) { w->player.health = hp; ... w->player.keys = held_keys; }
+ * @endcode
+ *
+ * That is the same shape ::RunState was extracted from, one layer up, and it
+ * had the same problem: the list was a thing somebody had to keep current. Give
+ * the player armour, or a powerup, or a count of secrets found, and the field
+ * arrives in ::Player where it belongs and quietly does not survive a door.
+ * "My armour vanished when I took the exit" is a bug that looks like a design
+ * decision, which is exactly what the death check exists to avoid being.
+ *
+ * @note The list is now in three places rather than one -- these fields,
+ *       ::world_progress_read and ::world_progress_write -- but all three are
+ *       within twenty lines of each other, and a `_Static_assert` on this
+ *       struct's size turns adding a field without teaching the other two into
+ *       a compile error rather than a playtest surprise.
+ *
+ * 한국어
+ * ------
+ * @brief 플레이어가 다음 레벨로 넘어갈 때 가져가는 모든 것입니다.
+ *
+ * 체력, 키카드, 그리고 탄약대입니다. 어떤 무기를 보유했는지, 각각 얼마나 담고 있는지, 손에
+ * 든 것이 무엇인지입니다. 위치도, 바라보는 방향도, 피격 섬광도 아닙니다. 그것들은 새 레벨의
+ * 시작 지점이 결정하거나 한 프레임이 잊을 것들입니다.
+ *
+ * 이것이 존재하는 이유는 ::world_load_level이 그 목록을 두 번 적고 있었기 때문입니다. 한
+ * 함수의 두 절반에, 그 사이에 ::player_spawn을 두고서 말입니다.
+ *
+ * 그것은 한 계층 위에서 ::RunState가 추출되어 나온 것과 같은 형태이며, 같은 문제를 갖고
+ * 있었습니다. 그 목록은 누군가가 최신으로 유지해야 하는 것이었습니다. 플레이어에게 아머나
+ * 파워업, 또는 발견한 비밀의 수를 준다고 해 보십시오. 그 필드는 마땅히 있어야 할 ::Player에
+ * 도착하고, 조용히 문을 넘어 살아남지 못합니다. "출구를 지나니 아머가 사라졌다"는 설계
+ * 판단처럼 보이는 버그이며, 사망 검사가 그렇게 되지 않기 위해 존재하는 바로 그것입니다.
+ *
+ * @note 이제 목록은 하나가 아니라 세 곳에 있습니다. 이 필드들, ::world_progress_read,
+ *       ::world_progress_write입니다. 그러나 셋 모두 서로 20줄 안에 있으며, 이 구조체의
+ *       크기에 대한 `_Static_assert`가 나머지 둘에게 알려 주지 않고 필드를 추가하는 것을
+ *       플레이 중의 놀라움이 아니라 컴파일 오류로 만듭니다.
+ */
+typedef struct {
+    int health;             /**< Hit points. / 체력. */
+    int keys;               /**< KEY_* mask of the cards held. / 보유한 카드의 KEY_* 마스크. */
+    int cur;                /**< Which weapon is in hand. / 손에 든 무기. */
+    int ammo[WP_TYPES];     /**< Rounds in each belt. / 무기별 탄약. */
+    int owned[WP_TYPES];    /**< Which weapons have been found. / 획득한 무기 여부. */
+} PlayerProgress;
+
+/* The two calls that move one are declared with the rest of the API below,
+   because they take a ::World and it does not exist yet up here.
+   이것을 옮기는 두 함수는 아래의 나머지 API와 함께 선언되어 있습니다. ::World를 인자로
+   받는데 이 위쪽에는 그것이 아직 존재하지 않기 때문입니다. */
+
 /* ------------------------------------------------------------------- world */
 
 /**
@@ -391,6 +461,51 @@ void world_init(World *w);
  *       *닫힌* 형상을 레벨에서 복사하며, 레벨이 아직 그것을 담고 있는 동안에만 가능합니다.
  */
 int world_load_level(World *w, const char *name, int carry_state);
+
+/**
+ * @brief Reads out what the player would keep across a level boundary.
+ *
+ * ENGLISH
+ * -------
+ * @param[in]  w   The world.
+ * @param[out] out Filled in completely; every field is written.
+ *
+ * @note One caller today -- ::world_load_level, which reads before the spawn and
+ *       writes after it. Exported anyway because the type is the answer to "what
+ *       does a player keep", and a save file is exactly this struct.
+ *
+ * 한국어
+ * ------
+ * @brief 플레이어가 레벨 경계를 넘어 가져갈 것을 읽어 냅니다.
+ * @param[in]  w   월드.
+ * @param[out] out 모든 필드가 완전히 채워집니다.
+ *
+ * @note 오늘의 호출자는 하나입니다. ::world_load_level이 스폰 전에 읽고 스폰 후에 씁니다.
+ *       그럼에도 공개하는 이유는, 이 타입이 "플레이어는 무엇을 가져가는가"에 대한 답이며
+ *       세이브 파일이 정확히 이 구조체이기 때문입니다.
+ */
+void world_progress_read(const World *w, PlayerProgress *out);
+
+/**
+ * @brief Puts a ::PlayerProgress back, over whatever a spawn just set.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] w The world.
+ * @param[in]     p What to restore.
+ * @note ::player_spawn resets health, so this has to run AFTER it rather than
+ *       before -- which is the whole reason the read and the write are two calls
+ *       and not one.
+ *
+ * 한국어
+ * ------
+ * @brief ::PlayerProgress를 스폰이 방금 설정한 값 위에 되돌려 놓습니다.
+ * @param[in,out] w 월드.
+ * @param[in]     p 복원할 내용.
+ * @note ::player_spawn이 체력을 초기화하므로, 이 호출은 그 앞이 아니라 *뒤에* 와야 합니다.
+ *       읽기와 쓰기가 하나가 아니라 두 개의 호출인 이유가 바로 그것입니다.
+ */
+void world_progress_write(World *w, const PlayerProgress *p);
 
 /**
  * @brief Restarts the current level as a fresh run.

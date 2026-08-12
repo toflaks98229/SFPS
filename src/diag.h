@@ -115,6 +115,28 @@ typedef enum {
     DIAG_SHOT_CAP,      /**< A monster wanted to fire with ENEMY_MAX_SHOTS already in flight. / ENEMY_MAX_SHOTS가 이미 비행 중인 상태에서 몬스터가 발사를 시도했습니다. */
     DIAG_SOUND_CAP,     /**< Recipe text exceeded MAX_SOUNDS or MAX_LAYERS. / 레시피 텍스트가 MAX_SOUNDS 또는 MAX_LAYERS를 초과했습니다. */
     DIAG_DOOR_CAP,      /**< Level declared more doors than LVL_MAX_DOORS. / 레벨이 LVL_MAX_DOORS보다 많은 문을 선언했습니다. */
+    /**
+     * @brief A door's saved shape belongs to a sector its definition no longer
+     *        names -- ::door_reset was not called for the level being stepped.
+     *
+     * ENGLISH: The door module keeps one array of runtime state alongside the
+     * level's own array of door definitions, matched by index. The two are
+     * brought into agreement by ::door_reset, and nothing but calling it at the
+     * right moment kept them there. When they disagree, ::door_update would
+     * write one sector's geometry out of another sector's snapshot: a wall in
+     * the wrong place, moving. This counter is raised instead, and the door is
+     * left alone.
+     *
+     * 한국어: 문의 저장된 형상이, 그 정의가 더 이상 지목하지 않는 섹터의 것입니다.
+     * 진행 중인 레벨에 대해 ::door_reset이 호출되지 않았습니다.
+     *
+     * door 모듈은 레벨 자신의 문 정의 배열과 나란히 런타임 상태 배열 하나를 인덱스로
+     * 대응시켜 유지합니다. 둘을 일치시키는 것은 ::door_reset이며, 그것을 올바른 시점에
+     * 호출하는 것 외에는 무엇도 일치를 지켜 주지 않았습니다. 어긋나면 ::door_update가 한
+     * 섹터의 지오메트리를 *다른* 섹터의 스냅숏으로부터 씁니다. 엉뚱한 자리에서 움직이는
+     * 벽입니다. 대신 이 카운터를 올리고 그 문은 건드리지 않습니다.
+     */
+    DIAG_DOOR_STALE,
     DIAG_PASS_ORDER,    /**< A draw was made on the wrong side of the world/UI pass boundary. / 월드/UI 패스 경계의 잘못된 쪽에서 그리기가 수행되었습니다. */
     DIAG_COUNT          /**< Number of counters. / 카운터의 개수. */
 } DiagKind;

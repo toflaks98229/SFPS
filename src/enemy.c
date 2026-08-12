@@ -18,8 +18,19 @@ static Enemy g_enemies[ENEMY_MAX];
 static int   g_count;
 /** @brief 난수 생성을 위한 시드. */
 static unsigned g_rng = 0x9e3779b9u;
-/** @brief 마지막 업데이트 시점의 플레이어 눈 위치. */
-static v3 g_player_eye;
+/* A `g_player_eye` used to sit here, assigned at the top of every enemy_update
+   and read by nothing at all. Every helper below takes the eye as an argument
+   -- can_see, sees_player and shot_fire all do -- so the global was a copy the
+   AI never consulted: twelve bytes of .bss and a store per frame, and worse, an
+   invitation. The next helper that needed the eye could have read it instead of
+   asking for it, and would then have been reading a value whose freshness
+   depended on where in the call stack it happened to be.
+   이곳에 `g_player_eye`가 있었습니다. 모든 enemy_update의 맨 위에서 대입되었고 어디에서도
+   읽히지 않았습니다. 아래의 모든 헬퍼는 눈 위치를 인자로 받습니다(can_see, sees_player,
+   shot_fire 모두 그렇습니다). 따라서 그 전역은 AI가 결코 참조하지 않는 사본이었습니다.
+   .bss 12바이트와 프레임당 저장 한 번, 그리고 더 나쁜 것은 유혹입니다. 눈 위치가 필요한 다음
+   헬퍼가 그것을 요청하는 대신 읽을 수 있었고, 그러면 호출 스택의 어디에 있느냐에 따라
+   신선도가 달라지는 값을 읽게 됩니다. */
 /** @brief 활성화된 모든 발사체의 배열. */
 static Shot g_shots[ENEMY_MAX_SHOTS];
 
@@ -595,7 +606,6 @@ void enemy_spawn_level(const Level *l) {
 }
 
 int enemy_update(const Level *l, v3 player_eye, float dt) {
-    g_player_eye = player_eye;
     int player_damage = shots_update(l, player_eye, dt);
 
     for (int i = 0; i < g_count; i++) {

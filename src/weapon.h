@@ -1285,4 +1285,47 @@ void wp_set_model(const char *name);
  */
 void wp_reload_texture(void);
 
+#ifdef HOT_RELOAD
+/**
+ * @brief How long the pump animation runs, in seconds.
+ *
+ * ENGLISH
+ * -------
+ * @return The pump's duration.
+ * @note Exposed so a headless test can drive ::weapon_sprite_frame_at with
+ *       real timer values instead of carrying its own copy of the number --
+ *       a test that hardcodes a duration passes after the duration changes.
+ *
+ * 한국어
+ * ------
+ * @brief 펌프 애니메이션이 지속되는 시간(초)입니다.
+ * @note 헤드리스 테스트가 자체 사본을 들고 다니는 대신 실제 타이머 값으로
+ *       ::weapon_sprite_frame_at을 구동할 수 있도록 노출합니다. 지속 시간을 하드코딩한
+ *       테스트는 그 값이 바뀐 뒤에도 통과합니다.
+ */
+float weapon_pump_time(void);
+
+/**
+ * @brief Which drawing the viewmodel would show for these timer values.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] flash      Seconds of muzzle flash remaining.
+ * @param[in] pump_timer Seconds of pump remaining; counts down.
+ * @return One of the WPN_* poses.
+ * @note The frame choice is otherwise reachable only through a GL draw, and
+ *       an animation nothing can assert is one that drifts silently.
+ *
+ * 한국어
+ * ------
+ * @brief 주어진 타이머 값에서 뷰 모델이 보일 그림입니다.
+ * @param[in] flash      남은 총구 화염 시간(초).
+ * @param[in] pump_timer 남은 펌프 시간(초). 감소합니다.
+ * @return WPN_* 자세 중 하나.
+ * @note 그렇지 않으면 프레임 선택은 GL 드로우를 통해서만 도달할 수 있으며, 아무것도
+ *       단언할 수 없는 애니메이션은 조용히 어긋나는 애니메이션입니다.
+ */
+int weapon_sprite_frame_at(float flash, float pump_timer);
+#endif
+
 #endif

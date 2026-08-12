@@ -10,7 +10,13 @@ Monsters:  imp  brute  hound  caster
 Frames:    0 walk-A   1 walk-B   2 attack   3 hurt   4 dead
 
 Weapon:    gun
-Frames:    0 idle   1 firing   2 pump back   3 pump returning
+Poses:     0 rest   1 raised   2 pump open
+
+Those are POSES, not moments. Which pose shows WHEN is the PUMP_CYCLE table in
+weapon.c, so the animation can gain steps without the atlas gaining cells.
+There is no "firing" cell because the firing pose IS the raised one, and the
+pump returns through it too: naming the slots after moments meant storing that
+one drawing twice, and gun1 and gun3 were byte-identical.
 
 A name that matches nothing is ignored rather than painted over whichever
 subject happens to be first, so a work-in-progress file parked here is

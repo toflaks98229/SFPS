@@ -1884,6 +1884,50 @@ The set costs **66KB, about 4.5% of the floppy** — a shaded 64×96 creature
 frame is ~2,600 bytes and its corpse ~1,100. See
 [Hand-drawn art](#hand-drawn-art-and-the-weapon-that-replaces-its-model).
 
+### The viewmodel animates off a table, not a chain of ifs
+
+Real art made a real animation possible, and then showed why the old shape
+could not hold one. The atlas cells used to be named for *moments* — `IDLE`,
+`FIRE`, `PUMP0`, `PUMP1` — which works only while every moment needs a drawing
+of its own. A pump does not: it passes through the **same pose** going out and
+coming back. Doom's shotgun cycles `B → C → D → C → B`, and `C` is in there
+twice. Naming slots after moments meant storing that pose twice, so `gun1` and
+`gun3` were byte-identical — 3.3KB of atlas spent saying the same thing again.
+
+So the cells are poses now, and *when* is a table:
+
+```c
+static const struct { unsigned char frame; float upto; } PUMP_CYCLE[] = {
+    { WPN_RAISED, 0.28f },   /* the shot: kicked up, where the flash lives */
+    { WPN_OPEN,   0.52f },   /* pump snapped back */
+    { WPN_RAISED, 0.80f },   /* and forward again -- the same drawing */
+    { WPN_REST,   1.00f },   /* settled, before idle takes over */
+};
+```
+
+A pose repeats by being named twice in a table rather than stored twice in a
+texture, and a longer or lumpier cycle over the same three drawings is a row,
+not new art. The rows are **fractions of the pump**, not seconds, so retuning
+`FIRE_INTERVAL` changes the animation's speed and not its shape — a table in
+seconds would quietly run off the end of a faster pump and freeze on its last
+row. And `PUMP_TIME` is now a constant rather than `FIRE_INTERVAL * 0.55f`
+written out in both the timer and the picker, which is two copies of one number
+free to disagree after either is edited.
+
+Still driven by the weapon's own timers rather than an animation clock of its
+own, for the reason the monsters read their frames from `EState`: a second
+clock has to be advanced in step with firing, and when it drifts the gun's
+picture stops matching what the gun is doing.
+
+**Nothing on screen asserts an animation.** One that drifts does not crash; it
+just stops being right, which is how it survives. `weapontest` samples the
+whole pump through a `HOT_RELOAD` accessor and reads the poses back in order,
+asserting the sequence is exactly raised → open → raised → rest *and nothing
+else* — a single sample cannot see a row inserted, dropped or reordered.
+Boundaries are deliberately not asserted: where the pump snaps back is a feel
+decision that should move without breaking a test. Verified by dropping the
+return pose and watching it report `got 3 poses: 1 2 0  wanted 4: 1 2 1 0`.
+
 ### What the import cost the codec
 
 Real art broke three things that placeholder art had been hiding, which is

@@ -85,6 +85,15 @@ _Static_assert(TEX_NAME_MAX >= LVL_MAT,
 #define PELLETS        6
 #define PELLET_DAMAGE  7        /* six of these -- one point-blank blast -- kills */
 #define FIRE_INTERVAL  0.50f
+
+/* How long the pump takes. Named because two places need it -- the timer that
+   counts it down and the table that reads how far through it is -- and while
+   it was written out at both, the animation's timing was a duplicate of the
+   pump's, free to disagree with it after any edit to either.
+   펌프에 걸리는 시간입니다. 두 곳이 필요로 하므로 이름을 붙였습니다. 이를 감소시키는
+   타이머와 얼마나 진행됐는지 읽는 표인데, 양쪽에 값을 적어 두었던 동안 애니메이션의
+   타이밍은 펌프 타이밍의 복사본이었고 어느 한쪽을 고치면 어긋날 수 있었습니다. */
+#define PUMP_TIME     (FIRE_INTERVAL * 0.55f)
 #define RANGE         120.0f
 #define PELLET_SPREAD  0.040f   /* fixed cone, not a growing bloom */
 
@@ -723,7 +732,7 @@ static void fire_hitscan(Weapon *w, v3 eye, float yaw, float pitch,
 
     /* The pump is what gives a shotgun its rhythm, so it lands partway
        through the cooldown rather than on the trigger pull. */
-    w->pump_timer = FIRE_INTERVAL * 0.55f;
+    w->pump_timer = PUMP_TIME;
 }
 
 /**
@@ -1194,17 +1203,53 @@ mat4 wp_gun_matrix(const Weapon *w) {
  *       불일치하는 총기입니다. 대기 중에 펌프질을 하거나, 발사하는데 가만히 있는 식입니다.
  *       몬스터가 ::EState에서 프레임을 고르는 것과 같은 이유입니다.
  */
-static int wp_sprite_frame(const Weapon *w) {
-    /* The flash is short and is exactly the shot, so it owns the fire frame. */
-    if (w->flash > 0.0f) return WPN_FIRE;
+/* THE PUMP, AS A TABLE: which pose, and how far through the pump it lasts.
+ *
+ * Doom's shotgun cycles B -> C -> D -> C -> B, and the middle of that is the
+ * point: the gun passes through the SAME pose going out and coming back. Two
+ * `if` branches could not express it without a third drawing to return to,
+ * which is why the atlas used to carry `gun1` and `gun3` as identical images.
+ * A table repeats a pose by naming it twice, and costs nothing per repeat.
+ *
+ * Fractions of the pump rather than seconds, so retuning FIRE_INTERVAL keeps
+ * the animation's shape and only changes its speed -- a table in seconds would
+ * silently run past the end of a faster pump and freeze on its last row.
+ *
+ * Adding a step is a row. That is the whole reason it is shaped this way:
+ * SHTG has only three usable drawings, but a longer or lumpier cycle over
+ * those three needs no new art and no new code.
+ *
+ * 펌프를 표로 표현합니다. 어느 자세를, 펌프의 어디까지 보일지입니다. Doom의 샷건은
+ * B -> C -> D -> C -> B로 순환하며 핵심은 그 가운데입니다. 총이 나갈 때와 돌아올 때
+ * *같은* 자세를 지납니다. if 두 개로는 돌아갈 세 번째 그림 없이 이를 표현할 수 없었고,
+ * 그래서 아틀라스가 `gun1`과 `gun3`을 동일한 이미지로 들고 있었습니다. 표는 자세를 두 번
+ * 적어 반복하며 반복마다 드는 비용이 없습니다.
+ *
+ * 초가 아니라 펌프에 대한 비율인 이유는, FIRE_INTERVAL을 다시 조정해도 애니메이션의
+ * 모양은 유지되고 속도만 바뀌게 하기 위함입니다. 초 단위 표라면 더 빠른 펌프의 끝을
+ * 조용히 넘어가 마지막 행에서 멈춥니다. */
+static const struct { unsigned char frame; float upto; } PUMP_CYCLE[] = {
+    { WPN_RAISED, 0.28f },   /* the shot: kicked up, and where the flash lives */
+    { WPN_OPEN,   0.52f },   /* pump snapped back */
+    { WPN_RAISED, 0.80f },   /* and forward again -- the same drawing as the shot */
+    { WPN_REST,   1.00f },   /* settled, before idle takes over */
+};
 
-    /* The pump runs after it, and its two halves split the remaining time.
-       펌프 동작이 그 뒤에 이어지며, 남은 시간을 두 절반이 나눠 갖습니다. */
+static int wp_sprite_frame(const Weapon *w) {
+    /* A weapon that flashes without pumping still has to look like it fired.
+       Kept ahead of the table so the pose is right for anything that never
+       sets pump_timer, rather than depending on the table's first row.
+       펌프 없이 화염만 내는 무기도 발사한 것처럼 보여야 합니다. pump_timer를 설정하지
+       않는 무기에 대해서도 자세가 맞도록 표보다 앞에 둡니다. */
+    if (w->flash > 0.0f) return WPN_RAISED;
+
     if (w->pump_timer > 0.0f) {
-        float half = FIRE_INTERVAL * 0.55f * 0.5f;
-        return (w->pump_timer > half) ? WPN_PUMP0 : WPN_PUMP1;
+        /* 0 at the start of the pump, 1 at its end. pump_timer counts down. */
+        float t = 1.0f - w->pump_timer / PUMP_TIME;
+        for (int i = 0; i < (int)(sizeof PUMP_CYCLE / sizeof PUMP_CYCLE[0]); i++)
+            if (t < PUMP_CYCLE[i].upto) return PUMP_CYCLE[i].frame;
     }
-    return WPN_IDLE;
+    return WPN_REST;
 }
 
 /**
@@ -1581,3 +1626,22 @@ int wp_axe_land(Weapon *w, v3 feet, int grounded, float dt) {
     w->punch += wp_stats(WP_AXE)->punch * 1.5f;
     return 1;
 }
+
+#ifdef HOT_RELOAD
+/* --- Exposed for the headless tests / 헤드리스 테스트를 위한 노출 --- */
+
+float weapon_pump_time(void) { return PUMP_TIME; }
+
+int weapon_sprite_frame_at(float flash, float pump_timer) {
+    /* A zeroed weapon with just the two timers set. wp_sprite_frame reads
+       nothing else, and saying so here means the test cannot accidentally
+       depend on some other field being plausible.
+       두 타이머만 설정한 0으로 초기화된 무기입니다. wp_sprite_frame은 그 외에 아무것도
+       읽지 않으며, 그것을 여기서 밝혀 두면 테스트가 다른 필드가 그럴듯한지에 실수로
+       의존할 수 없게 됩니다. */
+    Weapon w = (Weapon){0};
+    w.flash      = flash;
+    w.pump_timer = pump_timer;
+    return wp_sprite_frame(&w);
+}
+#endif

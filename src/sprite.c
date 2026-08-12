@@ -689,9 +689,16 @@ enum { SPR_DEST_MONSTER, SPR_DEST_WEAPON };
 
 /* Muzzle point per weapon frame, in cell pixels; -1 when the drawing did
    not mark one. Filled by the same pass that decodes the pixels.
+
+   Zero-initialised and then set to -1 in the decode, rather than carrying a
+   brace list that has to have exactly WPN_FRAMES rows: a list like that is a
+   second place recording how many frames there are, and it silently disagrees
+   with the enum the moment a drawing is added or removed.
    무기 프레임별 총구 지점(셀 픽셀 단위)입니다. 그림이 표시하지 않았으면 -1입니다.
-   픽셀을 디코딩하는 동일한 패스가 채웁니다. */
-static int g_weapon_muz[WPN_FRAMES][2] = {{-1,-1},{-1,-1},{-1,-1},{-1,-1}};
+   WPN_FRAMES개의 행을 정확히 가져야 하는 중괄호 목록 대신 0으로 초기화한 뒤 디코드에서
+   -1로 설정합니다. 그런 목록은 프레임 수를 기록하는 두 번째 장소이며, 그림이 하나
+   추가되거나 빠지는 순간 열거형과 조용히 어긋납니다. */
+static int g_weapon_muz[WPN_FRAMES][2];
 
 /* The viewmodel's name prefix. "gun0" is frame 0 of the weapon, the same way
    "imp0" is frame 0 of the imp -- the name carries the placement, so adding art
@@ -851,6 +858,15 @@ static void decode_sprites(const char *p, unsigned char *buf, int W, int H, int 
 
     unsigned char pal[16][3] = {{0,0,0}};
     int n_pal = 0;
+
+    /* "No marker" is -1, and this is the one place that can say so for every
+       frame without a second copy of how many frames there are.
+       "표식 없음"은 -1이며, 프레임이 몇 개인지에 대한 두 번째 사본 없이 모든 프레임에
+       대해 그렇게 말할 수 있는 유일한 장소입니다. */
+    if (dest == SPR_DEST_WEAPON) {
+        for (int i = 0; i < WPN_FRAMES; i++)
+            g_weapon_muz[i][0] = g_weapon_muz[i][1] = -1;
+    }
 
     for (;;) {
         int len;

@@ -71,28 +71,43 @@
 #define WPN_CH  96          ///< @brief Weapon frame cell height, pixels. / 무기 프레임 셀의 높이 (픽셀).
 
 /**
- * @brief Weapon animation frames, in the order `gun<N>.png` names them.
+ * @brief The weapon's distinct DRAWINGS, in the order `gun<N>.png` names them.
  *
  * ENGLISH
  * -------
- * Driven by the weapon's own timers rather than a separate animation clock, so
- * the drawing cannot fall out of step with what the gun is actually doing --
- * the same reason the monsters' frames are chosen from ::EState.
+ * Poses, not moments. These used to be moments -- IDLE, FIRE, PUMP0, PUMP1 --
+ * which works only while every moment needs a drawing of its own. A pump
+ * passes through the same pose twice, going out and coming back, and naming
+ * the slots after moments meant storing that pose twice: `gun1` and `gun3`
+ * were byte-identical, 3.3KB of atlas spent on saying the same thing again.
+ *
+ * Which pose to show WHEN is weapon.c's PUMP_CYCLE table, so the animation can
+ * grow steps without the atlas growing cells, and a pose can repeat by being
+ * named twice in a table rather than stored twice in a texture.
+ *
+ * Still driven by the weapon's own timers rather than a separate animation
+ * clock, so the drawing cannot fall out of step with what the gun is actually
+ * doing -- the same reason the monsters' frames are chosen from ::EState.
  *
  * 한국어
  * ------
- * @brief `gun<N>.png`가 이름 붙이는 순서대로의 무기 애니메이션 프레임입니다.
+ * @brief `gun<N>.png`가 이름 붙이는 순서대로의, 무기의 서로 다른 *그림*들입니다.
  *
- * 별도의 애니메이션 시계가 아니라 무기 자신의 타이머가 구동하므로, 그림이 총기가 실제로
- * 하는 일과 어긋날 수 없습니다. 몬스터의 프레임을 ::EState에서 고르는 것과 같은
- * 이유입니다.
+ * 순간이 아니라 자세입니다. 예전에는 순간이었고(IDLE, FIRE, PUMP0, PUMP1) 그것은 모든
+ * 순간이 저마다의 그림을 필요로 할 때에만 통합니다. 펌프는 나갈 때와 돌아올 때 같은
+ * 자세를 두 번 지나므로, 슬롯을 순간으로 이름 붙이면 그 자세를 두 번 저장하게 됩니다.
+ * `gun1`과 `gun3`은 바이트 단위로 동일했고, 같은 말을 다시 하는 데 아틀라스 3.3KB를
+ * 쓰고 있었습니다.
+ *
+ * 어느 자세를 *언제* 보일지는 weapon.c의 PUMP_CYCLE 표가 정하므로, 아틀라스의 칸을
+ * 늘리지 않고 애니메이션의 단계를 늘릴 수 있고, 자세의 반복은 텍스처에 두 번 저장하는
+ * 대신 표에 두 번 적는 일이 됩니다.
  */
 enum {
-    WPN_IDLE,      /**< At rest. / 대기 상태. */
-    WPN_FIRE,      /**< The shot itself, while the muzzle flash lives. / 발사 순간. 총구 화염이 살아 있는 동안. */
-    WPN_PUMP0,     /**< Pump drawn back. / 펌프를 당긴 상태. */
-    WPN_PUMP1,     /**< Pump returning. / 펌프가 돌아오는 상태. */
-    WPN_FRAMES     /**< How many. / 프레임 수. */
+    WPN_REST,      /**< Lowered, at rest. / 내려놓은 대기 자세. */
+    WPN_RAISED,    /**< Kicked up: the shot, and the pump coming forward. / 튀어오른 상태. 발사 순간과 펌프가 돌아오는 구간. */
+    WPN_OPEN,      /**< Pump drawn fully back. / 펌프를 끝까지 당긴 상태. */
+    WPN_FRAMES     /**< How many drawings. / 그림의 수. */
 };
 
 /* --- Enumerations / 열거형 --- */

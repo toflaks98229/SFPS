@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <math.h>
 #include "weapon.h"
+#include "sprite.h"   /* WPN_* -- the poses the viewmodel cycles through */
 #include "proj.h"
 #include "enemy.h"
 #include "player.h"
@@ -259,6 +260,78 @@ int main(void) {
             made, PROJ_MAX);
         okd(proj_live() == PROJ_MAX, "and holds exactly that many",
             proj_live(), PROJ_MAX);
+    }
+
+    /* --- the viewmodel's pump cycle --------------------------------------
+       The animation is a table of (pose, how far through the pump), and the
+       reason it is a table is that Doom's pump passes through the SAME pose
+       going out and coming back. Two branches could not express that without
+       a third drawing to return to, which is why the atlas used to carry two
+       byte-identical cells.
+
+       Nothing on screen asserts an animation, and an animation that drifts
+       does not crash -- it just stops matching what the gun is doing. So the
+       cycle is checked here, off the same timers the renderer reads.
+
+       애니메이션은 (자세, 펌프의 어디까지)의 표이며, 표인 이유는 Doom의 펌프가 나갈 때와
+       돌아올 때 *같은* 자세를 지나기 때문입니다. 화면의 그 무엇도 애니메이션을 단언하지
+       않고, 어긋난 애니메이션은 크래시를 내지 않고 그저 총이 하는 일과 맞지 않게 될
+       뿐입니다. */
+    {
+        const float T = weapon_pump_time();
+
+        okd(weapon_sprite_frame_at(0.0f, 0.0f) == WPN_REST,
+            "an idle gun is at rest",
+            weapon_sprite_frame_at(0.0f, 0.0f), WPN_REST);
+        okd(weapon_sprite_frame_at(0.05f, 0.0f) == WPN_RAISED,
+            "a flash with no pump still reads as a shot",
+            weapon_sprite_frame_at(0.05f, 0.0f), WPN_RAISED);
+
+        /* pump_timer counts DOWN, so a full timer is the start of the cycle. */
+        int a = weapon_sprite_frame_at(0.0f, T * 0.95f);   /*  5% through */
+        int b = weapon_sprite_frame_at(0.0f, T * 0.60f);   /* 40% through */
+        int c = weapon_sprite_frame_at(0.0f, T * 0.35f);   /* 65% through */
+        int d = weapon_sprite_frame_at(0.0f, T * 0.05f);   /* 95% through */
+        okd(a == WPN_RAISED, "the pump opens from the raised pose", a, WPN_RAISED);
+        okd(b == WPN_OPEN,   "swings the pump back",               b, WPN_OPEN);
+        okd(c == WPN_RAISED, "returns through the SAME pose",      c, WPN_RAISED);
+        okd(d == WPN_REST,   "and settles",                        d, WPN_REST);
+
+        /* Sample the whole pump and read off the poses in order. The four
+           spot checks above prove those four instants; this proves there is
+           nothing ELSE in between -- a row inserted, dropped or reordered
+           changes this sequence, and no single sample would notice.
+
+           Sampled rather than compared against the table's own numbers,
+           because a test that reads the table only proves the table equals
+           itself. Boundaries are deliberately not asserted: where exactly the
+           pump snaps back is a feel decision that should be free to move
+           without failing a test.
+
+           펌프 전체를 표본으로 훑어 자세를 순서대로 읽습니다. 위의 네 지점 검사는 그
+           네 순간을 증명하고, 이것은 그 사이에 *다른 것이 없음*을 증명합니다. 행이
+           추가되거나 빠지거나 순서가 바뀌면 이 수열이 달라지며, 단일 표본은 그것을
+           알아채지 못합니다. 표의 숫자와 비교하지 않고 표본을 쓰는 이유는, 표를 읽는
+           테스트는 표가 자기 자신과 같다는 것만 증명하기 때문입니다. 경계값을 일부러
+           단언하지 않는 이유는, 펌프가 정확히 어디서 꺾이는지는 감각의 문제이고
+           테스트를 깨지 않고 움직일 수 있어야 하기 때문입니다. */
+        int seq[8], n = 0;
+        for (int i = 0; i <= 200; i++) {
+            int f = weapon_sprite_frame_at(0.0f, T * (1.0f - i / 200.0f));
+            if (n == 0 || seq[n - 1] != f) {
+                if (n < 8) seq[n++] = f;
+            }
+        }
+        static const int WANT[] = { WPN_RAISED, WPN_OPEN, WPN_RAISED, WPN_REST };
+        int match = (n == 4);
+        for (int i = 0; match && i < 4; i++) match = (seq[i] == WANT[i]);
+        ok(match, "the pump plays raised -> open -> raised -> rest, and nothing else");
+        if (!match) {
+            printf("      got %d poses:", n);
+            for (int i = 0; i < n; i++) printf(" %d", seq[i]);
+            printf("  wanted 4: %d %d %d %d\n",
+                   WANT[0], WANT[1], WANT[2], WANT[3]);
+        }
     }
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall weapon checks passed\n", fails);

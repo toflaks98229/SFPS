@@ -70,7 +70,12 @@ MAGENTA = (255, 0, 255, 255)
 
 # ours -> Freedoom lump, in our frame order.
 #   monsters: 0 walk-A  1 walk-B  2 attack  3 hurt  4 dead
-#   weapon:   0 idle    1 fire    2 pump back  3 pump returning
+#   weapon:   0 rest    1 raised  2 pump open      (POSES, not moments)
+#
+# The weapon list is three drawings, not four moments. Doom's pump passes
+# through the same pose going out and coming back, so a fourth cell would hold
+# a byte-identical copy of the second -- which is what it did until weapon.c
+# grew a PUMP_CYCLE table that can name a pose twice for free.
 #
 # Rotation 1 is the front view and the only one worth taking: this engine
 # billboards monsters towards the player, so the other seven are unreachable.
@@ -87,14 +92,12 @@ MAGENTA = (255, 0, 255, 255)
 # assumption that most of the weapon is below the screen edge, so all that is
 # in the file is the end of the barrel -- in a cell of our proportions it lands
 # as a fragment in the corner. B is the resting gun that is actually all there.
-# C appears twice because Doom's own pump returns through it (S_SGUN4 and
-# S_SGUN6 are the same frame), so the repeat is the animation, not a gap.
 SUBJECTS = {
     'imp':    ['POSSA1', 'POSSC1', 'POSSF1', 'POSSG1', 'POSSL0'],
     'brute':  ['BOSSA1', 'BOSSC1', 'BOSSG1', 'BOSSH1', 'BOSSO0'],
     'hound':  ['SARGA1', 'SARGC1', 'SARGF1', 'SARGH1', 'SARGN0'],
     'caster': ['HEADA1', 'HEADB1', 'HEADD1', 'HEADF1', 'HEADL0'],
-    'gun':    ['SHTGB0', 'SHTGC0', 'SHTGD0', 'SHTGC0'],
+    'gun':    ['SHTGB0', 'SHTGC0', 'SHTGD0'],
 }
 
 

@@ -134,10 +134,10 @@ enum {
  * 때문이며, 그 이름이 공개인 것과 같은 이유입니다. 둘은 assets/sprites의 그림과 그것을
  * 보여 주는 무기 사이의 계약입니다.
  */
-enum { SG_REST, SG_RAISED, SG_OPEN };          /**< shotgun: SHTG B, C, D */
-enum { LN_REST, LN_FIRE };                     /**< grenade: MISG A, B */
-enum { RP_REST, RP_SPIN };                     /**< rapid: CHGG A, B */
-enum { AX_IDLE0, AX_IDLE1, AX_CUT0, AX_CUT1 }; /**< axe: SAWG A, B, C, D */
+enum { SG_IDLE, SG_PUMP0, SG_PUMP1, SG_PUMP2 };  /**< shotgun: SHTG A, B, C, D */
+enum { LN_IDLE, LN_FIRE };                       /**< grenade: MISG A, B */
+enum { RP_IDLE, RP_SPIN };                       /**< rapid: CHGG A, B */
+enum { AX_REV0, AX_REV1, AX_CUT0, AX_CUT1 };     /**< axe: SAWG C, D, A, B */
 
 typedef struct {
     const char *name;       /**< Shown on the HUD; also the sprite prefix and pickup name. / HUD 표시명이자 스프라이트 접두사, 아이템 이름. */
@@ -701,6 +701,13 @@ typedef struct {
     float punch;         /**< View model kickback in metres, springs back to 0. / 뷰 모델의 후퇴 거리 (미터). 0으로 복원됩니다. */
     float flash;         /**< Muzzle flash timer. / 총구 화염 타이머. */
     float bob_phase;     /**< Walk cycle accumulator. / 걷기 주기 누적값. */
+    /** Free-running seconds, for animations that play while nothing happens.
+        Separate from bob_phase because that one stops when the player does,
+        and a chainsaw revs whether or not you are walking.
+        아무 일도 없을 때 재생되는 애니메이션을 위한 자유 진행 시간(초)입니다.
+        bob_phase와 분리한 이유는 그것이 플레이어가 멈추면 함께 멈추기 때문이며,
+        전기톱은 걷고 있든 아니든 떨립니다. */
+    float anim_clock;
     float sway_x, sway_y;/**< View model lag behind mouse movement. / 마우스 움직임에 뒤따르는 뷰 모델의 지연. */
     float spread;        /**< Aim bloom in radians, grows per shot. / 조준 산포도 (라디안). 사격할 때마다 증가합니다. */
     float pump_timer;    /**< Counts down to the pump sound after a shot. / 사격 후 펌프 소리까지의 카운트다운. */
@@ -1351,6 +1358,7 @@ float weapon_pump_time(int type);
  * -------
  * @param[in] flash      Seconds of muzzle flash remaining.
  * @param[in] pump_timer Seconds of pump remaining; counts down.
+ * @param[in] anim_clock The free-running idle clock, in seconds.
  * @return One of the WPN_* poses.
  * @note The frame choice is otherwise reachable only through a GL draw, and
  *       an animation nothing can assert is one that drifts silently.
@@ -1364,7 +1372,8 @@ float weapon_pump_time(int type);
  * @note 그렇지 않으면 프레임 선택은 GL 드로우를 통해서만 도달할 수 있으며, 아무것도
  *       단언할 수 없는 애니메이션은 조용히 어긋나는 애니메이션입니다.
  */
-int weapon_sprite_frame_at(int type, float flash, float pump_timer);
+int weapon_sprite_frame_at(int type, float flash, float pump_timer,
+                           float anim_clock);
 #endif
 
 #endif

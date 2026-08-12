@@ -2011,6 +2011,43 @@ timer that was already there, for a **share** of its own cooldown — they span
 when it was ready to fire again. The shotgun's rack became a table column,
 because once every weapon set the timer, every weapon racked a shotgun.
 
+### Which frame is the idle comes from Doom's state table, not from the art
+
+Two weapons were animating with the wrong frames, and both shipped, because I
+picked the idle by looking at the drawings.
+
+**The shotgun idled on its first pump frame.** `SHTGA0` is its real idle
+(`S_SGUN`, `A_WeaponReady`), but it looks like little more than the end of a
+barrel — at rest the gun is mostly below the screen edge — so I had dropped it
+as unusable back when the cell was a tight box. `SHTGB0` stood in for "rest",
+and `SHTGB0` is the first frame of the reload. The pump was also only playing
+its middle: Doom's is `A B C D C B A`, out *and* back through two of the same
+drawings, and only `B C D C B` was reachable.
+
+**The chainsaw had its idle and its cut swapped.** `SAWG` C and D are
+`S_SAW`/`S_SAWB`, the pair `A_WeaponReady` alternates between; A and B are
+`S_SAW1`/`S_SAW2`, the pair `A_Saw` alternates between. C and D are the *wider*
+drawings, which reads as a lunge and is exactly the wrong conclusion.
+
+Neither failed to compile, neither crashed, and neither is visible in a
+screenshot unless you already know what to look for. So the cycles are now
+transcribed from `info.c` — frame and duration in tics, converted to fractions
+of the recovery — and `weapontest` walks each weapon's whole recovery and reads
+the poses back in order, against the sequence the state table specifies.
+
+**And the idle is a cycle too.** `A_WeaponReady` shows one frame for three of
+these weapons and alternates two for the chainsaw, because a saw you are
+holding revs. Modelling "at rest" as a single drawing cannot express that, so
+rest is a cycle and three of the four simply have one row. It runs off a
+free-running `anim_clock` rather than `bob_phase`, because `bob_phase` stops
+when the player does and a saw does not.
+
+One test bug worth recording, since it hid two of the four: the sampling loop
+ran to `i <= 400`, where the timer is exactly zero — which is not "the end of
+the animation" but "not animating", so it picked up the idle frame as a phantom
+extra pose. The shotgun and grenade passed anyway, because their idle happens
+to equal their cycle's last pose.
+
 ### A 411KB stowaway, and why the graceful path hid it
 
 The importer's `--preview` contact sheet landed in `assets/sprites/` and was

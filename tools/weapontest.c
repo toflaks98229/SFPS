@@ -262,76 +262,86 @@ int main(void) {
             proj_live(), PROJ_MAX);
     }
 
-    /* --- the viewmodel's pump cycle --------------------------------------
-       The animation is a table of (pose, how far through the pump), and the
-       reason it is a table is that Doom's pump passes through the SAME pose
-       going out and coming back. Two branches could not express that without
-       a third drawing to return to, which is why the atlas used to carry two
-       byte-identical cells.
+    /* --- every weapon's cycle, against Doom's own state table -------------
+       These tables are transcribed from info.c, and the reason to assert them
+       is that reading the ART instead got two of them wrong and both shipped.
+       The shotgun idled on its first PUMP frame, because its real idle
+       (SHTGA0) is little more than the end of a barrel and had been dropped as
+       unusable; and the chainsaw had its idle and its cut swapped, because
+       SAWG C and D -- the frames A_WeaponReady alternates between -- are the
+       wider drawings and read as a lunge.
 
-       Nothing on screen asserts an animation, and an animation that drifts
-       does not crash -- it just stops matching what the gun is doing. So the
-       cycle is checked here, off the same timers the renderer reads.
+       Neither failed to compile, neither crashed, and neither is visible in a
+       screenshot unless you already know what to look for.
 
-       애니메이션은 (자세, 펌프의 어디까지)의 표이며, 표인 이유는 Doom의 펌프가 나갈 때와
-       돌아올 때 *같은* 자세를 지나기 때문입니다. 화면의 그 무엇도 애니메이션을 단언하지
-       않고, 어긋난 애니메이션은 크래시를 내지 않고 그저 총이 하는 일과 맞지 않게 될
-       뿐입니다. */
+       이 표들은 info.c에서 옮긴 것이며, 이를 단언하는 이유는 대신 *아트*를 읽고
+       판단했다가 둘을 틀렸고 둘 다 배포되었기 때문입니다. 어느 쪽도 컴파일에 실패하지
+       않았고, 크래시도 나지 않았으며, 무엇을 찾아야 하는지 이미 알지 않는 한 스크린샷
+       으로도 보이지 않습니다. */
     {
-        const float T = weapon_pump_time(WP_SHOTGUN);
+        /* Walk the whole recovery and read the poses off in order. A single
+           sample cannot see a row inserted, dropped or reordered. Sampled
+           rather than compared against the table's own numbers, because a test
+           that reads the table proves only that the table equals itself. */
+        struct { int type; const char *name; int want[8]; int n; } W[] = {
+            /* A B C D C B A -- out and back, all four drawings */
+            { WP_SHOTGUN, "shotgun",
+              { SG_IDLE, SG_PUMP0, SG_PUMP1, SG_PUMP2, SG_PUMP1, SG_PUMP0, SG_IDLE }, 7 },
+            /* B held for the whole shot, then back to A */
+            { WP_GRENADE, "grenade", { LN_FIRE, LN_IDLE }, 2 },
+            /* A(4) B(4): both states fire, so the alternation is the fire rate */
+            { WP_RAPID,   "rapid",   { RP_IDLE, RP_SPIN }, 2 },
+            /* A_Saw alternates A and B -- the bite, never the rev */
+            { WP_AXE,     "axe",     { AX_CUT0, AX_CUT1 }, 2 },
+        };
 
-        okd(weapon_sprite_frame_at(WP_SHOTGUN, 0.0f, 0.0f) == SG_REST,
-            "an idle gun is at rest",
-            weapon_sprite_frame_at(WP_SHOTGUN, 0.0f, 0.0f), SG_REST);
-        okd(weapon_sprite_frame_at(WP_SHOTGUN, 0.05f, 0.0f) == SG_RAISED,
-            "a flash with no pump still reads as a shot",
-            weapon_sprite_frame_at(WP_SHOTGUN, 0.05f, 0.0f), SG_RAISED);
-
-        /* pump_timer counts DOWN, so a full timer is the start of the cycle. */
-        int a = weapon_sprite_frame_at(WP_SHOTGUN, 0.0f, T * 0.95f);   /*  5% through */
-        int b = weapon_sprite_frame_at(WP_SHOTGUN, 0.0f, T * 0.60f);   /* 40% through */
-        int c = weapon_sprite_frame_at(WP_SHOTGUN, 0.0f, T * 0.35f);   /* 65% through */
-        int d = weapon_sprite_frame_at(WP_SHOTGUN, 0.0f, T * 0.05f);   /* 95% through */
-        okd(a == SG_RAISED, "the pump opens from the raised pose", a, SG_RAISED);
-        okd(b == SG_OPEN,   "swings the pump back",               b, SG_OPEN);
-        okd(c == SG_RAISED, "returns through the SAME pose",      c, SG_RAISED);
-        okd(d == SG_REST,   "and settles",                        d, SG_REST);
-
-        /* Sample the whole pump and read off the poses in order. The four
-           spot checks above prove those four instants; this proves there is
-           nothing ELSE in between -- a row inserted, dropped or reordered
-           changes this sequence, and no single sample would notice.
-
-           Sampled rather than compared against the table's own numbers,
-           because a test that reads the table only proves the table equals
-           itself. Boundaries are deliberately not asserted: where exactly the
-           pump snaps back is a feel decision that should be free to move
-           without failing a test.
-
-           펌프 전체를 표본으로 훑어 자세를 순서대로 읽습니다. 위의 네 지점 검사는 그
-           네 순간을 증명하고, 이것은 그 사이에 *다른 것이 없음*을 증명합니다. 행이
-           추가되거나 빠지거나 순서가 바뀌면 이 수열이 달라지며, 단일 표본은 그것을
-           알아채지 못합니다. 표의 숫자와 비교하지 않고 표본을 쓰는 이유는, 표를 읽는
-           테스트는 표가 자기 자신과 같다는 것만 증명하기 때문입니다. 경계값을 일부러
-           단언하지 않는 이유는, 펌프가 정확히 어디서 꺾이는지는 감각의 문제이고
-           테스트를 깨지 않고 움직일 수 있어야 하기 때문입니다. */
-        int seq[8], n = 0;
-        for (int i = 0; i <= 200; i++) {
-            int f = weapon_sprite_frame_at(WP_SHOTGUN, 0.0f, T * (1.0f - i / 200.0f));
-            if (n == 0 || seq[n - 1] != f) {
-                if (n < 8) seq[n++] = f;
+        for (int k = 0; k < 4; k++) {
+            const float T = weapon_pump_time(W[k].type);
+            int seq[12], n = 0;
+            /* i < 400, not <= : at exactly 400 the timer is zero, which is
+               not "the end of the animation" but "not animating", and the
+               idle frame it returns then is a fifth pose that is not part of
+               the cycle. Two weapons hid that because their idle happens to
+               equal their cycle's last pose.
+               i <= 400이 아니라 i < 400입니다. 정확히 400에서 타이머는 0이 되는데 그것은
+               "애니메이션의 끝"이 아니라 "애니메이션 중이 아님"이며, 그때 반환되는 대기
+               프레임은 주기에 속하지 않는 다섯 번째 자세입니다. */
+            for (int i = 0; i < 400; i++) {
+                int f = weapon_sprite_frame_at(W[k].type, 0.0f,
+                                               T * (1.0f - i / 400.0f), 0.0f);
+                if (n == 0 || seq[n - 1] != f) { if (n < 12) seq[n++] = f; }
+            }
+            int match = (n == W[k].n);
+            for (int i = 0; match && i < n; i++) match = (seq[i] == W[k].want[i]);
+            ok(match, W[k].name);
+            if (!match) {
+                printf("      got %d poses:", n);
+                for (int i = 0; i < n; i++) printf(" %d", seq[i]);
+                printf("   wanted %d:", W[k].n);
+                for (int i = 0; i < W[k].n; i++) printf(" %d", W[k].want[i]);
+                printf("\n");
             }
         }
-        static const int WANT[] = { SG_RAISED, SG_OPEN, SG_RAISED, SG_REST };
-        int match = (n == 4);
-        for (int i = 0; match && i < 4; i++) match = (seq[i] == WANT[i]);
-        ok(match, "the pump plays raised -> open -> raised -> rest, and nothing else");
-        if (!match) {
-            printf("      got %d poses:", n);
-            for (int i = 0; i < n; i++) printf(" %d", seq[i]);
-            printf("  wanted 4: %d %d %d %d\n",
-                   WANT[0], WANT[1], WANT[2], WANT[3]);
+
+        /* THE IDLE IS A CYCLE TOO, and for the chainsaw it is the whole point.
+           A_WeaponReady shows one frame for three of these weapons and
+           alternates two for the saw, so "at rest" cannot be a single drawing.
+           Driven by a free-running clock rather than by bob_phase, because a
+           saw revs while you stand still and bob_phase does not. */
+        ok(weapon_sprite_frame_at(WP_SHOTGUN, 0.0f, 0.0f, 0.0f) == SG_IDLE,
+           "a resting shotgun shows its IDLE frame, not a pump frame");
+
+        int saw_seen0 = 0, saw_seen1 = 0, gun_moved = 0;
+        for (int i = 0; i < 60; i++) {
+            float clock = i / 60.0f;      /* a second of standing still */
+            int a = weapon_sprite_frame_at(WP_AXE, 0.0f, 0.0f, clock);
+            if (a == AX_REV0) saw_seen0 = 1;
+            if (a == AX_REV1) saw_seen1 = 1;
+            if (weapon_sprite_frame_at(WP_SHOTGUN, 0.0f, 0.0f, clock) != SG_IDLE)
+                gun_moved = 1;
         }
+        ok(saw_seen0 && saw_seen1, "a resting chainsaw revs between two frames");
+        ok(!gun_moved, "and a weapon with a one-frame idle stays still");
     }
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall weapon checks passed\n", fails);

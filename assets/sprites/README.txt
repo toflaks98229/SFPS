@@ -10,17 +10,32 @@ Monsters:  imp  brute  hound  caster
 Frames:    0 walk-A   1 walk-B   2 attack   3 hurt   4 dead
 
 Weapons:   shotgun  grenade  rapid  axe   -- named for weapon.c's WEAPONS table
-Poses:     shotgun  0 rest    1 raised  2 pump open
-           grenade  0 rest    1 firing
-           rapid    0 rest    1 spun
-           axe      0 idle-A  1 idle-B  2 cut-A  3 cut-B
+Poses:     shotgun  0 idle   1 pump-A  2 pump-B  3 pump-C   (SHTG A B C D)
+           grenade  0 idle   1 firing                       (MISG A B)
+           rapid    0 idle   1 spun                         (CHGG A B)
+           axe      0 rev-A  1 rev-B   2 cut-A   3 cut-B    (SAWG C D A B)
 
 Those are POSES, not moments, and the counts differ because Doom drew each
 weapon with the frames that weapon needed. Which pose shows WHEN is the cycle
 table beside each weapon in weapon.c, so the animation can gain steps without
-the atlas gaining cells. There is no "firing" cell for the shotgun because the
-firing pose IS the raised one and the pump returns through it: naming slots
-after moments meant storing that drawing twice.
+the atlas gaining cells -- the shotgun's pump walks A B C D C B A out of four
+drawings, passing back through two of them.
+
+WHICH FRAME IS THE IDLE COMES FROM DOOM'S STATE TABLE, NOT FROM THE ART, and
+guessing from the drawings got it wrong twice:
+
+  SHTGA0 is the shotgun's idle (S_SGUN, A_WeaponReady). It looks like little
+  more than the end of a barrel, because at rest the gun is mostly below the
+  screen edge, and it was dropped as unusable -- which put the first PUMP
+  frame on screen as the resting pose.
+
+  SAWG C and D are the chainsaw's idle (S_SAW/S_SAWB) and A and B are its cut
+  (S_SAW1/S_SAW2). C and D are the WIDER drawings, which reads as a lunge and
+  is not, so idle and attack ended up swapped.
+
+The axe is also the one weapon whose idle is itself an animation: A_WeaponReady
+alternates its two frames, because a saw you are holding revs. weapon.c gives
+every weapon an idle cycle for that reason; three of them just have one row.
 
 A WEAPON CELL IS A WINDOW ON DOOM'S SCREEN. It spans Doom's full 320-unit
 width and 144 rows of its 3D view, so where a drawing sits in the cell is

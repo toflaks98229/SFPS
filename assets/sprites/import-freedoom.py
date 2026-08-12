@@ -92,18 +92,32 @@ MAGENTA = (255, 0, 255, 255)
 # they are the two extremes of Doom's four-frame cycle, and a two-frame cycle
 # wants the extremes.
 #
-# SHTGA0 is deliberately unused. It is Doom's resting shotgun, drawn on the
-# assumption that most of the weapon is below the screen edge, so all that is
-# in the file is the end of the barrel -- and with the cell now spanning the
-# whole screen it would sit correctly but show almost nothing. B is the
-# resting gun that is actually all there.
+# WHICH FRAME IS THE IDLE COMES FROM DOOM'S STATE TABLE, NOT FROM THE ART.
+# Reading the drawings and picking the one that looks like a resting weapon
+# gets it wrong twice over, and both were shipped before this comment existed:
+#
+#   SHTGA0 was dropped as "just the end of a barrel" -- it IS the shotgun's
+#   idle (S_SGUN, A_WeaponReady), drawn on the assumption that the rest of the
+#   gun is below the screen edge. Standing SHTGB0 in for it put the FIRST PUMP
+#   FRAME on screen as the resting pose.
+#
+#   SAWG C and D are the chainsaw's idle (S_SAW/S_SAWB), and A and B are the
+#   cut (S_SAW1/S_SAW2). They are the wider drawings, which looks backwards
+#   next to the narrower A/B pair, and taking them for the attack swapped the
+#   saw's rest and swing with each other.
+#
+# info.c numbers frames 0=A, 1=B, 2=C, 3=D; the order below is idle first,
+# then whatever the recovery cycle walks through.
+#
+# 어느 프레임이 대기 자세인지는 아트가 아니라 Doom의 상태 표에서 옵니다. 그림을 보고
+# 쉬고 있어 보이는 것을 고르면 두 번 틀리며, 둘 다 이 주석이 생기기 전에 배포되었습니다.
 #
 # One row per weapon, named for the row in weapon.c's WEAPONS table, so the
 # name is what pairs a drawing with a weapon and adding a weapon adds a row
 # rather than an edit. The counts differ on purpose: Doom gives the chaingun
-# and the launcher two frames each and the chainsaw four, and padding the
-# short ones to a common length would store a duplicate to fill a slot -- the
-# thing the PUMP_CYCLE table exists to avoid.
+# and the launcher two frames each, and padding the short ones to a common
+# length would store a duplicate to fill a slot -- the thing the cycle tables
+# exist to avoid.
 WEAPON_SUBJECTS = ('shotgun', 'grenade', 'rapid', 'axe')
 
 # Floor items. The `item` prefix is load-bearing: without it a drawing called
@@ -136,15 +150,16 @@ SUBJECTS = {
     'brute':   ['BOSSA1', 'BOSSC1', 'BOSSG1', 'BOSSH1', 'BOSSO0'],
     'hound':   ['SARGA1', 'SARGC1', 'SARGF1', 'SARGH1', 'SARGN0'],
     'caster':  ['HEADA1', 'HEADB1', 'HEADD1', 'HEADF1', 'HEADL0'],
-    # rest, raised, open -- see the WPN_* enum in sprite.h
-    'shotgun': ['SHTGB0', 'SHTGC0', 'SHTGD0'],
-    # the launcher: Doom animates it as two poses, at rest and firing
+    # idle, then the pump: A B C D, and the cycle walks A B C D C B A
+    'shotgun': ['SHTGA0', 'SHTGB0', 'SHTGC0', 'SHTGD0'],
+    # the launcher: A at rest, B for the whole shot
     'grenade': ['MISGA0', 'MISGB0'],
-    # the chaingun: two poses it alternates between while the barrel spins
+    # the chaingun: A at rest, alternating A/B while the barrel spins
     'rapid':   ['CHGGA0', 'CHGGB0'],
     # the chainsaw, for the axe: a held melee tool rather than a fist, and the
-    # only melee viewmodel Doom draws as a weapon you can see
-    'axe':     ['SAWGA0', 'SAWGB0', 'SAWGC0', 'SAWGD0'],
+    # only melee viewmodel Doom draws as a weapon you can see. C and D FIRST
+    # because they are the idle -- the saw revs at rest -- and A/B are the cut.
+    'axe':     ['SAWGC0', 'SAWGD0', 'SAWGA0', 'SAWGB0'],
 }
 for _k, _v in PICKUP_SUBJECTS.items():
     SUBJECTS[_k] = [_v]

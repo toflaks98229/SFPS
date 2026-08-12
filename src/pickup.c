@@ -219,16 +219,12 @@ void pickup_update(v3 player_eye, int *health, int health_max,
    fx.c use on their own name lookups.
    두 이름이 일치하는지 여부입니다. <string.h>를 끌어오지 않으며, enemy.c와 fx.c가 자체
    이름 조회에 쓰는 것과 같은 루프입니다. */
-static int name_eq(const char *a, const char *b) {
-    while (*a && *a == *b) { a++; b++; }
-    return !*a && !*b;
-}
-
-/* The same compare against a slice that is not NUL-terminated. The sprite
+/* Compares a name against a slice that is NOT NUL-terminated. The sprite
    decoder holds names as pointer+length inside one big text blob, and copying
    each into a buffer to compare it would be a second place that decides how
-   long a pickup name may be.
-   NUL로 끝나지 않는 조각에 대한 같은 비교입니다. 스프라이트 디코더는 하나의 큰 텍스트
+   long a pickup name may be. The NUL-terminated version this replaced became
+   dead once every caller went through here.
+   NUL로 끝나지 않는 조각과 이름을 비교합니다. 스프라이트 디코더는 하나의 큰 텍스트
    덩어리 안에서 이름을 포인터와 길이로 들고 있으며, 비교를 위해 각각을 버퍼로 복사하면
    아이템 이름의 최대 길이를 정하는 두 번째 장소가 생깁니다. */
 static int name_eq_n(const char *a, int n, const char *b) {

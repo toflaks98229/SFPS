@@ -96,6 +96,13 @@ _Static_assert(TEX_NAME_MAX >= LVL_MAT,
    에서 0.85초에 걸쳐 있기 때문입니다. 고정된 지속 시간이라면 연사 무기는 다시 쏠 수
    있는데도 동작 중이고, 유탄 발사기는 그보다 한참 전에 동작이 끝나 있게 됩니다. */
 #define PUMP_SHARE    0.55f
+
+/* How long one pass of the idle cycle takes. Doom holds each chainsaw frame
+   for 4 tics, so the pair is 8 of the 35 a second: a visible shudder rather
+   than a flicker.
+   대기 주기 한 바퀴에 걸리는 시간입니다. Doom은 전기톱의 각 프레임을 4틱씩 유지하므로
+   한 쌍이 초당 35틱 중 8틱이며, 깜빡임이 아니라 눈에 보이는 떨림이 됩니다. */
+#define IDLE_CYCLE_TIME (8.0f / 35.0f)
 #define RANGE         120.0f
 #define PELLET_SPREAD  0.040f   /* fixed cone, not a growing bloom */
 
@@ -907,6 +914,13 @@ void wp_update(Weapon *w, float dt, int firing, v3 eye, float yaw, float pitch,
     g_world_fov = world_fov;
     g_aspect    = aspect;
 
+    /* Wrapped rather than left to grow: a float that has been accumulating for
+       an hour loses the precision a 0.23s cycle needs.
+       무한정 커지게 두지 않고 되감습니다. 한 시간 동안 누적된 float은 0.23초 주기가
+       필요로 하는 정밀도를 잃습니다. */
+    w->anim_clock += dt;
+    if (w->anim_clock > IDLE_CYCLE_TIME) w->anim_clock -= IDLE_CYCLE_TIME;
+
     if (w->cooldown      > 0.0f) w->cooldown      -= dt;
     if (w->hook_cooldown > 0.0f) w->hook_cooldown -= dt;
     if (w->flash         > 0.0f) w->flash         -= dt;
@@ -1243,32 +1257,69 @@ mat4 wp_gun_matrix(const Weapon *w) {
  * 애니메이션의 모양은 유지되고 속도만 바뀌게 하기 위함입니다. */
 typedef struct { unsigned char frame; float upto; } AnimStep;
 
+/* TRANSCRIBED FROM DOOM'S STATE TABLE, not chosen by looking at the drawings.
+ *
+ * info.c gives each weapon a chain of states, each naming a frame and a
+ * duration in tics; these are those chains as fractions of the recovery. Two
+ * things were got wrong by reading the ART instead, and both shipped:
+ *
+ *   The shotgun idled on its FIRST PUMP FRAME, because SHTGA0 -- the real
+ *   idle, S_SGUN with A_WeaponReady -- is drawn as little more than the end of
+ *   a barrel and had been dropped as unusable. The pump is A B C D C B A: it
+ *   goes out and comes back, and only the middle of that was being played.
+ *
+ *   The chainsaw had its idle and its cut SWAPPED. SAWG C and D are
+ *   S_SAW/S_SAWB, the frames A_WeaponReady alternates between; A and B are
+ *   S_SAW1/S_SAW2, the frames A_Saw alternates between. C and D are the wider
+ *   drawings, which reads as the lunge and is not.
+ *
+ * Doom의 상태 표에서 옮긴 것이며 그림을 보고 고른 것이 아닙니다. info.c는 무기마다
+ * 프레임과 지속 시간(tic)을 명시한 상태의 사슬을 주며, 아래는 그 사슬을 회복 시간에
+ * 대한 비율로 옮긴 것입니다. 아트를 보고 판단해 두 가지를 틀렸고 둘 다 배포되었습니다.
+ * 샷건은 첫 펌프 프레임으로 대기했고, 전기톱은 대기와 절단이 서로 뒤바뀌어 있었습니다. */
+
+/* A(3) B(7) C(5) D(4) C(5) B(5) A(3) A(7) -- 39 tics, out and back. */
 static const AnimStep CYCLE_SHOTGUN[] = {
-    { SG_RAISED, 0.28f },   /* the shot: kicked up, and where the flash lives */
-    { SG_OPEN,   0.52f },   /* pump snapped back */
-    { SG_RAISED, 0.80f },   /* and forward again -- the same drawing as the shot */
-    { SG_REST,   1.00f },   /* settled, before idle takes over */
+    { SG_IDLE,  0.08f },
+    { SG_PUMP0, 0.26f },
+    { SG_PUMP1, 0.38f },
+    { SG_PUMP2, 0.49f },   /* pump fully back */
+    { SG_PUMP1, 0.62f },   /* and the same drawings again, coming forward */
+    { SG_PUMP0, 0.74f },
+    { SG_IDLE,  1.00f },
 };
-/* The launcher has one firing drawing, so its cycle is the recoil settling. */
+/* B(8) B(12): the launcher holds one firing drawing for the whole shot. */
 static const AnimStep CYCLE_GRENADE[] = {
-    { LN_FIRE, 0.55f },
-    { LN_REST, 1.00f },
+    { LN_FIRE, 0.40f },
+    { LN_FIRE, 0.90f },
+    { LN_IDLE, 1.00f },
 };
-/* The chaingun alternates twice over one shot, which is what makes a spin read
-   as a spin rather than as a flicker between two pictures. */
+/* A(4) B(4): both states fire, so the alternation IS the rate of fire. */
 static const AnimStep CYCLE_RAPID[] = {
-    { RP_SPIN, 0.25f },
-    { RP_REST, 0.50f },
-    { RP_SPIN, 0.75f },
-    { RP_REST, 1.00f },
+    { RP_IDLE, 0.50f },
+    { RP_SPIN, 1.00f },
 };
-/* The saw bites twice per swing and returns to its idle pair. */
+/* A(4) B(4), A_Saw. The bite, not the rev. */
 static const AnimStep CYCLE_AXE[] = {
-    { AX_CUT0,  0.30f },
-    { AX_CUT1,  0.60f },
-    { AX_IDLE1, 0.80f },
-    { AX_IDLE0, 1.00f },
+    { AX_CUT0, 0.50f },
+    { AX_CUT1, 1.00f },
 };
+
+/* AND AN IDLE THAT IS ITSELF AN ANIMATION, for the one weapon that has one.
+ *
+ * A_WeaponReady shows a single frame for three of these weapons and alternates
+ * two for the chainsaw -- a saw you are holding revs. Modelling "at rest" as a
+ * single drawing cannot express that, so rest is a cycle too, and three of the
+ * four simply have one row.
+ *
+ * 그리고 그 자체가 애니메이션인 대기 자세입니다. A_WeaponReady는 세 무기에 대해서는
+ * 프레임 하나를 보이고 전기톱에 대해서는 둘을 번갈아 보입니다. 들고 있는 톱은 떨기
+ * 때문입니다. "쉬는 중"을 그림 하나로 모델링하면 그것을 표현할 수 없으므로 대기도
+ * 주기이며, 넷 중 셋은 그저 행이 하나일 뿐입니다. */
+static const AnimStep IDLE_SHOTGUN[] = { { SG_IDLE, 1.00f } };
+static const AnimStep IDLE_GRENADE[] = { { LN_IDLE, 1.00f } };
+static const AnimStep IDLE_RAPID[]   = { { RP_IDLE, 1.00f } };
+static const AnimStep IDLE_AXE[]     = { { AX_REV0, 0.50f }, { AX_REV1, 1.00f } };
 
 /* Rows, keyed by WP_*, so adding a weapon adds a line here beside its line in
    WEAPONS rather than a branch somewhere else.
@@ -1277,13 +1328,21 @@ static const AnimStep CYCLE_AXE[] = {
 static const struct {
     const AnimStep *step;
     int             n;
-    unsigned char   rest;    /* the drawing shown when nothing is happening */
+    const AnimStep *idle;
+    int             idle_n;
 } ANIM[WP_TYPES] = {
-    { CYCLE_SHOTGUN, 4, SG_REST  },
-    { CYCLE_GRENADE, 2, LN_REST  },
-    { CYCLE_RAPID,   4, RP_REST  },
-    { CYCLE_AXE,     4, AX_IDLE0 },
+    { CYCLE_SHOTGUN, 7, IDLE_SHOTGUN, 1 },
+    { CYCLE_GRENADE, 3, IDLE_GRENADE, 1 },
+    { CYCLE_RAPID,   2, IDLE_RAPID,   1 },
+    { CYCLE_AXE,     2, IDLE_AXE,     2 },
 };
+
+
+static const AnimStep *anim_pick(const AnimStep *step, int n, float f) {
+    for (int i = 0; i < n; i++)
+        if (f < step[i].upto) return &step[i];
+    return &step[n - 1];
+}
 
 static int wp_sprite_frame(const Weapon *w) {
     int t = (w->cur >= 0 && w->cur < WP_TYPES) ? w->cur : 0;
@@ -1294,14 +1353,11 @@ static int wp_sprite_frame(const Weapon *w) {
        second thing to keep aligned with the trigger, and the failure when it
        drifts is a gun whose picture disagrees with what it is doing.
        펌프 타이머는 샷건만이 아니라 모든 무기의 애니메이션 시계입니다. 이미 무기 자신의
-       회복 시간으로 설정되고 발사와 보조를 맞춰 감소합니다. 무기마다 두 번째 시계를 두면
-       방아쇠와 맞춰 두어야 할 것이 하나 더 늘고, 어긋났을 때의 증상은 그림이 실제 동작과
-       불일치하는 총기입니다. */
+       회복 시간으로 설정되고 발사와 보조를 맞춰 감소합니다. */
     if (w->pump_timer > 0.0f) {
         float len = wp_stats(t)->cooldown * PUMP_SHARE;
         float f = (len > 0.0f) ? 1.0f - w->pump_timer / len : 1.0f;
-        for (int i = 0; i < ANIM[t].n; i++)
-            if (f < ANIM[t].step[i].upto) return ANIM[t].step[i].frame;
+        return anim_pick(ANIM[t].step, ANIM[t].n, f)->frame;
     }
 
     /* A weapon that flashes without running its cycle still has to look like
@@ -1310,7 +1366,15 @@ static int wp_sprite_frame(const Weapon *w) {
        아니라 주기의 첫 그림으로 대체합니다. */
     if (w->flash > 0.0f) return ANIM[t].step[0].frame;
 
-    return ANIM[t].rest;
+    /* At rest, which for the chainsaw is not a single drawing. anim_clock runs
+       whether or not the player moves, because a saw revs while you stand
+       still -- bob_phase would have been free but it stops when you do.
+       쉬는 중이며, 전기톱에게는 그것이 그림 하나가 아닙니다. anim_clock은 플레이어가
+       움직이든 아니든 흐릅니다. 가만히 서 있어도 톱은 떨기 때문입니다. bob_phase를 쓸
+       수도 있었지만 그것은 플레이어가 멈추면 함께 멈춥니다. */
+    float p = w->anim_clock / IDLE_CYCLE_TIME;
+    p -= (float)(int)p;
+    return anim_pick(ANIM[t].idle, ANIM[t].idle_n, p)->frame;
 }
 
 /**
@@ -1716,7 +1780,8 @@ float weapon_pump_time(int type) {
     return wp_stats(type)->cooldown * PUMP_SHARE;
 }
 
-int weapon_sprite_frame_at(int type, float flash, float pump_timer) {
+int weapon_sprite_frame_at(int type, float flash, float pump_timer,
+                           float anim_clock) {
     /* A zeroed weapon with just the two timers set. wp_sprite_frame reads
        nothing else, and saying so here means the test cannot accidentally
        depend on some other field being plausible.
@@ -1727,6 +1792,7 @@ int weapon_sprite_frame_at(int type, float flash, float pump_timer) {
     w.cur        = type;
     w.flash      = flash;
     w.pump_timer = pump_timer;
+    w.anim_clock = anim_clock;
     return wp_sprite_frame(&w);
 }
 #endif

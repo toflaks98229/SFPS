@@ -169,6 +169,41 @@ typedef enum {
     GFX_PIXEL_COUNT        /**< How many presets there are. / 프리셋의 개수. */
 } GfxPixelPreset;
 
+/**
+ * @brief How hard the resolve pass quantises colour.
+ *
+ * ENGLISH
+ * -------
+ * A setting rather than a constant because it is the single knob that decides
+ * whether the picture can be read, and where to put it is taste. The dither's
+ * loudness is not set by the dither: an ordered pattern swings half a
+ * quantisation step to fake the shades between two levels, so fewer levels
+ * means a louder pattern, in direct proportion.
+ *
+ * @note ::GFX_DITHER_HEAVY is what the game shipped with. Measured on a real
+ *       frame, a third of the screen had neighbouring pixels differing by more
+ *       than 16% of full scale, which is what was fighting the silhouettes.
+ * @note ::GFX_DITHER_OFF is the PlayStation's own 15-bit colour -- five bits a
+ *       channel, thirty-two levels -- which is what the PSX shader collections
+ *       quantise to, and where the pattern stops reading as interference.
+ *
+ * 한국어
+ * ------
+ * @brief 해상 패스가 색을 얼마나 강하게 양자화하는지입니다.
+ *
+ * 상수가 아니라 설정인 이유는, 이것이 그림을 읽을 수 있는지를 결정하는 유일한 손잡이이고
+ * 어디에 둘지는 취향이기 때문입니다. 디더의 시끄러움은 디더가 정하지 않습니다. 정렬
+ * 패턴은 두 단계 사이의 음영을 흉내 내려고 양자화 한 단계의 절반을 흔들므로, 단계가
+ * 적을수록 패턴이 정비례로 시끄러워집니다.
+ */
+typedef enum {
+    GFX_DITHER_HEAVY = 0,  /**< 4 steps -- what this shipped with. / 4단계. 기존 배포값. */
+    GFX_DITHER_NORMAL,     /**< 12 steps -- the default. / 12단계. 기본값. */
+    GFX_DITHER_LIGHT,      /**< 20 steps. / 20단계. */
+    GFX_DITHER_OFF,        /**< 32 steps: the PlayStation's own. / 32단계. 플레이스테이션의 값. */
+    GFX_DITHER_COUNT       /**< How many presets there are. / 프리셋의 개수. */
+} GfxDither;
+
 /* --- Type definitions / 타입 정의 --- */
 
 /**
@@ -195,6 +230,7 @@ typedef struct {
     int pixel;      /**< A ::GfxPixelPreset. / ::GfxPixelPreset 값. */
     int post_on;    /**< Non-zero to run the pixelise/dither pass. / 픽셀화·디더 패스를 켜려면 0이 아닌 값. */
     int scanlines;  /**< Non-zero to draw CRT scanlines. / CRT 주사선을 그리려면 0이 아닌 값. */
+    int dither;     /**< A ::GfxDither. / ::GfxDither 값. */
 } MenuSettings;
 
 /* --- Lifecycle / 수명 주기 --- */

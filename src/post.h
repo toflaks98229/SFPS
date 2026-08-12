@@ -145,6 +145,38 @@
  */
 #define POST_SCANLINE_DEFAULT 0.18f
 
+/* WHAT THE DITHER STARTS AT.
+ *
+ * Twelve steps per channel, not the four this shipped with. The dither's
+ * loudness is not set by the dither -- it is set by the level count, because
+ * an ordered pattern has to swing half a quantisation step to fake the shades
+ * between two levels. At four levels a step is a third of full scale, so the
+ * pattern swings a sixth of it, and measured on a real frame a THIRD of the
+ * screen had neighbouring pixels differing by more than 16%. That is what was
+ * fighting the silhouettes.
+ *
+ * Twelve puts a step at 9% and the swing at 4.5%, which still bands visibly --
+ * the look survives -- while letting an imp read as an imp. The PlayStation
+ * this borrows from was 15-bit, five bits a channel, THIRTY-TWO levels; the
+ * PSX shader collections on GitHub quantise to exactly that, and it is why
+ * their dithering reads as texture rather than as interference.
+ *
+ * 디더가 시작하는 값입니다. 채널당 4단계가 아니라 12단계입니다. 디더의 시끄러움은 디더가
+ * 아니라 *단계 수*가 정합니다. 정렬 패턴은 두 단계 사이의 음영을 흉내 내려고 양자화
+ * 한 단계의 절반만큼 흔들어야 하기 때문입니다. 4단계에서는 한 단계가 전체 범위의
+ * 3분의 1이므로 패턴은 6분의 1을 흔들고, 실제 프레임에서 화면의 3분의 1이 이웃
+ * 픽셀과 16% 넘게 차이 났습니다. 실루엣과 싸우고 있던 것이 그것입니다. */
+#define POST_LEVELS_DEFAULT 12.0f
+
+/* Per-frame grain. Cut from 0.05, and the reason is that it is the one effect
+   here that changes every frame: a still image tolerates it and a moving one
+   turns it into shimmer, because the eye tracks a surface and the noise on it
+   does not travel with it. 0.015 is enough to break up a flat gradient.
+   프레임별 그레인입니다. 0.05에서 줄였습니다. 이곳에서 매 프레임 바뀌는 유일한 효과이며,
+   정지 화면은 견디지만 움직이는 화면에서는 어른거림이 됩니다. 눈은 표면을 따라가는데
+   그 위의 잡음은 함께 움직이지 않기 때문입니다. */
+#define POST_GRAIN_DEFAULT 0.015f
+
 /* --- The single-hue (duotone) look / 단색조 룩 --- */
 
 /**
@@ -454,6 +486,30 @@ void post_size(int *w, int *h);
  *       분리하려면 같은 프레임을 켜고/끄고 렌더링하는 수밖에 없습니다.
  */
 void post_set_scanline(float depth);
+
+/**
+ * @brief Sets how hard the resolve pass quantises and grains the picture.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] levels Steps per colour channel, 2..64. Clamped.
+ * @param[in] grain  Per-frame noise amplitude, 0..0.5. Clamped.
+ * @note `levels` is the one that decides readability. An ordered dither swings
+ *       half a quantisation step, so the pattern's amplitude is 1/(2*(levels-1))
+ *       of full scale -- the dither constants do not come into it. Four levels
+ *       is a sixth; twelve is a twenty-second; the PlayStation's own thirty-two
+ *       is a sixty-second.
+ *
+ * 한국어
+ * ------
+ * @brief 해상 패스가 그림을 얼마나 강하게 양자화하고 거칠게 만들지를 설정합니다.
+ * @param[in] levels 색 채널당 단계 수(2..64). 제한됩니다.
+ * @param[in] grain  프레임별 잡음의 세기(0..0.5). 제한됩니다.
+ * @note 가독성을 결정하는 것은 `levels`입니다. 정렬 디더는 양자화 한 단계의 절반을
+ *       흔들므로 패턴의 진폭은 전체 범위의 1/(2*(levels-1))이며, 디더 상수는 여기에
+ *       관여하지 않습니다.
+ */
+void post_set_dither(float levels, float grain);
 
 /**
  * @brief The current scanline depth.

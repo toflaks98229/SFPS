@@ -1155,6 +1155,28 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
         post_set_enabled(menu_settings()->post_on);
         post_set_scanline(menu_settings()->scanlines ? POST_SCANLINE_DEFAULT : 0.0f);
 
+        /* Steps per channel, and the grain that rides on them. A table rather
+           than arithmetic on the enum, because these are four points chosen by
+           eye and the spacing between them is not regular -- HEAVY to NORMAL
+           is the jump that matters and the rest is fine tuning.
+           OFF is not zero dither: it is thirty-two steps, the PlayStation's own
+           five bits a channel, where the pattern stops being visible on its own
+           rather than being switched off.
+           채널당 단계 수와 그 위에 얹히는 그레인입니다. 열거형에 대한 산술이 아니라
+           표인 이유는, 이 넷이 눈으로 고른 지점이고 간격이 규칙적이지 않기 때문입니다.
+           HEAVY에서 NORMAL로 가는 것이 중요한 도약이고 나머지는 미세 조정입니다.
+           OFF는 디더 0이 아니라 32단계, 즉 플레이스테이션 자신의 채널당 5비트이며,
+           패턴이 꺼지는 것이 아니라 그 자체로는 보이지 않게 되는 지점입니다. */
+        static const struct { float levels, grain; } DITHER[GFX_DITHER_COUNT] = {
+            {  4.0f, 0.050f },   /* HEAVY  -- what this shipped with */
+            { 12.0f, 0.015f },   /* NORMAL */
+            { 20.0f, 0.008f },   /* LIGHT  */
+            { 32.0f, 0.000f },   /* OFF    -- the PlayStation's 15-bit colour */
+        };
+        int di = menu_settings()->dither;
+        if (di < 0 || di >= GFX_DITHER_COUNT) di = GFX_DITHER_NORMAL;
+        post_set_dither(DITHER[di].levels, DITHER[di].grain);
+
         /* The world does not advance while the menu is up or the game is won.
            One flag for both, because they freeze exactly the same things and
            two conditions repeated at five call sites is how one of them ends up

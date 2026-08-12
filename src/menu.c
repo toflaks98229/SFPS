@@ -86,6 +86,7 @@ typedef struct {
 static const char *const OFF_ON[]  = { "OFF", "ON" };
 static const char *const DISPLAYS[] = { "WINDOWED", "BORDERLESS" };
 static const char *const PIXELS[]   = { "CHUNKY", "NORMAL", "FINE" };
+static const char *const DITHERS[]  = { "HEAVY", "NORMAL", "LIGHT", "OFF" };
 
 /* Each name table must have exactly one entry per value the enum can take. A
    short table would index out of bounds the first time the player cycled onto
@@ -98,6 +99,8 @@ _Static_assert(sizeof(DISPLAYS) / sizeof(DISPLAYS[0]) == DISPLAY_MODE_COUNT,
                "one name per DisplayMode");
 _Static_assert(sizeof(PIXELS) / sizeof(PIXELS[0]) == GFX_PIXEL_COUNT,
                "one name per GfxPixelPreset");
+_Static_assert(sizeof(DITHERS) / sizeof(DITHERS[0]) == GFX_DITHER_COUNT,
+               "one name per GfxDither");
 
 /* --- Screens / 화면 --- */
 
@@ -125,6 +128,7 @@ static const Row SETTINGS_ROWS[] = {
     { "PIXEL SIZE",  ROW_VALUE, 0, FIELD(pixel),     GFX_PIXEL_COUNT,    PIXELS   },
     { "POST FX",     ROW_VALUE, 0, FIELD(post_on),   2,                  OFF_ON   },
     { "SCANLINES",   ROW_VALUE, 0, FIELD(scanlines), 2,                  OFF_ON   },
+    { "DITHER",      ROW_VALUE, 0, FIELD(dither),    GFX_DITHER_COUNT,   DITHERS  },
     { "BACK",        ROW_SCREEN, MENU_ROOT, 0, 0, 0 },
 };
 
@@ -134,7 +138,17 @@ static MenuScreen   g_screen;
 static int          g_cursor;
 static MenuAction   g_pending;
 static MenuSettings g_set = {
-    DISPLAY_WINDOWED, GFX_PIXEL_NORMAL, 1, 1
+    /* Named rather than positional past the first few: a struct that gains a
+       field silently gives it 0, and 0 here is GFX_DITHER_HEAVY -- the exact
+       setting this list exists to stop being the default.
+       처음 몇 개를 넘어서는 위치가 아니라 이름으로 씁니다. 필드가 늘어난 구조체는 그것에
+       조용히 0을 주는데, 여기서 0은 GFX_DITHER_HEAVY이며 이 목록이 기본값이 되지 않게
+       하려는 바로 그 설정입니다. */
+    .display   = DISPLAY_WINDOWED,
+    .pixel     = GFX_PIXEL_NORMAL,
+    .post_on   = 1,
+    .scanlines = 1,
+    .dither    = GFX_DITHER_NORMAL,
 };
 
 /* --- Static helpers / 정적 헬퍼 --- */

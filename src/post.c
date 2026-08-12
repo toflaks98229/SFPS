@@ -68,6 +68,11 @@ static GLuint g_vao;
 /** @brief The resolve program and its uniform locations. / 해상 프로그램과 그 유니폼 위치. */
 static GLuint g_prog;
 static GLint  g_u_tex, g_u_res, g_u_win, g_u_time, g_u_scan;
+/** @brief Quantisation steps per channel. See post_set_dither. / 채널당 양자화 단계. */
+static float g_levels = POST_LEVELS_DEFAULT;
+/** @brief Per-frame grain amplitude. See post_set_dither. / 프레임별 그레인 세기. */
+static float g_grain  = POST_GRAIN_DEFAULT;
+static GLint g_u_levels, g_u_grain;
 /** @brief Scanline depth, 0..1. See post_set_scanline. / 주사선 세기(0..1). post_set_scanline 참조. */
 static float  g_scan = POST_SCANLINE_DEFAULT;
 /** @brief Frames drawn, wrapped. Drives the CRT grain. / 그린 프레임 수(순환). CRT 그레인을 구동합니다. */
@@ -227,6 +232,31 @@ static const char *FS =
  * 검사가 23.9%를 보고하며 통과했습니다. 행끼리 비교해서는 디더와 주사선을 분리할 수
  * 없지만, 같은 프레임을 주사선 켜고/끄고 비교하면 가능합니다. */
 "uniform float uScan;\n"
+/* HOW MANY STEPS EACH CHANNEL IS QUANTISED TO, and how much per-frame noise
+ * rides on top. Uniforms rather than constants for the reason uScan is one:
+ * they are the two knobs that decide whether the picture can be read, and the
+ * right value is a matter of taste that should not need a rebuild to find.
+ *
+ * The step between levels is 1/(uLevels-1), and an ordered dither has to swing
+ * half a step to fake the shades in between -- so the pattern's loudness is
+ * set by the level count, not by the dither. At the four levels this shipped
+ * with, a step is a third of full scale and the dither a sixth of it; measured
+ * on a real frame, a THIRD of the screen had neighbouring pixels differing by
+ * more than 16%. The PlayStation this look is borrowed from was 15-bit --
+ * five bits a channel, thirty-two levels -- where the same dither swings 1.6%.
+ *
+ * 각 채널이 몇 단계로 양자화되는지와, 그 위에 얹히는 프레임별 잡음의 양입니다. 상수가
+ * 아니라 유니폼인 이유는 uScan과 같습니다. 이 둘이 그림을 읽을 수 있는지를 결정하는
+ * 손잡이이고, 알맞은 값은 취향의 문제이며 그것을 찾자고 다시 빌드해야 해서는 안 됩니다.
+ *
+ * 단계 사이의 간격은 1/(uLevels-1)이고, 정렬 디더는 그 사이의 음영을 흉내 내려고 반
+ * 단계만큼 흔들어야 합니다. 즉 패턴의 시끄러움은 디더가 아니라 *단계 수*가 정합니다.
+ * 배포되던 4단계에서는 한 단계가 전체 범위의 3분의 1이고 디더는 6분의 1입니다. 실제
+ * 프레임에서 재어 보니 화면의 3분의 1이 이웃 픽셀과 16% 넘게 차이 났습니다. 이 룩을
+ * 빌려 온 플레이스테이션은 15비트, 채널당 5비트, 즉 32단계였고 거기서 같은 디더는
+ * 1.6%를 흔듭니다. */
+"uniform float uLevels;\n"
+"uniform float uGrain;\n"
 
 /* 8x8 Bayer, values 0..63. Written as a flat array indexed by hand because
    GLSL 330 cannot portably initialise a const matrix from a nested list.
@@ -247,7 +277,7 @@ static const char *FS =
    depends on.
    채널당 단계 수입니다. 4단계는 재질을 구분할 만큼의 색을 남깁니다. 진정한 1비트
    룩은 총기가 의존하는 블루잉/강철/호두나무의 대비를 버리게 됩니다. */
-"const float LEVELS = 4.0;\n"
+
 
 /* How strongly luminance opens and closes the pattern. 0 is a plain ordered
    dither; 1 is the full shading effect. Above ~1.2 the dark end crushes.
@@ -706,12 +736,13 @@ static const char *FS =
  * 가중치가 물리적 강도에 대해 정의되어 있기 때문입니다. 두 공간을 각각이 옳은 용도에
  * 맞게 사용합니다.
  *
- * Dividing by LEVELS-1 after the floor puts the top step at exactly 1.0;
- * dividing by LEVELS leaves the brightest output at 0.75 and the whole image
+ * Dividing by uLevels-1 after the floor puts the top step at exactly 1.0;
+ * dividing by uLevels leaves the brightest output at 0.75 and the whole image
  * reads washed out.
- * floor 이후 LEVELS-1로 나누면 최상위 단계가 정확히 1.0이 됩니다. LEVELS로 나누면
+ * floor 이후 uLevels-1로 나누면 최상위 단계가 정확히 1.0이 됩니다. uLevels로 나누면
  * 가장 밝은 출력이 0.75에 머물러 화면 전체가 바랜 것처럼 보입니다. */
-"  vec3 q = floor(src * (LEVELS - 1.0) + 0.5 + th) / (LEVELS - 1.0);\n"
+"  float steps = max(uLevels - 1.0, 1.0);\n"
+"  vec3 q = floor(src * steps + 0.5 + th) / steps;\n"
 
 /* Pull the result back toward a hue-preserving version of itself.
  *
@@ -741,7 +772,7 @@ static const char *FS =
  * 어긋날 수 없고, 따라서 색상이 디더를 견뎌 냅니다. SATURATION이 둘 사이를
  * 혼합합니다. 0이면 색상이 완전히 보존되고 약간 평평해지며, 1이면 기존의 채널별
  * 결과가 됩니다. */
-"  float ql = floor(lum * (LEVELS - 1.0) + 0.5 + th) / (LEVELS - 1.0);\n"
+"  float ql = floor(lum * steps + 0.5 + th) / steps;\n"
 "  vec3  hue = src / max(lum, 1e-3);\n"
 "  vec3  qh  = clamp(hue * ql, 0.0, 1.0);\n"
 
@@ -795,7 +826,7 @@ static const char *FS =
  * which is the reason it is not higher -- the dither's darkest band is already
  * near black and a heavier scanline crushes it into solid black.
  *
- * GRAIN is a *temporal* noise, and it is the one thing here that changes every
+ * uGrain is a *temporal* noise, and it is the one thing here that changes every
  * frame. It is not the same tool as the light noise in render.c: that one is
  * attached to the world and never moves, which is what makes it read as the
  * surface. This one moves constantly, which is what makes it read as the
@@ -834,7 +865,7 @@ static const char *FS =
  * @note 요청에 따라 비네팅은 *없습니다*. 비네팅, 통 왜곡, 색수차는 한 계열입니다. 모두
  *       가장자리를 어둡게 하거나 휘게 하며, 나머지 없이 하나만 넣으면 선택이 아니라 실수로
  *       읽힙니다. 셋 다 빼는 것은 일관된 입장이지만 하나만 취하는 것은 그렇지 않습니다. */
-"  const float GRAIN = 0.05;\n"
+
 
 /* Odd output rows are the dark ones. mod on the raw fragment row means the
    pattern is locked to the display, not to the image -- resizing the window
@@ -852,7 +883,7 @@ static const char *FS =
    프레임을 입력받아 매번 다른 곳에 놓입니다. */
 "  float g = fract(sin(dot(gl_FragCoord.xy + uTime, vec2(12.9898,78.233)))\n"
 "                  * 43758.5453);\n"
-"  col += (g - 0.5) * GRAIN;\n"
+"  col += (g - 0.5) * uGrain;\n"
 
 "  FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);\n"
 "}\n";
@@ -979,6 +1010,8 @@ int post_init(int width, int height) {
     g_u_win  = glGetUniformLocation(g_prog, "uWin");
     g_u_time = glGetUniformLocation(g_prog, "uTime");
     g_u_scan = glGetUniformLocation(g_prog, "uScan");
+    g_u_levels = glGetUniformLocation(g_prog, "uLevels");
+    g_u_grain  = glGetUniformLocation(g_prog, "uGrain");
 
     /* An empty VAO is still required: core profile refuses to draw with no
        vertex array bound, even when the shader reads no attributes.
@@ -993,6 +1026,15 @@ int post_init(int width, int height) {
 int post_enabled(void) { return g_ready && g_on; }
 
 int post_in_world_pass(void) { return g_in_world; }
+
+void post_set_dither(float levels, float grain) {
+    /* Clamped rather than trusted: one level makes `steps` zero and every
+       pixel divide by it, and a negative grain would brighten as it noises.
+       믿지 않고 제한합니다. 단계가 1이면 steps가 0이 되어 모든 픽셀이 그것으로 나누게
+       되고, 음수 그레인은 잡음을 넣으면서 화면을 밝히게 됩니다. */
+    g_levels = levels < 2.0f ? 2.0f : (levels > 64.0f ? 64.0f : levels);
+    g_grain  = grain  < 0.0f ? 0.0f : (grain  > 0.5f  ? 0.5f  : grain);
+}
 
 void post_set_scanline(float depth) {
     if (depth < 0.0f) depth = 0.0f;
@@ -1077,6 +1119,8 @@ void post_end(int win_w, int win_h) {
     if (g_frame > 4096.0f) g_frame = 0.0f;
     glUniform1f(g_u_time, g_frame);
     glUniform1f(g_u_scan, g_scan);
+    glUniform1f(g_u_levels, g_levels);
+    glUniform1f(g_u_grain, g_grain);
 
     glBindVertexArray(g_vao);
     glDrawArrays(GL_TRIANGLES, 0, 3);

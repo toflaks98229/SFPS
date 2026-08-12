@@ -56,18 +56,21 @@
    size lives HERE rather than in the art: every drawing already fills as much
    of its 48x48 cell as the one shared scale allows, and a bigger drawing would
    only clip.
-   Tripled from 0.5m, which had them reading as litter. At 1.5m the set lands
-   close to the sizes Doom drew: the launcher fills its cell and comes out
-   1.50m, the medikit 0.75m, a box of shells 0.34m -- so the item that IS small
-   stays small, which is the whole reason they share one scale.
+   Up from 0.5m, which had them reading as litter. The cell edge is what a
+   drawing filling its whole cell measures, so this is a ceiling and not a
+   size every item takes: the launcher fills its cell and comes out 2.00m, the
+   medikit 1.00m, a box of shells 0.46m. The item that IS small stays small,
+   which is the whole reason they share one scale rather than each fitting its
+   own cell.
 
    바닥 아이템은 월드에서 고정된 정사각형으로 그려지므로, 겉보기 크기는 아트가 아니라
    *이곳*에 있습니다. 모든 그림은 이미 하나의 공용 배율이 허용하는 만큼 48x48 셀을 채우고
-   있어, 더 크게 그리면 잘리기만 합니다. 0.5m에서 3배로 키웠습니다. 그 크기에서는
-   쓰레기처럼 보였습니다. 1.5m에서 이 세트는 Doom이 그린 크기에 가깝게 떨어집니다.
-   발사기는 셀을 채워 1.50m, 구급상자는 0.75m, 산탄 상자는 0.34m입니다. 작은 것은 작게
-   남으며, 그것이 하나의 배율을 공유하는 이유 전부입니다. */
-#define PICKUP_SIZE     1.5f    /* billboard edge, metres */
+   있어, 더 크게 그리면 잘리기만 합니다. 0.5m에서 올렸습니다. 그 크기에서는 쓰레기처럼
+   보였습니다. 셀의 변은 셀을 가득 채운 그림이 갖는 크기이므로 이것은 상한이지 모든
+   아이템이 갖는 크기가 아닙니다. 발사기는 셀을 채워 2.00m, 구급상자는 1.00m, 산탄 상자는
+   0.46m입니다. 작은 것은 작게 남으며, 그것이 각자 자기 셀에 맞추는 대신 하나의 배율을
+   공유하는 이유 전부입니다. */
+#define PICKUP_SIZE     2.0f    /* billboard edge, metres */
 
 /* Clearance under the item. A fixed gap rather than a fraction of the size,
    because it is a hover cue and not a property of the object -- scaling it

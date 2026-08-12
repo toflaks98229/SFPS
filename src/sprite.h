@@ -53,62 +53,110 @@
  * half-drawn bestiary should still show creatures, whereas a gun drawn over a
  * 3D gun would be two guns.
  *
- * The cell is 128x96, which is the size a viewmodel actually occupies and, at
- * this project's art resolution, roughly what Doom's own weapon sprites were.
+ * THE CELL IS A WINDOW ON DOOM'S SCREEN, not a box the art is centred in.
+ *
+ * That distinction is the whole of where a viewmodel sits. Doom does not centre
+ * its weapons: it stores a per-frame offset and draws the sprite AT it, so the
+ * shotgun rests left of centre, the chaingun sits right of where the shotgun
+ * does, and the chainsaw's cutting frames run off the right edge of the screen
+ * on purpose. Those offsets are the artist placing the weapon. Centring each
+ * drawing in a tight cell throws all of it away and puts every weapon in the
+ * same place -- which is what this used to do, and why the imported shotgun sat
+ * dead centre looking like it belonged to a different game.
+ *
+ * So the cell spans Doom's full 320-unit screen width and 144 rows of its 3D
+ * view, and a frame's position in the cell IS its position there. Nothing
+ * in the format changed to allow it: `o <x> <y>` already places a drawing in
+ * its cell, and the importer now computes that from the offsets instead of
+ * from a centring rule.
+ *
+ * Costing nothing is what makes it practical. bake.ps1 crops each drawing to
+ * its ink, so a cell four times the area of the old one stores the same
+ * pixels; only the atlas texture grows, and that is RAM rather than floppy.
+ *
+ * 192x104 keeps the cell's pixel aspect equal to its screen aspect, which is
+ * what makes the 1.2 correction for Doom's non-square pixels fall out of the
+ * geometry rather than being applied by hand: 104/144 over 192/320 is 1.204.
  *
  * 한국어
  * ------
  * Doom 방식의 무기 스프라이트입니다. 외곽선을 압출하지 않고 아트로 그립니다. 존재하면 3D
- * 뷰 모델을 *대체*하며, 3D 쪽은 폴백으로 남습니다. `assets/sprites/gun0.png` 이후를 넣는
- * 것만으로 전환되고, 지우면 되돌아갑니다. 이는 몬스터가 따르는 것보다 의도적으로 강한
- * 규칙입니다. 그림은 SDF 생물체 *위에* 합성되는데, 절반만 그려진 몬스터 도감도 생물체를
- * 보여 주어야 하기 때문입니다. 반면 3D 총기 위에 그린 총기는 총이 두 자루가 됩니다.
+ * 뷰 모델을 *대체*하며, 3D 쪽은 폴백으로 남습니다. 이는 몬스터가 따르는 것보다 의도적으로
+ * 강한 규칙입니다. 그림은 SDF 생물체 *위에* 합성되는데, 절반만 그려진 몬스터 도감도
+ * 생물체를 보여 주어야 하기 때문입니다. 반면 3D 총기 위에 그린 총기는 총이 두 자루입니다.
  *
- * 셀은 128x96이며, 뷰 모델이 실제로 차지하는 크기이자 이 프로젝트의 아트 해상도에서 Doom
- * 자신의 무기 스프라이트와 대략 같은 크기입니다.
+ * 셀은 그림을 가운데 넣는 상자가 아니라 *Doom 화면을 들여다보는 창*입니다. 이 구분이 뷰
+ * 모델의 위치 전부입니다. Doom은 무기를 가운데 두지 않고 프레임마다 오프셋을 저장해 그
+ * 자리에 그립니다. 그래서 샷건은 중앙 왼쪽에, 체인건은 그보다 오른쪽에 놓이고, 전기톱의
+ * 절단 프레임은 의도적으로 화면 오른쪽 밖으로 나갑니다. 그 오프셋이 곧 아티스트의 배치
+ * 입니다. 좁은 셀에 가운데 맞추면 그것을 전부 버리고 모든 무기를 같은 자리에 놓게 되며,
+ * 이전이 그러했고 그래서 이식한 샷건이 정중앙에 어색하게 놓였습니다.
+ *
+ * 포맷은 이를 위해 바뀐 것이 없습니다. `o <x> <y>`가 이미 셀 안 배치를 담당하며, 임포터가
+ * 그 값을 가운데 맞춤 규칙이 아니라 오프셋에서 계산할 뿐입니다. 비용이 들지 않는다는 점이
+ * 이를 실용적으로 만듭니다. bake.ps1이 잉크에 맞춰 자르므로 넓이가 네 배인 셀도 같은
+ * 픽셀을 저장하며, 커지는 것은 아틀라스 텍스처뿐이고 그것은 플로피가 아니라 RAM입니다.
  */
-#define WPN_CW 128          ///< @brief Weapon frame cell width, pixels. / 무기 프레임 셀의 너비 (픽셀).
-#define WPN_CH  96          ///< @brief Weapon frame cell height, pixels. / 무기 프레임 셀의 높이 (픽셀).
+/* WHICH DOOM SCREEN, and it is not the obvious one.
+ *
+ * Doom's screen is 320x200, but its 3D VIEW is 168 rows: the status bar takes
+ * the bottom 32, and that is the framing the game shipped with. The weapon is
+ * still drawn against the full 200 -- BASEYCENTER is a fixed 100 whatever the
+ * view height is -- so the bar does not merely hide the bottom of the gun, it
+ * changes where the gun sits AND how big it is against what you can see.
+ *
+ * Matching the 200-row fullscreen view instead put the shotgun at 35.8%..99.8%
+ * of the screen: its bottom balanced exactly on the edge with nothing cut off,
+ * which reads as a gun perched too high and too small. Doom as shipped puts it
+ * at 33.0%..109.2% -- a fifth larger, and planted past the bottom edge.
+ *
+ * 어느 Doom 화면인가의 문제이며, 뻔한 쪽이 아닙니다. Doom의 화면은 320x200이지만 3D
+ * *뷰*는 168행입니다. 상태 표시줄이 아래 32행을 가져가며, 그것이 게임이 배포된 구도
+ * 입니다. 무기는 여전히 200행 전체를 기준으로 그려지므로(BASEYCENTER는 뷰 높이와 무관한
+ * 고정된 100입니다) 표시줄은 총의 아래쪽을 가리기만 하는 것이 아니라, 총이 놓이는
+ * 위치와 보이는 영역 대비 크기까지 바꿉니다.
+ *
+ * 200행 전체 화면에 맞췄을 때 샷건은 화면의 35.8%..99.8%에 놓였습니다. 아래가 잘리지
+ * 않고 가장자리에 정확히 걸터앉아, 너무 높고 작게 놓인 총으로 읽혔습니다. 배포판 Doom은
+ * 33.0%..109.2%에 놓습니다. 5분의 1만큼 크고, 아래 가장자리 너머로 박혀 있습니다. */
+#define WPN_DOOM_W    320   ///< @brief Doom's screen width, in its own units. / Doom 화면의 너비 (자체 단위).
+#define WPN_DOOM_FULL 200   ///< @brief Doom's whole screen height; the psprite reference. / Doom 화면 전체 높이. 뷰 모델의 기준.
+#define WPN_DOOM_VIEW 168   ///< @brief The 3D view: the screen less its status bar. / 3D 뷰. 화면에서 상태 표시줄을 뺀 높이.
+#define WPN_DOOM_TOP   24   ///< @brief View row the cell's top edge sits on. / 셀 상단이 놓이는 뷰의 행.
+
+#define WPN_CW 192          ///< @brief Weapon cell width, pixels: Doom's whole screen width. / 무기 셀의 너비 (픽셀). Doom 화면 전체 너비.
+#define WPN_CH 104          ///< @brief Weapon cell height, pixels: view rows WPN_DOOM_TOP..WPN_DOOM_VIEW. / 무기 셀의 높이 (픽셀).
 
 /**
- * @brief The weapon's distinct DRAWINGS, in the order `gun<N>.png` names them.
+ * @brief How many drawings one weapon's row can hold.
  *
  * ENGLISH
  * -------
- * Poses, not moments. These used to be moments -- IDLE, FIRE, PUMP0, PUMP1 --
- * which works only while every moment needs a drawing of its own. A pump
- * passes through the same pose twice, going out and coming back, and naming
- * the slots after moments meant storing that pose twice: `gun1` and `gun3`
- * were byte-identical, 3.3KB of atlas spent on saying the same thing again.
+ * A CAP, not a list of moments. It used to be a list -- IDLE, FIRE, PUMP0,
+ * PUMP1 -- which works only while every moment needs a drawing of its own and
+ * every weapon needs the same moments. Neither is true. A pump passes through
+ * the same pose going out and coming back, so naming slots after moments meant
+ * storing one pose twice; and Doom gives the chaingun two drawings, the
+ * launcher two, the shotgun three and the chainsaw four, so a shared list of
+ * moments would pad the short weapons with duplicates to fill their slots.
  *
- * Which pose to show WHEN is weapon.c's PUMP_CYCLE table, so the animation can
- * grow steps without the atlas growing cells, and a pose can repeat by being
- * named twice in a table rather than stored twice in a texture.
- *
- * Still driven by the weapon's own timers rather than a separate animation
- * clock, so the drawing cannot fall out of step with what the gun is actually
- * doing -- the same reason the monsters' frames are chosen from ::EState.
+ * So a slot is just a drawing, WHICH drawing means something different per
+ * weapon, and what each one is and when it shows lives beside that weapon's
+ * animation cycle in weapon.c. The atlas only has to know how wide a row is.
  *
  * 한국어
  * ------
- * @brief `gun<N>.png`가 이름 붙이는 순서대로의, 무기의 서로 다른 *그림*들입니다.
+ * @brief 한 무기의 행이 담을 수 있는 그림의 수, 즉 *상한*입니다.
  *
- * 순간이 아니라 자세입니다. 예전에는 순간이었고(IDLE, FIRE, PUMP0, PUMP1) 그것은 모든
- * 순간이 저마다의 그림을 필요로 할 때에만 통합니다. 펌프는 나갈 때와 돌아올 때 같은
- * 자세를 두 번 지나므로, 슬롯을 순간으로 이름 붙이면 그 자세를 두 번 저장하게 됩니다.
- * `gun1`과 `gun3`은 바이트 단위로 동일했고, 같은 말을 다시 하는 데 아틀라스 3.3KB를
- * 쓰고 있었습니다.
- *
- * 어느 자세를 *언제* 보일지는 weapon.c의 PUMP_CYCLE 표가 정하므로, 아틀라스의 칸을
- * 늘리지 않고 애니메이션의 단계를 늘릴 수 있고, 자세의 반복은 텍스처에 두 번 저장하는
- * 대신 표에 두 번 적는 일이 됩니다.
+ * 순간의 목록이 아닙니다. 예전에는 목록이었고(IDLE, FIRE, PUMP0, PUMP1) 그것은 모든
+ * 순간이 저마다의 그림을 필요로 하고 모든 무기가 같은 순간을 필요로 할 때에만 통합니다.
+ * 둘 다 사실이 아닙니다. 펌프는 나갈 때와 돌아올 때 같은 자세를 지나므로 슬롯을 순간으로
+ * 이름 붙이면 한 자세를 두 번 저장하게 되고, Doom은 체인건에 그림 둘, 발사기에 둘,
+ * 샷건에 셋, 전기톱에 넷을 주므로 공유된 순간 목록은 짧은 무기의 빈 슬롯을 복제로 채우게
+ * 됩니다. 그래서 슬롯은 그저 그림이며, *어느* 그림인지는 무기마다 다르고, 각각이 무엇이며
+ * 언제 보이는지는 weapon.c의 해당 무기 애니메이션 주기 옆에 있습니다.
  */
-enum {
-    WPN_REST,      /**< Lowered, at rest. / 내려놓은 대기 자세. */
-    WPN_RAISED,    /**< Kicked up: the shot, and the pump coming forward. / 튀어오른 상태. 발사 순간과 펌프가 돌아오는 구간. */
-    WPN_OPEN,      /**< Pump drawn fully back. / 펌프를 끝까지 당긴 상태. */
-    WPN_FRAMES     /**< How many drawings. / 그림의 수. */
-};
+#define WPN_FRAMES 4
 
 /* --- Enumerations / 열거형 --- */
 
@@ -325,7 +373,7 @@ void sprite_decode_text(const char *text, unsigned char *rgba, int W, int H,
  */
 int sprite_b64val(char c);
 
-int sprite_weapon_muzzle_px(int frame, int *x, int *y);
+int sprite_weapon_muzzle_px(int type, int frame, int *x, int *y);
 #endif
 
 /* --- The hand-drawn viewmodel / 손으로 그린 뷰 모델 --- */
@@ -387,7 +435,7 @@ GLuint weapon_atlas(void);
  * @param[in]  frame       WPN_* 프레임 중 하나. 범위를 벗어나면 제한됩니다.
  * @param[out] u0,v0,u1,v1 부분 영역.
  */
-void weapon_uv(int frame, float *u0, float *v0, float *u1, float *v1);
+void weapon_uv(int type, int frame, float *u0, float *v0, float *u1, float *v1);
 
 /**
  * @brief Where a weapon frame's muzzle sits, as a fraction of its cell.
@@ -407,6 +455,6 @@ void weapon_uv(int frame, float *u0, float *v0, float *u1, float *v1);
  *       modeledit이 weapon.c의 상수가 아니라 3D 모델에 끌 수 있는 총구를 두는 것과 같은
  *       이유입니다.
  */
-int weapon_muzzle(int frame, float *u, float *v);
+int weapon_muzzle(int type, int frame, float *u, float *v);
 
 #endif

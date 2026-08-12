@@ -278,24 +278,24 @@ int main(void) {
        않고, 어긋난 애니메이션은 크래시를 내지 않고 그저 총이 하는 일과 맞지 않게 될
        뿐입니다. */
     {
-        const float T = weapon_pump_time();
+        const float T = weapon_pump_time(WP_SHOTGUN);
 
-        okd(weapon_sprite_frame_at(0.0f, 0.0f) == WPN_REST,
+        okd(weapon_sprite_frame_at(WP_SHOTGUN, 0.0f, 0.0f) == SG_REST,
             "an idle gun is at rest",
-            weapon_sprite_frame_at(0.0f, 0.0f), WPN_REST);
-        okd(weapon_sprite_frame_at(0.05f, 0.0f) == WPN_RAISED,
+            weapon_sprite_frame_at(WP_SHOTGUN, 0.0f, 0.0f), SG_REST);
+        okd(weapon_sprite_frame_at(WP_SHOTGUN, 0.05f, 0.0f) == SG_RAISED,
             "a flash with no pump still reads as a shot",
-            weapon_sprite_frame_at(0.05f, 0.0f), WPN_RAISED);
+            weapon_sprite_frame_at(WP_SHOTGUN, 0.05f, 0.0f), SG_RAISED);
 
         /* pump_timer counts DOWN, so a full timer is the start of the cycle. */
-        int a = weapon_sprite_frame_at(0.0f, T * 0.95f);   /*  5% through */
-        int b = weapon_sprite_frame_at(0.0f, T * 0.60f);   /* 40% through */
-        int c = weapon_sprite_frame_at(0.0f, T * 0.35f);   /* 65% through */
-        int d = weapon_sprite_frame_at(0.0f, T * 0.05f);   /* 95% through */
-        okd(a == WPN_RAISED, "the pump opens from the raised pose", a, WPN_RAISED);
-        okd(b == WPN_OPEN,   "swings the pump back",               b, WPN_OPEN);
-        okd(c == WPN_RAISED, "returns through the SAME pose",      c, WPN_RAISED);
-        okd(d == WPN_REST,   "and settles",                        d, WPN_REST);
+        int a = weapon_sprite_frame_at(WP_SHOTGUN, 0.0f, T * 0.95f);   /*  5% through */
+        int b = weapon_sprite_frame_at(WP_SHOTGUN, 0.0f, T * 0.60f);   /* 40% through */
+        int c = weapon_sprite_frame_at(WP_SHOTGUN, 0.0f, T * 0.35f);   /* 65% through */
+        int d = weapon_sprite_frame_at(WP_SHOTGUN, 0.0f, T * 0.05f);   /* 95% through */
+        okd(a == SG_RAISED, "the pump opens from the raised pose", a, SG_RAISED);
+        okd(b == SG_OPEN,   "swings the pump back",               b, SG_OPEN);
+        okd(c == SG_RAISED, "returns through the SAME pose",      c, SG_RAISED);
+        okd(d == SG_REST,   "and settles",                        d, SG_REST);
 
         /* Sample the whole pump and read off the poses in order. The four
            spot checks above prove those four instants; this proves there is
@@ -317,12 +317,12 @@ int main(void) {
            테스트를 깨지 않고 움직일 수 있어야 하기 때문입니다. */
         int seq[8], n = 0;
         for (int i = 0; i <= 200; i++) {
-            int f = weapon_sprite_frame_at(0.0f, T * (1.0f - i / 200.0f));
+            int f = weapon_sprite_frame_at(WP_SHOTGUN, 0.0f, T * (1.0f - i / 200.0f));
             if (n == 0 || seq[n - 1] != f) {
                 if (n < 8) seq[n++] = f;
             }
         }
-        static const int WANT[] = { WPN_RAISED, WPN_OPEN, WPN_RAISED, WPN_REST };
+        static const int WANT[] = { SG_RAISED, SG_OPEN, SG_RAISED, SG_REST };
         int match = (n == 4);
         for (int i = 0; match && i < 4; i++) match = (seq[i] == WANT[i]);
         ok(match, "the pump plays raised -> open -> raised -> rest, and nothing else");

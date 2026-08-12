@@ -780,7 +780,22 @@ $spriteDir  = Join-Path $root 'assets\sprites'
 
 if (Test-Path $spriteDir) {
     $groups = [ordered]@{}
-    foreach ($png in (Get-ChildItem $spriteDir -Filter *.png | Sort-Object Name)) {
+    # A LEADING UNDERSCORE MEANS "NOT A SPRITE", and it is enforced here rather
+    # than left to the decoder. sprite.c already ignores a name that matches no
+    # monster and no weapon, which sounds like enough and is not: ignoring it
+    # happens at DECODE time, so the drawing is still quantised, encoded and
+    # carried in .rdata for the life of the binary. The importer's --preview
+    # contact sheet landed here once and cost 411KB of a 1.44MB budget while
+    # never being drawn a single time.
+    #
+    # 앞의 밑줄은 "스프라이트가 아님"을 뜻하며, 디코더에 맡기지 않고 이곳에서 강제합니다.
+    # sprite.c는 이미 어떤 몬스터에도 무기에도 해당하지 않는 이름을 무시하는데, 그것으로
+    # 충분해 보이지만 아닙니다. 무시는 *디코드* 시점에 일어나므로 그림은 여전히
+    # 양자화되고 인코딩되어 바이너리가 사는 내내 .rdata에 실려 다닙니다. 임포터의
+    # --preview 대조 시트가 한 번 이곳에 떨어져, 단 한 번도 그려지지 않으면서 1.44MB
+    # 예산 중 411KB를 차지했습니다.
+    foreach ($png in (Get-ChildItem $spriteDir -Filter *.png |
+                      Where-Object { $_.Name -notlike '_*' } | Sort-Object Name)) {
         $name = [System.IO.Path]::GetFileNameWithoutExtension($png.Name)
         $subject = $name -replace '\d+$', ''
         if (-not $subject) { $subject = $name }
@@ -846,3 +861,13 @@ if ($new -ne $old) {
 }
 
 $report | Format-Table -AutoSize | Out-String | Write-Host
+
+# A TOTAL, because a per-file list hides a stowaway. A contact sheet dropped
+# into assets\sprites\ was baked as a sprite and carried 411KB into .rdata
+# while never being drawn; every line of the table above was individually
+# unremarkable and the sum was a third of the floppy.
+# 파일별 목록은 밀항자를 숨기므로 합계를 냅니다. assets\sprites\에 떨어진 대조 시트가
+# 스프라이트로 구워져 한 번도 그려지지 않으면서 411KB를 .rdata로 날랐는데, 위 표의 모든
+# 줄은 개별로는 평범했고 합계가 플로피의 3분의 1이었습니다.
+$bakedTotal = ($report | Measure-Object -Property Baked -Sum).Sum
+Write-Host ("  baked total: {0:N0} bytes across {1} assets`n" -f $bakedTotal, $report.Count)

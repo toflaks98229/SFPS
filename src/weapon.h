@@ -109,10 +109,49 @@ enum {
  * @note `hook`은 우클릭이 그래플을 던지는지를 나타냅니다. 도끼가 유일하게 그렇지 않은
  *       행이며, 대신 도약합니다. 둘 다 제공하는 무기는 세 번째 버튼이 필요해집니다.
  */
+/**
+ * @brief What each weapon's atlas slots hold.
+ *
+ * ENGLISH
+ * -------
+ * A slot is just a drawing, and WHICH drawing means something different per
+ * weapon, because Doom drew each weapon with the frames that weapon needed --
+ * two for the chaingun, two for the launcher, three for the shotgun, four for
+ * the chainsaw. One shared list of moments would make the short weapons pad
+ * their slots with duplicates.
+ *
+ * Public because they pair with the sprite names in the WEAPONS table, which
+ * are public for the same reason: they are the contract between a drawing in
+ * assets/sprites and the weapon that shows it.
+ *
+ * 한국어
+ * ------
+ * @brief 각 무기의 아틀라스 슬롯이 무엇을 담는지입니다.
+ *
+ * 슬롯은 그저 그림이며 *어느* 그림인지는 무기마다 다릅니다. Doom이 각 무기를 그 무기에
+ * 필요한 프레임으로 그렸기 때문입니다. 공유된 순간 목록 하나는 짧은 무기가 빈 슬롯을
+ * 복제로 채우게 만듭니다. 공개인 이유는 WEAPONS 표의 스프라이트 이름과 짝을 이루기
+ * 때문이며, 그 이름이 공개인 것과 같은 이유입니다. 둘은 assets/sprites의 그림과 그것을
+ * 보여 주는 무기 사이의 계약입니다.
+ */
+enum { SG_REST, SG_RAISED, SG_OPEN };          /**< shotgun: SHTG B, C, D */
+enum { LN_REST, LN_FIRE };                     /**< grenade: MISG A, B */
+enum { RP_REST, RP_SPIN };                     /**< rapid: CHGG A, B */
+enum { AX_IDLE0, AX_IDLE1, AX_CUT0, AX_CUT1 }; /**< axe: SAWG A, B, C, D */
+
 typedef struct {
     const char *name;       /**< Shown on the HUD; also the sprite prefix and pickup name. / HUD 표시명이자 스프라이트 접두사, 아이템 이름. */
     const char *model;      /**< models.txt entry, drawn when there is no sprite art. / 스프라이트 아트가 없을 때 그리는 models.txt 항목. */
     const char *fire_snd;   /**< sounds.txt entry for the attack. / 공격 사운드. */
+    /** sounds.txt entry played when the recovery animation finishes, or NULL.
+        The shotgun's rack is the reason this is a column rather than a check
+        for WP_SHOTGUN: the recovery timer drives every weapon's viewmodel
+        animation, so once every weapon set it, every weapon racked a shotgun.
+        회복 애니메이션이 끝날 때 재생할 사운드이며 없으면 NULL입니다. 이것이
+        WP_SHOTGUN 검사가 아니라 표의 열인 이유는 샷건의 장전음 때문입니다. 회복
+        타이머가 모든 무기의 뷰 모델 애니메이션을 구동하므로, 모든 무기가 그것을
+        설정하게 되자 모든 무기가 샷건을 장전했습니다. */
+    const char *reload_snd;
 
     int   start_ammo;       /**< Rounds you spawn with, or pick the weapon up with. / 스폰 또는 획득 시의 탄약. */
     int   max_ammo;         /**< What the belt holds for this type. / 이 종류의 최대 탄약. */
@@ -1303,7 +1342,7 @@ void wp_reload_texture(void);
  *       ::weapon_sprite_frame_at을 구동할 수 있도록 노출합니다. 지속 시간을 하드코딩한
  *       테스트는 그 값이 바뀐 뒤에도 통과합니다.
  */
-float weapon_pump_time(void);
+float weapon_pump_time(int type);
 
 /**
  * @brief Which drawing the viewmodel would show for these timer values.
@@ -1325,7 +1364,7 @@ float weapon_pump_time(void);
  * @note 그렇지 않으면 프레임 선택은 GL 드로우를 통해서만 도달할 수 있으며, 아무것도
  *       단언할 수 없는 애니메이션은 조용히 어긋나는 애니메이션입니다.
  */
-int weapon_sprite_frame_at(float flash, float pump_timer);
+int weapon_sprite_frame_at(int type, float flash, float pump_timer);
 #endif
 
 #endif

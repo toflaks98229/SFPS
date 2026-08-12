@@ -25,6 +25,10 @@ static void okf(int cond, const char *what, float got, float want) {
     printf("  %-52s %8.3f / %8.3f  %s\n", what, got, want, cond ? "ok" : "FAIL");
     if (!cond) fails++;
 }
+static void okd(int cond, const char *what, int got, int want) {
+    printf("  %-52s %8d / %8d  %s\n", what, got, want, cond ? "ok" : "FAIL");
+    if (!cond) fails++;
+}
 
 /* A flat room with an ammo box at the origin and a medkit to the east. */
 static void build(void) {
@@ -123,6 +127,62 @@ int main(void) {
         int live = 0; for (int i = 0; i < pickup_count(); i++)
             if (pickup_at(i)->active) live++;
         ok(live == 2, "and leaves it on the floor");
+    }
+
+    /* --- every kind is reachable by name, and no two share one ------------
+       The sprite decoder addresses a pickup cell by the SAME name a level uses
+       to place one, so this resolver is now load-bearing in two directions. A
+       kind no name reaches is a drawing that can never be shown; two names
+       reaching one kind is a drawing that silently replaces another.
+
+       The `<weapon>ammo` before `<weapon>` ordering is the interesting case:
+       `rapid` is a prefix of `rapidammo`, so the wrong order hands a level
+       that asked for a box of ammunition a free weapon instead.
+
+       스프라이트 디코더가 레벨이 아이템을 배치할 때 쓰는 것과 *같은* 이름으로 아이템
+       셀을 지정하므로, 이 해석기는 이제 양방향으로 중요합니다. 어떤 이름도 닿지 못하는
+       종류는 결코 보일 수 없는 그림이고, 두 이름이 한 종류에 닿으면 한 그림이 다른
+       그림을 조용히 대체합니다. */
+    {
+        static const char *NAMES[] = {
+            "health", "ammo",
+            "shotgun", "grenade", "rapid", "axe",
+            "shotgunammo", "grenadeammo", "rapidammo", "axeammo",
+            "redkey", "bluekey", "yellowkey",
+        };
+        const int n = (int)(sizeof NAMES / sizeof NAMES[0]);
+
+        int unresolved = 0, collided = 0;
+        int seen[PK_KINDS];
+        for (int i = 0; i < PK_KINDS; i++) seen[i] = 0;
+
+        for (int i = 0; i < n; i++) {
+            int len = 0; while (NAMES[i][len]) len++;
+            int k = pickup_kind_for_n(NAMES[i], len);
+            if (k < 0) { unresolved++; printf("      '%s' resolves to nothing\n", NAMES[i]); }
+            else if (seen[k]++) { collided++; printf("      '%s' collides\n", NAMES[i]); }
+        }
+        okd(unresolved == 0, "every pickup name resolves to a kind", unresolved, 0);
+        okd(collided == 0, "and no two names reach the same kind", collided, 0);
+
+        /* PK_AMMO is the shotgun's box under its old name, so it is the one
+           kind two names legitimately reach -- asserted rather than left as a
+           hole in the count above. */
+        int a = pickup_kind_for_n("ammo", 4);
+        int b = pickup_kind_for_n("shotgunammo", 11);
+        ok(a == PK_AMMO && b == PK_AMMO_FOR(WP_SHOTGUN),
+           "the legacy 'ammo' and 'shotgunammo' are separate kinds");
+
+        ok(pickup_kind_for_n("nosuchitem", 10) < 0,
+           "and an unknown name resolves to nothing");
+
+        /* The length is honoured, not the terminator: the decoder hands this a
+           slice of one big text blob, so a resolver that ran to the NUL would
+           match whatever followed the name. */
+        ok(pickup_kind_for_n("healthXX", 6) == PK_HEALTH,
+           "a name is matched by its length, not by a terminator");
+        ok(pickup_kind_for_n("health", 3) < 0,
+           "and a prefix of a name is not that name");
     }
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall pickup checks passed\n", fails);

@@ -224,6 +224,19 @@ static int name_eq(const char *a, const char *b) {
     return !*a && !*b;
 }
 
+/* The same compare against a slice that is not NUL-terminated. The sprite
+   decoder holds names as pointer+length inside one big text blob, and copying
+   each into a buffer to compare it would be a second place that decides how
+   long a pickup name may be.
+   NUL로 끝나지 않는 조각에 대한 같은 비교입니다. 스프라이트 디코더는 하나의 큰 텍스트
+   덩어리 안에서 이름을 포인터와 길이로 들고 있으며, 비교를 위해 각각을 버퍼로 복사하면
+   아이템 이름의 최대 길이를 정하는 두 번째 장소가 생깁니다. */
+static int name_eq_n(const char *a, int n, const char *b) {
+    int i = 0;
+    while (i < n && b[i] && a[i] == b[i]) i++;
+    return i == n && !b[i];
+}
+
 /**
  * @brief The pickup kind a level entity's name asks for, or -1.
  *
@@ -258,29 +271,35 @@ static int name_eq(const char *a, const char *b) {
  *       순서가 반대라면 "rapidammo"가 무기 "rapid"와 일치하여, 상자를 요청한 레벨이 공짜
  *       무기를 생성하게 됩니다.
  */
-static int pickup_kind_for(const char *k) {
-    if (name_eq(k, "health")) return PK_HEALTH;
-    if (name_eq(k, "ammo"))   return PK_AMMO;
+int pickup_kind_for_n(const char *k, int len) {
+    if (name_eq_n(k, len, "health")) return PK_HEALTH;
+    if (name_eq_n(k, len, "ammo"))   return PK_AMMO;
 
     for (int w = 0; w < WP_TYPES; w++) {
         const char *n = wp_stats(w)->name;
 
         /* "<name>ammo", compared without building a string. */
-        const char *p = k, *q = n;
-        while (*q && *p == *q) { p++; q++; }
-        if (!*q && name_eq(p, "ammo")) return PK_AMMO_FOR(w);
+        int i = 0;
+        while (i < len && n[i] && k[i] == n[i]) i++;
+        if (!n[i] && name_eq_n(k + i, len - i, "ammo")) return PK_AMMO_FOR(w);
     }
     for (int w = 0; w < WP_TYPES; w++)
-        if (name_eq(k, wp_stats(w)->name)) return PK_WEAPON_FOR(w);
+        if (name_eq_n(k, len, wp_stats(w)->name)) return PK_WEAPON_FOR(w);
 
     /* Keycards, named by colour: `redkey`, `bluekey`, `yellowkey`. The colour
        leads because that is how a player refers to them and how the door that
        wants one is written -- `key red`.
        색이 앞에 옵니다. 플레이어가 그렇게 부르고, 그것을 요구하는 문도 `key red`로
        기록되기 때문입니다. */
-    if (name_eq(k, "redkey"))    return PK_KEY0 + 0;
-    if (name_eq(k, "bluekey"))   return PK_KEY0 + 1;
-    if (name_eq(k, "yellowkey")) return PK_KEY0 + 2;
+    if (name_eq_n(k, len, "redkey"))    return PK_KEY0 + 0;
+    if (name_eq_n(k, len, "bluekey"))   return PK_KEY0 + 1;
+    if (name_eq_n(k, len, "yellowkey")) return PK_KEY0 + 2;
 
     return -1;
+}
+
+static int pickup_kind_for(const char *k) {
+    int n = 0;
+    while (k[n]) n++;
+    return pickup_kind_for_n(k, n);
 }

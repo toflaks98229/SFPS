@@ -33,6 +33,7 @@
 #include <string.h>
 #include "sprite.h"
 #include "enemy.h"      /* MON_TYPES -- the monster atlas has one row per type */
+#include "weapon.h"     /* WP_TYPES  -- and the weapon atlas one row per weapon */
 
 static int fails;
 
@@ -55,7 +56,7 @@ static unsigned char g_atlas[AW * AH * 4];
 
 /* The weapon atlas. */
 #define WW (WPN_CW * WPN_FRAMES)
-#define WH (WPN_CH)
+#define WH (WPN_CH * WP_TYPES)
 static unsigned char g_watlas[WW * WH * 4];
 
 static void clear(unsigned char *b, int n) { memset(b, 0, (size_t)n * 4); }
@@ -289,13 +290,13 @@ int main(void) {
            (96-2) = 94 down. */
         const char *text =
             "pal 2 000000 ff0000\n"
-            "s gun0 4 2\n"
+            "s shotgun0 4 2\n"
             "m 1 0\n"
             "r EBEB\n";
         sprite_decode_text(text, g_watlas, WW, WH, 1);
 
         int mx = -1, my = -1;
-        int got = sprite_weapon_muzzle_px(0, &mx, &my);
+        int got = sprite_weapon_muzzle_px(0, 0, &mx, &my);
         ok(got, "the weapon frame recorded a muzzle");
         okd(mx == (WPN_CW - 4) / 2 + 1, "muzzle x follows the centring",
             mx, (WPN_CW - 4) / 2 + 1);
@@ -325,7 +326,7 @@ int main(void) {
            of a cell at (20,30) instead of being centred and floor-seated. */
         const char *text =
             "pal 2 000000 ff0000\n"
-            "s gun1 4 2\n"
+            "s shotgun1 4 2\n"
             "o 20 30\n"
             "m 1 0\n"
             "r EBEB\n";
@@ -341,7 +342,7 @@ int main(void) {
         ok(d[3] == 0, "and not at the centred, floor-seated default");
 
         int mx = -1, my = -1;
-        (void)sprite_weapon_muzzle_px(1, &mx, &my);
+        (void)sprite_weapon_muzzle_px(0, 1, &mx, &my);
         okd(mx == 20 + 1, "the muzzle moves with the origin, not the centring",
             mx, 21);
         okd(my == 30 + 0, "on both axes", my, 30);

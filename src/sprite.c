@@ -28,6 +28,7 @@
 #include "data.h"
 #include "txt.h"
 #include "enemy.h"        /* MON_* -- the atlas row order */
+#include "weapon.h"       /* WP_TYPES and wp_stats -- the viewmodel row order */
 #include "pickup.h"       /* PK_* -- the pickup atlas order */
 #include "tex.h"          /* tex_hashf, for a little surface grain */
 #include <math.h>
@@ -380,7 +381,25 @@ static int creature_pixel(int type, int fr, float nx, float ny, unsigned char *r
  *
  * Small floor icons. Same alpha-silhouette trick as the monsters, but a
  * single frame each and simpler shapes: a shell box and a medkit, chosen to
- * read at a glance from across a room. */
+ * read at a glance from across a room.
+ *
+ * THESE ARE THE FALLBACK NOW, not the shipped look. Freedoom's own floor
+ * sprites are imported as `item*` drawings and replace the cells they fill;
+ * what stays here is what a kind nobody drew still shows, which is the same
+ * bargain the monsters get. Kept rather than deleted for that reason, and
+ * because the argument they were written for is still sound: a WEAPON'S
+ * VIEWMODEL makes a bad floor item, since art drawn to be read at arm's length
+ * is a dark smear across a room. Doom's pickups are not viewmodels -- MEDI and
+ * SHEL were drawn for exactly this distance -- so importing them answers that
+ * objection rather than ignoring it.
+ *
+ * 이것들은 이제 폴백이며 배포되는 모습이 아닙니다. Freedoom 자신의 바닥 스프라이트가
+ * `item*` 그림으로 이식되어 자기가 채우는 셀을 대체하며, 여기 남은 것은 아무도 그리지
+ * 않은 종류가 여전히 보여 주는 모습입니다. 몬스터가 받는 것과 같은 거래입니다. 지우지
+ * 않고 두는 이유는 그것과, 이것이 쓰인 근거가 여전히 타당하기 때문입니다. *무기의 뷰
+ * 모델*은 나쁜 바닥 아이템이 됩니다. 팔 길이에서 읽히도록 그린 아트는 방 건너에서
+ * 어두운 얼룩이기 때문입니다. Doom의 픽업은 뷰 모델이 아니며 바로 이 거리를 위해
+ * 그려졌으므로, 그것을 이식하는 일은 그 반론을 무시하는 것이 아니라 해소합니다. */
 
 /* Rounded-box coverage: >0 inside, in the same [-1,1] units. */
 static float rbox(float nx, float ny, float hw, float hh, float r) {
@@ -588,6 +607,21 @@ static int pickup_pixel(int kind, float nx, float ny, unsigned char *rgb) {
 
 static GLuint g_pickup_atlas;
 
+/* Which atlas a drawing is addressed to. The decoder is shared and only the
+   cell size and the name-to-row rule differ, so this is the one thing it
+   branches on.
+   그림이 어느 아틀라스로 향하는지입니다. 디코더는 공유되며 셀 크기와 이름-행 규칙만
+   다르므로, 이것이 디코더가 분기하는 유일한 값입니다. */
+enum { SPR_DEST_MONSTER, SPR_DEST_WEAPON, SPR_DEST_PICKUP };
+
+/* Defined below, next to the decoder it wraps; declared here because the
+   pickup atlas is built above it and the alternative is moving a 200-line
+   function to satisfy an ordering rule.
+   아래에서 감싸는 디코더 옆에 정의되어 있습니다. 아이템 아틀라스가 그보다 위에서
+   생성되며, 대안은 순서 규칙을 만족시키려고 200줄짜리 함수를 옮기는 것뿐이라 이곳에
+   선언합니다. */
+static void overlay_drawn_sprites(unsigned char *buf, int W, int H, int dest);
+
 GLuint pickup_atlas(void) {
     if (g_pickup_atlas) return g_pickup_atlas;
 
@@ -604,6 +638,14 @@ GLuint pickup_atlas(void) {
             unsigned char *p = &buf[(y * W + kind * PK_CW + x) * 4];
             p[0] = rgb[0]; p[1] = rgb[1]; p[2] = rgb[2]; p[3] = (unsigned char)a;
         }
+
+    /* Drawn art replaces the generated icon in the cells it fills, the same
+       rule the monsters follow -- a kind nobody drew keeps its icon, so a
+       half-imported set still shows every item.
+       그려진 아트가 자기가 채우는 셀의 생성된 아이콘을 대체합니다. 몬스터와 같은
+       규칙이며, 아무도 그리지 않은 종류는 아이콘을 그대로 지녀 절반만 이식된 세트도
+       모든 아이템을 보여 줍니다. */
+    overlay_drawn_sprites(buf, W, H, SPR_DEST_PICKUP);
 
     glGenTextures(1, &g_pickup_atlas);
     glBindTexture(GL_TEXTURE_2D, g_pickup_atlas);
@@ -685,7 +727,6 @@ static GLuint g_atlas;
  */
 /* Which atlas a pass of the sprite text is filling.
    스프라이트 텍스트를 한 번 훑을 때 어떤 아틀라스를 채우는지입니다. */
-enum { SPR_DEST_MONSTER, SPR_DEST_WEAPON };
 
 /* Muzzle point per weapon frame, in cell pixels; -1 when the drawing did
    not mark one. Filled by the same pass that decodes the pixels.
@@ -698,7 +739,7 @@ enum { SPR_DEST_MONSTER, SPR_DEST_WEAPON };
    WPN_FRAMES개의 행을 정확히 가져야 하는 중괄호 목록 대신 0으로 초기화한 뒤 디코드에서
    -1로 설정합니다. 그런 목록은 프레임 수를 기록하는 두 번째 장소이며, 그림이 하나
    추가되거나 빠지는 순간 열거형과 조용히 어긋납니다. */
-static int g_weapon_muz[WPN_FRAMES][2];
+static int g_weapon_muz[WP_TYPES][WPN_FRAMES][2];
 
 /* The viewmodel's name prefix. "gun0" is frame 0 of the weapon, the same way
    "imp0" is frame 0 of the imp -- the name carries the placement, so adding art
@@ -706,8 +747,22 @@ static int g_weapon_muz[WPN_FRAMES][2];
    뷰 모델의 이름 접두사입니다. "imp0"이 임프의 프레임 0인 것과 같은 방식으로 "gun0"은
    무기의 프레임 0입니다. 이름이 배치 정보를 담고 있으므로 아트를 추가하는 데 어떤 표도
    필요하지 않습니다. */
-static int is_weapon_prefix(const char *s, int len) {
-    return len == 3 && s[0] == 'g' && s[1] == 'u' && s[2] == 'n';
+/* Which weapon a drawing belongs to, matched against the WEAPONS table's own
+   names rather than a list kept here. The table already calls that field the
+   sprite prefix, so adding a weapon adds its row and its art with no third
+   place to update -- and a name that matches nothing is skipped rather than
+   painted over whichever weapon happens to be first.
+   그림이 어느 무기의 것인지를, 이곳에 둔 목록이 아니라 WEAPONS 표 자신의 이름과 대조해
+   정합니다. 표는 이미 그 필드를 스프라이트 접두사라고 부르므로, 무기를 추가하면 행과
+   아트가 함께 생기고 갱신할 세 번째 장소가 없습니다. */
+static int weapon_type_for_prefix(const char *s, int len) {
+    for (int t = 0; t < WP_TYPES; t++) {
+        const char *n = wp_stats(t)->name;
+        int i = 0;
+        while (i < len && n[i] && n[i] == s[i]) i++;
+        if (i == len && !n[i]) return t;
+    }
+    return -1;
 }
 
 static int mon_type_for_prefix(const char *s, int len) {
@@ -853,8 +908,10 @@ static void decode_sprites(const char *p, unsigned char *buf, int W, int H, int 
        대상마다 셀 크기가 다릅니다. 포맷이 같으므로 파서를 공유합니다. 무엇을 채우는지에
        따라 달라지는 것은 스프라이트가 *어디에 놓이는가*뿐이며, 무기를 위한 두 번째
        디코더 사본은 다른 버그를 가진 같은 코드가 될 뿐입니다. */
-    const int cell_w = (dest == SPR_DEST_WEAPON) ? WPN_CW : SPR_CW;
-    const int cell_h = (dest == SPR_DEST_WEAPON) ? WPN_CH : SPR_CH;
+    const int cell_w = (dest == SPR_DEST_WEAPON) ? WPN_CW
+                     : (dest == SPR_DEST_PICKUP) ? PK_CW : SPR_CW;
+    const int cell_h = (dest == SPR_DEST_WEAPON) ? WPN_CH
+                     : (dest == SPR_DEST_PICKUP) ? PK_CH : SPR_CH;
 
     unsigned char pal[16][3] = {{0,0,0}};
     int n_pal = 0;
@@ -865,7 +922,8 @@ static void decode_sprites(const char *p, unsigned char *buf, int W, int H, int 
        대해 그렇게 말할 수 있는 유일한 장소입니다. */
     if (dest == SPR_DEST_WEAPON) {
         for (int i = 0; i < WPN_FRAMES; i++)
-            g_weapon_muz[i][0] = g_weapon_muz[i][1] = -1;
+            for (int t = 0; t < WP_TYPES; t++)
+                g_weapon_muz[t][i][0] = g_weapon_muz[t][i][1] = -1;
     }
 
     for (;;) {
@@ -922,8 +980,27 @@ static void decode_sprites(const char *p, unsigned char *buf, int W, int H, int 
            데이터는 소비되므로, 하나의 스트림이 서로의 이름을 알 필요 없이 두 패스를
            모두 먹입니다. */
         int type;
-        if (dest == SPR_DEST_WEAPON) {
-            type = is_weapon_prefix(nm, nm_len - 1) ? 0 : -1;
+        if (dest == SPR_DEST_PICKUP) {
+            /* An `item` prefix, then the very name a level uses to place the
+               thing. The prefix is not decoration: without it a drawing called
+               `shotgun0` would be both the shotgun's VIEWMODEL and the shotgun
+               lying on the floor, and one of the two would silently be the
+               other. With it the collision cannot be written.
+               `item` 접두사 뒤에 레벨이 그 물건을 배치할 때 쓰는 바로 그 이름이 옵니다.
+               접두사는 장식이 아닙니다. 그것이 없으면 `shotgun0`이라는 그림이 샷건의
+               *뷰 모델*이자 바닥에 놓인 샷건이 되고, 둘 중 하나가 조용히 다른 하나가
+               됩니다. 접두사가 있으면 그 충돌을 쓸 수조차 없습니다. */
+            const char *k = nm; int klen = nm_len - 1;
+            if (klen > 4 && k[0]=='i' && k[1]=='t' && k[2]=='e' && k[3]=='m') {
+                type = pickup_kind_for_n(k + 4, klen - 4);
+            } else {
+                type = -1;
+            }
+            /* Pickups are one drawing each; the digit only keeps the naming
+               rule uniform. */
+            frame = 0;
+        } else if (dest == SPR_DEST_WEAPON) {
+            type = weapon_type_for_prefix(nm, nm_len - 1);
             if (frame < 0 || frame >= WPN_FRAMES) frame = 0;
         } else {
             type = mon_type_for_prefix(nm, nm_len - 1);
@@ -984,7 +1061,8 @@ static void decode_sprites(const char *p, unsigned char *buf, int W, int H, int 
            파싱하는 것과 같은 이유입니다. */
         if (type < 0) continue;
 
-        int ox = frame * cell_w, oy = type * cell_h;
+        int ox = (dest == SPR_DEST_PICKUP) ? type * cell_w : frame * cell_w;
+        int oy = (dest == SPR_DEST_PICKUP) ? 0               : type  * cell_h;
         int px_i = 0, total = sw * sh;
 
         /* A DRAWN FRAME OWNS ITS CELL: clear the generated creature out of it
@@ -1031,8 +1109,8 @@ static void decode_sprites(const char *p, unsigned char *buf, int W, int H, int 
         int place_y = (org_y >= 0) ? org_y : (cell_h - sh);
 
         if (dest == SPR_DEST_WEAPON && muz_x >= 0 && frame < WPN_FRAMES) {
-            g_weapon_muz[frame][0] = place_x + muz_x;
-            g_weapon_muz[frame][1] = place_y + muz_y;
+            g_weapon_muz[type][frame][0] = place_x + muz_x;
+            g_weapon_muz[type][frame][1] = place_y + muz_y;
         }
 
         /* Both opcodes spend whole characters rather than hex digits, so a
@@ -1306,7 +1384,12 @@ static void weapon_build(void) {
     if (g_weapon_built) return;
     g_weapon_built = 1;
 
-    int W = WPN_CW * WPN_FRAMES, H = WPN_CH;
+    /* A row per weapon, the way the monster atlas has a row per creature.
+       One row would mean every weapon drawing the same gun, which is what it
+       did while there was only one drawing to draw.
+       몬스터 아틀라스가 생물마다 행을 갖듯 무기마다 행을 둡니다. 한 행이면 모든 무기가
+       같은 총을 그리게 되며, 그릴 그림이 하나뿐이던 동안은 실제로 그러했습니다. */
+    int W = WPN_CW * WPN_FRAMES, H = WPN_CH * WP_TYPES;
     unsigned char *buf = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
                                    (SIZE_T)W * H * 4);
     if (!buf) return;
@@ -1346,22 +1429,30 @@ GLuint weapon_atlas(void) {
     return g_weapon_atlas;
 }
 
-void weapon_uv(int frame, float *u0, float *v0, float *u1, float *v1) {
+void weapon_uv(int type, int frame, float *u0, float *v0, float *u1, float *v1) {
+    if (type < 0) type = 0;
+    if (type >= WP_TYPES) type = WP_TYPES - 1;
     if (frame < 0) frame = 0;
     if (frame >= WPN_FRAMES) frame = WPN_FRAMES - 1;
 
-    float cw = 1.0f / WPN_FRAMES;
+    float cw = 1.0f / WPN_FRAMES, ch = 1.0f / WP_TYPES;
     float insu = 0.5f / (WPN_CW * WPN_FRAMES);
-    float insv = 0.5f / WPN_CH;
+    float insv = 0.5f / (WPN_CH * WP_TYPES);
 
     *u0 = frame * cw + insu;
     *u1 = (frame + 1) * cw - insu;
-    /* v flipped: image row 0 is the top of the drawing, and the quad's v grows
-       upward -- the same convention sprite_uv follows.
-       v를 뒤집습니다. 이미지의 0번 행은 그림의 위쪽이고 쿼드의 v는 위로 증가합니다.
-       sprite_uv가 따르는 것과 같은 규약입니다. */
-    *v0 = 1.0f - insv;
-    *v1 = insv;
+    /* v flipped: buffer row 0 is the TOP of the drawing, and the quad's v grows
+       upward, so the quad's bottom takes the row's high v and its top the low.
+       Rows run DOWN the buffer, so weapon `type` lives at v in [t*ch,(t+1)*ch)
+       -- not measured back from 1.0. Getting that backwards selects the LAST
+       weapon's row for the first, which is a shotgun that draws a chainsaw.
+       v를 뒤집습니다. 버퍼의 0번 행은 그림의 *위쪽*이고 쿼드의 v는 위로 증가하므로,
+       쿼드의 아래가 그 행의 높은 v를, 위가 낮은 v를 가져갑니다. 행은 버퍼를 따라
+       아래로 진행하므로 무기 `type`은 v가 [t*ch, (t+1)*ch)인 구간에 있으며 1.0에서
+       거꾸로 재는 것이 아닙니다. 이를 반대로 하면 첫 무기가 *마지막* 무기의 행을
+       고르게 되고, 그 결과가 전기톱을 그리는 샷건입니다. */
+    *v0 = (type + 1) * ch - insv;
+    *v1 = type * ch + insv;
 }
 
 /**
@@ -1395,8 +1486,10 @@ void weapon_uv(int frame, float *u0, float *v0, float *u1, float *v1) {
  *       방향으로 진행합니다. 뒤집기를 이곳에서 처리하면 그것을 아는 곳이 정확히 하나가
  *       됩니다.
  */
-int weapon_muzzle(int frame, float *u, float *v) {
+int weapon_muzzle(int type, int frame, float *u, float *v) {
     weapon_build();
+    if (type < 0) type = 0;
+    if (type >= WP_TYPES) type = WP_TYPES - 1;
     if (frame < 0) frame = 0;
     if (frame >= WPN_FRAMES) frame = WPN_FRAMES - 1;
 
@@ -1406,8 +1499,8 @@ int weapon_muzzle(int frame, float *u, float *v) {
        0번 프레임의 표식으로 대체합니다. 엄밀히 표식이 필요한 것은 발사 프레임뿐이며,
        대기 자세만 표시하고 나머지를 건너뛴 아티스트가 그 프레임들에서 화염이 구석으로
        튀는 결과를 얻어서는 안 됩니다. */
-    int mx = g_weapon_muz[frame][0], my = g_weapon_muz[frame][1];
-    if (mx < 0) { mx = g_weapon_muz[0][0]; my = g_weapon_muz[0][1]; }
+    int mx = g_weapon_muz[type][frame][0], my = g_weapon_muz[type][frame][1];
+    if (mx < 0) { mx = g_weapon_muz[type][0][0]; my = g_weapon_muz[type][0][1]; }
     if (mx < 0) return 0;
 
     *u = (mx + 0.5f) / (float)WPN_CW;
@@ -1434,11 +1527,11 @@ void sprite_decode_text(const char *text, unsigned char *rgba, int W, int H,
    컴파일러도 볼 수 없습니다. */
 int sprite_b64val(char c) { return b64val(c); }
 
-int sprite_weapon_muzzle_px(int frame, int *x, int *y) {
+int sprite_weapon_muzzle_px(int type, int frame, int *x, int *y) {
     if (frame < 0 || frame >= WPN_FRAMES) return 0;
-    if (g_weapon_muz[frame][0] < 0) return 0;
-    *x = g_weapon_muz[frame][0];
-    *y = g_weapon_muz[frame][1];
+    if (g_weapon_muz[type][frame][0] < 0) return 0;
+    *x = g_weapon_muz[type][frame][0];
+    *y = g_weapon_muz[type][frame][1];
     return 1;
 }
 #endif

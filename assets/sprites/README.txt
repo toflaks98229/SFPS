@@ -4,19 +4,43 @@ NAMING decides where a drawing lands. The name is "<subject><frame>":
 
     imp0.png     monster "imp", frame 0
     brute2.png   monster "brute", frame 2
-    gun0.png     the weapon, frame 0
+    shotgun0.png the weapon "shotgun", pose 0
 
 Monsters:  imp  brute  hound  caster
 Frames:    0 walk-A   1 walk-B   2 attack   3 hurt   4 dead
 
-Weapon:    gun
-Poses:     0 rest   1 raised   2 pump open
+Weapons:   shotgun  grenade  rapid  axe   -- named for weapon.c's WEAPONS table
+Poses:     shotgun  0 rest    1 raised  2 pump open
+           grenade  0 rest    1 firing
+           rapid    0 rest    1 spun
+           axe      0 idle-A  1 idle-B  2 cut-A  3 cut-B
 
-Those are POSES, not moments. Which pose shows WHEN is the PUMP_CYCLE table in
-weapon.c, so the animation can gain steps without the atlas gaining cells.
-There is no "firing" cell because the firing pose IS the raised one, and the
-pump returns through it too: naming the slots after moments meant storing that
-one drawing twice, and gun1 and gun3 were byte-identical.
+Those are POSES, not moments, and the counts differ because Doom drew each
+weapon with the frames that weapon needed. Which pose shows WHEN is the cycle
+table beside each weapon in weapon.c, so the animation can gain steps without
+the atlas gaining cells. There is no "firing" cell for the shotgun because the
+firing pose IS the raised one and the pump returns through it: naming slots
+after moments meant storing that drawing twice.
+
+A WEAPON CELL IS A WINDOW ON DOOM'S SCREEN. It spans Doom's full 320-unit
+width and 144 rows of its 3D view, so where a drawing sits in the cell is
+where it sits on screen.
+
+Which view matters: Doom's screen is 320x200 but its 3D VIEW is 168 rows,
+because the status bar takes the bottom 32, and that is the framing the game
+shipped with. The weapon is still drawn against the full 200 -- BASEYCENTER is
+a fixed 100 whatever the view height is -- so the bar does not merely hide the
+bottom of the gun, it MOVES the gun and changes its size against what you can
+see. Matching the 200-row fullscreen view instead left the shotgun a fifth too
+small with its bottom balanced on the screen edge. That is not a detail -- Doom places each weapon by a per-frame
+offset, and those offsets are the artist's decision: the shotgun rests left of
+centre, the chaingun sits lower and centred, and the chainsaw's cutting frames
+run off the right edge on purpose. Centring each drawing in a tight cell puts
+four different weapons in the same place, which is what this did until the
+imported shotgun turned up dead centre looking wrong.
+
+Pixels outside the cell are dropped rather than pulled back in, because Doom
+clips at the screen edge and the chainsaw is drawn expecting it.
 
 A name that matches nothing is ignored rather than painted over whichever
 subject happens to be first, so a work-in-progress file parked here is
@@ -32,25 +56,49 @@ drawn -- and deleting the file brings it straight back. Nothing else in the
 project changes either way.
 
 
-A WEAPON DRAWING IS THE VIEWMODEL ONLY. The item lying on the floor is NOT
-this sprite -- it is a generated icon, and that is a decision rather than a
-gap waiting to be filled. A viewmodel is drawn to be seen from one angle,
-filling the bottom of the screen; on the floor across a room it is a small
-dark smear, because the detail that sells it up close is the first thing the
-art resolution throws away. The floor icons were designed for that distance
-instead, so colour says which weapon and the shard-vs-box shape says whether
-it is the weapon or its ammunition. See pickup_pixel in src/sprite.c.
+A WEAPON DRAWING IS THE VIEWMODEL ONLY, and the floor item is a separate
+drawing with its own name. That has not changed; what it points at has.
+
+The floor items used to be generated icons, kept deliberately rather than as a
+gap, because the obvious move -- reusing the weapon's viewmodel art -- is
+worse: a viewmodel is drawn to be read at arm's length filling the bottom of
+the screen, and across a room it is a small dark smear, since the detail that
+sells it up close is the first thing the art resolution throws away.
+
+That reasoning was about VIEWMODEL art, and it still holds. Doom's pickups are
+not viewmodels. MEDI, SHEL and SHOT are separate drawings made to be
+recognised from exactly the distance the generated icons were designed for, so
+importing them clears the objection instead of ignoring it. They are named
+with an `item` prefix and are what the atlas shows now; pickup_pixel in
+src/sprite.c still generates an icon for any kind nobody drew.
+
+Floor items:
+
+    itemhealth        itemredkey    itembluekey   itemyellowkey
+    itemammo          itemshotgun   itemgrenade   itemrapid     itemaxe
+    itemshotgunammo   itemgrenadeammo   itemrapidammo   itemaxeammo
+
+After the `item` prefix comes the exact name a level uses to place the thing,
+so one resolver in pickup.c serves both and there is no second table to drift.
+The prefix is load-bearing rather than tidy: without it `shotgun0` would be
+both the shotgun's viewmodel and the shotgun lying on the floor.
+
+ONE SCALE ACROSS EVERY FLOOR ITEM, not one per item. The cell is drawn as a
+fixed square in world space, so fitting each item to its own cell would make a
+box of shells exactly as large as a rocket launcher -- and Doom drew them at 14
+and 59 units precisely because they are not the same size. The cost is that
+the smallest items are small, which is what they are.
 
 
 THE WEAPON FACES FORWARD, NOT SIDEWAYS. You are looking down your own sights,
-so the weapon points AWAY into the screen: the barrel recedes to a muzzle near
-the top-centre of the cell, the receiver and stock are below it, and your hands
-are at the bottom edge. A side profile is what a weapon looks like in a shop
-display, not what a held one looks like.
+so the weapon points AWAY into the screen: the barrel recedes to a muzzle, the
+receiver and stock are below it, and your hands are at the bottom edge. A side
+profile is what a weapon looks like in a shop display, not what a held one
+looks like.
 
-The cell is 128x96 and the drawing is centred horizontally and sits on the
-BOTTOM, so leave the top of the cell empty and let the grip run off the bottom
-edge -- that is what makes it read as being held rather than as floating.
+Let the grip run off the bottom of the cell -- that is what makes it read as
+being held rather than as floating. WHERE in the cell is not a centring rule
+but a screen position; see the window paragraph above.
 
 
 THE MUZZLE IS ONE MAGENTA PIXEL (255, 0, 255). Put it where the flash and the
@@ -95,12 +143,15 @@ its budget on frames the game cannot show. Death frames carry rotation 0
 because a corpse looks the same from every angle -- which is also how the
 frame list tells you which letters are deaths.
 
-    ours     Freedoom   why
-    imp      POSS       the baseline humanoid
-    hound    SARG       the fast melee charger
-    brute    BOSS       the big one
-    caster   HEAD       floats, attacks at range
-    gun      SHTG       the pump shotgun viewmodel
+    ours      Freedoom   why
+    imp       POSS       the baseline humanoid
+    hound     SARG       the fast melee charger
+    brute     BOSS       the big one
+    caster    HEAD       floats, attacks at range
+    shotgun   SHTG       the pump shotgun viewmodel
+    grenade   MISG       the launcher: it arcs, so a launcher reads right
+    rapid     CHGG       the chaingun, for the fast projectile weapon
+    axe       SAWG       the chainsaw: a held melee tool rather than a fist
 
 Frame letters do not map to our numbers by position: A and B are a walk cycle,
 but which letter is the attack differs per monster, so they were read off the
@@ -121,8 +172,9 @@ of README.md.
 
 
 SIZE is 32x32 by convention for monsters, but anything up to the 64x96 cell
-works. Weapons use the 128x96 cell. A drawing is centred horizontally and sits
-on the BOTTOM of its cell.
+works, and a monster drawing is centred horizontally and sits on the BOTTOM of
+its cell. Weapons use a 192x104 cell and are NOT centred -- it is a window on
+Doom's screen and the drawing goes where it goes.
 
 TRANSPARENCY is alpha < 128.
 

@@ -858,11 +858,35 @@ as debris at 40, and the detail that sells it up close is the first thing the
 art resolution throws away. Four of them at range are four smudges you have to
 walk onto to identify.
 
-The generated icons answer what the floor actually asks — *what is that, and do
-I want it* — from across a room, because they were designed for that distance
-instead of borrowed from another one. Colour carries which weapon, and the
-shard-versus-box silhouette carries whether it is the weapon or its ammunition.
-Both survive being small. See `pickup_pixel` in [src/sprite.c](src/sprite.c).
+The generated icons answered what the floor actually asks — *what is that, and
+do I want it* — from across a room, because they were designed for that
+distance instead of borrowed from another one.
+
+**Doom's pickups are now what the atlas shows, and that does not overturn the
+paragraph above — it satisfies it.** The argument was against *viewmodel* art
+on the floor, and `MEDI`, `SHEL` and `SHOT` are not viewmodels: they are
+separate drawings id made to be recognised from exactly that distance. The
+objection was never "imported art is worse", it was "art drawn for one distance
+does not work at another", and these were drawn for this one. Thirteen of them
+cost 3,571 bytes.
+
+The prefix is load-bearing. A drawing is named `item` + *the exact name a level
+uses to place the thing* — `itemhealth`, `itemshotgunammo`, `itemredkey` — so
+one resolver in `pickup.c` serves the level loader and the sprite decoder
+alike. Without the prefix, `shotgun0` would be both the shotgun's viewmodel and
+the shotgun lying on the floor, and one would silently become the other.
+
+`pickup_pixel` in [src/sprite.c](src/sprite.c) still generates an icon for any
+kind nobody drew, so the graceful path is unchanged: a half-imported set shows
+every item.
+
+**One scale across every floor item**, not one per item. The cell is drawn as a
+fixed square in world space, so fitting each item to its own cell would make a
+box of shells exactly as large as a rocket launcher — and Doom drew them at 14
+and 59 units precisely because they are not the same size. The cost is that the
+smallest items are small, which is what they are; if they want to be findable
+rather than faithful, the fix is a per-kind billboard size, not a per-item
+scale that flattens them all to the same one.
 
 **The muzzle is one magenta pixel**, recorded and then left transparent. The
 alternative is a constant in `weapon.c` that somebody edits to match the art,
@@ -1927,6 +1951,82 @@ else* — a single sample cannot see a row inserted, dropped or reordered.
 Boundaries are deliberately not asserted: where the pump snaps back is a feel
 decision that should move without breaking a test. Verified by dropping the
 return pose and watching it report `got 3 poses: 1 2 0  wanted 4: 1 2 1 0`.
+
+### Where a viewmodel goes is the art's decision, not the cell's
+
+The imported shotgun sat dead centre looking like it belonged to a different
+game, and it did, because the cell was a box the art got centred in. **Doom
+does not centre its weapons.** It stores a per-frame offset and draws the
+sprite at it, and those offsets are the artist placing the weapon:
+
+| weapon | Doom screen x (of 320) | |
+|---|---|---|
+| shotgun | 44…166 | left of centre |
+| launcher | 107…213 | centred |
+| chaingun | 107…213 | centred, lower |
+| chainsaw | 150…408 | right, and off the edge on purpose |
+
+Every one bottoms out at y=200, the screen's bottom edge — which is why "sits
+on the floor of its cell" looked nearly right and the horizontal never did.
+
+So **the cell is a window on Doom's screen**: 320 units wide, 144 rows of its
+3D view, and a frame's place in the cell *is* its place on that screen.
+
+**Which view, though — and that is not the obvious one.** Doom's screen is
+320×200, but its 3D *view* is 168 rows: the status bar takes the bottom 32, and
+that is the framing the game shipped with. The weapon is still drawn against
+the full 200 — `BASEYCENTER` is a fixed 100 whatever the view height is — so
+the bar does not merely hide the bottom of the gun, it **moves** the gun and
+changes its size against what you can see.
+
+Matching the 200-row fullscreen view put the shotgun at 35.8%…99.8% of the
+screen: bottom balanced exactly on the edge, nothing cut off, which reads as a
+gun perched too high and too small. Doom as shipped puts it at 33.0%…109.2% —
+a fifth larger, planted past the bottom edge. Measured in the running game, the
+barrel tip moved from 40.1% to 38.3% down the frame.
+
+Worth being precise about what this is *not*: it is not a resolution
+difference. The whole mapping is in fractions of viewport height, so 320×200
+against 1280×720 never enters — a bigger window scales everything identically.
+
+The quad follows from the same geometry: `(4/3)·200/168·height` wide however
+wide the window is, because 320×200 was displayed at 4:3 and our height covers
+168 of those rows, so the weapon layer letterboxes into a widescreen viewport
+rather than stretching across it.
+
+Nothing in the sprite format changed to allow it. `o <x> <y>` already placed a
+drawing in its cell; the importer computes it from the offsets instead of from
+a centring rule. And it costs nothing, because bake crops to the ink: a cell
+four times the area stores the same pixels, and only the atlas texture grows —
+RAM, not floppy. 192×104 keeps the cell's pixel aspect equal to its screen
+aspect, so Doom's 1.2 non-square-pixel correction falls out of the geometry
+instead of being applied by hand.
+
+`WPN_FRAMES` stopped being a list of moments and became a **cap**. Doom gives
+the chaingun two drawings, the launcher two, the shotgun three and the chainsaw
+four; a shared list of moments would pad the short ones with duplicates, which
+is the thing the cycle table exists to avoid. Every weapon animates off the
+timer that was already there, for a **share** of its own cooldown — they span
+0.085s to 0.85s, so one fixed length would leave the rapid weapon mid-swing
+when it was ready to fire again. The shotgun's rack became a table column,
+because once every weapon set the timer, every weapon racked a shotgun.
+
+### A 411KB stowaway, and why the graceful path hid it
+
+The importer's `--preview` contact sheet landed in `assets/sprites/` and was
+baked as a sprite: **411KB of a 1.44MB budget**, carried in `.rdata`, never
+drawn once.
+
+`sprite.c` ignores a name matching no monster and no weapon — documented,
+deliberate, and it sounds like enough. It is not, because ignoring it happens
+at *decode* time, long after the bytes are quantised, encoded and committed to
+the binary. Graceful degradation at the wrong end of the pipeline is just a
+silent cost.
+
+Three changes, because one would have been the fix and not the lesson: bake
+skips `_`-prefixed names, the importer writes the preview outside the scanned
+directory, and the size report prints a **total**. Every line of that table was
+individually unremarkable; only the sum said a third of the floppy.
 
 ### What the import cost the codec
 

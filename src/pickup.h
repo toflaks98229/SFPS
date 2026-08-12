@@ -256,4 +256,34 @@ const Pickup *pickup_at(int i);
 void pickup_update(v3 player_eye, int *health, int health_max,
                    Weapon *w, int *keys, float dt);
 
+/**
+ * @brief Resolves a pickup name to its ::PK_ kind, for a name that is not
+ *        NUL-terminated.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] k   First character of the name.
+ * @param[in] len How many characters it has.
+ * @return A PK_* kind, or -1 when the name names no pickup.
+ * @note Exposed so the sprite decoder can address a pickup cell by the SAME
+ *       name a level uses to place one. A second table mapping drawings to
+ *       kinds would be a list that agrees with this one until somebody adds a
+ *       pickup, and then quietly does not.
+ * @note The vocabulary is `health`, `ammo`, `<weapon>ammo`, `<weapon>`, and
+ *       `redkey`/`bluekey`/`yellowkey`. Most of it is derived from the weapon
+ *       table rather than listed, so a new weapon brings its box and its
+ *       floor item with it.
+ *
+ * 한국어
+ * ------
+ * @brief NUL로 끝나지 않는 이름을 ::PK_ 종류로 해석합니다.
+ * @param[in] k   이름의 첫 문자.
+ * @param[in] len 이름의 길이.
+ * @return PK_* 종류, 또는 어떤 아이템도 가리키지 않으면 -1.
+ * @note 스프라이트 디코더가 레벨이 아이템을 배치할 때 쓰는 것과 *같은* 이름으로 아이템
+ *       셀을 지정할 수 있도록 노출합니다. 그림을 종류에 대응시키는 두 번째 표는 누군가
+ *       아이템을 추가하기 전까지만 이것과 일치하다가 조용히 어긋나는 목록이 됩니다.
+ */
+int pickup_kind_for_n(const char *k, int len);
+
 #endif

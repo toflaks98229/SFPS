@@ -86,14 +86,16 @@ _Static_assert(TEX_NAME_MAX >= LVL_MAT,
 #define PELLET_DAMAGE  7        /* six of these -- one point-blank blast -- kills */
 #define FIRE_INTERVAL  0.50f
 
-/* How long the pump takes. Named because two places need it -- the timer that
-   counts it down and the table that reads how far through it is -- and while
-   it was written out at both, the animation's timing was a duplicate of the
-   pump's, free to disagree with it after any edit to either.
-   펌프에 걸리는 시간입니다. 두 곳이 필요로 하므로 이름을 붙였습니다. 이를 감소시키는
-   타이머와 얼마나 진행됐는지 읽는 표인데, 양쪽에 값을 적어 두었던 동안 애니메이션의
-   타이밍은 펌프 타이밍의 복사본이었고 어느 한쪽을 고치면 어긋날 수 있었습니다. */
-#define PUMP_TIME     (FIRE_INTERVAL * 0.55f)
+/* How much of a weapon's cooldown its recovery animation runs for.
+   A SHARE rather than a duration, because every weapon now animates off this
+   timer and their cooldowns span 0.085s to 0.85s -- one fixed duration would
+   leave the rapid weapon mid-swing when it was ready to fire again, and the
+   grenade launcher finished animating long before it was.
+   무기의 재사용 대기 시간 중 회복 애니메이션이 차지하는 비율입니다. 지속 시간이 아니라
+   *비율*인 이유는, 이제 모든 무기가 이 타이머로 애니메이션하고 그 대기 시간이 0.085초
+   에서 0.85초에 걸쳐 있기 때문입니다. 고정된 지속 시간이라면 연사 무기는 다시 쏠 수
+   있는데도 동작 중이고, 유탄 발사기는 그보다 한참 전에 동작이 끝나 있게 됩니다. */
+#define PUMP_SHARE    0.55f
 #define RANGE         120.0f
 #define PELLET_SPREAD  0.040f   /* fixed cone, not a growing bloom */
 
@@ -122,27 +124,27 @@ _Static_assert(TEX_NAME_MAX >= LVL_MAT,
  * 18입니다.
  */
 static const WeaponType WEAPONS[WP_TYPES] = {
-    /* name       model      snd      start max pick dmg  cool   spread  pel  spd   grav  melee  recoil punch hook */
-    { "shotgun", "shotgun", "shot",     20,  50,   8,   7, 0.50f, 0.040f,  6, 0.0f,  0.0f, 0.0f, 0.055f, 0.085f, 1 },
+    /* name       model      snd     reload  start max pick dmg  cool   spread  pel  spd   grav  melee  recoil punch hook */
+    { "shotgun", "shotgun", "shot", "pump",     20,  50,   8,   7, 0.50f, 0.040f,  6, 0.0f,  0.0f, 0.0f, 0.055f, 0.085f, 1 },
 
     /* Arcs and bounces, so it reaches what you cannot see. The fuse is long
        enough to bank a shot off a wall and short enough that a grenade at your
        feet is your problem.
        곡선을 그리며 튕기므로 보이지 않는 것에 닿습니다. 도화선은 벽에 튕겨 넣을 만큼
        길고, 발밑의 유탄이 스스로의 문제가 될 만큼 짧습니다. */
-    { "grenade", "shotgun", "shot",      6,  20,   3,  55, 0.85f, 0.010f,  0, 26.0f, 26.0f, 0.0f, 0.075f, 0.130f, 1 },
+    { "grenade", "shotgun", "shot", NULL,        6,  20,   3,  55, 0.85f, 0.010f,  0, 26.0f, 26.0f, 0.0f, 0.075f, 0.130f, 1 },
 
     /* No hitscan: the bolts travel, so a moving target has to be led. That is
        the cost of the highest sustained damage in the roster.
        히트스캔이 아닙니다. 탄이 날아가므로 움직이는 표적은 예측 사격이 필요합니다.
        구성 내 최고 지속 피해량의 대가입니다. */
-    { "rapid",   "shotgun", "shot",     80, 200,  40,   9, 0.085f, 0.030f, 0, 70.0f,  0.0f, 0.0f, 0.012f, 0.022f, 1 },
+    { "rapid",   "shotgun", "shot", NULL,       80, 200,  40,   9, 0.085f, 0.030f, 0, 70.0f,  0.0f, 0.0f, 0.012f, 0.022f, 1 },
 
     /* Melee, and the only row with no hook: right-click leaps instead. Its
        "ammo" is slam charges, which is why it is not simply free.
        근접이며 훅이 없는 유일한 행입니다. 우클릭이 대신 도약합니다. "탄약"은 내려찍기
        충전량이며, 그래서 완전히 공짜는 아닙니다. */
-    { "axe",     "shotgun", "shot",      3,   6,   2,  45, 0.42f, 0.0f,    0, 0.0f,  0.0f, 2.2f, 0.090f, 0.150f, 0 },
+    { "axe",     "shotgun", "shot", NULL,        3,   6,   2,  45, 0.42f, 0.0f,    0, 0.0f,  0.0f, 2.2f, 0.090f, 0.150f, 0 },
 };
 
 const WeaponType *wp_stats(int type) {
@@ -730,9 +732,6 @@ static void fire_hitscan(Weapon *w, v3 eye, float yaw, float pitch,
        noise and steal every voice. */
     if (hits) audio_play("impact", 35 + hits * 8);
 
-    /* The pump is what gives a shotgun its rhythm, so it lands partway
-       through the cooldown rather than on the trigger pull. */
-    w->pump_timer = PUMP_TIME;
 }
 
 /**
@@ -758,6 +757,14 @@ static void attack_feedback(Weapon *w, const WeaponType *S) {
     w->recoil  += S->recoil * (0.85f + frand(w) * 0.3f);
     w->punch   += S->punch;
     w->flash    = FLASH_TIME;
+
+    /* The recovery animation, for every weapon rather than the shotgun alone.
+       It lands partway through the cooldown rather than on the trigger pull,
+       which is what gives a pump its rhythm and a spin its follow-through.
+       회복 애니메이션이며, 샷건만이 아니라 모든 무기의 것입니다. 방아쇠를 당기는 순간이
+       아니라 대기 시간의 중간까지 이어지며, 그것이 펌프에 리듬을, 회전에 여운을
+       줍니다. */
+    w->pump_timer = S->cooldown * PUMP_SHARE;
 
     g_flash_scale = 1.1f + frand(w) * 0.7f;
     g_flash_roll  = frand(w) * M_TAU;
@@ -906,7 +913,10 @@ void wp_update(Weapon *w, float dt, int firing, v3 eye, float yaw, float pitch,
 
     if (w->pump_timer > 0.0f) {
         w->pump_timer -= dt;
-        if (w->pump_timer <= 0.0f) audio_play("pump", 70);
+        if (w->pump_timer <= 0.0f) {
+            const char *snd = wp_stats(w->cur)->reload_snd;
+            if (snd) audio_play(snd, 70);
+        }
     }
     if (w->dry_timer > 0.0f) w->dry_timer -= dt;
 
@@ -1203,53 +1213,104 @@ mat4 wp_gun_matrix(const Weapon *w) {
  *       불일치하는 총기입니다. 대기 중에 펌프질을 하거나, 발사하는데 가만히 있는 식입니다.
  *       몬스터가 ::EState에서 프레임을 고르는 것과 같은 이유입니다.
  */
-/* THE PUMP, AS A TABLE: which pose, and how far through the pump it lasts.
+/* WHAT EACH WEAPON'S DRAWINGS ARE, AND WHEN EACH SHOWS.
  *
- * Doom's shotgun cycles B -> C -> D -> C -> B, and the middle of that is the
+ * A slot in the atlas is just a drawing; which drawing means something
+ * different per weapon, because Doom drew each weapon with the frames that
+ * weapon needed. So the meanings live here, next to the cycles that use them,
+ * rather than as one shared enum that every weapon would have to pretend to
+ * fit. The counts differ on purpose -- padding the chaingun out to the
+ * chainsaw's four would store a duplicate to fill a slot.
+ *
+ * 아틀라스의 슬롯은 그저 그림이고, *어느* 그림인지는 무기마다 다릅니다. Doom이 각 무기를
+ * 그 무기에 필요한 프레임으로 그렸기 때문입니다. 그래서 의미를 모든 무기가 억지로 맞춰야
+ * 하는 공유 열거형이 아니라, 그것을 쓰는 주기 옆인 이곳에 둡니다. */
+/* A CYCLE IS A TABLE: which drawing, and how far through the action it lasts.
+ *
+ * Doom's shotgun goes B -> C -> D -> C -> B, and the middle of that is the
  * point: the gun passes through the SAME pose going out and coming back. Two
  * `if` branches could not express it without a third drawing to return to,
- * which is why the atlas used to carry `gun1` and `gun3` as identical images.
- * A table repeats a pose by naming it twice, and costs nothing per repeat.
+ * which is why the atlas used to carry two identical images. A table repeats a
+ * pose by naming it twice, and costs nothing per repeat.
  *
- * Fractions of the pump rather than seconds, so retuning FIRE_INTERVAL keeps
- * the animation's shape and only changes its speed -- a table in seconds would
- * silently run past the end of a faster pump and freeze on its last row.
+ * Fractions of the action rather than seconds, so retuning a weapon's rate
+ * keeps its animation's shape and changes only its speed -- a table in seconds
+ * would run past the end of a faster action and freeze on its last row.
  *
- * Adding a step is a row. That is the whole reason it is shaped this way:
- * SHTG has only three usable drawings, but a longer or lumpier cycle over
- * those three needs no new art and no new code.
- *
- * 펌프를 표로 표현합니다. 어느 자세를, 펌프의 어디까지 보일지입니다. Doom의 샷건은
- * B -> C -> D -> C -> B로 순환하며 핵심은 그 가운데입니다. 총이 나갈 때와 돌아올 때
- * *같은* 자세를 지납니다. if 두 개로는 돌아갈 세 번째 그림 없이 이를 표현할 수 없었고,
- * 그래서 아틀라스가 `gun1`과 `gun3`을 동일한 이미지로 들고 있었습니다. 표는 자세를 두 번
- * 적어 반복하며 반복마다 드는 비용이 없습니다.
- *
- * 초가 아니라 펌프에 대한 비율인 이유는, FIRE_INTERVAL을 다시 조정해도 애니메이션의
- * 모양은 유지되고 속도만 바뀌게 하기 위함입니다. 초 단위 표라면 더 빠른 펌프의 끝을
- * 조용히 넘어가 마지막 행에서 멈춥니다. */
-static const struct { unsigned char frame; float upto; } PUMP_CYCLE[] = {
-    { WPN_RAISED, 0.28f },   /* the shot: kicked up, and where the flash lives */
-    { WPN_OPEN,   0.52f },   /* pump snapped back */
-    { WPN_RAISED, 0.80f },   /* and forward again -- the same drawing as the shot */
-    { WPN_REST,   1.00f },   /* settled, before idle takes over */
+ * 주기는 표입니다. 어느 그림을, 동작의 어디까지 보일지입니다. Doom의 샷건은
+ * B -> C -> D -> C -> B로 가며 핵심은 그 가운데입니다. 총이 나갈 때와 돌아올 때 같은
+ * 자세를 지납니다. 초가 아니라 동작에 대한 비율인 이유는, 무기의 속도를 조정해도
+ * 애니메이션의 모양은 유지되고 속도만 바뀌게 하기 위함입니다. */
+typedef struct { unsigned char frame; float upto; } AnimStep;
+
+static const AnimStep CYCLE_SHOTGUN[] = {
+    { SG_RAISED, 0.28f },   /* the shot: kicked up, and where the flash lives */
+    { SG_OPEN,   0.52f },   /* pump snapped back */
+    { SG_RAISED, 0.80f },   /* and forward again -- the same drawing as the shot */
+    { SG_REST,   1.00f },   /* settled, before idle takes over */
+};
+/* The launcher has one firing drawing, so its cycle is the recoil settling. */
+static const AnimStep CYCLE_GRENADE[] = {
+    { LN_FIRE, 0.55f },
+    { LN_REST, 1.00f },
+};
+/* The chaingun alternates twice over one shot, which is what makes a spin read
+   as a spin rather than as a flicker between two pictures. */
+static const AnimStep CYCLE_RAPID[] = {
+    { RP_SPIN, 0.25f },
+    { RP_REST, 0.50f },
+    { RP_SPIN, 0.75f },
+    { RP_REST, 1.00f },
+};
+/* The saw bites twice per swing and returns to its idle pair. */
+static const AnimStep CYCLE_AXE[] = {
+    { AX_CUT0,  0.30f },
+    { AX_CUT1,  0.60f },
+    { AX_IDLE1, 0.80f },
+    { AX_IDLE0, 1.00f },
+};
+
+/* Rows, keyed by WP_*, so adding a weapon adds a line here beside its line in
+   WEAPONS rather than a branch somewhere else.
+   WP_*로 색인되는 행입니다. 무기를 추가하면 다른 곳의 분기가 아니라 WEAPONS의 자기 줄
+   옆에 이 줄 하나가 늘어납니다. */
+static const struct {
+    const AnimStep *step;
+    int             n;
+    unsigned char   rest;    /* the drawing shown when nothing is happening */
+} ANIM[WP_TYPES] = {
+    { CYCLE_SHOTGUN, 4, SG_REST  },
+    { CYCLE_GRENADE, 2, LN_REST  },
+    { CYCLE_RAPID,   4, RP_REST  },
+    { CYCLE_AXE,     4, AX_IDLE0 },
 };
 
 static int wp_sprite_frame(const Weapon *w) {
-    /* A weapon that flashes without pumping still has to look like it fired.
-       Kept ahead of the table so the pose is right for anything that never
-       sets pump_timer, rather than depending on the table's first row.
-       펌프 없이 화염만 내는 무기도 발사한 것처럼 보여야 합니다. pump_timer를 설정하지
-       않는 무기에 대해서도 자세가 맞도록 표보다 앞에 둡니다. */
-    if (w->flash > 0.0f) return WPN_RAISED;
+    int t = (w->cur >= 0 && w->cur < WP_TYPES) ? w->cur : 0;
 
+    /* The pump timer is the animation clock for every weapon, not just the
+       shotgun: it is already set to the weapon's own recovery and already
+       counts down in step with firing. A second clock per weapon would be a
+       second thing to keep aligned with the trigger, and the failure when it
+       drifts is a gun whose picture disagrees with what it is doing.
+       펌프 타이머는 샷건만이 아니라 모든 무기의 애니메이션 시계입니다. 이미 무기 자신의
+       회복 시간으로 설정되고 발사와 보조를 맞춰 감소합니다. 무기마다 두 번째 시계를 두면
+       방아쇠와 맞춰 두어야 할 것이 하나 더 늘고, 어긋났을 때의 증상은 그림이 실제 동작과
+       불일치하는 총기입니다. */
     if (w->pump_timer > 0.0f) {
-        /* 0 at the start of the pump, 1 at its end. pump_timer counts down. */
-        float t = 1.0f - w->pump_timer / PUMP_TIME;
-        for (int i = 0; i < (int)(sizeof PUMP_CYCLE / sizeof PUMP_CYCLE[0]); i++)
-            if (t < PUMP_CYCLE[i].upto) return PUMP_CYCLE[i].frame;
+        float len = wp_stats(t)->cooldown * PUMP_SHARE;
+        float f = (len > 0.0f) ? 1.0f - w->pump_timer / len : 1.0f;
+        for (int i = 0; i < ANIM[t].n; i++)
+            if (f < ANIM[t].step[i].upto) return ANIM[t].step[i].frame;
     }
-    return WPN_REST;
+
+    /* A weapon that flashes without running its cycle still has to look like
+       it fired, so fall back to the cycle's first drawing rather than to rest.
+       주기를 돌리지 않고 화염만 내는 무기도 발사한 것처럼 보여야 하므로, 대기 자세가
+       아니라 주기의 첫 그림으로 대체합니다. */
+    if (w->flash > 0.0f) return ANIM[t].step[0].frame;
+
+    return ANIM[t].rest;
 }
 
 /**
@@ -1297,14 +1358,34 @@ static void wp_draw_view_sprite(const Weapon *w, float aspect) {
        것도 픽셀 크기를 알 필요가 없습니다. */
     mat4 proj = mat4_ortho(0.0f, 1.0f, 0.0f, 1.0f, -1.0f, 1.0f);
 
-    /* How much of the screen the gun covers. Width follows the cell's aspect
-       so the drawing is never stretched, and the aspect correction runs on the
-       WIDTH because the height is what the artist framed against.
-       총기가 화면에서 차지하는 비율입니다. 너비는 셀의 종횡비를 따라 그림이 늘어나지 않게
-       하며, 종횡비 보정은 *너비*에 적용합니다. 아티스트가 기준으로 삼아 배치한 것이
-       높이이기 때문입니다. */
-    const float SH = 0.62f;
-    float sw = SH * ((float)WPN_CW / (float)WPN_CH) / (aspect > 0.01f ? aspect : 1.0f);
+    /* THE QUAD IS DOOM'S SCREEN, not a box sized to taste.
+       The cell spans Doom's full 320-unit width and its bottom 144 rows, and
+       the frame's place in the cell is its place on that screen -- so this has
+       to put the cell exactly where Doom's screen would be, or the offsets the
+       art was drawn with land somewhere else.
+       Doom's 320x200 was displayed at 4:3, so the screen is (4/3)*height wide
+       whatever the window's shape, and the weapon layer is letterboxed inside
+       a widescreen viewport rather than stretched across it. Height is the
+       cell's share of those 200 rows. Neither number is a taste dial: change
+       one and every weapon moves off the position its artist chose.
+       쿼드는 취향껏 정한 상자가 아니라 *Doom의 화면*입니다. 셀은 Doom의 320단위 너비
+       전체와 아래 144행을 덮으며, 프레임의 셀 안 위치가 곧 그 화면에서의 위치입니다.
+       따라서 이 코드는 셀을 Doom 화면이 있었을 자리에 정확히 놓아야 하고, 그러지 않으면
+       아트가 지니고 온 오프셋이 엉뚱한 곳에 떨어집니다. Doom의 320x200은 4:3으로
+       표시되었으므로 창의 모양과 무관하게 화면 너비는 높이의 4/3이며, 무기 레이어는
+       와이드스크린 뷰포트에 늘어나지 않고 레터박스로 들어갑니다. */
+    /* The viewport IS Doom's 3D view, so the cell's share of it is the cell's
+       share of those 168 rows. Width follows from the 320x200 screen being
+       displayed at 4:3: our height covers VIEW rows, so the full screen is
+       (4/3)*FULL/VIEW of it across. Matching FULL instead of VIEW is what left
+       the shotgun a fifth too small with its bottom balanced on the edge.
+       뷰포트가 곧 Doom의 3D 뷰이므로, 셀이 차지하는 비율은 그 168행 중 셀의 비율입니다.
+       너비는 320x200 화면이 4:3으로 표시된다는 사실에서 나옵니다. 우리 높이가 VIEW행을
+       담으므로 화면 전체는 그 (4/3)*FULL/VIEW배만큼 넓습니다. VIEW가 아니라 FULL에
+       맞춘 것이 샷건을 5분의 1만큼 작게, 아래를 가장자리에 걸터앉게 만든 원인입니다. */
+    const float SH = (float)(WPN_DOOM_VIEW - WPN_DOOM_TOP) / (float)WPN_DOOM_VIEW;
+    float sw = (4.0f / 3.0f) * (float)WPN_DOOM_FULL / (float)WPN_DOOM_VIEW
+             / (aspect > 0.01f ? aspect : 1.0f);
 
     /* The weapon's own motion, as screen fractions. The scales are small
        because a viewmodel that swings a visible fraction of the screen reads
@@ -1322,7 +1403,7 @@ static void wp_draw_view_sprite(const Weapon *w, float aspect) {
 
     int frame = wp_sprite_frame(w);
     float u0, v0, u1, v1;
-    weapon_uv(frame, &u0, &v0, &u1, &v1);
+    weapon_uv(w->cur, frame, &u0, &v0, &u1, &v1);
 
     mb_reset(&g_fx_buf);
     v3 n = v3f(0, 0, 1);
@@ -1351,7 +1432,7 @@ static void wp_draw_view_sprite(const Weapon *w, float aspect) {
        그림이 표식을 담지 않았으면 완전히 건너뜁니다. 추측한 위치의 화염은 없는 것보다
        나쁩니다. 표식이 동작하지 않는데도 동작한다고 아티스트에게 알려 주기 때문입니다. */
     float mu, mv;
-    if (w->flash > 0.0f && weapon_muzzle(frame, &mu, &mv)) {
+    if (w->flash > 0.0f && weapon_muzzle(w->cur, frame, &mu, &mv)) {
         float k  = w->flash / FLASH_TIME;
         float fs = (0.10f + 0.07f * k) * g_flash_scale;
         float fx = x0 + mu * (x1 - x0);
@@ -1630,9 +1711,12 @@ int wp_axe_land(Weapon *w, v3 feet, int grounded, float dt) {
 #ifdef HOT_RELOAD
 /* --- Exposed for the headless tests / 헤드리스 테스트를 위한 노출 --- */
 
-float weapon_pump_time(void) { return PUMP_TIME; }
+float weapon_pump_time(int type) {
+    if (type < 0 || type >= WP_TYPES) type = 0;
+    return wp_stats(type)->cooldown * PUMP_SHARE;
+}
 
-int weapon_sprite_frame_at(float flash, float pump_timer) {
+int weapon_sprite_frame_at(int type, float flash, float pump_timer) {
     /* A zeroed weapon with just the two timers set. wp_sprite_frame reads
        nothing else, and saying so here means the test cannot accidentally
        depend on some other field being plausible.
@@ -1640,6 +1724,7 @@ int weapon_sprite_frame_at(float flash, float pump_timer) {
        읽지 않으며, 그것을 여기서 밝혀 두면 테스트가 다른 필드가 그럴듯한지에 실수로
        의존할 수 없게 됩니다. */
     Weapon w = (Weapon){0};
+    w.cur        = type;
     w.flash      = flash;
     w.pump_timer = pump_timer;
     return wp_sprite_frame(&w);

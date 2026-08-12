@@ -681,6 +681,11 @@ static void fire_hitscan(Weapon *w, v3 eye, float yaw, float pitch,
     v3 muzzle = muzzle_world(w, eye, right, up, fwd);
 
     int hits = 0;
+    /* Where the volley's impact sound comes from. Starts at the muzzle so a
+       miss has somewhere sane to point, though a miss plays nothing.
+       일제사격의 타격음이 나는 자리입니다. 빗나감이 가리킬 곳이 있도록 총구에서
+       시작하지만, 빗나가면 아무 소리도 나지 않습니다. */
+    v3 hit_at = eye;
 
     for (int i = 0; i < PELLETS; i++) {
         v3 dir = v3norm(v3add(fwd,
@@ -703,6 +708,7 @@ static void fire_hitscan(Weapon *w, v3 eye, float yaw, float pitch,
         }
         hits += hit;
         v3 end = v3add(eye, v3scale(dir, t));
+        if (hit) hit_at = end;
 
         if (hit) {
             Impact *im = &g_impacts[g_impact_next];
@@ -736,8 +742,17 @@ static void fire_hitscan(Weapon *w, v3 eye, float yaw, float pitch,
 
     /* One impact for the whole volley, louder when more pellets connect.
        Six separate impact sounds fired on the same frame just smear into
-       noise and steal every voice. */
-    if (hits) audio_play("impact", 35 + hits * 8);
+       noise and steal every voice.
+       Placed where the pellets LANDED rather than at the muzzle: a hitscan
+       carries to 120m, and an impact that played at full volume regardless
+       told you that you had hit something without telling you how far off it
+       was -- which for the one weapon that reaches across a level is most of
+       what the sound was for.
+       총구가 아니라 산탄이 *떨어진* 자리에서 재생합니다. 히트스캔은 120m까지 닿는데,
+       거리와 무관하게 최대 음량으로 나는 타격음은 무언가를 맞혔다는 사실만 알려 주고
+       그것이 얼마나 멀리 있었는지는 알려 주지 않습니다. 레벨을 가로지르는 유일한
+       무기에게는 그것이 이 소리의 존재 이유의 대부분입니다. */
+    if (hits) audio_play_at("impact", 35 + hits * 8, hit_at);
 
 }
 
@@ -880,7 +895,7 @@ static void fire_melee(Weapon *w, const WeaponType *S,
     float et; int eidx;
     if (enemy_hitscan(eye, fwd, S->melee_range, &et, &eidx)) {
         enemy_hurt(eidx, S->damage, fwd);
-        audio_play("impact", 90);
+        audio_play_at("impact", 90, v3add(eye, v3scale(fwd, et)));
     }
     audio_play(S->fire_snd, 80);
 }
@@ -1766,7 +1781,7 @@ int wp_axe_land(Weapon *w, v3 feet, int grounded, float dt) {
     proj_blast(feet, AXE_SLAM_RADIUS, AXE_SLAM_DAMAGE);
     fx_spawn("boltburst", feet, v3f(0, 1, 0));
     fx_spawn("spark", feet, v3f(0, 1, 0));
-    audio_play("impact", 100);
+    audio_play_at("impact", 100, feet);
 
     w->punch += wp_stats(WP_AXE)->punch * 1.5f;
     return 1;

@@ -71,6 +71,24 @@ int door_refused(void) { return g_refused; }
    점이 문의 *닫힌* 외곽선에 가장 가까워지는 거리(미터)입니다. 현재 형상이 아니라 닫힌
    형상을 기준으로 재므로, 열리기 시작한 문이 그것을 연 플레이어에게서 멀어져 중간에
    멈추지 않습니다. */
+/* The middle of the door's CLOSED outline, in metres -- where the sound of it
+   moving comes from. The closed shape rather than the current one for the same
+   reason the touch test uses it: a sliding door that measured from where it
+   has got to would walk away from the player who opened it.
+   문의 *닫힌* 외곽선의 한가운데를 미터로 반환합니다. 그것이 문이 움직이는 소리가 나는
+   자리입니다. 현재 모양이 아니라 닫힌 모양을 쓰는 이유는 접촉 판정과 같습니다. 도달한
+   위치를 기준으로 재면, 미닫이문은 그것을 연 플레이어에게서 멀어져 갑니다. */
+static v3 door_centre(const DoorState *st) {
+    float sx = 0.0f, sz = 0.0f;
+    if (st->n0 <= 0) return v3f(0.0f, 0.0f, 0.0f);
+    for (int i = 0; i < st->n0; i++) {
+        sx += st->pts0[i * 2 + 0];
+        sz += st->pts0[i * 2 + 1];
+    }
+    float y = (st->floor0 + st->ceil0) * 0.5f;
+    return v3f(sx / st->n0 * 0.01f, y * 0.01f, sz / st->n0 * 0.01f);
+}
+
 static float dist_to_outline(const DoorState *st, float x, float z) {
     if (st->n0 < 2) return 1e9f;
     float best = 1e9f;
@@ -216,8 +234,8 @@ int door_update(Level *l, v3 player_pos, int keys, float dt) {
                태그가 있는 문은 스위치가 연 것이므로 그 소리가 함께 납니다. 스위치가
                아니라 문이 *열리기 시작하는 경계*에서 재생하는 이유는, 스위치 처리기가
                플레이어가 밟고 있는 매 프레임 실행되어 소리를 연발하기 때문입니다. */
-            if (d->tag > 0) audio_play("switch", 80);
-            audio_play("door", 75);
+            if (d->tag > 0) audio_play_at("switch", 80, door_centre(st));
+            audio_play_at("door", 75, door_centre(st));
         }
         if (asked) st->wait = DOOR_OPEN_TIME;
 

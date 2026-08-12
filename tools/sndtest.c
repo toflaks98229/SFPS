@@ -165,6 +165,78 @@ static const char *PLAYED[] = {
 
 /* Names the game plays that the recipe file must still define.
    게임이 재생하는 이름 중 레시피 파일이 여전히 정의해야 하는 것들입니다. */
+/* --- distance attenuation ------------------------------------------------
+   Two things nothing else can see.
+
+   The first is that a SAMPLE-ONLY sound plays at all. audio_play used to
+   reject a sound with no layers, which was right while every sound was a
+   recipe and became wrong the moment some came from WAVs -- the door, the
+   switch and the keycard were silent after being imported, and no test
+   noticed, because the checks that render playback ask for names out of
+   sounds.txt and those three are not in it.
+
+   The second is the curve. Full inside AUDIO_NEAR, nothing at AUDIO_FAR, and
+   never rising in between. A wrong curve does not crash and is not visible;
+   it makes the world feel flat, or makes a distant monster deafening, and
+   either reads as a design choice rather than as a bug.
+
+   거리 감쇠입니다. 다른 무엇도 볼 수 없는 두 가지를 검사합니다. 첫째는 *샘플만 있는*
+   사운드가 재생되기는 하는가입니다. audio_play는 레이어가 없는 사운드를 거부했는데,
+   모든 사운드가 레시피이던 동안에는 옳았고 일부가 WAV에서 오는 순간 틀리게 되었습니다.
+   둘째는 곡선입니다. 틀린 곡선은 크래시도 나지 않고 눈에 보이지도 않으며, 세계를
+   납작하게 만들거나 먼 몬스터를 귀청 떨어지게 만들 뿐인데, 둘 다 버그가 아니라 설계
+   선택처럼 읽힙니다. */
+static int check_distance(void) {
+    int bad = 0;
+
+    /* Sample-only names: none of these has a recipe in sounds.txt. */
+    static const char *SAMPLED[] = { "door", "switch", "key" };
+    for (int i = 0; i < 3; i++) {
+        if (audio_render(SAMPLED[i], g_buf, MAX_FRAMES) <= 0) {
+            printf("  %-10s a sample-only sound produced NO audio\n", SAMPLED[i]);
+            bad++;
+        }
+    }
+    if (!bad) printf("  distance          sample-only sounds play\n");
+
+    /* The curve, asked of the same function audio_play_at uses -- so this
+       cannot pass while the game applies a different one. */
+    audio_listener(v3f(0, 0, 0));
+    int prev = -1, fell = 1;
+    for (int m = 0; m <= 40; m += 2) {
+        int g = audio_gain_at(100, v3f((float)m, 0.0f, 0.0f));
+        if (m == 0 && g != 100) {
+            printf("  distance          not full volume at the listener (%d)\n", g);
+            bad++;
+        }
+        if ((float)m >= AUDIO_FAR && g != 0) {
+            printf("  distance          %dm is past AUDIO_FAR and still %d\n", m, g);
+            bad++;
+        }
+        if ((float)m < AUDIO_NEAR && g != 100) {
+            printf("  distance          %dm is inside AUDIO_NEAR and only %d\n", m, g);
+            bad++;
+        }
+        if (prev >= 0 && g > prev) fell = 0;
+        prev = g;
+    }
+    if (fell) printf("  distance          never gets louder as it gets further\n");
+    else { printf("  distance          not monotonic with range\n"); bad++; }
+
+    /* And the band between is a ramp rather than a cliff: something halfway
+       has to be audible AND quieter than something near.
+       그 사이 구간이 절벽이 아니라 경사인지 봅니다. */
+    int mid = audio_gain_at(100, v3f((AUDIO_NEAR + AUDIO_FAR) * 0.5f, 0, 0));
+    if (mid <= 0 || mid >= 100) {
+        printf("  distance          midway is %d, so the ramp is a cliff\n", mid);
+        bad++;
+    } else {
+        printf("  distance          midway is %d of 100\n", mid);
+    }
+
+    return bad;
+}
+
 /* --- the alphabet contract, read out of bake.ps1 ------------------------
    bake.ps1 encodes sampled sounds with a 64-character string and audio.c
    decodes by COMPUTING the value from the character. Nothing checks that the
@@ -273,6 +345,7 @@ int main(int argc, char **argv) {
     if (!one) fails += check_played();
 
     if (!one) fails += check_alphabet();
+    if (!one) fails += check_distance();
 
     printf(fails ? "\n%d problem(s)\n" : "\nall sounds produced audio\n", fails);
     return fails != 0;

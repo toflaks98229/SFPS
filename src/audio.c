@@ -589,7 +589,15 @@ int audio_render(const char *name, short *out, int max_frames) {
     const Sound *s = find_sound(name);
 
     if (lock) LeaveCriticalSection(&g_lock);
-    if (!s || !s->n) return 0;
+    /* The same test audio_play makes, and it was wrong here too: a sampled
+       sound has no layers, so this returned 0 frames for every sound that came
+       from a WAV. Two copies of one rule is how one of them stays wrong -- the
+       playback path was fixed and the render path, which is what the tests
+       drive, went on reporting silence.
+       audio_play와 같은 판정이며 이곳에서도 틀려 있었습니다. 하나의 규칙이 두 벌 있으면
+       그중 하나는 계속 틀린 채로 남습니다. 재생 경로는 고쳤는데 테스트가 구동하는
+       렌더 경로는 계속 무음을 보고하고 있었습니다. */
+    if (!s || (!s->n && s->pcm_n <= 0)) return 0;
 
     Voice V = {0};
     V.snd  = s;
@@ -722,7 +730,13 @@ void audio_reload(void) {
  * 최악의 경우는 버퍼 하나가 늦어지는 것인데 4버퍼 약 46ms 큐가 끊김 없이 이를
  * 흡수합니다.
  */
-void audio_play(const char *name, int gain) {
+/* Where the player's ears are. Game thread only -- see audio.h.
+   플레이어의 귀 위치입니다. 게임 스레드 전용입니다. */
+static v3 g_listener;
+
+void audio_listener(v3 pos) { g_listener = pos; }
+
+static void play_gain(const char *name, int gain) {
     if (!g_ready) return;
 
     EnterCriticalSection(&g_lock);
@@ -734,8 +748,14 @@ void audio_play(const char *name, int gain) {
        것입니다. */
     if (!g_parsed) parse_sounds();
 
+    /* A sample has no layers, so `!s->n` alone rejected every sound that
+       came from a WAV rather than a recipe -- which is why the door, the
+       switch and the keycard made no noise at all after they were imported.
+       샘플에는 레이어가 없으므로 `!s->n`만으로는 레시피가 아니라 WAV에서 온 모든
+       사운드를 거부했고, 그래서 문과 스위치와 열쇠는 이식된 뒤에도 아무 소리를 내지
+       않았습니다. */
     const Sound *s = find_sound(name);
-    if (!s || !s->n) { LeaveCriticalSection(&g_lock); return; }
+    if (!s || (!s->n && s->pcm_n <= 0)) { LeaveCriticalSection(&g_lock); return; }
 
     int slot = -1, oldest = -1, oldest_pos = -1;
     for (int i = 0; i < MAX_VOICES; i++) {
@@ -751,4 +771,42 @@ void audio_play(const char *name, int gain) {
     V->rng  = 0x2545f491u + (unsigned)slot * 2654435761u;
     for (int k = 0; k < MAX_LAYERS; k++) { V->phase[k] = 0.0f; V->hold[k] = 0.0f; }
     LeaveCriticalSection(&g_lock);
+}
+
+void audio_play(const char *name, int gain) { play_gain(name, gain); }
+
+/* The curve, in one place, so audio_play_at and the test that checks it
+   cannot drift apart. Returns what `gain` is worth from `pos`.
+   곡선을 한 곳에 둡니다. audio_play_at과 그것을 검사하는 테스트가 어긋날 수 없도록
+   하기 위함입니다. */
+static int gain_at(int gain, v3 pos) {
+    float dx = pos.x - g_listener.x;
+    float dy = pos.y - g_listener.y;
+    float dz = pos.z - g_listener.z;
+    float d2 = dx * dx + dy * dy + dz * dz;
+
+    /* Compared squared, so nothing beyond earshot pays for a square root.
+       제곱으로 비교하므로 가청 범위 밖의 것은 제곱근 비용을 치르지 않습니다. */
+    if (d2 >= AUDIO_FAR * AUDIO_FAR) return 0;
+    if (d2 <= AUDIO_NEAR * AUDIO_NEAR) return gain;
+
+    float d = sqrtf(d2);
+    float k = (AUDIO_FAR - d) / (AUDIO_FAR - AUDIO_NEAR);
+    return (int)(gain * k + 0.5f);
+}
+
+#ifdef HOT_RELOAD
+int audio_gain_at(int gain, v3 pos) { return gain_at(gain, pos); }
+#endif
+
+void audio_play_at(const char *name, int gain, v3 pos) {
+    int g = gain_at(gain, pos);
+
+    /* A sound that rounded to nothing still costs a voice, and voices are the
+       scarce thing in a firefight: twelve of them, and the allocator evicts
+       the OLDEST, so a distant inaudible shot can silence a near one.
+       0으로 반올림된 소리도 보이스를 차지하며, 총격전에서 희소한 것이 바로 보이스입니다.
+       열두 개뿐이고 할당기는 가장 *오래된* 것을 밀어내므로, 들리지도 않는 먼 총성이
+       가까운 소리를 끊을 수 있습니다. */
+    if (g > 0) play_gain(name, g);
 }

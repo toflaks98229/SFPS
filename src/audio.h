@@ -13,6 +13,22 @@
 #ifndef AUDIO_H
 #define AUDIO_H
 
+#include "m.h"        /* v3 -- a leaf type; audio stays free of everything else */
+
+/* HOW FAR A SOUND CARRIES, in metres.
+   Full volume within NEAR, silent at FAR, straight line between -- which is
+   Doom's model rather than an inverse square. Inverse square is what physics
+   does and it is wrong here: it drops off so fast that a monster two rooms
+   away is inaudible while one across the room is still deafening, and the
+   band where a sound is quiet-but-informative is where all the play is.
+   소리가 얼마나 멀리 가는지를 미터로 나타냅니다. NEAR 안에서는 최대 음량, FAR에서
+   무음, 그 사이는 직선입니다. 역제곱이 아니라 Doom의 모델입니다. 역제곱은 물리적으로는
+   맞지만 여기서는 틀립니다. 감쇠가 너무 빨라 두 방 건너의 몬스터는 들리지 않는데 같은
+   방의 몬스터는 여전히 귀청이 떨어지며, 정작 플레이가 일어나는 곳은 소리가 작지만
+   정보를 주는 그 구간입니다. */
+#define AUDIO_NEAR  5.0f
+#define AUDIO_FAR  34.0f
+
 /**
  * @brief 오디오 장치를 열고 믹싱 스레드를 시작합니다.
  *
@@ -37,6 +53,85 @@ void audio_shutdown(void);
  *             거리 감쇠 등은 레시피가 아닌 호출자에게 달려 있습니다.
  */
 void audio_play(const char *name, int gain);
+
+/**
+ * @brief Sets where the player's ears are, in world metres.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] pos The listener's position.
+ * @note Call once a frame, before anything plays. ::audio_play_at reads it to
+ *       work out how far away a sound is, and a stale listener makes every
+ *       sound in that frame loud or quiet by where the player USED to be.
+ * @note Read on the game thread only, by audio_play_at, so it needs no lock:
+ *       the mixer never sees it. That is deliberate -- a voice stores the gain
+ *       it was given and never looks at the world again, so the mixer stays
+ *       free of game state and a sound cannot change volume because the thing
+ *       that made it moved or died.
+ *
+ * 한국어
+ * ------
+ * @brief 플레이어의 귀가 어디 있는지를 월드 미터 단위로 설정합니다.
+ * @param[in] pos 청취자의 위치.
+ * @note 무언가 재생되기 전에 프레임당 한 번 호출하십시오. 오래된 청취자 위치는 그
+ *       프레임의 모든 소리를 플레이어가 *있었던* 자리 기준으로 키우거나 줄입니다.
+ * @note audio_play_at이 게임 스레드에서만 읽으므로 락이 필요 없습니다. 믹서는 이를
+ *       보지 않습니다. 이는 의도적입니다. 보이스는 주어진 음량을 저장할 뿐 다시는
+ *       월드를 보지 않으므로, 믹서는 게임 상태로부터 자유롭게 유지되고 소리를 낸 대상이
+ *       움직이거나 죽었다고 해서 소리의 음량이 변할 수 없습니다.
+ */
+void audio_listener(v3 pos);
+
+/**
+ * @brief Plays a sound at a world position, quieter the further away it is.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] name The sound's name.
+ * @param[in] gain 0-100, what it would be worth at the listener's feet.
+ * @param[in] pos  Where in the world it happens.
+ * @note Distance is taken ONCE, when the sound starts, the way Doom does it.
+ *       A one-shot effect that tracked its emitter would need the mixer to
+ *       read the world every buffer, and would swell as a corpse slid past.
+ * @note Beyond ::AUDIO_FAR nothing is queued at all, so a firefight across the
+ *       level cannot spend every voice on sounds that would be inaudible.
+ *
+ * 한국어
+ * ------
+ * @brief 월드의 한 지점에서 소리를 재생하며, 멀수록 조용해집니다.
+ * @param[in] name 사운드 이름.
+ * @param[in] gain 0-100. 청취자의 발밑에서 났다면 가졌을 음량.
+ * @param[in] pos  월드에서 그 일이 일어나는 지점.
+ * @note 거리는 소리가 *시작될 때* 한 번만 측정합니다. Doom과 같은 방식입니다. 발생원을
+ *       계속 따라가는 일회성 효과음은 믹서가 버퍼마다 월드를 읽어야 하고, 시체가 미끄러져
+ *       지나가면 소리가 커지게 됩니다.
+ * @note ::AUDIO_FAR를 넘으면 아예 큐에 넣지 않으므로, 레벨 반대편의 총격전이 들리지도
+ *       않을 소리에 보이스를 전부 쓰는 일이 없습니다.
+ */
+void audio_play_at(const char *name, int gain, v3 pos);
+
+#ifdef HOT_RELOAD
+/**
+ * @brief What `gain` is worth from `pos`, given the current listener.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] gain 0-100 at the listener's feet.
+ * @param[in] pos  Where the sound would happen.
+ * @return The attenuated gain, 0 past ::AUDIO_FAR.
+ * @note Exposed so a test can ask the SAME function ::audio_play_at uses. A
+ *       test that reimplemented the curve would pass while the game applied a
+ *       different one, which is the failure it exists to catch.
+ *
+ * 한국어
+ * ------
+ * @brief 현재 청취자를 기준으로 `pos`에서의 `gain` 값을 반환합니다.
+ * @note 테스트가 ::audio_play_at이 쓰는 것과 *같은* 함수에 물어볼 수 있도록 노출합니다.
+ *       곡선을 다시 구현한 테스트는 게임이 다른 곡선을 쓰는 동안에도 통과하며, 그것이
+ *       이 함수가 막으려는 실패입니다.
+ */
+int audio_gain_at(int gain, v3 pos);
+#endif
 
 /**
  * @brief 파싱된 캐시를 삭제하여 다음 재생 시 레시피 텍스트를 다시 읽도록 합니다.

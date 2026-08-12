@@ -2057,6 +2057,50 @@ The IMA tables are `$AdpcmStep` and `$AdpcmNext` for a related reason:
 PowerShell variable names are case-insensitive, and `$step = $STEP[$i]`
 overwrites the table with its own first lookup.
 
+### Distance, and the two models that were already there
+
+Everything positional played at whatever volume its caller felt like, so a door
+two rooms away opened at your feet. Fixing that turned up more than the missing
+attenuation.
+
+**There were already two distance models, and one was invisible.** `enemy.c`
+had carried its own falloff — `base * 12/(12+d)` — since before anything else
+had one. Fine while it was the only one; wrong the moment audio grew a second,
+because a monster and a door at the same distance became different volumes for
+no reason anyone could point at. The enemy curve also never reached zero, so a
+growl four rooms away was still a quarter as loud as one in your face.
+
+The surviving curve is **full inside 5m, silent at 34m, straight line
+between** — Doom's model, not an inverse square. Inverse square is what physics
+does and it is the wrong choice here: it falls off so fast that a monster two
+rooms away is inaudible while one across the room is deafening, and the band
+where a sound is *quiet but informative* is where all the play happens.
+
+Distance is taken **once**, when the sound starts. A one-shot that tracked its
+emitter would need the mixer to read the world every buffer, and the threading
+contract in `audio.c` exists precisely to keep game state off that thread. It
+also means a sound cannot swell because the corpse that made it slid past.
+Nothing past 34m is queued at all — voices are the scarce thing in a firefight
+(twelve, evicting the *oldest*), so a distant shot that rounds to silence could
+otherwise cut off a near one.
+
+**Three sounds had never once been audible**, and the same one-line rule was
+wrong in two places. `audio_play` rejected a sound with `!s->n` — right while
+every sound was a recipe, wrong the moment some were samples, because a sample
+has no layers. The door, the switch and the keycard were silent from the day
+they were imported. And `audio_render` had its *own copy* of that test, so
+fixing playback left the render path — the one the tests drive — still
+reporting silence. The test written to catch the first bug found the second.
+
+`sndtest` asks `audio_gain_at`, which is the function `audio_play_at` itself
+calls. A test that reimplemented the curve would pass while the game applied a
+different one, which is the exact failure it exists to catch.
+
+Left non-positional on purpose: the shot, the rack, the dry click, the grapple,
+taking damage, dying, and picking things up. Those all happen *at* the player,
+and attenuating them would be measuring the distance from the listener to
+itself.
+
 ### Two builds that sounded different
 
 Recipes hot-reload from `assets/sounds.txt`. Samples cannot — they are ADPCM

@@ -1172,6 +1172,14 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
            against where the player actually ends up this frame. The module
            owns the AI; the player's health is owned here. */
         if (!frozen) {
+            /* Before anything can play. Everything positional is measured
+               from here, so a listener set after the fact would price this
+               frame's sounds by where the player stood last frame.
+               무엇이든 재생되기 전에 설정합니다. 위치가 있는 모든 소리가 이 지점을
+               기준으로 측정되므로, 나중에 설정하면 이번 프레임의 소리가 지난 프레임의
+               위치로 값이 매겨집니다. */
+            audio_listener(g_player.pos);
+
             int dmg = enemy_update(&g_level, g_player.pos, dt);
             if (dmg > 0 && g_player.health > 0) {
                 g_player.health -= dmg;

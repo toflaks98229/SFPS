@@ -66,15 +66,27 @@ static float frand(void) {
 
 /**
  * @brief 특정 위치에서 사운드를 재생하며, 거리에 따라 볼륨을 조절합니다.
- * @param p 사운드 발생 위치.
- * @param name 재생할 사운드의 이름.
- * @param base 기본 볼륨 게인.
+ *
+ * ENGLISH
+ * -------
+ * A pass-through to ::audio_play_at, kept only so the call sites below stay
+ * short. It used to hold its own falloff -- base * 12/(12+d) -- which was the
+ * only distance model in the game and therefore fine, and stopped being fine
+ * the moment audio grew one: two curves meant a monster and a door at the same
+ * distance were different volumes for no reason anyone could point at, and the
+ * enemy one never reached zero, so a growl four rooms away was still a quarter
+ * as loud as one in your face.
+ *
+ * 한국어
+ * ------
+ * ::audio_play_at으로 넘기기만 하며, 아래의 호출부를 짧게 두려고 남겨 둡니다. 예전에는
+ * 자체 감쇠 곡선을 들고 있었고, 그것이 게임의 유일한 거리 모델인 동안에는 괜찮았습니다.
+ * 오디오 쪽에 곡선이 생기는 순간 괜찮지 않게 되었습니다. 곡선이 둘이면 같은 거리의
+ * 몬스터와 문이 아무도 설명할 수 없는 이유로 다른 음량이 되고, 몬스터 쪽 곡선은 0에
+ * 닿지 않아 네 방 건너의 으르렁거림이 코앞의 것의 4분의 1만큼 크게 들렸습니다.
  */
 static void play_at(v3 p, const char *name, int base) {
-    float dx = p.x - g_player_eye.x, dy = p.y - g_player_eye.y, dz = p.z - g_player_eye.z;
-    float d = sqrtf(dx*dx + dy*dy + dz*dz);
-    int g = (int)(base * (12.0f / (12.0f + d)));
-    if (g > 0) audio_play(name, g);
+    audio_play_at(name, base, p);
 }
 
 /* ---------------------------------------------------------- 발사체 로직 */

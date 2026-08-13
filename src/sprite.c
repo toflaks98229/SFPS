@@ -612,7 +612,7 @@ static GLuint g_pickup_atlas;
    branches on.
    그림이 어느 아틀라스로 향하는지입니다. 디코더는 공유되며 셀 크기와 이름-행 규칙만
    다르므로, 이것이 디코더가 분기하는 유일한 값입니다. */
-enum { SPR_DEST_MONSTER, SPR_DEST_WEAPON, SPR_DEST_PICKUP };
+enum { SPR_DEST_MONSTER, SPR_DEST_WEAPON, SPR_DEST_PICKUP, SPR_DEST_WALL };
 
 /* Defined below, next to the decoder it wraps; declared here because the
    pickup atlas is built above it and the alternative is moving a 200-line
@@ -871,10 +871,22 @@ static int b64val(char c) {
  */
 /* The shipped entry point: decode whatever bake.ps1 produced.
    배포 진입점입니다. bake.ps1이 생성한 것을 디코딩합니다. */
-static void decode_sprites(const char *p, unsigned char *buf, int W, int H, int dest);
+static int decode_sprites(const char *p, unsigned char *buf, int W, int H, int dest, const char *want);
 
 static void overlay_drawn_sprites(unsigned char *buf, int W, int H, int dest) {
-    decode_sprites(data_text(DATA_SPRITES), buf, W, H, dest);
+    decode_sprites(data_text(DATA_SPRITES), buf, W, H, dest, 0);
+}
+
+int sprite_wall(const char *name, unsigned char *rgba) {
+    /* Cleared first, so a name that matches nothing leaves a known buffer
+       rather than whatever the caller's allocation happened to hold. A missing
+       texture should look like a missing texture, not like noise.
+       먼저 지웁니다. 어떤 것과도 일치하지 않는 이름이 호출자의 할당에 남아 있던 값이
+       아니라 알려진 버퍼를 남기도록 하기 위해서입니다. 없는 텍스처는 잡음이 아니라 없는
+       텍스처처럼 보여야 합니다. */
+    for (int i = 0; i < SPR_WALL * SPR_WALL * 4; i++) rgba[i] = 0;
+    return decode_sprites(data_text(DATA_SPRITES), rgba,
+                          SPR_WALL, SPR_WALL, SPR_DEST_WALL, name) > 0;
 }
 
 /* The decoder proper, over a caller-supplied text.
@@ -898,8 +910,10 @@ static void overlay_drawn_sprites(unsigned char *buf, int W, int H, int dest) {
  * 다시 빌드해서 화면을 보는 것뿐입니다. 이 코덱이 형식이 바뀌는 동안에도 테스트가 전혀
  * 없었던 경위가 그것입니다.
  */
-static void decode_sprites(const char *p, unsigned char *buf, int W, int H, int dest) {
-    if (!p || !*p) return;
+static int decode_sprites(const char *p, unsigned char *buf, int W, int H,
+                          int dest, const char *want) {
+    int placed = 0;
+    if (!p || !*p) return 0;
 
     /* One cell size per destination. The parser is shared because the
        format is: only where a sprite LANDS depends on what is being
@@ -909,9 +923,11 @@ static void decode_sprites(const char *p, unsigned char *buf, int W, int H, int 
        따라 달라지는 것은 스프라이트가 *어디에 놓이는가*뿐이며, 무기를 위한 두 번째
        디코더 사본은 다른 버그를 가진 같은 코드가 될 뿐입니다. */
     const int cell_w = (dest == SPR_DEST_WEAPON) ? WPN_CW
-                     : (dest == SPR_DEST_PICKUP) ? PK_CW : SPR_CW;
+                     : (dest == SPR_DEST_PICKUP) ? PK_CW
+                     : (dest == SPR_DEST_WALL)   ? SPR_WALL : SPR_CW;
     const int cell_h = (dest == SPR_DEST_WEAPON) ? WPN_CH
-                     : (dest == SPR_DEST_PICKUP) ? PK_CH : SPR_CH;
+                     : (dest == SPR_DEST_PICKUP) ? PK_CH
+                     : (dest == SPR_DEST_WALL)   ? SPR_WALL : SPR_CH;
 
     unsigned char pal[16][3] = {{0,0,0}};
     int n_pal = 0;
@@ -999,6 +1015,24 @@ static void decode_sprites(const char *p, unsigned char *buf, int W, int H, int 
             /* Pickups are one drawing each; the digit only keeps the naming
                rule uniform. */
             frame = 0;
+        } else if (dest == SPR_DEST_WALL) {
+            /* THE WHOLE NAME, with no frame digit split off it. A surface is
+               one drawing and `wall_brick` ends in a letter, so the trailing
+               character is part of the name rather than a frame number -- the
+               split every other destination performs would ask for
+               `wall_bric` and find nothing.
+               Matched against ONE requested name rather than a table, because
+               a wall is fetched on demand by the material that wants it: there
+               is no atlas of every surface to fill, and building one would
+               carry every texture in the game for a level that uses three.
+               프레임 숫자를 떼지 않은 *이름 전체*입니다. 표면은 그림 하나이고
+               `wall_brick`은 글자로 끝나므로 마지막 문자는 프레임 번호가 아니라 이름의
+               일부입니다. 다른 대상들이 하는 분리는 `wall_bric`을 찾게 됩니다.
+               표가 아니라 요청된 이름 *하나*와 대조하는 이유는, 벽이 그것을 원하는 재질에
+               의해 필요할 때 가져와지기 때문입니다. 채워야 할 전체 표면 아틀라스가 없으며,
+               만든다면 셋만 쓰는 레벨을 위해 게임의 모든 텍스처를 싣게 됩니다. */
+            type  = (want && txt_is(nm, nm_len, want)) ? 0 : -1;
+            frame = 0;
         } else if (dest == SPR_DEST_WEAPON) {
             type = weapon_type_for_prefix(nm, nm_len - 1);
             if (frame < 0 || frame >= WPN_FRAMES) frame = 0;
@@ -1061,8 +1095,11 @@ static void decode_sprites(const char *p, unsigned char *buf, int W, int H, int 
            파싱하는 것과 같은 이유입니다. */
         if (type < 0) continue;
 
-        int ox = (dest == SPR_DEST_PICKUP) ? type * cell_w : frame * cell_w;
-        int oy = (dest == SPR_DEST_PICKUP) ? 0               : type  * cell_h;
+        int ox = (dest == SPR_DEST_WALL)   ? 0
+               : (dest == SPR_DEST_PICKUP) ? type * cell_w : frame * cell_w;
+        int oy = (dest == SPR_DEST_WALL)   ? 0
+               : (dest == SPR_DEST_PICKUP) ? 0             : type  * cell_h;
+        placed++;
         int px_i = 0, total = sw * sh;
 
         /* A DRAWN FRAME OWNS ITS CELL: clear the generated creature out of it
@@ -1204,6 +1241,7 @@ static void decode_sprites(const char *p, unsigned char *buf, int W, int H, int 
             }
         }
     }
+    return placed;
 }
 
 GLuint sprite_atlas(void) {
@@ -1516,7 +1554,7 @@ int weapon_muzzle(int type, int frame, float *u, float *v) {
    sprite_dump_ppm과 같이 가드되므로 배포 바이너리에는 둘 다 들어가지 않습니다. */
 void sprite_decode_text(const char *text, unsigned char *rgba, int W, int H,
                         int weapon) {
-    decode_sprites(text, rgba, W, H, weapon ? SPR_DEST_WEAPON : SPR_DEST_MONSTER);
+    decode_sprites(text, rgba, W, H, weapon ? SPR_DEST_WEAPON : SPR_DEST_MONSTER, 0);
 }
 
 /* The alphabet, one character at a time, so tools/sprtest.c can hold it against

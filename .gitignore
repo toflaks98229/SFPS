@@ -37,3 +37,14 @@ assets/sounds/.freedoom-cache/
 *.user
 Thumbs.db
 desktop.ini
+
+# Freedoom wall patches downloaded by assets/sprites/import-walls.py. Same
+# reasoning as the two caches above: upstream art at its original size, kept
+# only so a re-run does not re-fetch. What the project carries is the converted
+# 128x128 PNGs beside it, which ARE committed.
+assets/sprites/.freedoom-walls/
+
+# Python leaves this behind when a tool imports another tool -- sprtest's
+# verification does that to reuse the importer's PNG reader rather than write a
+# second one.
+__pycache__/

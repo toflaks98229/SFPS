@@ -38,6 +38,17 @@
 #define SPR_CW 64           ///< @brief Monster frame cell width, pixels. / 몬스터 프레임 셀의 너비 (픽셀).
 #define SPR_CH 96           ///< @brief Monster frame cell height, pixels. / 몬스터 프레임 셀의 높이 (픽셀).
 
+/* THE EDGE OF AN IMPORTED SURFACE, in pixels. 128 because that is what Doom's
+   wall patches are, and resampling them would be inventing detail the artist
+   did not draw. tex.c's own buffer is 256 and repeats this twice, which is a
+   whole number of tiles and therefore seamless -- a size that did not divide
+   256 would put a visible join down every wall in the game.
+   가져온 표면 한 변의 픽셀 수입니다. 128인 이유는 Doom의 벽 패치가 그 크기이고, 다시
+   샘플링하면 작가가 그리지 않은 디테일을 지어내게 되기 때문입니다. tex.c의 버퍼는
+   256이며 이것을 두 번 반복하는데, 타일 수가 정수이므로 이음매가 없습니다. 256을 나누어
+   떨어지지 않는 크기는 게임의 모든 벽에 눈에 보이는 이음매를 남깁니다. */
+#define SPR_WALL 128
+
 #define PK_CW 48            ///< @brief Pickup cell width, pixels. / 아이템 셀의 너비 (픽셀).
 #define PK_CH 48            ///< @brief Pickup cell height, pixels. / 아이템 셀의 높이 (픽셀).
 
@@ -205,6 +216,32 @@ enum {
  * @warning 최초 호출 시 활성 GL 컨텍스트가 필요합니다. 이 텍스처는 모듈이 소유하므로
  *          호출자가 삭제해서는 안 됩니다.
  */
+/**
+ * @brief Fills `rgba` with one imported surface, by name.
+ *
+ * ENGLISH
+ * -------
+ * @param[in]  name The baked drawing's name, e.g. "wall_brick".
+ * @param[out] rgba ::SPR_WALL x ::SPR_WALL x 4 bytes, written in full.
+ * @return 1 if a drawing of that name was found, 0 if none was.
+ * @note Fetched ON DEMAND by the material that wants it rather than built into
+ *       an atlas. There is no atlas of every surface to fill, and making one
+ *       would carry every texture in the game for a level that uses three.
+ * @note Zeroes the buffer first, so a name that matches nothing leaves a known
+ *       result. A missing texture should look like a missing texture rather
+ *       than like whatever the caller's allocation happened to hold.
+ *
+ * 한국어
+ * ------
+ * @brief 이름으로 가져온 표면 하나를 `rgba`에 채웁니다.
+ * @return 해당 이름의 그림을 찾으면 1, 없으면 0입니다.
+ * @note 아틀라스에 미리 넣지 않고, 그것을 원하는 재질이 *필요할 때* 가져옵니다. 채워야 할
+ *       전체 표면 아틀라스가 없으며, 만든다면 셋만 쓰는 레벨을 위해 게임의 모든 텍스처를
+ *       싣게 됩니다.
+ * @note 먼저 버퍼를 0으로 채우므로 일치하는 것이 없는 이름도 알려진 결과를 남깁니다.
+ */
+int sprite_wall(const char *name, unsigned char *rgba);
+
 GLuint sprite_atlas(void);
 
 /**

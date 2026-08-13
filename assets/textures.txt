@@ -276,3 +276,80 @@ base 168 128 74          # tan hemp
 ribs 10 35                # the twist -- period 10px, 35% light/dark
 grain 12                  # fibre noise
 gloss 8                   # faint sheen, mostly matte
+
+# --- imported surfaces ---------------------------------------------------
+#
+# Freedoom wall patches, brought across by assets/sprites/import-walls.py and
+# baked by bake.ps1 into the same indexed data the monsters use.
+#
+# `image <tiles>` fills the buffer from the drawing that shares this
+# material's NAME, repeated `tiles` times. The name is the key precisely so
+# there is no second place for it to disagree: a material called wall_brick
+# fetches wall_brick and nothing else can be written.
+#
+# 2 tiles because the source is 128 and the buffer is 256. Any other number
+# would land the wrap somewhere other than the buffer edge, and a seam that is
+# not on the edge is a seam you can see.
+#
+# THE OPS AFTER `image` ACT ON THE IMAGE, which is the whole reason the door is
+# one drawing rather than three: the key colour is a tint, not a bitmap.
+#
+# Freedoom 벽 패치이며, assets/sprites/import-walls.py가 가져오고 bake.ps1이 몬스터와
+# 같은 인덱스 데이터로 굽습니다. `image <tiles>`는 이 재질의 *이름*과 같은 그림으로 버퍼를
+# 채웁니다. 이름이 키인 이유는 어긋날 두 번째 장소를 만들지 않기 위해서입니다.
+# 원본이 128이고 버퍼가 256이므로 2입니다. 다른 수는 되감김을 가장자리가 아닌 곳에
+# 떨어뜨리며, 가장자리가 아닌 이음매는 눈에 보이는 이음매입니다.
+# `image` 뒤의 연산은 이미지에 작용합니다. 문이 그림 셋이 아니라 하나인 이유가 그것입니다.
+
+t wall_brick
+image 2
+
+t wall_stone
+image 2
+
+t wall_rough
+image 2
+
+t wall_metal
+image 2
+gloss 30
+
+t wall_plain
+image 2
+
+t wall_marble
+image 2
+gloss 45
+
+t wall_track
+image 2
+gloss 25
+
+# The door, and the same door wearing each key's colour. Doom ships DOORRED,
+# DOORBLU and DOORYEL as three textures; here they are three recipes over one
+# drawing, which is the bargain every other material in this file already
+# strikes. `tint` spreads colour per brick when there are bricks and over the
+# whole surface when there are none, so on a door face it reads as the panel
+# being painted rather than as a wash laid on top.
+#
+# 문, 그리고 각 열쇠 색을 입은 같은 문입니다. Doom은 DOORRED/DOORBLU/DOORYEL을 세 텍스처로
+# 내놓지만, 여기서는 그림 하나 위의 레시피 셋입니다.
+
+t wall_door
+image 2
+gloss 35
+
+t door_red
+image 2
+tint 120 -40 -40
+gloss 35
+
+t door_blue
+image 2
+tint -40 -20 130
+gloss 35
+
+t door_yellow
+image 2
+tint 110 90 -50
+gloss 35

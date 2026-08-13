@@ -381,6 +381,98 @@ int main(void) {
         ok(1, "empty and NULL texts are handled");
     }
 
+
+    /* --- imported surfaces reach the caller ------------------------------
+     *
+     * sprite_wall is the whole of the wall pipeline that can be checked
+     * without a GL context: the decode and the name lookup. What follows it in
+     * tex.c is a copy into a buffer and an upload, and neither can be wrong in
+     * a way this would not catch first.
+     *
+     * The failure being guarded is NOT "no pixels". A wall that decoded to
+     * nothing would be obvious the moment anyone looked at the game. The one
+     * that hides is a wall that decodes to a FLAT COLOUR -- a palette read
+     * wrongly, a run length misread as an index -- because a flat brown wall
+     * looks like a wall until you stand next to it.
+     *
+     * GL 컨텍스트 없이 검사할 수 있는 벽 파이프라인 전체입니다. 디코드와 이름 조회가
+     * 그것이고, tex.c에서 뒤따르는 것은 버퍼 복사와 업로드뿐입니다.
+     *
+     * 막으려는 실패는 "픽셀 없음"이 아닙니다. 아무것도 디코드되지 않은 벽은 누구든 게임을
+     * 보는 순간 드러납니다. 숨는 것은 *단색*으로 디코드되는 벽입니다. 팔레트를 잘못 읽거나
+     * 실행 길이를 인덱스로 오독한 경우이며, 균일한 갈색 벽은 바로 옆에 설 때까지 벽처럼
+     * 보이기 때문입니다.
+     */
+    {
+        static unsigned char wall[SPR_WALL * SPR_WALL * 4];
+
+        ok(sprite_wall("wall_brick", wall), "an imported wall decodes by name");
+
+        /* Every pixel opaque: a wall has no holes, and index 0 -- the sprite
+           format's transparent -- must never reach one.
+           모든 픽셀이 불투명합니다. 벽에는 구멍이 없으며, 스프라이트 형식의 투명 인덱스인
+           0이 벽에 닿아서는 안 됩니다. */
+        int clear = 0;
+        for (int i = 0; i < SPR_WALL * SPR_WALL; i++)
+            if (wall[i * 4 + 3] == 0) clear++;
+        okd(clear == 0, "and covers its whole face with no holes", clear, 0);
+
+        /* EXACT distinct colours, not coarse buckets. The first version of
+           this counted 2-bit-per-channel buckets and scored 3 against a
+           threshold of 3 -- passing with no margin at all, on a brick texture
+           that is nearly monochrome by nature. A check that only just passes
+           on correct data cannot be trusted to fail on wrong data.
+           The palette holds 16 and index 0 is the format's transparent, so a
+           correctly decoded wall should reach most of the remaining 15.
+           거친 버킷이 아니라 *정확한* 색 수입니다. 첫 판은 채널당 2비트 버킷을 세어
+           기준 3에 3점, 즉 여유 없이 통과했습니다. 본래 거의 단색인 벽돌 텍스처에서
+           그랬습니다. 올바른 데이터에서 간신히 통과하는 검사는 잘못된 데이터에서 실패할
+           것이라고 믿을 수 없습니다. 팔레트는 16개이고 인덱스 0은 형식의 투명이므로,
+           올바로 디코드된 벽은 나머지 15개의 대부분에 닿아야 합니다. */
+        unsigned seen[256]; int kinds = 0;
+        for (int i = 0; i < 256; i++) seen[i] = 0xFFFFFFFFu;
+        for (int i = 0; i < SPR_WALL * SPR_WALL; i++) {
+            unsigned c = ((unsigned)wall[i*4] << 16) |
+                         ((unsigned)wall[i*4+1] << 8) | wall[i*4+2];
+            int k = 0;
+            while (k < kinds && seen[k] != c) k++;
+            if (k == kinds && kinds < 256) seen[kinds++] = c;
+        }
+        /* 5, against a MEASURED 8. The source brick has 21 colours and the
+           median cut keeps 8 of them, confirmed by dumping the decoded surface
+           and looking at it -- it is a brick wall. A threshold equal to the
+           measurement passes with no margin and so proves nothing; this one
+           still fails the collapse it exists to catch, which is a wall
+           arriving as one or two colours.
+           실측 8에 대해 5입니다. 원본 벽돌은 21색이고 중앙값 분할이 그중 8을 남기며,
+           디코드된 표면을 덤프해 눈으로 확인했습니다. 벽돌 벽이 맞습니다. 실측과 같은
+           기준은 여유 없이 통과하므로 아무것도 증명하지 못합니다. 이 값은 이 검사가
+           막으려는 붕괴, 즉 벽이 한두 색으로 도착하는 경우에는 여전히 실패합니다. */
+        okd(kinds >= 5, "and uses its palette rather than one flat colour",
+            kinds, 5);
+
+        /* The door is a separate drawing, not the brick under another name.
+           문은 다른 이름의 벽돌이 아니라 별개의 그림입니다. */
+        static unsigned char door[SPR_WALL * SPR_WALL * 4];
+        ok(sprite_wall("wall_door", door), "the door face decodes too");
+        int same = 1;
+        for (int i = 0; i < SPR_WALL * SPR_WALL * 4; i++)
+            if (door[i] != wall[i]) { same = 0; break; }
+        ok(!same, "and is a different drawing from the brick");
+
+        /* A name nobody baked leaves a cleared buffer and says so, rather than
+           handing back the previous wall -- which is what a cache keyed on
+           nothing would do.
+           구워지지 않은 이름은 이전 벽을 돌려주지 않고 지워진 버퍼를 남기며 그렇게
+           보고합니다. */
+        ok(!sprite_wall("wall_no_such_thing", wall),
+           "an unimported name reports that it found nothing");
+        int nonzero = 0;
+        for (int i = 0; i < SPR_WALL * SPR_WALL * 4; i++) if (wall[i]) nonzero++;
+        okd(nonzero == 0, "and leaves the buffer cleared rather than stale",
+            nonzero, 0);
+    }
+
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall sprite codec checks passed\n",
            fails);
     return fails != 0;

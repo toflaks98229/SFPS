@@ -30,6 +30,7 @@
 #include "data.h"
 #include "txt.h"
 #include "render.h"   /* rd_proc -- a material selects the shader it draws with */
+#include "sprite.h"   /* sprite_wall -- imported surfaces, fetched by name */
 #include "diag.h"
 #include <math.h>
 
@@ -51,7 +52,8 @@
 enum {
     OP_BASE, OP_BRICK, OP_TINT, OP_GRAIN, OP_BEVEL, OP_MORTAR,
     OP_BRUSH, OP_BLOTCH, OP_SCRATCH, OP_SEAM,
-    OP_WOOD, OP_CHECK, OP_RIBS, OP_BLUE, OP_GLOSS, OP_PROC, OP_BUMP, OP_COUNT
+    OP_WOOD, OP_CHECK, OP_RIBS, OP_BLUE, OP_GLOSS, OP_PROC, OP_BUMP,
+    OP_IMAGE, OP_COUNT
 };
 
 static const struct { const char *name; unsigned char arity; } OPS[OP_COUNT] = {
@@ -59,7 +61,7 @@ static const struct { const char *name; unsigned char arity; } OPS[OP_COUNT] = {
     {"bevel",   3}, {"mortar",  4}, {"brush",   3}, {"blotch",  2},
     {"scratch", 2}, {"seam",    3}, {"wood",    4}, {"check",   2},
     {"ribs",    2}, {"blue",    1}, {"gloss",   1}, {"proc",    2},
-    {"bump",    1}
+    {"bump",    1}, {"image",   1}
 };
 
 typedef struct { unsigned char op; short a[4]; } Op;
@@ -317,6 +319,71 @@ static unsigned char clamp8(float v) {
     return (unsigned char)(v < 0.0f ? 0 : v > 1.0f ? 255 : v * 255.0f);
 }
 
+/* Fills the whole buffer from an imported bitmap, repeated `tiles` times.
+ *
+ * ENGLISH
+ * -------
+ * THE MATERIAL'S OWN NAME IS THE LOOKUP KEY, which is why `image` takes a
+ * repeat count and not a filename. Every other op in this file takes integers,
+ * and adding string arguments to the recipe grammar for one op would be a
+ * second kind of operand for every op that follows it to be parsed around. A
+ * material called `wall_brick` fetches the drawing called `wall_brick`: one
+ * name, one thing, and no way to write the two so they disagree.
+ *
+ * The repeat is why SPR_WALL divides SIZE. 128 into 256 is exactly two tiles,
+ * so the wrap lands on the buffer edge where GL_REPEAT already joins it. A
+ * size that did not divide would put a visible seam down every wall.
+ *
+ * Returns 0 when no drawing of that name was baked, and the caller then leaves
+ * the recipe's other ops to paint the surface -- so a material whose art has
+ * not been imported yet degrades to its written recipe rather than to black.
+ *
+ * 한국어
+ * ------
+ * 재질 자신의 이름이 조회 키이며, 그래서 `image`는 파일명이 아니라 반복 횟수를 받습니다.
+ * 이 파일의 다른 모든 연산은 정수를 받으며, 연산 하나를 위해 레시피 문법에 문자열 인자를
+ * 더하면 그 뒤의 모든 연산이 우회해서 파싱해야 할 두 번째 종류의 피연산자가 생깁니다.
+ * `wall_brick`이라는 재질은 `wall_brick`이라는 그림을 가져옵니다. 이름 하나에 사물 하나,
+ * 그리고 둘이 어긋나게 쓸 방법이 없습니다.
+ *
+ * SPR_WALL이 SIZE를 나누어떨어져야 하는 이유가 이 반복입니다. 256 안의 128은 정확히 두
+ * 타일이므로 되감김이 버퍼 가장자리에 떨어지고, 그곳은 GL_REPEAT가 이미 잇는 자리입니다.
+ *
+ * 그 이름의 그림이 구워지지 않았으면 0을 반환하고, 호출자는 레시피의 나머지 연산이 표면을
+ * 칠하도록 둡니다. 아직 아트를 가져오지 않은 재질이 검은색이 아니라 적힌 레시피로
+ * 물러납니다.
+ */
+static int fill_from_image(const char *name, unsigned char *buf, int tiles) {
+    if (tiles < 1) tiles = 1;
+
+    unsigned char *src = HeapAlloc(GetProcessHeap(), 0, SPR_WALL * SPR_WALL * 4);
+    if (!src) return 0;
+
+    if (!sprite_wall(name, src)) {
+        HeapFree(GetProcessHeap(), 0, src);
+        return 0;
+    }
+
+    for (int y = 0; y < SIZE; y++) {
+        int sy = (y * tiles * SPR_WALL / SIZE) % SPR_WALL;
+        for (int x = 0; x < SIZE; x++) {
+            int sx = (x * tiles * SPR_WALL / SIZE) % SPR_WALL;
+            const unsigned char *s = &src[(sy * SPR_WALL + sx) * 4];
+            unsigned char *d = &buf[(y * SIZE + x) * 4];
+            d[0] = s[0]; d[1] = s[1]; d[2] = s[2];
+            /* Alpha is gloss here, not transparency -- see the note on GLOSS in
+               textures.txt. An imported wall is matte unless its recipe says
+               otherwise, so the drawing's own alpha is deliberately dropped.
+               여기서 알파는 투명도가 아니라 광택입니다. 가져온 벽은 레시피가 달리 말하지
+               않는 한 무광이므로, 그림 자신의 알파는 일부러 버립니다. */
+            d[3] = 0;
+        }
+    }
+
+    HeapFree(GetProcessHeap(), 0, src);
+    return 1;
+}
+
 GLuint tex_make(const char *name) {
     Op ops[MAX_OPS];
     int n_ops = parse_recipe(name, ops);
@@ -324,9 +391,25 @@ GLuint tex_make(const char *name) {
 
     unsigned char *buf = HeapAlloc(GetProcessHeap(), 0, SIZE * SIZE * 4);
 
+    /* An imported surface paints the whole buffer before any per-pixel op
+       runs, so the ops that follow it act ON the image: `tint` colours a door
+       by its key, `grain` ages a wall. That ordering is what lets one bitmap
+       become three locked doors instead of three bitmaps.
+       가져온 표면은 픽셀 단위 연산이 돌기 전에 버퍼 전체를 칠하므로, 뒤따르는 연산들이
+       그 이미지에 *작용*합니다. `tint`는 문을 열쇠 색으로 물들이고 `grain`은 벽을
+       낡힙니다. 비트맵 하나가 비트맵 셋이 아니라 잠긴 문 셋이 되게 하는 것이 이 순서입니다. */
+    int imaged = 0;
+    for (int i = 0; i < n_ops; i++)
+        if (ops[i].op == OP_IMAGE)
+            imaged = fill_from_image(name, buf, ops[i].a[0]);
+
     for (int y = 0; y < SIZE; y++) {
         for (int x = 0; x < SIZE; x++) {
             Px px = {0};
+            if (imaged) {
+                const unsigned char *q = &buf[(y * SIZE + x) * 4];
+                px.r = q[0]; px.g = q[1]; px.b = q[2];
+            }
             /* Seeding from the op index keeps two `brush` lines in the same
                recipe from producing identical noise. */
             for (int i = 0; i < n_ops; i++)

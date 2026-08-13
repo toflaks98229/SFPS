@@ -52,26 +52,26 @@ next vault
 
 s
 floor -50  ceil 600
-mat floor ptile  wall pbrick  ceil ppanel
+mat floor ptile  wall wall_brick  ceil ppanel
 p
    -2000 -1400   1650 -1400   2850 450   1650 2150
    -2000 2150   -3000 450
 
 s
 floor 45  ceil 600
-mat floor ppanel  wall ppanel  ceil ppanel
+mat floor ppanel  wall wall_plain  ceil ppanel
 p
    -800 -600   -400 -600   -400 -200   -800 -200
 
 s
 floor 90  ceil 600
-mat floor phex  wall phex  ceil ppanel
+mat floor phex  wall wall_metal  ceil ppanel
 p
    400 -900   1000 -900   1000 -500   400 -500
 
 s
 floor 135  ceil 600
-mat floor pmarble  wall pmarble  ceil ppanel
+mat floor pmarble  wall wall_marble  ceil ppanel
 p
    400 -500   1000 -500   1000 -100   400 -100
 
@@ -83,7 +83,7 @@ p
 
 s
 floor -120  ceil 600
-mat floor prust  wall prust  ceil ppanel
+mat floor prust  wall wall_rough  ceil ppanel
 p
    -300 950   300 950   300 1550   -300 1550
 
@@ -114,21 +114,21 @@ e ammo 0 0
 s
 floor -50  ceil -50
 door up 400
-mat floor pgrid  wall pgrid  ceil pgrid
+mat floor pgrid  wall wall_door  ceil pgrid
 p
    1750 -300   2150 -300   2150 300   1750 300
 
 s
 floor -50  ceil 320
 door x 500 speed 260 tag 1
-mat floor prust  wall prust  ceil ppanel
+mat floor prust  wall wall_track  ceil ppanel
 p
    -1900 700   -1500 700   -1500 1300   -1900 1300
 
 s
 floor -50  ceil 340
 door up 380 key red
-mat floor plava  wall pbrick  ceil ppanel
+mat floor plava  wall door_red  ceil ppanel
 p
    700 1500   1200 1500   1200 2000   700 2000
 
@@ -164,7 +164,7 @@ start 0 700 0
 
 s
 floor 0  ceil 450
-mat floor pmarble  wall phex  ceil pgrid
+mat floor pmarble  wall wall_stone  ceil pgrid
 p
    -900 -900   900 -900   900 900   -900 900
 

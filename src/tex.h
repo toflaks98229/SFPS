@@ -66,6 +66,9 @@
  */
 #define TEX_NAME_MAX 16
 
+/** @brief Edge of a rasterised material, in pixels. / 래스터화된 재질 한 변의 픽셀 수. */
+#define TEX_SIZE 256
+
 /* --- Type definitions / 타입 정의 --- */
 
 /**
@@ -204,6 +207,25 @@ void tex_use(const Mat *m);
  * @warning 반환된 텍스처는 호출자의 소유입니다. 단, ::tex_mat을 통해 얻은 경우에는
  *          캐시가 소유하며 ::tex_flush 시점에 해제됩니다.
  */
+/**
+ * @brief Rasterises one material into `buf`, touching no GL.
+ *
+ * @param[in]  name The material's name in assets/textures.txt.
+ * @param[out] buf  ::TEX_SIZE x ::TEX_SIZE x 4 bytes, RGB plus gloss in alpha.
+ * @return 1 if the material exists, 0 if no recipe of that name was found.
+ * @note Split from ::tex_make so a headless test can inspect exactly what the
+ *       GPU would receive. Three bugs shipped in these pixels and none was
+ *       visible from outside -- each still built a texture, uploaded it and
+ *       drew it, so the only witness was the screen, where a blown-out wall
+ *       under a coloured light looks exactly like a wall.
+ *
+ * @brief GL을 건드리지 않고 재질 하나를 `buf`에 래스터화합니다.
+ * @note 헤드리스 테스트가 GPU에 전달될 내용을 그대로 검사할 수 있도록 ::tex_make에서
+ *       분리했습니다. 이 픽셀 단계에서 버그 셋이 커밋되었고 어느 것도 밖에서 보이지
+ *       않았습니다.
+ */
+int tex_pixels(const char *name, unsigned char *buf);
+
 GLuint tex_make(const char *name);
 
 /**

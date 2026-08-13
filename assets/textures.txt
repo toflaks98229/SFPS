@@ -302,27 +302,27 @@ gloss 8                   # faint sheen, mostly matte
 # `image` 뒤의 연산은 이미지에 작용합니다. 문이 그림 셋이 아니라 하나인 이유가 그것입니다.
 
 t wall_brick
-image 2
+image wall_brick 2
 
 t wall_stone
-image 2
+image wall_stone 2
 
 t wall_rough
-image 2
+image wall_rough 2
 
 t wall_metal
-image 2
+image wall_metal 2
 gloss 30
 
 t wall_plain
-image 2
+image wall_plain 2
 
 t wall_marble
-image 2
+image wall_marble 2
 gloss 45
 
 t wall_track
-image 2
+image wall_track 2
 gloss 25
 
 # The door, and the same door wearing each key's colour. Doom ships DOORRED,
@@ -336,20 +336,20 @@ gloss 25
 # 내놓지만, 여기서는 그림 하나 위의 레시피 셋입니다.
 
 t wall_door
-image 2
+image wall_door 1
 gloss 35
 
 t door_red
-image 2
+image wall_door 1
 tint 120 -40 -40
 gloss 35
 
 t door_blue
-image 2
+image wall_door 1
 tint -40 -20 130
 gloss 35
 
 t door_yellow
-image 2
+image wall_door 1
 tint 110 90 -50
 gloss 35

@@ -47,6 +47,101 @@ static void okd(int cond, const char *what, int got, int want) {
     if (!cond) fails++;
 }
 
+
+/* --- imported surfaces, as the GPU would receive them --------------------
+ *
+ * Three bugs shipped in these pixels and none of them was visible from
+ * outside. Each still parsed a recipe, still built a texture, still uploaded
+ * it and still drew it -- so the only witness was the screen, and on the
+ * screen a blown-out wall under a coloured light looks exactly like a wall.
+ *
+ *   1. Px carries 0..1 and the image was copied in as raw 0..255 bytes, so
+ *      every channel clamped to white.
+ *   2. `image` keyed on the MATERIAL'S name, which the keyed doors cannot use:
+ *      three of them share one drawing, so door_red found nothing.
+ *   3. `tint` scales by the per-brick hash, which is zero when no `brick` op
+ *      ran -- so tinting an imported door did nothing at all.
+ *
+ * All three collapse a surface towards ONE COLOUR or towards its untinted
+ * self, so that is what these check.
+ *
+ * 이 픽셀 단계에서 버그 셋이 커밋되었고 어느 것도 밖에서 보이지 않았습니다. 셋 다 레시피를
+ * 파싱하고 텍스처를 만들고 업로드하고 그렸으므로, 증인은 화면뿐이었는데 색 조명 아래 날아간
+ * 벽은 벽과 똑같아 보입니다. 셋 다 표면을 *한 색*으로, 또는 색조 이전의 자기 자신으로
+ * 무너뜨리므로 그것을 검사합니다. */
+static int check_imported(void) {
+    static unsigned char a[TEX_SIZE * TEX_SIZE * 4];
+    static unsigned char b[TEX_SIZE * TEX_SIZE * 4];
+    int bad = 0;
+
+    printf("\n  --- imported surfaces ---\n");
+
+    if (!tex_pixels("wall_brick", a)) {
+        printf("  %-46s %s\n", "wall_brick has a recipe", "FAIL");
+        return 1;
+    }
+
+    /* Distinct colours. White-clamped or image-less surfaces collapse to one.
+       구별되는 색의 수입니다. 흰색으로 포화되었거나 이미지가 없는 표면은 하나로
+       무너집니다. */
+    unsigned seen[64]; int kinds = 0;
+    for (int i = 0; i < TEX_SIZE * TEX_SIZE && kinds < 64; i++) {
+        unsigned c = ((unsigned)a[i*4] << 16) | ((unsigned)a[i*4+1] << 8) | a[i*4+2];
+        int k = 0;
+        while (k < kinds && seen[k] != c) k++;
+        if (k == kinds) seen[kinds++] = c;
+    }
+    printf("  %-46s %4d / %4d  %s\n", "a brick wall is not one flat colour",
+           kinds, 5, kinds >= 5 ? "ok" : "FAIL");
+    if (kinds < 5) bad++;
+
+    /* Not white. The /255 bug pinned all three channels at 255, which the
+       count above would still pass if the image had any variation left.
+       흰색이 아닙니다. /255 버그는 세 채널 모두를 255에 고정시켰는데, 이미지에 변화가
+       남아 있었다면 위의 개수 검사는 통과했을 것입니다. */
+    long sum = 0;
+    for (int i = 0; i < TEX_SIZE * TEX_SIZE; i++)
+        sum += a[i*4] + a[i*4+1] + a[i*4+2];
+    int mean = (int)(sum / (TEX_SIZE * (long)TEX_SIZE * 3));
+    printf("  %-46s %4d / %4d  %s\n", "and is not blown out to white",
+           mean, 235, mean < 235 ? "ok" : "FAIL");
+    if (mean >= 235) bad++;
+
+    /* A keyed door differs from the plain one it is drawn from. This is the
+       whole of bugs 2 and 3: both left door_red identical to wall_door.
+       열쇠 문은 그것이 그려져 나온 일반 문과 달라야 합니다. 버그 2와 3의 전부가
+       이것입니다. 둘 다 door_red를 wall_door와 동일하게 남겼습니다. */
+    if (tex_pixels("wall_door", a) && tex_pixels("door_red", b)) {
+        long dr = 0, db = 0;
+        int same = 1;
+        for (int i = 0; i < TEX_SIZE * TEX_SIZE; i++) {
+            if (a[i*4] != b[i*4] || a[i*4+1] != b[i*4+1]) same = 0;
+            dr += b[i*4];      /* red channel of the keyed door */
+            db += a[i*4];      /* red channel of the plain door */
+        }
+        printf("  %-46s %s\n", "a red door is not the plain door",
+               !same ? "ok" : "FAIL");
+        if (same) bad++;
+
+        int redder = (int)((dr - db) / (TEX_SIZE * (long)TEX_SIZE));
+        printf("  %-46s %4d / %4d  %s\n", "and is redder than it, not merely different",
+               redder, 20, redder > 20 ? "ok" : "FAIL");
+        if (redder <= 20) bad++;
+    } else {
+        printf("  %-46s %s\n", "the door materials exist", "FAIL");
+        bad++;
+    }
+
+    /* A material nobody wrote reports so rather than handing back a buffer of
+       whatever was there.
+       아무도 쓰지 않은 재질은 남아 있던 내용을 돌려주지 않고 없다고 보고합니다. */
+    printf("  %-46s %s\n", "an unknown material reports that it has none",
+           !tex_pixels("no_such_material", a) ? "ok" : "FAIL");
+    if (tex_pixels("no_such_material", a)) bad++;
+
+    return bad;
+}
+
 int main(void) {
     printf("textest\n\n");
 
@@ -178,6 +273,8 @@ int main(void) {
         ok(e == GL_NO_ERROR, "the whole exercise raises no GL error");
         if (e != GL_NO_ERROR) printf("      glGetError = 0x%04X\n", e);
     }
+
+    fails += check_imported();
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall texture cache checks passed\n", fails);
     return fails != 0;

@@ -34,7 +34,7 @@
 #include "diag.h"
 #include <math.h>
 
-#define SIZE     256
+#define SIZE     TEX_SIZE
 #define MAX_OPS  32
 
 /* ---------------------------------------------------------------- recipes */
@@ -56,15 +56,37 @@ enum {
     OP_IMAGE, OP_COUNT
 };
 
-static const struct { const char *name; unsigned char arity; } OPS[OP_COUNT] = {
-    {"base",    3}, {"brick",   3}, {"tint",    3}, {"grain",   1},
-    {"bevel",   3}, {"mortar",  4}, {"brush",   3}, {"blotch",  2},
-    {"scratch", 2}, {"seam",    3}, {"wood",    4}, {"check",   2},
-    {"ribs",    2}, {"blue",    1}, {"gloss",   1}, {"proc",    2},
-    {"bump",    1}, {"image",   1}
+/* `takes_name` is a NAME operand before the integers, and only `image` has
+   one. It was added when the first version of `image` used the MATERIAL'S own
+   name as the key -- which read well and could not express the thing the op
+   exists for: three locked doors sharing one drawing. door_red, door_blue and
+   door_yellow are three recipes over one bitmap, so by construction they
+   cannot each be named after their source, and the version that required it
+   left every keyed door rendering flat.
+   `takes_name`은 정수들 앞에 오는 *이름* 피연산자이며 `image`만 가집니다. 첫 판이 *재질
+   자신의* 이름을 키로 쓴 뒤에 추가했습니다. 읽기에는 좋았지만 이 연산이 존재하는 이유,
+   즉 그림 하나를 공유하는 잠긴 문 셋을 표현할 수 없었습니다. door_red, door_blue,
+   door_yellow는 비트맵 하나 위의 레시피 셋이므로 구조적으로 각자 출처의 이름을 가질 수
+   없고, 그것을 요구한 판에서는 열쇠 달린 문이 전부 단색으로 그려졌습니다. */
+static const struct {
+    const char   *name;
+    unsigned char arity;
+    unsigned char takes_name;
+} OPS[OP_COUNT] = {
+    {"base",    3, 0}, {"brick",   3, 0}, {"tint",    3, 0}, {"grain",   1, 0},
+    {"bevel",   3, 0}, {"mortar",  4, 0}, {"brush",   3, 0}, {"blotch",  2, 0},
+    {"scratch", 2, 0}, {"seam",    3, 0}, {"wood",    4, 0}, {"check",   2, 0},
+    {"ribs",    2, 0}, {"blue",    1, 0}, {"gloss",   1, 0}, {"proc",    2, 0},
+    {"bump",    1, 0}, {"image",   1, 1}
 };
 
-typedef struct { unsigned char op; short a[4]; } Op;
+#define OP_NAME_MAX 16
+
+typedef struct {
+    unsigned char op;
+    short         a[4];
+    char          src[OP_NAME_MAX];   /**< The name operand, for ops that take one. */
+} Op;
 
 /* ------------------------------------------------------------------ noise */
 
@@ -122,12 +144,29 @@ static int parse_recipe(const char *name, Op *out) {
             if (txt_is(t, len, OPS[i].name)) { op = i; break; }
         if (op < 0) continue;                 /* unknown word: ignore */
 
+        /* The name operand first, when the op has one. Read for a FOREIGN
+           recipe too, exactly as the integers are: skipping someone else's
+           material still has to step over its operands, or the parser resumes
+           in the middle of one and every op after it is read wrong.
+           이름 피연산자가 먼저입니다. 정수와 마찬가지로 *다른* 레시피에 대해서도
+           읽습니다. 남의 재질을 건너뛸 때도 그 피연산자를 지나가야 하며, 그러지 않으면
+           파서가 피연산자 한가운데서 재개되어 그 뒤의 모든 연산을 잘못 읽습니다. */
+        char src[OP_NAME_MAX];
+        src[0] = 0;
+        if (OPS[op].takes_name) {
+            const char *sn = txt_token(p, &len);
+            if (!sn) break;
+            p = (sn + len);
+            txt_copy(src, sizeof src, sn, len);
+        }
+
         int a[4] = {0, 0, 0, 0};
         for (int i = 0; i < OPS[op].arity; i++) { int ok; p = txt_read_int(p, &a[i], &ok); }
 
         if (found && n < MAX_OPS) {
             out[n].op = (unsigned char)op;
             for (int i = 0; i < 4; i++) out[n].a[i] = (short)a[i];
+            txt_copy(out[n].src, sizeof out[n].src, src, -1);
             n++;
         } else if (found) {
             /* Recipe longer than MAX_OPS: the trailing ops never run, so the
@@ -180,7 +219,18 @@ static void run_op(const Op *o, Px *px, int x, int y, unsigned seed) {
 
     case OP_TINT: {
         if (px->edge) break;
-        float t = (px->cell & 0xffu) / 255.0f;
+        /* WITHOUT A BRICK LATTICE, TINT THE WHOLE SURFACE. `cell` is the
+           per-brick hash and OP_BRICK is what sets it, so a recipe that tints
+           without laying bricks first got t = 0 and no tint at all -- silently,
+           because the material still built and still drew. That is how the
+           keyed doors came out uncoloured: an imported door face has no bricks
+           for the spread to vary across, and a red door was simply a door.
+           벽돌 격자가 없으면 표면 전체를 물들입니다. `cell`은 벽돌별 해시이고 OP_BRICK이
+           그것을 설정하므로, 벽돌을 깔지 않고 tint하는 레시피는 t = 0이 되어 색조가 전혀
+           들어가지 않았습니다. 재질은 여전히 만들어지고 그려지므로 조용히 그렇게 됩니다.
+           열쇠 문에 색이 없던 이유가 그것입니다. 가져온 문짝에는 편차가 퍼질 벽돌이 없고,
+           빨간 문은 그냥 문이었습니다. */
+        float t = px->bw ? (px->cell & 0xffu) / 255.0f : 1.0f;
         px->r += t * a[0] / 255.0f;
         px->g += t * a[1] / 255.0f;
         px->b += t * a[2] / 255.0f;
@@ -353,14 +403,14 @@ static unsigned char clamp8(float v) {
  * 칠하도록 둡니다. 아직 아트를 가져오지 않은 재질이 검은색이 아니라 적힌 레시피로
  * 물러납니다.
  */
-static int fill_from_image(const char *name, unsigned char *buf, int tiles) {
+static int fill_from_image(const char *src, unsigned char *buf, int tiles) {
     if (tiles < 1) tiles = 1;
 
-    unsigned char *src = HeapAlloc(GetProcessHeap(), 0, SPR_WALL * SPR_WALL * 4);
-    if (!src) return 0;
+    unsigned char *px = HeapAlloc(GetProcessHeap(), 0, SPR_WALL * SPR_WALL * 4);
+    if (!px) return 0;
 
-    if (!sprite_wall(name, src)) {
-        HeapFree(GetProcessHeap(), 0, src);
+    if (!sprite_wall(src, px)) {
+        HeapFree(GetProcessHeap(), 0, px);
         return 0;
     }
 
@@ -368,7 +418,7 @@ static int fill_from_image(const char *name, unsigned char *buf, int tiles) {
         int sy = (y * tiles * SPR_WALL / SIZE) % SPR_WALL;
         for (int x = 0; x < SIZE; x++) {
             int sx = (x * tiles * SPR_WALL / SIZE) % SPR_WALL;
-            const unsigned char *s = &src[(sy * SPR_WALL + sx) * 4];
+            const unsigned char *s = &px[(sy * SPR_WALL + sx) * 4];
             unsigned char *d = &buf[(y * SIZE + x) * 4];
             d[0] = s[0]; d[1] = s[1]; d[2] = s[2];
             /* Alpha is gloss here, not transparency -- see the note on GLOSS in
@@ -380,16 +430,29 @@ static int fill_from_image(const char *name, unsigned char *buf, int tiles) {
         }
     }
 
-    HeapFree(GetProcessHeap(), 0, src);
+    HeapFree(GetProcessHeap(), 0, px);
     return 1;
 }
 
-GLuint tex_make(const char *name) {
+/* The pixels of one material, with NO GL. Split out of tex_make so a headless
+   test can look at what the GPU would receive.
+   That split exists because three bugs shipped in the pixels and none of them
+   could be seen from outside: an imported surface handed to Px as raw bytes
+   came out pure white, a keyed door whose source could not be named came out
+   flat, and a tint with no brick lattice under it did nothing at all. Every one
+   of those still built a texture, still uploaded it, and still drew -- so the
+   only witness was the screen, and on the screen a blown-out wall under a
+   coloured light looks exactly like a wall.
+   GL을 쓰지 않는 재질 하나의 픽셀입니다. 헤드리스 테스트가 GPU에 갈 내용을 볼 수 있도록
+   tex_make에서 분리했습니다. 픽셀 단계에서 버그 셋이 커밋되었고 어느 것도 밖에서는 보이지
+   않았기 때문입니다. 원시 바이트로 Px에 넘어간 표면은 순백이 되었고, 출처를 지목할 수 없던
+   열쇠 문은 단색이 되었으며, 벽돌 격자 없는 tint는 아무 일도 하지 않았습니다. 셋 다 여전히
+   텍스처를 만들고 업로드하고 그렸으므로 증인은 화면뿐이었는데, 화면에서는 색 조명 아래
+   날아간 벽이 벽과 똑같아 보입니다. */
+int tex_pixels(const char *name, unsigned char *buf) {
     Op ops[MAX_OPS];
     int n_ops = parse_recipe(name, ops);
     if (!n_ops) return 0;
-
-    unsigned char *buf = HeapAlloc(GetProcessHeap(), 0, SIZE * SIZE * 4);
 
     /* An imported surface paints the whole buffer before any per-pixel op
        runs, so the ops that follow it act ON the image: `tint` colours a door
@@ -401,14 +464,28 @@ GLuint tex_make(const char *name) {
     int imaged = 0;
     for (int i = 0; i < n_ops; i++)
         if (ops[i].op == OP_IMAGE)
-            imaged = fill_from_image(name, buf, ops[i].a[0]);
+            imaged = fill_from_image(ops[i].src, buf, ops[i].a[0]);
+
 
     for (int y = 0; y < SIZE; y++) {
         for (int x = 0; x < SIZE; x++) {
             Px px = {0};
             if (imaged) {
+                /* /255: Px CARRIES 0..1, NOT BYTES. Every other op writes
+                   `a[0] / 255.0f`, and handing it raw bytes made each channel
+                   255x too large -- clamp8 then pinned all three at white, so
+                   every imported surface arrived as a flat white wall that
+                   took the colour of whatever light fell on it. It looked
+                   exactly like a texture that had failed to load.
+                   Px는 바이트가 아니라 0..1을 담습니다. 다른 모든 연산이 `a[0] / 255.0f`를
+                   쓰는데 원시 바이트를 넘기면 채널마다 255배가 되고, clamp8이 셋 모두를
+                   흰색에 고정시켰습니다. 그래서 가져온 표면이 전부 단색 흰 벽으로
+                   도착해, 그 위에 떨어지는 빛의 색을 그대로 띠었습니다. 텍스처 로드에
+                   실패한 것과 똑같아 보였습니다. */
                 const unsigned char *q = &buf[(y * SIZE + x) * 4];
-                px.r = q[0]; px.g = q[1]; px.b = q[2];
+                px.r = q[0] / 255.0f;
+                px.g = q[1] / 255.0f;
+                px.b = q[2] / 255.0f;
             }
             /* Seeding from the op index keeps two `brush` lines in the same
                recipe from producing identical noise. */
@@ -419,6 +496,17 @@ GLuint tex_make(const char *name) {
             p[0] = clamp8(px.r); p[1] = clamp8(px.g);
             p[2] = clamp8(px.b); p[3] = clamp8(px.gloss);
         }
+    }
+
+    return 1;
+}
+
+GLuint tex_make(const char *name) {
+    unsigned char *buf = HeapAlloc(GetProcessHeap(), 0, SIZE * SIZE * 4);
+    if (!buf) return 0;
+    if (!tex_pixels(name, buf)) {
+        HeapFree(GetProcessHeap(), 0, buf);
+        return 0;
     }
 
     GLuint t;

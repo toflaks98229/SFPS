@@ -66,6 +66,17 @@ void mb_vtx(MeshBuf *b, v3 p, v3 n, float u, float v) {
     o->px = p.x; o->py = p.y; o->pz = p.z;
     o->nx = n.x; o->ny = n.y; o->nz = n.z;
     o->u  = u;   o->v  = v;
+
+    /* Zeroed HERE, in the one place a vertex is written, rather than left to
+       each builder. The buffer is HeapAlloc'd and not cleared, so a field this
+       function did not set would be whatever the last mesh left behind -- and
+       the symptom would be a model lit by garbage, flickering as the allocator
+       reused memory.
+       각 빌더에 맡기지 않고 정점을 기록하는 유일한 이 자리에서 0으로 채웁니다. 버퍼는
+       HeapAlloc으로 잡고 비우지 않으므로, 이 함수가 설정하지 않은 필드는 직전 메시가
+       남긴 값이 됩니다. 증상은 쓰레기 값으로 조명된 모델이며, 할당자가 메모리를 재사용할
+       때마다 깜빡입니다. */
+    o->lr = o->lg = o->lb = 0.0f;
 }
 
 /* Planar projection onto the plane the normal points out of. This is the same
@@ -438,6 +449,8 @@ void mesh_upload(Mesh *m, const MeshBuf *b, int dynamic) {
         glEnableVertexAttribArray(1);
         glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vtx), (void *)24);
         glEnableVertexAttribArray(2);
+        glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, sizeof(Vtx), (void *)32);
+        glEnableVertexAttribArray(3);
     } else {
         glBindVertexArray(m->vao);
         glBindBuffer(GL_ARRAY_BUFFER, m->vbo);
@@ -521,11 +534,12 @@ static const char *VS_SRC =
 "layout(location=0) in vec3 aPos;\n"
 "layout(location=1) in vec3 aNrm;\n"
 "layout(location=2) in vec2 aUV;\n"
+"layout(location=3) in vec3 aLit;\n"
 "uniform mat4 uMVP;\n"
 "uniform vec2 uSnap;\n"
-"out vec3 vPos; out vec3 vNrm; out vec2 vUV;\n"
+"out vec3 vPos; out vec3 vNrm; out vec2 vUV; out vec3 vLit;\n"
 "void main(){\n"
-"  vPos=aPos; vNrm=aNrm; vUV=aUV;\n"
+"  vPos=aPos; vNrm=aNrm; vUV=aUV; vLit=aLit;\n"
 "  vec4 p=uMVP*vec4(aPos,1.0);\n"
 /* w <= 0 is behind the eye, where NDC is meaningless and the division would
    mirror the vertex across the screen. Those vertices are clipped anyway, so
@@ -1000,7 +1014,7 @@ static const char *FS_PROC =
 
 static const char *FS_SRC =
 "#version 330 core\n"
-"in vec3 vPos; in vec3 vNrm; in vec2 vUV;\n"
+"in vec3 vPos; in vec3 vNrm; in vec2 vUV; in vec3 vLit;\n"
 "uniform sampler2D uTex;\n"
 "uniform vec3 uEye;\n"
 "uniform int uMode;\n"
@@ -1225,6 +1239,24 @@ static const char *FS_MAIN =
 "      lum+=e;\n"
 "      lit+=e;\n"
 "      tint=mix(tint,uLightCol[i].rgb,clamp(e,0.0,1.0));\n"
+"    }\n"
+
+/* The baked light, folded in the same way a dynamic one is. It arrives already
+   attenuated and already shadowed -- the bake did that at load, against every
+   light in the level rather than the eight this loop can hold -- so all that is
+   left is to add it.
+   Its own luminance drives the tint, so a room lit red by a static light and
+   crossed by a white muzzle flash blends between them exactly as two dynamic
+   lights would.
+   구워 넣은 조명이며 동적 광원과 같은 방식으로 합칩니다. 감쇠와 그림자는 로드 시점에 이미
+   처리되었고, 위 반복문이 담을 수 있는 여덟 개가 아니라 레벨의 *모든* 광원을 대상으로
+   했습니다. 남은 일은 더하는 것뿐입니다. 자기 휘도가 색조를 이끌므로, 정적 광원으로 붉게
+   밝은 방을 흰 총구 섬광이 가로지르면 두 동적 광원과 똑같이 섞입니다. */
+"    float bl=dot(vLit,vec3(0.299,0.587,0.114));\n"
+"    if(bl>0.0){\n"
+"      lum+=bl;\n"
+"      lit+=bl;\n"
+"      tint=mix(tint,vLit/max(bl,0.001),clamp(bl,0.0,1.0));\n"
 "    }\n"
 
 /* Break the band edges up with noise, BEFORE the quantisation.

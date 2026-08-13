@@ -98,7 +98,51 @@ typedef struct {
  *       이전의 UV 없는 형식은 1.4MB의 여유 중 약 6KB의 RAM을 절약하면서 매핑 제어
  *       능력을 전부 잃었는데, 이는 손해 보는 거래였습니다.
  */
-typedef struct { float px, py, pz, nx, ny, nz, u, v; } Vtx;
+typedef struct {
+    float px, py, pz, nx, ny, nz, u, v;
+
+    /**
+     * @brief Static light baked into this vertex at load, added to the eight
+     *        dynamic lights rather than replacing them.
+     *
+     * ENGLISH
+     * -------
+     * Quake's answer to the same problem, in the shape this engine can hold.
+     * Lighting here was eight point lights and nothing else, so a room was lit
+     * within their radius and BLACK everywhere else -- which is not "dark", it
+     * is unlit, and no amount of placing lights fixes it because the ninth one
+     * is not looked at.
+     *
+     * Quake compiles static light into the surfaces once and lets the handful
+     * of dynamic lights add on top. This does the same at the vertex rather
+     * than the texel, because the geometry here is sectors with few, large
+     * faces and a lightmap would need a second texture, a second set of UVs
+     * and a packer to go with them.
+     *
+     * ZERO EVERYWHERE IT IS NOT BAKED, so the change is purely additive: a
+     * model or a sprite carries 0 and is lit exactly as it was, and only level
+     * geometry gains anything.
+     *
+     * 한국어
+     * ------
+     * @brief 로드 시 이 정점에 구워 넣은 정적 조명입니다. 동적 광원 8개를 대체하지 않고
+     *        더해집니다.
+     *
+     * 같은 문제에 대한 Quake의 답을 이 엔진이 담을 수 있는 모양으로 옮긴 것입니다. 이곳의
+     * 조명은 점광원 여덟 개가 전부였으므로 방은 그 반경 안에서만 밝고 나머지는 전부
+     * *검었습니다*. 그것은 어두운 것이 아니라 조명이 없는 것이며, 아홉 번째 광원은 보지
+     * 않으므로 광원을 더 놓아도 해결되지 않습니다.
+     *
+     * Quake는 정적 조명을 표면에 한 번 구워 넣고 소수의 동적 광원이 그 위에 더해지게
+     * 합니다. 이것은 같은 일을 텍셀이 아니라 정점에서 합니다. 이곳의 지오메트리는 크고 적은
+     * 면으로 이루어진 섹터이고, 라이트맵을 쓰려면 두 번째 텍스처와 두 번째 UV 세트, 그리고
+     * 그것들을 담을 패커가 필요하기 때문입니다.
+     *
+     * 굽지 않은 곳에서는 전부 0이므로 변경이 순수하게 가산적입니다. 모델이나 스프라이트는
+     * 0을 지니고 이전과 정확히 같이 조명되며, 레벨 지오메트리만 얻습니다.
+     */
+    float lr, lg, lb;
+} Vtx;
 
 /**
  * @struct MeshBuf

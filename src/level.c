@@ -1200,6 +1200,84 @@ int level_edge_spans(const Level *l, int si, int e, EdgeSpan *out, int max) {
     return n;
 }
 
+/* Bakes every level light into the vertices, once, at build time.
+ *
+ * ENGLISH
+ * -------
+ * This is Quake's static lighting in the shape this engine can hold. The
+ * fragment shader carries eight point lights, which is enough for muzzle
+ * flashes and explosions and nowhere near enough to light a room: a level with
+ * a ninth lamp simply does not have it, and everything outside the eight radii
+ * is not dark but UNLIT.
+ *
+ * Baked at the VERTEX rather than into a lightmap because the geometry here is
+ * sectors -- few faces, each large -- and a lightmap would need a second
+ * texture, a second set of UVs, and a packer to fit them. The cost of this is
+ * that light varies smoothly across a wall instead of casting a shaped pool on
+ * it, which is the trade Quake made in the other direction because its walls
+ * were subdivided into 16-unit patches and ours are not.
+ *
+ * SHADOWED WITH THE SAME TRACE THE MONSTERS SEE WITH, so a lamp behind a wall
+ * does not light the room in front of it. That trace is the expensive part and
+ * it runs once per vertex per light at load, not per frame.
+ *
+ * 한국어
+ * ------
+ * 이 엔진이 담을 수 있는 모양으로 옮긴 Quake의 정적 조명입니다. 프래그먼트 셰이더는 점광원
+ * 여덟 개를 담으며, 총구 섬광과 폭발에는 충분하고 방을 밝히기에는 턱없이 부족합니다. 아홉
+ * 번째 등이 있는 레벨은 그것을 그냥 갖지 못하고, 여덟 반경 밖은 어두운 것이 아니라 조명이
+ * *없습니다*.
+ *
+ * 라이트맵이 아니라 *정점*에 굽는 이유는 이곳의 지오메트리가 섹터, 즉 크고 적은 면이기
+ * 때문입니다. 라이트맵은 두 번째 텍스처와 두 번째 UV, 그리고 그것을 채울 패커를 요구합니다.
+ * 대가는 빛이 벽에 모양 있는 웅덩이를 드리우지 않고 매끄럽게 변한다는 것입니다. Quake는
+ * 벽을 16단위 조각으로 나누었기에 반대 방향으로 거래했고, 우리 벽은 나뉘어 있지 않습니다.
+ *
+ * 몬스터가 보는 것과 *같은* 판정으로 그림자를 처리하므로, 벽 뒤의 등이 앞의 방을 밝히지
+ * 않습니다. 그 판정이 비싼 부분이며 프레임마다가 아니라 로드 시 정점당 광원당 한 번
+ * 돌아갑니다. */
+static void bake_light(MeshBuf *b, const Level *l, int first) {
+    for (int vi = first; vi < b->count; vi++) {
+        Vtx *v = &b->v[vi];
+        v3 p = v3f(v->px, v->py, v->pz);
+        v3 n = v3f(v->nx, v->ny, v->nz);
+
+        /* Lifted off the surface before tracing. A point exactly on a wall is
+           inside that wall as far as the trace is concerned, so every vertex
+           would shadow itself and the whole level would bake black.
+           판정 전에 표면에서 띄웁니다. 벽에 정확히 놓인 점은 판정에게는 벽 *안*이므로,
+           모든 정점이 자기 자신을 가리고 레벨 전체가 검게 구워집니다. */
+        v3 from = v3add(p, v3scale(n, 0.05f));
+
+        for (int li = 0; li < l->n_lights; li++) {
+            const Light *lt = &l->lights[li];
+            v3 lp = v3f(lt->x * U, lt->y * U, lt->z * U);
+            v3 d  = v3sub(lp, from);
+            float dist = v3len(d);
+            float rad  = lt->radius * U;
+            if (rad <= 0.0f || dist > rad) continue;
+
+            /* Facing away is unlit before anything is traced, which is also
+               the cheap test that skips most of the tracing.
+               등지고 있으면 판정 이전에 이미 어둡습니다. 대부분의 판정을 건너뛰는 값싼
+               검사이기도 합니다. */
+            v3 dir = v3scale(d, 1.0f / (dist > 0.001f ? dist : 0.001f));
+            float lam = v3dot(n, dir);
+            if (lam <= 0.0f) continue;
+
+            if (level_blocked(l, from, dir, dist)) continue;
+
+            float att = 1.0f - dist / rad;
+            att *= att;
+            float e = att * lam * (lt->power * 0.01f);
+
+            v->lr += e * (lt->r * (1.0f / 255.0f));
+            v->lg += e * (lt->g * (1.0f / 255.0f));
+            v->lb += e * (lt->b * (1.0f / 255.0f));
+        }
+    }
+}
+
 int level_geometry(MeshBuf *b, const Level *l, MdlRange *ranges, int max_ranges) {
     int n_ranges = 0;
 
@@ -1237,6 +1315,13 @@ int level_geometry(MeshBuf *b, const Level *l, MdlRange *ranges, int max_ranges)
     }
 
     mb_free(&tmp);
+
+    /* After every surface exists, so one pass covers floors, ceilings and
+       walls alike rather than three that could disagree about the rule.
+       모든 표면이 만들어진 뒤입니다. 바닥·천장·벽을 규칙이 어긋날 수 있는 세 번이 아니라
+       한 번의 순회로 처리합니다. */
+    bake_light(b, l, 0);
+
     return n_ranges;
 }
 

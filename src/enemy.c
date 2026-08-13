@@ -7,7 +7,7 @@
 #include "audio.h"
 #include "fx.h"
 #include "diag.h"
-#include "player.h"    /* PLAYER_EYE / PLAYER_RADIUS -- 발사체 히트 박스용 */
+#include "player.h" /* PLAYER_EYE / PLAYER_RADIUS -- 발사체 히트 박스용 */
 #include <math.h>
 
 /* --- 정적 변수 --- */
@@ -15,7 +15,7 @@
 /** @brief 모든 몬스터의 배열. */
 static Enemy g_enemies[ENEMY_MAX];
 /** @brief 현재 활성화된 몬스터의 수. */
-static int   g_count;
+static int g_count;
 /** @brief 난수 생성을 위한 시드. */
 static unsigned g_rng = 0x9e3779b9u;
 /* A `g_player_eye` used to sit here, assigned at the top of every enemy_update
@@ -50,13 +50,13 @@ static Shot g_shots[ENEMY_MAX_SHOTS];
 /*         name     behaviour     hp  spd   rad    hgt    eye   sight  atk  dmg  wind   cool  aspct shot   yaw    pain */
 static const MonType TYPES[MON_TYPES] = {
     /* IMP: 기준선. 충분히 빠르며, 근접 샷건 한 방에 죽습니다. */
-    { "imp",    AI_BRAWLER,  40, 3.0f, 0.40f, 1.70f, 1.30f, 34.0f,  1.8f,  9, 0.35f, 1.10f, 0.70f,  0.0f, 220.0f, 0.6f },
+    {"imp", AI_BRAWLER, 40, 3.0f, 0.40f, 1.70f, 1.30f, 34.0f, 1.8f, 9, 0.35f, 1.10f, 0.70f, 0.0f, 220.0f, 0.6f},
     /* BRUTE: 체력이 높은 벽. 느리게 다가오지만 강력한 공격을 하므로, 피하기보다 계획적으로 대처해야 하는 위협입니다. */
-    { "brute",  AI_BRAWLER, 120, 1.9f, 0.62f, 2.35f, 1.80f, 34.0f,  2.3f, 24, 0.55f, 1.50f, 0.85f,  0.0f, 130.0f, 2.2f },
+    {"brute", AI_BRAWLER, 120, 1.9f, 0.62f, 2.35f, 1.80f, 34.0f, 2.3f, 24, 0.55f, 1.50f, 0.85f, 0.0f, 130.0f, 2.2f},
     /* HOUND: 빠르고 약한 야수. 가만히 있는 것을 응징합니다. 한 번의 공격 피해는 적지만, 경고를 알아차리기 전에 덮칩니다. */
-    { "hound",  AI_BRAWLER,  18, 5.3f, 0.38f, 1.25f, 0.70f, 40.0f,  1.5f,  5, 0.18f, 0.65f, 1.00f,  0.0f, 400.0f, 0.3f },
+    {"hound", AI_BRAWLER, 18, 5.3f, 0.38f, 1.25f, 0.70f, 40.0f, 1.5f, 5, 0.18f, 0.65f, 1.00f, 0.0f, 400.0f, 0.3f},
     /* CASTER: 계속 움직여야 하는 이유. 접근하지 않고 사정거리를 유지하며 주문을 시전하므로, 발놀림 대신 엄폐와 각도가 중요합니다. */
-    { "caster", AI_CASTER,     26, 2.4f, 0.42f, 1.90f, 1.45f, 40.0f, 13.0f, 12, 0.85f, 1.40f, 0.80f, 11.0f, 180.0f, 0.9f },
+    {"caster", AI_CASTER, 26, 2.4f, 0.42f, 1.90f, 1.45f, 40.0f, 13.0f, 12, 0.85f, 1.40f, 0.80f, 11.0f, 180.0f, 0.9f},
 };
 
 /* A caster that cannot throw anything stands in its band and does nothing, and
@@ -68,10 +68,13 @@ static const MonType TYPES[MON_TYPES] = {
    아무도 읽지 않는 수치입니다. 둘 다 behaviour 열이 실수로 작성될 수 없게 만들려는 바로 그
    조용한 오류입니다. 신뢰하지 않고 이곳에서 검사하는 이유는, 표가 새 몬스터를 저작하는 유일한
    곳이고 이곳이 이의를 제기할 수 있는 유일한 곳이기 때문입니다. */
-static void types_check(void) {
-    for (int i = 0; i < MON_TYPES; i++) {
+static void types_check(void)
+{
+    for (int i = 0; i < MON_TYPES; i++)
+    {
         int caster = TYPES[i].behaviour == AI_CASTER;
-        if (caster != (TYPES[i].shot_speed > 0.0f)) DIAG(DIAG_MON_TABLE);
+        if (caster != (TYPES[i].shot_speed > 0.0f))
+            DIAG(DIAG_MON_TABLE);
     }
 }
 
@@ -87,7 +90,7 @@ static void types_check(void) {
 #define MON_LEGACY_TYPE MON_IMP
 
 /** @brief 원거리 몬스터(Caster)가 플레이어에게 허용하는 최소 접근 거리. 이보다 가까워지면 뒤로 물러납니다. */
-#define CASTER_KEEP  0.55f
+#define CASTER_KEEP 0.55f
 
 /* --- 정적 함수 --- */
 
@@ -95,7 +98,8 @@ static void types_check(void) {
  * @brief 의사 난수를 생성합니다.
  * @return 0.0f에서 1.0f 사이의 float 값.
  */
-static float frand(void) {
+static float frand(void)
+{
     g_rng = g_rng * 1664525u + 1013904223u;
     return (g_rng >> 8) * (1.0f / 16777216.0f);
 }
@@ -121,7 +125,8 @@ static float frand(void) {
  * 몬스터와 문이 아무도 설명할 수 없는 이유로 다른 음량이 되고, 몬스터 쪽 곡선은 0에
  * 닿지 않아 네 방 건너의 으르렁거림이 코앞의 것의 4분의 1만큼 크게 들렸습니다.
  */
-static void play_at(v3 p, const char *name, int base) {
+static void play_at(v3 p, const char *name, int base)
+{
     audio_play_at(name, base, p);
 }
 
@@ -134,10 +139,15 @@ static void play_at(v3 p, const char *name, int base) {
  * @param speed 발사체 속도.
  * @param damage 발사체 피해량.
  */
-static void shot_fire(v3 from, v3 at, float speed, int damage) {
+static void shot_fire(v3 from, v3 at, float speed, int damage)
+{
     Shot *s = 0;
     for (int i = 0; i < ENEMY_MAX_SHOTS; i++)
-        if (!g_shots[i].active) { s = &g_shots[i]; break; }
+        if (!g_shots[i].active)
+        {
+            s = &g_shots[i];
+            break;
+        }
     /* Every other pool in the project reports when it turns something away,
        and this one did not. A caster that finished its whole wind-up and then
        produced no bolt is indistinguishable from one that never attacked --
@@ -149,16 +159,21 @@ static void shot_fire(v3 from, v3 at, float speed, int damage) {
        공격하지 않은 캐스터와 구분되지 않습니다. 어느 쪽이든 애니메이션은 재생되기
        때문입니다. 그래서 증상은 "캐스터가 가끔 그냥 안 쏜다"가 되며, 이것만으로는 원인을
        전혀 알 수 없습니다. 릴리스에서는 비용이 없습니다. diag.h를 참조하십시오. */
-    if (!s) { DIAG(DIAG_SHOT_CAP); return; }
+    if (!s)
+    {
+        DIAG(DIAG_SHOT_CAP);
+        return;
+    }
 
     v3 d = v3sub(at, from);
     float len = v3len(d);
-    if (len < 0.001f) return;
+    if (len < 0.001f)
+        return;
     d = v3scale(d, 1.0f / len);
 
-    s->pos    = from;
-    s->vel    = v3scale(d, speed);
-    s->life   = 6.0f;
+    s->pos = from;
+    s->vel = v3scale(d, speed);
+    s->life = 6.0f;
     s->damage = damage;
     s->active = 1;
     /* Zero, not the interval: the first trail particle is laid on the frame
@@ -176,19 +191,27 @@ static void shot_fire(v3 from, v3 at, float speed, int damage) {
  * @param dt 프레임 시간.
  * @return 플레이어에게 가해진 총 피해량.
  */
-static int shots_update(const Level *l, v3 player_eye, float dt) {
+static int shots_update(const Level *l, v3 player_eye, float dt)
+{
     int dealt = 0;
 
-    for (int i = 0; i < ENEMY_MAX_SHOTS; i++) {
+    for (int i = 0; i < ENEMY_MAX_SHOTS; i++)
+    {
         Shot *s = &g_shots[i];
-        if (!s->active) continue;
+        if (!s->active)
+            continue;
 
         s->life -= dt;
-        if (s->life <= 0.0f) { s->active = 0; continue; }
+        if (s->life <= 0.0f)
+        {
+            s->active = 0;
+            continue;
+        }
 
         v3 step = v3scale(s->vel, dt);
         float dist = v3len(step);
-        if (dist < 1e-6f) continue;
+        if (dist < 1e-6f)
+            continue;
         v3 dir = v3scale(step, 1.0f / dist);
 
         /* Lay down the trail at a fixed interval rather than once per frame.
@@ -203,7 +226,8 @@ static int shots_update(const Level *l, v3 player_eye, float dt) {
            고갈시킵니다. 간격이 초 단위이므로 경로상의 간격은 기기 속도와 무관하게
            일정합니다. */
         s->trail_timer -= dt;
-        if (s->trail_timer <= 0.0f) {
+        if (s->trail_timer <= 0.0f)
+        {
             s->trail_timer = SHOT_TRAIL_INTERVAL;
             /* Thrown backward along the flight, so what little spread the
                trail has drifts behind the bolt rather than ahead of it.
@@ -212,35 +236,43 @@ static int shots_update(const Level *l, v3 player_eye, float dt) {
             fx_spawn("bolttrail", s->pos, v3scale(dir, -1.0f));
         }
 
-        float t; v3 n;
+        float t;
+        v3 n;
         int hit_wall = level_trace(l, s->pos, dir, dist + SHOT_RADIUS, &t, &n);
 
         v3 feet = v3f(player_eye.x, player_eye.y - PLAYER_EYE, player_eye.z);
-        v3 rel  = v3sub(s->pos, feet);
+        v3 rel = v3sub(s->pos, feet);
         float body_hit = -1.0f;
         {
             float rx = rel.x, rz = rel.z;
-            float a = dir.x*dir.x + dir.z*dir.z;
-            float b = 2.0f * (rx*dir.x + rz*dir.z);
+            float a = dir.x * dir.x + dir.z * dir.z;
+            float b = 2.0f * (rx * dir.x + rz * dir.z);
             float rr = PLAYER_RADIUS + SHOT_RADIUS;
-            float c = rx*rx + rz*rz - rr*rr;
-            if (c <= 0.0f) {
+            float c = rx * rx + rz * rz - rr * rr;
+            if (c <= 0.0f)
+            {
                 body_hit = 0.0f;
-            } else if (a > 1e-6f) {
-                float disc = b*b - 4.0f*a*c;
-                if (disc >= 0.0f) {
+            }
+            else if (a > 1e-6f)
+            {
+                float disc = b * b - 4.0f * a * c;
+                if (disc >= 0.0f)
+                {
                     float root = (-b - sqrtf(disc)) / (2.0f * a);
-                    if (root >= 0.0f && root <= dist) body_hit = root;
+                    if (root >= 0.0f && root <= dist)
+                        body_hit = root;
                 }
             }
-            if (body_hit >= 0.0f) {
+            if (body_hit >= 0.0f)
+            {
                 float y = s->pos.y + dir.y * body_hit;
                 if (y < feet.y - 0.2f || y > feet.y + PLAYER_EYE + 0.35f)
                     body_hit = -1.0f;
             }
         }
 
-        if (body_hit >= 0.0f && (!hit_wall || body_hit <= t)) {
+        if (body_hit >= 0.0f && (!hit_wall || body_hit <= t))
+        {
             dealt += s->damage;
             s->active = 0;
             play_at(s->pos, "ehit", 85);
@@ -252,7 +284,8 @@ static int shots_update(const Level *l, v3 player_eye, float dt) {
             continue;
         }
 
-        if (hit_wall && t <= dist) {
+        if (hit_wall && t <= dist)
+        {
             s->pos = v3add(s->pos, v3scale(dir, t));
             s->active = 0;
             play_at(s->pos, "ehit", 45);
@@ -279,10 +312,13 @@ static int shots_update(const Level *l, v3 player_eye, float dt) {
  * @return 설 수 있으면 1, 그렇지 않으면 0.
  */
 static int foot_ok(const Level *l, const MonType *S, float x, float z,
-                   float feet, float *floor) {
+                   float feet, float *floor)
+{
     float f, c;
-    if (!level_ground(l, x, z, feet, S->height / 3.0f, &f, &c)) return 0;
-    if (c - f < S->height) return 0;
+    if (!level_ground(l, x, z, feet, S->height / 3.0f, &f, &c))
+        return 0;
+    if (c - f < S->height)
+        return 0;
     *floor = f;
     return 1;
 }
@@ -296,18 +332,26 @@ static int foot_ok(const Level *l, const MonType *S, float x, float z,
  * @param dz z축 이동량.
  */
 static void move_toward(const Level *l, const MonType *S, Enemy *m,
-                        float dx, float dz) {
+                        float dx, float dz)
+{
     float f;
-    if (foot_ok(l, S, m->pos.x + dx, m->pos.z + dz, m->pos.y, &f)) {
-        m->pos.x += dx; m->pos.z += dz; m->pos.y = f;
+    if (foot_ok(l, S, m->pos.x + dx, m->pos.z + dz, m->pos.y, &f))
+    {
+        m->pos.x += dx;
+        m->pos.z += dz;
+        m->pos.y = f;
         return;
     }
-    if (foot_ok(l, S, m->pos.x + dx, m->pos.z, m->pos.y, &f)) {
-        m->pos.x += dx; m->pos.y = f;
+    if (foot_ok(l, S, m->pos.x + dx, m->pos.z, m->pos.y, &f))
+    {
+        m->pos.x += dx;
+        m->pos.y = f;
         return;
     }
-    if (foot_ok(l, S, m->pos.x, m->pos.z + dz, m->pos.y, &f)) {
-        m->pos.z += dz; m->pos.y = f;
+    if (foot_ok(l, S, m->pos.x, m->pos.z + dz, m->pos.y, &f))
+    {
+        m->pos.z += dz;
+        m->pos.y = f;
     }
 }
 
@@ -327,18 +371,25 @@ static void move_toward(const Level *l, const MonType *S, Enemy *m,
  * 프레임률이 아니라 몬스터의 속성이 됩니다. 가까운 쪽으로 도는 계산이 틀리기 쉽고 틀려도
  * 눈에 띄지 않는 부분입니다. 먼 쪽으로 도는 몬스터는 바로 뒤에 있는 것을 보려고 거의 한
  * 바퀴를 도는데, 결함이라기보다 몹시 혼란스러운 짐승처럼 보입니다. */
-static void change_yaw(Enemy *m, float yaw_speed_deg, float dt) {
+static void change_yaw(Enemy *m, float yaw_speed_deg, float dt)
+{
     float move = m->ideal_yaw - m->yaw;
-    while (move >  M_PI_F) move -= M_TAU;
-    while (move < -M_PI_F) move += M_TAU;
+    while (move > M_PI_F)
+        move -= M_TAU;
+    while (move < -M_PI_F)
+        move += M_TAU;
 
     float step = yaw_speed_deg * (M_PI_F / 180.0f) * dt;
-    if (move >  step) move =  step;
-    if (move < -step) move = -step;
+    if (move > step)
+        move = step;
+    if (move < -step)
+        move = -step;
 
     m->yaw += move;
-    while (m->yaw >  M_PI_F) m->yaw -= M_TAU;
-    while (m->yaw < -M_PI_F) m->yaw += M_TAU;
+    while (m->yaw > M_PI_F)
+        m->yaw -= M_TAU;
+    while (m->yaw < -M_PI_F)
+        m->yaw += M_TAU;
 }
 
 /* --- Quake's ai_run_slide ------------------------------------------------
@@ -358,11 +409,13 @@ static void change_yaw(Enemy *m, float yaw_speed_deg, float dt) {
  * 그리는 몬스터가 벽에 대해 해야 할 일은 반대로 도는 것뿐이기 때문입니다. 방향은 매
  * 프레임 다시 고르지 않고 MON_SLIDE_HOLD 동안 유지합니다. Doom이 movecount를 두는 이유도
  * 같습니다. 프레임률로 다시 결정하는 몬스터는 제자리에서 떱니다. */
-static void ai_run_slide(const Level *l, const MonType *S, Enemy *m, float dt) {
+static void ai_run_slide(const Level *l, const MonType *S, Enemy *m, float dt)
+{
     float step = S->speed * dt;
 
-    if (m->slide_wait <= 0.0f) {
-        m->lefty     = (char)(frand() < 0.5f);
+    if (m->slide_wait <= 0.0f)
+    {
+        m->lefty = (char)(frand() < 0.5f);
         m->slide_wait = MON_SLIDE_HOLD;
     }
 
@@ -386,8 +439,9 @@ static void ai_run_slide(const Level *l, const MonType *S, Enemy *m, float dt) {
        막혔습니다. 뒤집어서 다음 프레임이 반대쪽을 쓰게 합니다. 레벨에 다시 묻지 않고
        실제로 움직였는지로 판정하므로, 검사와 이동이 어긋날 수 없습니다. */
     float moved = fabsf(m->pos.x - before_x) + fabsf(m->pos.z - before_z);
-    if (moved < step * 0.25f) {
-        m->lefty      = (char)!m->lefty;
+    if (moved < step * 0.25f)
+    {
+        m->lefty = (char)!m->lefty;
         m->slide_wait = MON_SLIDE_HOLD;
     }
 }
@@ -406,20 +460,27 @@ static void ai_run_slide(const Level *l, const MonType *S, Enemy *m, float dt) {
  * 근접 공격도 가진 몬스터에 대한 절반 감소도 포함합니다. 물 수 있는 것은 거리를 좁히기를
  * 선호하므로 다가오는 동안 덜 쏩니다. 우리의 `shot_speed > 0`이 이미 "원거리"를 말하는
  * 필드이므로, 두 번째 플래그가 아니라 그것이 여기서도 결정합니다. */
-static int check_attack(const MonType *S, Enemy *m, float dist) {
-    if (m->attack_wait > 0.0f) return 0;
+static int check_attack(const MonType *S, Enemy *m, float dist)
+{
+    if (m->attack_wait > 0.0f)
+        return 0;
 
     float chance;
-    if      (dist <= MON_RANGE_MELEE) chance = MON_ODDS_MELEE;
-    else if (dist <= MON_RANGE_NEAR)  chance = MON_ODDS_NEAR;
-    else if (dist <= MON_RANGE_MID)   chance = MON_ODDS_MID;
-    else                              return 0;
+    if (dist <= MON_RANGE_MELEE)
+        chance = MON_ODDS_MELEE;
+    else if (dist <= MON_RANGE_NEAR)
+        chance = MON_ODDS_NEAR;
+    else if (dist <= MON_RANGE_MID)
+        chance = MON_ODDS_MID;
+    else
+        return 0;
 
     /* A melee monster out of its reach cannot attack at all, whatever the dice
        say. The bands are about willingness; this is about arms.
        근접 몬스터는 사거리 밖에서는 주사위와 무관하게 공격할 수 없습니다. 대역은
        의사에 관한 것이고 이것은 팔 길이에 관한 것입니다. */
-    if (S->shot_speed <= 0.0f) return dist <= S->attack;
+    if (S->shot_speed <= 0.0f)
+        return dist <= S->attack;
 
     return frand() < chance;
 }
@@ -431,11 +492,13 @@ static int check_attack(const MonType *S, Enemy *m, float dist) {
  * @param player_eye 플레이어의 눈 위치.
  * @return 볼 수 있으면 1, 그렇지 않으면 0.
  */
-static int can_see(const Level *l, const Enemy *m, v3 player_eye) {
+static int can_see(const Level *l, const Enemy *m, v3 player_eye)
+{
     v3 eye = v3f(m->pos.x, m->pos.y + mon_stats(m->type)->eye, m->pos.z);
     v3 d = v3sub(player_eye, eye);
     float dist = v3len(d);
-    if (dist < 0.001f) return 1;
+    if (dist < 0.001f)
+        return 1;
     d = v3scale(d, 1.0f / dist);
 
     /* level_blocked rather than level_trace: this asks only whether the line is
@@ -515,8 +578,10 @@ static int can_see(const Level *l, const Enemy *m, v3 player_eye) {
  * 지어낸 값으로 행동하는 대신 첫 실제 측정이 나올 때까지 대기합니다. 한 갱신 주기 동안
  * 틀린다면 아무것도 하지 않는 쪽으로 틀려야 합니다.
  */
-static int sees_player(const Level *l, Enemy *m, v3 player_eye) {
-    if (m->sight_age <= 0) {
+static int sees_player(const Level *l, Enemy *m, v3 player_eye)
+{
+    if (m->sight_age <= 0)
+    {
         m->sight_age = SIGHT_PERIOD;
         m->seen = (char)can_see(l, m, player_eye);
     }
@@ -525,8 +590,10 @@ static int sees_player(const Level *l, Enemy *m, v3 player_eye) {
 
 /* --- 공개 API 함수 --- */
 
-const MonType *mon_stats(int type) {
-    if (type < 0 || type >= MON_TYPES) type = MON_IMP;
+const MonType *mon_stats(int type)
+{
+    if (type < 0 || type >= MON_TYPES)
+        type = MON_IMP;
     return &TYPES[type];
 }
 
@@ -534,50 +601,66 @@ const MonType *mon_stats(int type) {
    find_def가 이펙트 이름에 쓰는 것과 동일한 루프입니다.
    Whether two strings match. Avoids pulling in <string.h>, and is the same loop
    fx.c's find_def uses on effect names. */
-static int name_eq(const char *a, const char *b) {
-    while (*a && *a == *b) { a++; b++; }
+static int name_eq(const char *a, const char *b)
+{
+    while (*a && *a == *b)
+    {
+        a++;
+        b++;
+    }
     return !*a && !*b;
 }
 
-int mon_type_for(const char *kind) {
+int mon_type_for(const char *kind)
+{
     /* 테이블을 순회합니다. 새 몬스터는 TYPES에 행 하나를 추가하면 이곳이 자동으로
        알아보므로, 이 함수는 종류가 늘어나도 수정할 필요가 없습니다.
        Walks the table, so a new monster is a TYPES row and this function finds
        it without being edited. */
     for (int i = 0; i < MON_TYPES; i++)
-        if (name_eq(TYPES[i].name, kind)) return i;
+        if (name_eq(TYPES[i].name, kind))
+            return i;
 
-    if (name_eq(MON_LEGACY_NAME, kind)) return MON_LEGACY_TYPE;
+    if (name_eq(MON_LEGACY_NAME, kind))
+        return MON_LEGACY_TYPE;
 
     return -1;
 }
 
 int enemy_shot_count(void) { return ENEMY_MAX_SHOTS; }
 
-const Shot *enemy_shot_at(int i) {
+const Shot *enemy_shot_at(int i)
+{
     return (i >= 0 && i < ENEMY_MAX_SHOTS) ? &g_shots[i] : 0;
 }
 
-void enemy_reset(void) {
-    for (int i = 0; i < ENEMY_MAX; i++) g_enemies[i].active = 0;
-    for (int i = 0; i < ENEMY_MAX_SHOTS; i++) g_shots[i].active = 0;
+void enemy_reset(void)
+{
+    for (int i = 0; i < ENEMY_MAX; i++)
+        g_enemies[i].active = 0;
+    for (int i = 0; i < ENEMY_MAX_SHOTS; i++)
+        g_shots[i].active = 0;
     g_count = 0;
 }
 
 int enemy_count(void) { return g_count; }
 
-int enemy_alive(void) {
+int enemy_alive(void)
+{
     int n = 0;
     for (int i = 0; i < g_count; i++)
-        if (g_enemies[i].active && g_enemies[i].state != E_DEAD) n++;
+        if (g_enemies[i].active && g_enemies[i].state != E_DEAD)
+            n++;
     return n;
 }
 
-const Enemy *enemy_at(int i) {
+const Enemy *enemy_at(int i)
+{
     return (i >= 0 && i < g_count) ? &g_enemies[i] : 0;
 }
 
-void enemy_spawn_level(const Level *l) {
+void enemy_spawn_level(const Level *l)
+{
     /* Cheap, and this is the one call every level load and every headless test
        goes through, so a table that contradicts itself is reported on the first
        map anybody opens rather than on the one where somebody notices.
@@ -593,27 +676,34 @@ void enemy_spawn_level(const Level *l) {
        가득 찬 뒤에도 한계에서 루프를 빠져나가지 않고 모든 엔티티를 순회합니다. 조기
        종료해도 생성되는 수는 같지만 건너뛴 개수를 알 수 없게 되며, "레벨에 몬스터가
        빠졌다"와 "레벨을 원래 그렇게 만들었다"를 구분할 수 없게 됩니다. */
-    for (int i = 0; i < l->n_ents; i++) {
+    for (int i = 0; i < l->n_ents; i++)
+    {
         const Entity *e = &l->ents[i];
         int type = mon_type_for(e->kind);
-        if (type < 0) continue;
+        if (type < 0)
+            continue;
         const MonType *S = &TYPES[type];
 
         float x = e->x * 0.01f, z = e->z * 0.01f;
         float f, c;
-        if (!level_ground(l, x, z, 1000.0f, S->height, &f, &c)) continue;
+        if (!level_ground(l, x, z, 1000.0f, S->height, &f, &c))
+            continue;
 
-        if (g_count >= ENEMY_MAX) { DIAG(DIAG_ENEMY_CAP); continue; }
+        if (g_count >= ENEMY_MAX)
+        {
+            DIAG(DIAG_ENEMY_CAP);
+            continue;
+        }
 
         Enemy *m = &g_enemies[g_count++];
         Enemy zero = {0};
         *m = zero;
-        m->type   = type;
-        m->pos    = v3f(x, f, z);
+        m->type = type;
+        m->pos = v3f(x, f, z);
         m->health = S->hp;
-        m->state  = E_IDLE;
+        m->state = E_IDLE;
         m->active = 1;
-        m->anim   = frand() * 6.28f;
+        m->anim = frand() * 6.28f;
 
         /* Spread the sight refreshes across the period rather than lining them
            all up on the frame after a spawn. Derived from the index so it is
@@ -653,11 +743,13 @@ void enemy_spawn_level(const Level *l) {
  * @param[in]     dt   시간 간격 (초).
  */
 static void chase_brawler(const Level *l, const MonType *S, Enemy *m,
-                          v3 to, float dist, float dt) {
-    float inv  = dist > 0.001f ? 1.0f / dist : 0.0f;
+                          v3 to, float dist, float dt)
+{
+    float inv = dist > 0.001f ? 1.0f / dist : 0.0f;
     float step = S->speed * dt;
 
-    if (dist > S->attack) {
+    if (dist > S->attack)
+    {
         move_toward(l, S, m, to.x * inv * step, to.z * inv * step);
         return;
     }
@@ -668,11 +760,14 @@ static void chase_brawler(const Level *l, const MonType *S, Enemy *m,
        사거리 안입니다. 여기의 굴림은 근접 대역에서 Quake의 0.9입니다. 거리를 좁히는 것이
        여전히 치명적일 만큼 높고, 몬스터가 코앞에서 공격 타이머만 돌리는 대신 이따금 자리를
        바꿀 만큼 낮습니다. */
-    if (check_attack(S, m, dist)) {
+    if (check_attack(S, m, dist))
+    {
         m->state = E_ATTACK;
         m->timer = 0.0f;
         m->swung = 0;
-    } else {
+    }
+    else
+    {
         ai_run_slide(l, S, m, dt);
     }
 }
@@ -700,15 +795,18 @@ static void chase_brawler(const Level *l, const MonType *S, Enemy *m,
  * @param[in]     dt   시간 간격 (초).
  */
 static void chase_caster(const Level *l, const MonType *S, Enemy *m,
-                         v3 to, float dist, v3 player_eye, float dt) {
-    float inv  = dist > 0.001f ? 1.0f / dist : 0.0f;
+                         v3 to, float dist, v3 player_eye, float dt)
+{
+    float inv = dist > 0.001f ? 1.0f / dist : 0.0f;
     float step = S->speed * dt;
 
-    if (dist > S->attack) {
+    if (dist > S->attack)
+    {
         move_toward(l, S, m, to.x * inv * step, to.z * inv * step);
         return;
     }
-    if (dist < S->attack * CASTER_KEEP) {
+    if (dist < S->attack * CASTER_KEEP)
+    {
         move_toward(l, S, m, -to.x * inv * step, -to.z * inv * step);
         return;
     }
@@ -720,7 +818,8 @@ static void chase_caster(const Level *l, const MonType *S, Enemy *m,
        캐시를 씁니다. 이것은 자리를 잡고 시전을 *시작할지*를 결정하며, 시전 시간이 충분히
        길어 한두 프레임의 지연은 문제가 될 수 없습니다. ::release_bolt가 실시간으로 다시
        검사하며, 벽을 실제로 지키는 것은 그 검사입니다. */
-    if (!sees_player(l, m, player_eye)) {
+    if (!sees_player(l, m, player_eye))
+    {
         move_toward(l, S, m, to.x * inv * step, to.z * inv * step);
         return;
     }
@@ -732,11 +831,14 @@ static void chase_caster(const Level *l, const MonType *S, Enemy *m,
        선호하는 대역 안에서 플레이어를 정면으로 보고 있으면서도, 여전히 *가끔만* 쏩니다.
        나머지 시간에는 원을 그립니다. 그것이 캐스터를 포탑에서 방 안을 쫓아다녀야 하는
        무언가로 바꿉니다. */
-    if (check_attack(S, m, dist)) {
+    if (check_attack(S, m, dist))
+    {
         m->state = E_ATTACK;
         m->timer = 0.0f;
         m->swung = 0;
-    } else {
+    }
+    else
+    {
         ai_run_slide(l, S, m, dt);
     }
 }
@@ -766,8 +868,10 @@ static void chase_caster(const Level *l, const MonType *S, Enemy *m,
  *       같습니다. 이 모듈은 플레이어의 체력을 소유하지 않으며, 비워진 체력을 한 곳에서
  *       감지하는 것이 새로운 피해원이 플레이어를 죽이는 것을 잊지 않게 합니다.
  */
-static int release_swing(const MonType *S, Enemy *m, float dist) {
-    if (dist > S->attack + 0.3f) return 0;
+static int release_swing(const MonType *S, Enemy *m, float dist)
+{
+    if (dist > S->attack + 0.3f)
+        return 0;
     play_at(m->pos, "eatt", 90);
     return S->damage;
 }
@@ -805,28 +909,36 @@ static int release_swing(const MonType *S, Enemy *m, float dist) {
  *          볼트당 한 번이라면 판정 비용을 감당할 수 있습니다. 감당할 수 없었던 것은
  *          ::chase_caster의 매 프레임 폴링입니다.
  */
-static void release_bolt(const Level *l, const MonType *S, Enemy *m, v3 player_eye) {
-    if (!can_see(l, m, player_eye)) return;
+static void release_bolt(const Level *l, const MonType *S, Enemy *m, v3 player_eye)
+{
+    if (!can_see(l, m, player_eye))
+        return;
 
     v3 from = v3f(m->pos.x, m->pos.y + S->eye, m->pos.z);
-    v3 at   = v3f(player_eye.x, player_eye.y - PLAYER_EYE * 0.35f, player_eye.z);
+    v3 at = v3f(player_eye.x, player_eye.y - PLAYER_EYE * 0.35f, player_eye.z);
     shot_fire(from, at, S->shot_speed, S->damage);
     play_at(m->pos, "ecast", 90);
 }
 
-int enemy_update(const Level *l, v3 player_eye, float dt) {
+int enemy_update(const Level *l, v3 player_eye, float dt)
+{
     int player_damage = shots_update(l, player_eye, dt);
 
-    for (int i = 0; i < g_count; i++) {
+    for (int i = 0; i < g_count; i++)
+    {
         Enemy *m = &g_enemies[i];
-        if (!m->active) continue;
+        if (!m->active)
+            continue;
         const MonType *S = &TYPES[m->type];
 
         m->anim += dt;
-        if (m->flash > 0.0f) m->flash -= dt * 4.0f;
+        if (m->flash > 0.0f)
+            m->flash -= dt * 4.0f;
 
-        if (m->state == E_DEAD) {
-            if (m->timer > 0.0f) m->timer -= dt;
+        if (m->state == E_DEAD)
+        {
+            if (m->timer > 0.0f)
+                m->timer -= dt;
             continue;
         }
 
@@ -842,10 +954,11 @@ int enemy_update(const Level *l, v3 player_eye, float dt) {
            E_DEAD 건너뛰기 뒤에 두는 이유는 시체는 아무것도 묻지 않으며, 시체를 위해
            갱신하는 것은 더 이상 아무것도 보지 않는 몬스터에 절감분을 전부 쓰는
            일이기 때문입니다. */
-        if (m->sight_age > 0) m->sight_age--;
+        if (m->sight_age > 0)
+            m->sight_age--;
 
         v3 to = v3sub(player_eye, v3f(m->pos.x, m->pos.y + S->eye, m->pos.z));
-        float dist = sqrtf(to.x*to.x + to.z*to.z);
+        float dist = sqrtf(to.x * to.x + to.z * to.z);
 
         /* WHERE IT WANTS TO LOOK, which is no longer the same as where it is
            looking. This line used to be `m->yaw = atan2f(...)` -- a monster
@@ -861,11 +974,15 @@ int enemy_update(const Level *l, v3 player_eye, float dt) {
         m->ideal_yaw = atan2f(-to.x, -to.z);
         change_yaw(m, S->yaw_speed, dt);
 
-        if (m->pain_wait   > 0.0f) m->pain_wait   -= dt;
-        if (m->attack_wait > 0.0f) m->attack_wait -= dt;
-        if (m->slide_wait  > 0.0f) m->slide_wait  -= dt;
+        if (m->pain_wait > 0.0f)
+            m->pain_wait -= dt;
+        if (m->attack_wait > 0.0f)
+            m->attack_wait -= dt;
+        if (m->slide_wait > 0.0f)
+            m->slide_wait -= dt;
 
-        switch (m->state) {
+        switch (m->state)
+        {
         case E_IDLE:
             /* Cached: noticing the player a frame or two late is imperceptible,
                and the distance test in front of it means a monster out of sight
@@ -873,7 +990,8 @@ int enemy_update(const Level *l, v3 player_eye, float dt) {
                캐시를 씁니다. 플레이어를 한두 프레임 늦게 알아채는 것은 지각되지 않으며,
                앞의 거리 검사 덕분에 시야 거리 밖의 몬스터는 판정 비용을 아예 치르지
                않습니다. */
-            if (dist < S->sight && sees_player(l, m, player_eye)) {
+            if (dist < S->sight && sees_player(l, m, player_eye))
+            {
                 m->state = E_CHASE;
                 play_at(m->pos, "sight", 80);
             }
@@ -887,18 +1005,24 @@ int enemy_update(const Level *l, v3 player_eye, float dt) {
                하나의 질문을, 그에 답하는 열에게, 한 번 묻습니다. 이것이 대체하는 세 개의
                `shot_speed > 0` 검사는 각각 "이것은 캐스터인가"를 뜻했고, 세 번째 아키타입이
                생기는 날 각각을 다시 찾아내야 했을 것입니다. */
-            if (S->behaviour == AI_CASTER) chase_caster(l, S, m, to, dist, player_eye, dt);
-            else                            chase_brawler(l, S, m, to, dist, dt);
+            if (S->behaviour == AI_CASTER)
+                chase_caster(l, S, m, to, dist, player_eye, dt);
+            else
+                chase_brawler(l, S, m, to, dist, dt);
             break;
 
         case E_ATTACK:
             m->timer += dt;
-            if (!m->swung && m->timer >= S->windup) {
+            if (!m->swung && m->timer >= S->windup)
+            {
                 m->swung = 1;
-                if (S->behaviour == AI_CASTER) release_bolt(l, S, m, player_eye);
-                else                            player_damage += release_swing(S, m, dist);
+                if (S->behaviour == AI_CASTER)
+                    release_bolt(l, S, m, player_eye);
+                else
+                    player_damage += release_swing(S, m, dist);
             }
-            if (m->timer >= S->windup + S->cooldown) {
+            if (m->timer >= S->windup + S->cooldown)
+            {
                 /* Quake's SUB_AttackFinished(2*random()): a RANDOM rest before
                    the next attack is even considered, on top of the animation's
                    own cooldown. Fixed rests make a group of monsters fire in a
@@ -910,70 +1034,101 @@ int enemy_update(const Level *l, v3 player_eye, float dt) {
                    in reach swings again without paying for the walk back.
                    캐스터는 언제나 자기 대역으로 돌아갑니다. 아직 사거리 안에 있는 근접형은
                    되돌아오는 비용을 치르지 않고 다시 휘두릅니다. */
-                if (S->behaviour == AI_CASTER)  m->state = E_CHASE;
-                else if (dist <= S->attack)    { m->timer = 0.0f; m->swung = 0; }
-                else                             m->state = E_CHASE;
+                if (S->behaviour == AI_CASTER)
+                    m->state = E_CHASE;
+                else if (dist <= S->attack)
+                {
+                    m->timer = 0.0f;
+                    m->swung = 0;
+                }
+                else
+                    m->state = E_CHASE;
             }
             break;
 
         case E_HURT:
             m->timer -= dt;
-            if (m->timer <= 0.0f) m->state = E_CHASE;
+            if (m->timer <= 0.0f)
+                m->state = E_CHASE;
             break;
 
-        default: break;
+        default:
+            break;
         }
 
         float f, c;
-        if (level_ground(l, m->pos.x, m->pos.z, m->pos.y, S->height / 3.0f, &f, &c)) {
-            if (m->pos.y > f + 0.01f) {
+        if (level_ground(l, m->pos.x, m->pos.z, m->pos.y, S->height / 3.0f, &f, &c))
+        {
+            if (m->pos.y > f + 0.01f)
+            {
                 m->vel_y -= 22.0f * dt;
                 m->pos.y += m->vel_y * dt;
-                if (m->pos.y <= f) { m->pos.y = f; m->vel_y = 0.0f; }
-            } else {
-                m->pos.y = f; m->vel_y = 0.0f;
+                if (m->pos.y <= f)
+                {
+                    m->pos.y = f;
+                    m->vel_y = 0.0f;
+                }
+            }
+            else
+            {
+                m->pos.y = f;
+                m->vel_y = 0.0f;
             }
         }
     }
     return player_damage;
 }
 
-int enemy_hitscan(v3 o, v3 d, float maxdist, float *out_t, int *out_idx) {
+int enemy_hitscan(v3 o, v3 d, float maxdist, float *out_t, int *out_idx)
+{
     float best = maxdist;
-    int   hit = -1;
+    int hit = -1;
 
-    for (int i = 0; i < g_count; i++) {
+    for (int i = 0; i < g_count; i++)
+    {
         const Enemy *m = &g_enemies[i];
-        if (!m->active || m->state == E_DEAD) continue;
+        if (!m->active || m->state == E_DEAD)
+            continue;
         const MonType *S = &TYPES[m->type];
 
         float ex = o.x - m->pos.x, ez = o.z - m->pos.z;
-        float a = d.x*d.x + d.z*d.z;
-        if (a < 1e-6f) continue;
-        float b = 2.0f * (ex*d.x + ez*d.z);
-        float cc = ex*ex + ez*ez - S->radius*S->radius;
-        float disc = b*b - 4.0f*a*cc;
-        if (disc < 0.0f) continue;
+        float a = d.x * d.x + d.z * d.z;
+        if (a < 1e-6f)
+            continue;
+        float b = 2.0f * (ex * d.x + ez * d.z);
+        float cc = ex * ex + ez * ez - S->radius * S->radius;
+        float disc = b * b - 4.0f * a * cc;
+        if (disc < 0.0f)
+            continue;
 
         float t = (-b - sqrtf(disc)) / (2.0f * a);
-        if (t < 0.0f) t = (-b + sqrtf(disc)) / (2.0f * a);
-        if (t < 0.0f || t >= best) continue;
+        if (t < 0.0f)
+            t = (-b + sqrtf(disc)) / (2.0f * a);
+        if (t < 0.0f || t >= best)
+            continue;
 
         float y = o.y + d.y * t;
-        if (y < m->pos.y || y > m->pos.y + S->height) continue;
+        if (y < m->pos.y || y > m->pos.y + S->height)
+            continue;
 
-        best = t; hit = i;
+        best = t;
+        hit = i;
     }
 
-    if (hit < 0) return 0;
-    *out_t = best; *out_idx = hit;
+    if (hit < 0)
+        return 0;
+    *out_t = best;
+    *out_idx = hit;
     return 1;
 }
 
-void enemy_hurt(int idx, int dmg, v3 dir) {
-    if (idx < 0 || idx >= g_count) return;
+void enemy_hurt(int idx, int dmg, v3 dir)
+{
+    if (idx < 0 || idx >= g_count)
+        return;
     Enemy *m = &g_enemies[idx];
-    if (!m->active || m->state == E_DEAD) return;
+    if (!m->active || m->state == E_DEAD)
+        return;
 
     m->health -= dmg;
     m->flash = 1.0f;
@@ -993,7 +1148,8 @@ void enemy_hurt(int idx, int dmg, v3 dir) {
        가리킬 대상이 생기기 전까지 이 매개변수는 받기만 하고 버려졌습니다. */
     v3 back = v3len(dir) > 1e-4f ? v3scale(v3norm(dir), -1.0f) : v3f(0, 1, 0);
 
-    if (m->health <= 0) {
+    if (m->health <= 0)
+    {
         m->state = E_DEAD;
         m->timer = 0.6f;
         play_at(m->pos, "edie", 95);
@@ -1019,11 +1175,14 @@ void enemy_hurt(int idx, int dmg, v3 dir) {
        이미 도달 가능했고, 이동 속도가 10.8이 되면서 그 자리를 잡는 것이 쉬워졌습니다.
        자고 있던 몬스터를 깨우는 것은 예외입니다. 알아채지 못한 방 건너에서 총을 맞은
        몬스터는 그래도 알아채야 합니다. */
-    if (m->state == E_IDLE) {
+    if (m->state == E_IDLE)
+    {
         m->state = E_HURT;
         m->timer = 0.16f;
         m->pain_wait = S->pain_lock;
-    } else if (m->state == E_CHASE && m->pain_wait <= 0.0f) {
+    }
+    else if (m->state == E_CHASE && m->pain_wait <= 0.0f)
+    {
         m->state = E_HURT;
         m->timer = 0.16f;
         m->pain_wait = S->pain_lock;

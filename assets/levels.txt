@@ -205,3 +205,392 @@ e caster -600 -600       # shooting from the far corner while the brute closes
 e ammo -600 0
 e health 600 -600
 e exit 0 800             # the end of the game
+
+# --- imported from Freedoom levels/dm03.wad by import-doom-level.py ---
+# A DRAFT, not a finished level: see that script for why a Doom map
+# converted faithfully reads as wide and flat to a player who moves at
+# 10.8 m/s and has a grapple.
+l dm03
+start 480 1200 -576
+
+s
+floor 0  ceil 768
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   -1344 2784   -1344 2208   -1344 1440   -480 1440   -480 2160   -480 2880   -1248 2880
+
+s
+floor 0  ceil 288
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   -480 2160   -432 2208   -336 2208   -288 2160   -288 2016   480 2016   480 2208   -192 2208   -288 2304   -288 2880   -480 2880
+
+s
+floor 144  ceil 768
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   -1344 864   -480 864   -480 1056   -1344 1056
+
+s
+floor 96  ceil 480
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   -2016 2016   -1776 1968   -1776 1680   -2016 1632   -2016 1536   -1632 1536   -1632 2112   -2016 2112
+
+s
+floor 192  ceil 288
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   2112 -768   2016 -768   1920 -768   1920 -912   1968 -960   2112 -960   2112 -816
+
+s
+floor 192  ceil 288
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   2400 -960   2400 -864   2160 -864   2112 -816   2112 -960
+
+s
+floor 144  ceil 768
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   672 -1536   768 -1440   768 -1344   192 -1344   192 -1440   288 -1536
+
+s
+floor 288  ceil 768
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   672 2016   480 2016   480 1344   480 576   672 384   768 384   1344 384   1344 480   1344 960   1344 1200   1344 1632   1344 2064   1296 2016   1152 2016
+
+s
+floor -192  ceil 24
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   3120 -384   3120 -192   3072 -192   3072 -384
+
+s
+floor 0  ceil 384
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   2400 -1152   2784 -1152   2784 -960   2400 -960
+
+s
+floor 0  ceil 768
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   480 1344   480 2016   -288 2016   -288 1344
+
+s
+floor 48  ceil 384
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   -1440 2112   -1536 2112   -1536 1536   -1440 1536
+
+s
+floor -192  ceil 96
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   3576 -192   3528 -144   3240 -144   3192 -192   3192 -384   3240 -432   3528 -432   3576 -384
+
+s
+floor -144  ceil 288
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   1920 -768   2016 -768   2016 192   1920 192
+
+s
+floor -144  ceil 384
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   3456 1008   3408 1056   2688 1056   2112 1056   2112 960   2112 480   2112 384   3072 384   3120 432   3408 432   3456 480
+
+s
+floor 48  ceil 384
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   -144 3264   -192 3216   -192 2928   384 2928   384 3216   336 3264
+
+s
+floor -144  ceil 288
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   2688 1056   2688 1248   2112 1248   2112 1056
+
+s
+floor -48  ceil 768
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   2880 1632   2880 2112   1344 2112   1344 2064   1344 1632
+
+s
+floor 0  ceil 768
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   2880 2112   2880 2880   2688 3072   2208 3072   1536 3072   1344 2880   1344 2208   1344 2112
+
+s
+floor -96  ceil 768
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   1392 1248   2112 1248   2688 1248   2880 1440   2880 1632   1344 1632   1344 1200
+
+s
+floor 192  ceil 480
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   -1824 1728   -1824 1920   -2016 1920   -2016 1728
+
+s
+floor 288  ceil 672
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   -480 288   -480 480   -1344 480   -1344 288
+
+s
+floor 48  ceil 768
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   -1344 1248   -480 1248   -480 1440   -1344 1440
+
+s
+floor 96  ceil 768
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   192 -1344   768 -1344   768 -1248   192 -1248
+
+s
+floor 288  ceil 672
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   1152 2016   1152 2112   672 2112   672 2016
+
+s
+floor 240  ceil 768
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   -480 480   -480 672   -1344 672   -1344 480
+
+s
+floor 192  ceil 768
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   -1344 672   -480 672   -480 864   -1344 864
+
+s
+floor -48  ceil 768
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   480 576   480 1344   -288 1344   -288 576
+
+s
+floor -192  ceil 288
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   2016 192   2016 -768   2112 -768   2112 192
+
+s
+floor 96  ceil 768
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   -480 1248   -1344 1248   -1344 1056   -480 1056
+
+s
+floor 0  ceil 384
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   -1344 2208   -1440 2112   -1440 1536   -1344 1440
+
+s
+floor -192  ceil 24
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   3144 -192   3144 -384   3192 -384   3192 -192
+
+s
+floor 192  ceil 768
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   -1728 192   -1728 0   -1728 -576   -1728 -768   -1344 -1152   -288 -1152   -192 -1248   -192 -1536   -192 -1728   0 -1920   960 -1920   1152 -1728   1152 -1536   1152 -1248   1248 -1152   1920 -1152   1920 -912   1920 -768   960 -768   768 -960   768 -1056   768 -1152   768 -1248   768 -1344   768 -1440   672 -1536   288 -1536   192 -1440   192 -1344   192 -1248   192 -1152   192 -1056   192 -960   0 -768   -1152 -768   -1344 -576   -1344 288   -1632 288
+
+s
+floor 96  ceil 480
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   -1824 1920   -1824 1728   -2016 1728   -2016 1632   -1776 1680   -1776 1968   -2016 2016   -2016 1920
+
+s
+floor -192  ceil -192
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   3120 -192   3120 -384   3144 -384   3144 -192
+
+s
+floor 240  ceil 672
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   1344 480   1440 480   1440 960   1344 960
+
+s
+floor 192  ceil 672
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   1536 480   1536 960   1440 960   1440 480
+
+s
+floor 144  ceil 672
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   1632 480   1632 960   1536 960   1536 480
+
+s
+floor 96  ceil 672
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   1728 480   1728 960   1632 960   1632 480
+
+s
+floor 48  ceil 672
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   1824 480   1824 960   1728 960   1728 480
+
+s
+floor 0  ceil 672
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   1920 480   1920 960   1824 960   1824 480
+
+s
+floor -48  ceil 384
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   2016 480   2016 960   1920 960   1920 480
+
+s
+floor -96  ceil 384
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   2016 480   2112 480   2112 960   2016 960
+
+s
+floor -192  ceil 384
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   2352 -768   2400 -816   2400 -864   2784 -864   3024 -864   3072 -816   3072 -384   3072 -192   3072 384   2112 384   2112 192   2112 -768
+
+s
+floor 0  ceil 288
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   2400 -864   2400 -960   2784 -960   2784 -864
+
+s
+floor 192  ceil 384
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   2400 -960   2112 -960   2112 -1152   2400 -1152
+
+s
+floor 192  ceil 384
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   2112 -960   1968 -960   1920 -912   1920 -1152   2112 -1152
+
+s
+floor 192  ceil 384
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   2352 -768   2112 -768   2112 -816   2160 -864   2400 -864   2400 -816
+
+s
+floor 96  ceil 384
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   -1536 2112   -1632 2112   -1632 1536   -1536 1536
+
+s
+floor -96  ceil 768
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   -480 288   -1344 288   -1344 -576   -1152 -768   0 -768   192 -960   768 -960   960 -768   1920 -768   1920 192   1392 192   816 192   768 240   768 384   672 384   480 576   -288 576   -288 336   -336 288
+
+s
+floor -48  ceil 768
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   192 -960   192 -1056   768 -1056   768 -960
+
+s
+floor 0  ceil 768
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   192 -1152   768 -1152   768 -1056   192 -1056
+
+s
+floor 48  ceil 768
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   192 -1248   768 -1248   768 -1152   192 -1152
+
+s
+floor 192  ceil 384
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   1344 -1824   1344 -1536   1152 -1536   1152 -1728   960 -1920   0 -1920   -192 -1728   -192 -1536   -384 -1536   -384 -1824   -96 -2112   1056 -2112
+
+s
+floor -48  ceil 768
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   768 240   816 192   1392 192   1344 240   1344 384   768 384
+
+s
+floor 0  ceil 384
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   -288 2304   -192 2208   480 2208   1344 2208   1344 2880   432 2880   384 2928   -192 2928   -240 2880   -288 2880
+
+s
+floor 192  ceil 384
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   -1920 -576   -1728 -576   -1728 0   -1920 0
+
+s
+floor 48  ceil 384
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   1872 3168   1920 3120   2160 3120   2112 3360   1824 3360
+
+s
+floor 0  ceil 384
+mat floor ptile  wall wall_brick  ceil ppanel
+p
+   2208 3072   2160 3120   1920 3120   1872 3168   1824 3360   1536 3072
+
+e rapid          1248  -1632
+e rapid           576   1920
+e health        -1848    -72
+e rapid          3360    528
+e rapid            96   3168
+e health          768  -2016
+e health          480  -2016
+e health          192  -2016
+e grenade        1272    312
+e grenadeammo    1152    312
+e grenadeammo    1032    312
+e grenadeammo     912    312
+e grenadeammo     792    312
+e rapidammo       264   3192
+e rapidammo       336   3048
+e rapidammo      -144   3024
+e rapidammo       -72   3192
+e health        -1272   1152
+e health         2592   2976
+e ammo           1248   1920
+e ammo           2808   2016
+e ammo           2808   1728
+e rapid         -1824   -288
+e grenade        2040   3288
+e axe            3384   -288
+e health          912   2280
+

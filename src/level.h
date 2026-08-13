@@ -92,7 +92,17 @@ typedef struct MdlRange MdlRange;
 /* --- Capacity limits / 용량 제한 --- */
 
 #define LVL_MAX_SECTORS 64     ///< @brief Maximum sectors per level. / 레벨당 최대 섹터 수.
-#define LVL_MAX_PTS     32     ///< @brief Maximum vertices per sector. / 섹터당 최대 정점 수.
+/* Raised from 32 when the first imported Doom level was measured against it.
+   Hand-authored sectors here are four to eight points; a room somebody drew in
+   a Doom editor is whatever shape the walls took, and dm03's largest is 38.
+   48 rather than 38 because the number is a .bss cost of two bytes per point
+   per sector and nothing else -- a cap set to exactly what today's map needs
+   is a cap that fails on tomorrow's.
+   첫 Doom 레벨을 상한과 대조하면서 32에서 올렸습니다. 이곳에서 손으로 작성한 섹터는
+   4~8점이지만, Doom 에디터에서 그린 방은 벽이 이룬 모양 그대로이고 dm03의 최대는
+   38입니다. 38이 아니라 48인 이유는, 이 값이 섹터당 점당 2바이트의 .bss 비용일 뿐이며
+   오늘의 맵에 정확히 맞춘 상한은 내일의 맵에서 실패하기 때문입니다. */
+#define LVL_MAX_PTS     48     ///< @brief Maximum vertices per sector. / 섹터당 최대 정점 수.
 #define LVL_MAX_ENTS    64     ///< @brief Maximum entities per level. / 레벨당 최대 엔티티 수.
 
 /* HOW MANY NUMBERS AN ENTITY MAY CARRY beyond its position. Three because that

@@ -128,7 +128,7 @@ p
 s
 floor -50  ceil 340
 door up 380 key red
-mat floor plava  wall door_red  ceil ppanel
+mat floor plava  wall wall_door  ceil ppanel
 p
    700 1500   1200 1500   1200 2000   700 2000
 

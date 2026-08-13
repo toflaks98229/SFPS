@@ -9,6 +9,7 @@
 #include <math.h>
 #include <time.h>
 #include "level.h"
+#include "txt.h"    /* txt_is -- compare a fixed-width name to a literal */
 #include "player.h"
 /* Builds real geometry to check winding and spans, so it needs the renderer's
    CPU-side half and MdlRange by value. level.h forward-declares both rather
@@ -23,6 +24,11 @@ static int fails;
 
 static void ok(int cond, const char *what) {
     printf("  %-52s %s\n", what, cond ? "ok" : "FAIL");
+    if (!cond) fails++;
+}
+
+static void okd(int cond, const char *what, int got, int want) {
+    printf("  %-52s %6d / %6d  %s\n", what, got, want, cond ? "ok" : "FAIL");
     if (!cond) fails++;
 }
 
@@ -662,6 +668,57 @@ int main(void) {
     }
 
     mb_free(&b);
+
+    /* --- a locked door wears its key -------------------------------------
+     *
+     * The level text says `wall_door` and the KEY decides the colour, so the
+     * author states the requirement once. What this guards is the version
+     * where they state it twice and the two disagree: a red door that opens
+     * with the blue card is a level lying to the player about its own rules,
+     * and lying convincingly, because a picture is the kind of thing a player
+     * trusts without checking.
+     *
+     * Checked through the SECTOR the door names rather than by re-deriving the
+     * material here, because re-deriving it would be a second copy of the rule
+     * and the two copies could agree while both being wrong.
+     *
+     * 레벨 텍스트는 `wall_door`라고 쓰고 *열쇠*가 색을 정하므로, 작성자는 요구 사항을 한
+     * 번만 말합니다. 이 검사가 막는 것은 두 번 말했다가 둘이 어긋나는 경우입니다. 파란
+     * 카드로 열리는 빨간 문은 레벨이 자기 규칙에 대해 설득력 있게 거짓말하는 것입니다.
+     * 여기서 재질을 다시 유도하지 않고 문이 지목한 *섹터*를 통해 검사하는 이유는, 다시
+     * 유도하면 규칙의 사본이 둘이 되고 둘 다 틀리면서 서로 일치할 수 있기 때문입니다.
+     */
+    {
+        Level kd;
+        if (level_load("arena", &kd)) {
+            int keyed = 0, coloured = 0, generic_left = 0;
+            for (int i = 0; i < kd.n_doors; i++) {
+                const DoorDef *d = &kd.doors[i];
+                if (d->key == KEY_NONE) continue;
+                if (d->sector < 0 || d->sector >= kd.n_sectors) continue;
+                keyed++;
+
+                const char *m = kd.sectors[d->sector].mat_wall;
+                int ml = 0;
+                while (ml < LVL_MAT && m[ml]) ml++;
+
+                if (txt_is(m, ml, "wall_door")) generic_left++;
+
+                const char *want = (d->key & KEY_RED)    ? "door_red"
+                                 : (d->key & KEY_BLUE)   ? "door_blue"
+                                 : (d->key & KEY_YELLOW) ? "door_yellow" : "";
+                if (txt_is(m, ml, want)) coloured++;
+            }
+
+            ok(keyed > 0, "the arena has a locked door to check");
+            okd(generic_left == 0,
+                "no locked door is left wearing the generic face",
+                generic_left, 0);
+            okd(coloured == keyed, "and every one wears its own key's colour",
+                coloured, keyed);
+        }
+    }
+
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall level checks passed\n", fails);
     return fails != 0;
 }

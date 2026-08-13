@@ -540,6 +540,66 @@ int level_load(const char *name, Level *out) {
        모두 어떤 질의보다도 앞서야 합니다. */
     level_grid_build(out);
 
+    /* --- a locked door wears its key -------------------------------------
+     *
+     * ENGLISH
+     * -------
+     * DERIVED, NOT AUTHORED. The key a door needs is already written in the
+     * level text; making the author also write the matching material is asking
+     * them to state the same fact twice, and the failure mode is a red door
+     * that opens with the blue card -- a level that lies to the player about
+     * its own rules, and lies convincingly, because the picture is exactly the
+     * kind of thing a player trusts without checking.
+     *
+     * Only the generic `wall_door` is replaced. A door the author gave some
+     * other surface keeps it, so this is a default rather than an override:
+     * the moment it takes a decision away from whoever wrote the level, it
+     * stops being a convenience and becomes an obstacle.
+     *
+     * This pairs with the HUD keycard row. The row says which cards you hold;
+     * this says which card the door in front of you wants. Neither is much use
+     * without the other -- knowing you have the blue card does not help at a
+     * door whose colour you cannot see.
+     *
+     * 한국어
+     * ------
+     * 작성된 것이 아니라 *파생된* 것입니다. 문이 요구하는 열쇠는 이미 레벨 텍스트에 적혀
+     * 있습니다. 작성자에게 대응하는 재질까지 쓰게 하는 것은 같은 사실을 두 번 말하라는
+     * 것이고, 실패 형태는 파란 카드로 열리는 빨간 문입니다. 레벨이 자기 규칙에 대해
+     * 플레이어에게 거짓말을 하는 것이며, 설득력 있게 합니다. 그림은 플레이어가 확인 없이
+     * 믿는 바로 그런 것이기 때문입니다.
+     *
+     * 일반 `wall_door`만 교체합니다. 작성자가 다른 표면을 준 문은 그대로 유지되므로,
+     * 이것은 덮어쓰기가 아니라 기본값입니다. 레벨을 쓴 사람에게서 결정을 빼앗는 순간
+     * 편의가 아니라 방해가 됩니다.
+     *
+     * HUD의 키카드 행과 짝을 이룹니다. 그 행은 어떤 카드를 가졌는지 말하고, 이것은 앞에
+     * 있는 문이 어떤 카드를 원하는지 말합니다. 한쪽만으로는 쓸모가 적습니다. 파란 카드를
+     * 가졌다는 것을 알아도 색을 볼 수 없는 문 앞에서는 도움이 되지 않습니다. */
+    for (int i = 0; i < out->n_doors; i++) {
+        const DoorDef *d = &out->doors[i];
+        if (d->key == KEY_NONE) continue;
+        if (d->sector < 0 || d->sector >= out->n_sectors) continue;
+
+        Sector *s = &out->sectors[d->sector];
+        int wl = 0;
+        while (wl < LVL_MAT && s->mat_wall[wl]) wl++;
+        if (!txt_is(s->mat_wall, wl, "wall_door")) continue;
+
+        /* Lowest set bit wins, the same rule door_key_name uses, so a door
+           needing two cards shows the first of them rather than nothing.
+           door_key_name과 같이 가장 낮은 비트가 이깁니다. 두 카드를 요구하는 문이
+           아무것도 아닌 것이 아니라 그중 첫 번째를 보여 줍니다. */
+        const char *m = (d->key & KEY_RED)    ? "door_red"
+                      : (d->key & KEY_BLUE)   ? "door_blue"
+                      : (d->key & KEY_YELLOW) ? "door_yellow" : 0;
+        if (m) {
+            int ml = 0;
+            while (m[ml]) ml++;
+            copy_name(s->mat_wall, LVL_MAT, m, ml);
+        }
+    }
+
     return found;
 }
 

@@ -719,6 +719,66 @@ int main(void) {
         }
     }
 
+
+    /* --- an entity's optional numbers do not eat the next statement -------
+     *
+     * Entities may now carry numbers after their position, and the parser
+     * finds out how many by TRYING to read one and stopping when the next
+     * token is not a number. That is only safe because txt_read_int leaves the
+     * stream exactly where it found it on failure -- and because no statement
+     * in this format begins with a number.
+     *
+     * The second half of that is a property of the LANGUAGE, not of the
+     * parser, and nothing else states it. A statement that began with a number
+     * would be silently swallowed as the previous entity's parameter, and the
+     * symptom would be a missing sector or a lost light somewhere further down
+     * the file, nowhere near the entity that ate it.
+     *
+     * WHICH IS WHY THE CHECK IS "EVERY PARAMETER IS ZERO". No shipped level
+     * writes one yet, so a non-zero parameter today can only have come from the
+     * parser consuming something that was not offered to it. When the first
+     * real parameter is authored this check moves to naming it -- but until
+     * then this is the strongest statement available, and it costs nothing.
+     *
+     * 엔티티는 이제 위치 뒤에 수치를 담을 수 있고, 파서는 하나를 *읽어 보고* 다음 토큰이
+     * 숫자가 아니면 멈추는 방식으로 개수를 알아냅니다. 이것이 안전한 이유는 txt_read_int가
+     * 실패 시 스트림을 발견한 그대로 남기기 때문이며, 또한 이 형식의 어떤 문장도 숫자로
+     * 시작하지 않기 때문입니다.
+     *
+     * 후자는 파서가 아니라 *언어*의 성질이고 다른 어디에도 적혀 있지 않습니다. 숫자로
+     * 시작하는 문장이 생기면 앞 엔티티의 파라미터로 조용히 삼켜지며, 증상은 파일 한참
+     * 아래의 사라진 섹터나 잃어버린 광원으로 나타납니다. 그것을 먹은 엔티티 근처가
+     * 아닙니다.
+     *
+     * 그래서 검사가 "모든 파라미터가 0"입니다. 아직 어떤 배포 레벨도 파라미터를 쓰지
+     * 않으므로, 오늘 0이 아닌 파라미터는 파서가 주어지지 않은 것을 소비했다는 뜻뿐입니다.
+     * 첫 실제 파라미터가 작성되면 이 검사는 그것을 지목하는 쪽으로 옮겨 갑니다.
+     */
+    {
+        static const char *NAMES[] = { "arena", "vault" };
+        int checked = 0, dirty = 0;
+
+        for (int n = 0; n < (int)(sizeof(NAMES)/sizeof(NAMES[0])); n++) {
+            Level el;
+            if (!level_load(NAMES[n], &el)) continue;
+            checked++;
+            for (int i = 0; i < el.n_ents; i++)
+                for (int k = 0; k < LVL_ENT_PARAMS; k++)
+                    if (el.ents[i].p[k] != 0) {
+                        if (!dirty)
+                            printf("      '%s' entity %d ('%s') has p[%d] = %d\n",
+                                   NAMES[n], i, el.ents[i].kind, k,
+                                   el.ents[i].p[k]);
+                        dirty++;
+                    }
+        }
+
+        ok(checked > 0, "the shipped levels load for the parameter check");
+        okd(dirty == 0,
+            "no entity picked up a number the level never offered it",
+            dirty, 0);
+    }
+
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall level checks passed\n", fails);
     return fails != 0;
 }

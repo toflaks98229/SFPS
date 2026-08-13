@@ -470,11 +470,32 @@ int level_load(const char *name, Level *out) {
             p = txt_read_int(p, &z, &ok);
             if (!ok) continue;
 
+            /* OPTIONAL TRAILING NUMBERS, as many as the line supplies.
+               Safe to attempt because txt_read_int leaves the stream exactly
+               where it found it when the next token is not a number -- so
+               reading past the end of one entity's line stops on the `e` or
+               `s` that starts the next statement without consuming it. An
+               entity that writes none keeps the zeros, which is what every
+               level authored before this did.
+               줄이 제공하는 만큼 선택적으로 뒤따르는 수치를 읽습니다. txt_read_int가 다음
+               토큰이 숫자가 아닐 때 스트림을 발견한 그대로 남기므로 시도해도 안전합니다.
+               한 엔티티의 줄 끝을 지나 읽어도 다음 문장을 시작하는 `e`나 `s`에서 멈추고
+               그것을 소비하지 않습니다. 아무것도 쓰지 않은 엔티티는 0을 유지하며, 이 필드
+               이전에 작성된 모든 레벨이 그렇습니다. */
+            int par[LVL_ENT_PARAMS] = {0};
+            for (int i = 0; i < LVL_ENT_PARAMS; i++) {
+                int got, more;
+                p = txt_read_int(p, &got, &more);
+                if (!more) break;
+                par[i] = got;
+            }
+
             if (found && out->n_ents < LVL_MAX_ENTS) {
                 Entity *e = &out->ents[out->n_ents++];
                 copy_name(e->kind, LVL_MAT, kind, klen);
                 e->x = (short)x;
                 e->z = (short)z;
+                for (int i = 0; i < LVL_ENT_PARAMS; i++) e->p[i] = (short)par[i];
             }
             continue;
         }

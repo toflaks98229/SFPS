@@ -95,6 +95,17 @@ typedef struct MdlRange MdlRange;
 #define LVL_MAX_PTS     32     ///< @brief Maximum vertices per sector. / 섹터당 최대 정점 수.
 #define LVL_MAX_ENTS    64     ///< @brief Maximum entities per level. / 레벨당 최대 엔티티 수.
 
+/* HOW MANY NUMBERS AN ENTITY MAY CARRY beyond its position. Three because that
+   is what the gimmicks being brought over need at their widest -- a teleporter
+   naming a destination and the facing to leave at -- and because a cap that is
+   generous costs 6 bytes per entity while a cap that is tight costs a format
+   change. 64 entities is 384 bytes of .bss, which the floppy never sees.
+   엔티티가 위치 외에 담을 수 있는 수치의 개수입니다. 3인 이유는 가져오려는 기믹들이 가장
+   넓게 필요로 하는 수가 그만큼이기 때문이며(목적지와 나갈 방향을 지정하는 텔레포터),
+   넉넉한 상한은 엔티티당 6바이트지만 빠듯한 상한은 형식 변경을 치르기 때문입니다.
+   엔티티 64개면 .bss 384바이트이고 플로피는 그것을 보지 않습니다. */
+#define LVL_ENT_PARAMS   3
+
 /**
  * @brief Maximum point lights per level.
  *
@@ -624,6 +635,52 @@ typedef struct {
 typedef struct {
     char  kind[LVL_MAT];          /**< "spawn", "ammo", ... / "spawn", "ammo" 등. */
     short x, z;                   /**< Position in 1/100 units. / 위치 (1/100 단위). */
+
+    /**
+     * @brief Optional numbers the entity's own module interprets.
+     *
+     * ENGLISH
+     * -------
+     * A jump pad needs a launch speed, a teleporter needs to name its
+     * destination, a hazard needs a damage rate. None of those can be
+     * expressed by a position alone, and every one of them belongs to a
+     * different module.
+     *
+     * GENERIC ON PURPOSE, and this is the one place in the project where that
+     * is the right answer rather than the lazy one. ::Entity is the only struct
+     * here whose meaning is deliberately not known where it is declared -- the
+     * comment above it already says so: pickup.c owns "ammo", enemy.c owns the
+     * monster names, and level.c is not allowed an opinion. Naming these fields
+     * `speed` and `target` would hand level.h an opinion about entities it
+     * exists precisely not to know about, and the second module to want a
+     * third meaning would have to either lie in a badly-named field or add a
+     * fourth that nothing else uses.
+     *
+     * ALL ZERO WHEN UNWRITTEN, so every level authored before these existed
+     * still parses to exactly what it did, and a module reading `p[0]` on an
+     * entity that never set it gets a defined value rather than whatever was
+     * in the slot from the last level.
+     *
+     * 한국어
+     * ------
+     * @brief 해당 엔티티를 담당하는 모듈이 해석하는 선택적 수치입니다.
+     *
+     * 점프대에는 발사 속력이, 텔레포터에는 목적지 지정이, 위험 지대에는 피해량이
+     * 필요합니다. 어느 것도 위치만으로는 표현할 수 없고, 각각 서로 다른 모듈에 속합니다.
+     *
+     * 일부러 범용입니다. 이곳은 그것이 게으른 답이 아니라 *옳은* 답인 이 프로젝트의 유일한
+     * 자리입니다. ::Entity는 선언된 곳에서 의미를 의도적으로 모르는 유일한 구조체이며, 위의
+     * 주석이 이미 그렇게 말합니다. pickup.c가 "ammo"를, enemy.c가 몬스터 이름을 담당하고
+     * level.c에는 의견이 허용되지 않습니다. 이 필드를 `speed`나 `target`으로 이름 붙이면,
+     * 알지 않기 위해 존재하는 level.h에 엔티티에 대한 의견을 쥐여 주는 셈입니다. 그리고 세
+     * 번째 의미를 원하는 두 번째 모듈은 잘못된 이름의 필드에서 거짓말을 하거나, 아무도 쓰지
+     * 않는 네 번째 필드를 더해야 합니다.
+     *
+     * 기록되지 않으면 전부 0이므로, 이 필드가 생기기 전에 작성된 레벨도 정확히 그대로
+     * 해석되고, 설정한 적 없는 엔티티에서 `p[0]`을 읽는 모듈은 이전 레벨의 잔여물이 아니라
+     * 정의된 값을 얻습니다.
+     */
+    short p[LVL_ENT_PARAMS];
 } Entity;
 
 /**

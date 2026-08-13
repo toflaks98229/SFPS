@@ -434,6 +434,34 @@ static void step_smoke(World *w, float dt) {
  *       복사합니다. 이전에는 이곳에 지역 버퍼가 필요했습니다. ::level_load가 대상의 `next`
  *       필드를 비우므로 호출 도중에 자기 검색 문자열을 지웠기 때문입니다.
  */
+/* The jump pad, applied where the player is standing.
+ *
+ * ONLY WHILE GROUNDED, and that -- not the assignment below -- is what makes
+ * the height fixed. It is a correctness requirement rather than a design
+ * choice.
+ * The pad is found by an x/z test, and a player launched straight up stays
+ * inside that radius for the whole ascent: without the ground test the pad
+ * would re-set the velocity every frame, cancelling gravity, and hold them
+ * rising at launch speed until they drifted sideways off it. Requiring contact
+ * makes it fire once per landing, which is also what a pad you step on means.
+ *
+ * 플레이어가 서 있는 자리에 적용되는 점프대입니다. 높이를 고정시키는 것은 아래의 대입이
+ * 아니라 *접지 조건*입니다. 설계 선택이 아니라 정확성 문제입니다. 점프대는 x/z
+ * 판정으로 찾는데, 곧장 위로 발사된 플레이어는 상승 내내 그 반경 안에 머뭅니다. 접지
+ * 검사가 없으면 점프대가 매 프레임 속도를 다시 설정해 중력을 상쇄하고, 옆으로 벗어날
+ * 때까지 발사 속력으로 계속 올라갑니다. 접촉을 요구하면 착지마다 한 번 발동하며, 그것이
+ * 밟는 점프대의 의미이기도 합니다. */
+static void step_push(World *w) {
+    if (!w->player.grounded) return;
+
+    float sp = level_push_at(&w->level, w->player.pos.x, w->player.pos.z);
+    if (sp <= 0.0f) return;
+
+    w->player.vel.y   = sp;
+    w->player.grounded = 0;
+    audio_play_at("hland", 85, w->player.pos);
+}
+
 static void step_exit(World *w) {
     if (!level_exit_at(&w->level, w->player.pos.x, w->player.pos.z)) return;
 
@@ -933,6 +961,14 @@ int world_step(World *w, const Input *in, float aspect, float dt) {
     if (!frozen)
         pickup_update(w->player.pos, &w->player.health, PLAYER_MAX_HP,
                       &w->weapon, &w->player.keys, dt);
+
+    /* Before the exit, because a pad and an exit on the same tile is a level
+       bug either way and this order makes it an obvious one: the player is
+       thrown into the air rather than quietly finishing the level.
+       출구보다 먼저입니다. 같은 칸에 점프대와 출구가 있는 것은 어느 쪽이든 레벨의 결함이며,
+       이 순서는 그것을 눈에 띄게 만듭니다. 조용히 레벨이 끝나는 대신 플레이어가 공중으로
+       던져집니다. */
+    if (!frozen) step_push(w);
 
     if (!frozen) step_exit(w);
 

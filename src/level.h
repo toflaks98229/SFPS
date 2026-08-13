@@ -106,6 +106,34 @@ typedef struct MdlRange MdlRange;
    엔티티 64개면 .bss 384바이트이고 플로피는 그것을 보지 않습니다. */
 #define LVL_ENT_PARAMS   3
 
+/* THE JUMP PAD. `e push <x> <z> [speed]`, speed in file units per second so
+   the level text stays integers -- 1300 is 13 m/s.
+   Quake's trigger_push is where this comes from. Quake's reason for SETTING
+   the velocity rather than adding to it is that adding would make the height
+   depend on how fast you were already falling -- but that reason does not
+   apply here, and it is worth writing down that it does not: this pad only
+   fires while grounded, and landing has already zeroed the fall. Set and add
+   are indistinguishable, which was confirmed by changing one to the other and
+   watching every check still pass.
+   What actually makes the height fixed is the GROUND REQUIREMENT. `=` is kept
+   anyway, because it is the form that stays correct if that requirement is
+   ever relaxed, and because a pad that adds is a pad waiting to become
+   unpredictable the moment anything upstream changes.
+   The default is what a pad with no number gets. Chosen against this game's
+   own numbers rather than Quake's: PLAYER_JUMP 7.5 against PLAYER_GRAVITY 22
+   is a 1.28m hop, and 13 m/s is 3.8m -- high enough to be a route the player
+   could not otherwise take, which is the only reason to place one.
+   점프대입니다. `e push <x> <z> [speed]`이며 속력은 초당 파일 단위라 레벨 텍스트가 정수로
+   유지됩니다. 1300이 13 m/s입니다. Quake의 trigger_push에서 왔고, 가져올 값어치가 있는
+   단 하나는 이것이 속도를 *더하지 않고 설정한다*는 점입니다. 더하면 이미 얼마나 빨리
+   떨어지고 있었는지에 따라 높이가 달라져, 같은 점프대가 매번 다른 곳으로 던지고 배울 수
+   있는 레벨의 일부이기를 그만둡니다. 설정하면 고정 거리가 되고, 그것이 이것을 위험 요소가
+   아니라 지형으로 만듭니다. 기본값은 Quake가 아니라 이 게임 수치를 기준으로 골랐습니다.
+   PLAYER_GRAVITY 22에 대한 PLAYER_JUMP 7.5는 1.28m 도약이고, 13 m/s는 3.8m입니다.
+   플레이어가 달리 갈 수 없는 경로가 될 만큼 높으며, 하나를 놓을 이유는 그것뿐입니다. */
+#define LVL_PUSH_RADIUS   1.1f
+#define LVL_PUSH_DEFAULT  1300
+
 /**
  * @brief Maximum point lights per level.
  *
@@ -1117,6 +1145,31 @@ int level_hazard_at(const Level *l, float x, float z);
  *       두었습니다.
  */
 int level_exit_at(const Level *l, float x, float z);
+
+/**
+ * @brief The launch speed of a jump pad under this point, or 0 for none.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] l    The level.
+ * @param[in] x,z  Where the player is standing, in metres.
+ * @return Upward speed in metres per second, or 0 when no pad is here.
+ * @note Returns the SPEED rather than a yes/no, so the caller has nothing left
+ *       to look up and cannot pair the wrong pad with the wrong number. It is
+ *       also why 0 doubles as "no pad": a pad that launched at nothing would
+ *       be indistinguishable from floor, so the value and the question have
+ *       the same answer.
+ *
+ * 한국어
+ * ------
+ * @brief 이 지점 아래 점프대의 발사 속력이며, 없으면 0입니다.
+ * @return 초당 미터 단위의 상승 속력. 점프대가 없으면 0입니다.
+ * @note 예/아니오가 아니라 *속력*을 반환하므로 호출자가 더 찾아볼 것이 없고, 엉뚱한
+ *       점프대와 엉뚱한 수치를 짝지을 수 없습니다. 0이 "점프대 없음"을 겸하는 이유이기도
+ *       합니다. 아무 속력도 내지 않는 점프대는 바닥과 구별되지 않으므로, 값과 질문의 답이
+ *       같습니다.
+ */
+float level_push_at(const Level *l, float x, float z);
 
 /* --- Public function prototypes: edge geometry / 공개 함수 프로토타입: 모서리 지오메트리 --- */
 

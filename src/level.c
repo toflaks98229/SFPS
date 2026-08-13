@@ -1075,6 +1075,28 @@ int level_exit_at(const Level *l, float x, float z) {
     return 0;
 }
 
+float level_push_at(const Level *l, float x, float z) {
+    for (int i = 0; i < l->n_ents; i++) {
+        const char *k = l->ents[i].kind;
+        if (!(k[0]=='p'&&k[1]=='u'&&k[2]=='s'&&k[3]=='h'&&k[4]==0)) continue;
+
+        float dx = x - l->ents[i].x * U, dz = z - l->ents[i].z * U;
+        if (dx*dx + dz*dz > LVL_PUSH_RADIUS * LVL_PUSH_RADIUS) continue;
+
+        /* An unwritten speed is the default, not nothing. A pad the author
+           dropped in without a number should still throw them somewhere --
+           the alternative is a pad that reads as broken, and the author's next
+           move is to doubt the feature rather than to type a number.
+           기록되지 않은 속력은 0이 아니라 기본값입니다. 작성자가 수치 없이 놓은
+           점프대도 어딘가로 던져야 합니다. 그러지 않으면 고장 난 것처럼 읽히고, 작성자의
+           다음 행동은 숫자를 입력하는 것이 아니라 기능을 의심하는 것이 됩니다. */
+        int sp = l->ents[i].p[0];
+        if (sp <= 0) sp = LVL_PUSH_DEFAULT;
+        return sp * U;
+    }
+    return 0.0f;
+}
+
 v3 level_edge_normal(const Level *l, int sector, int edge) {
     return edge_normal(&l->sectors[sector], edge);
 }

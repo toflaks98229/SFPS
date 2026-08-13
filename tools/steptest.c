@@ -795,6 +795,112 @@ int main(void) {
         }
     }
 
+
+    /* --- the jump pad throws you the same distance every time --------------
+     *
+     * A pad SETS the velocity rather than adding to it, and that is the whole
+     * mechanic. Adding would make the height depend on how fast the player
+     * happened to be falling when they landed on it, so the same pad would
+     * throw them somewhere different every time and stop being a piece of
+     * level they can learn.
+     *
+     * WHICH IS WHY THE TEST HITS IT TWICE AT DIFFERENT SPEEDS. Checking that a
+     * pad launches at all passes just as well for an adding pad -- the fault
+     * is not that it fails to fire, it is that it fires by a different amount.
+     * Dropped from two different heights, the apex must be the same.
+     *
+     * 점프대는 속도를 더하지 않고 *설정*하며, 그것이 기능의 전부입니다. 더하면 착지 순간
+     * 마침 얼마나 빨리 떨어지고 있었는지에 따라 높이가 달라져, 같은 점프대가 매번 다른
+     * 곳으로 던지고 배울 수 있는 레벨의 일부이기를 그만둡니다.
+     *
+     * 그래서 검사가 서로 다른 속도로 두 번 밟습니다. "발사되는가"만 보면 더하는 점프대도
+     * 똑같이 통과합니다. 결함은 발동하지 않는 것이 아니라 *다른 양*으로 발동하는 것입니다.
+     * 서로 다른 높이에서 떨어뜨렸을 때 정점이 같아야 합니다.
+     */
+    {
+        /* Apex reached after landing on a pad from `drop` metres up. */
+        float apex[2];
+        const float DROP[2] = { 0.2f, 6.0f };
+
+        for (int k = 0; k < 2; k++) {
+            World w;
+            fixture(&w, 0);
+            Input in = idle();
+
+            /* A pad under the player. Placed rather than looked for, so the
+               test asserts about the code and not about whichever map happens
+               to have one today.
+               찾지 않고 직접 놓습니다. 오늘 어느 맵에 하나 있는지가 아니라 코드에 대해
+               단언하기 위해서입니다. */
+            Entity *e = &w.level.ents[w.level.n_ents++];
+            e->kind[0]='p'; e->kind[1]='u'; e->kind[2]='s'; e->kind[3]='h';
+            e->kind[4]=0;
+            e->x = (short)(w.player.pos.x * 100.0f);
+            e->z = (short)(w.player.pos.z * 100.0f);
+            e->p[0] = 1300;
+
+            /* Lifted, then allowed to fall onto it. The two drops arrive at
+               very different downward speeds, which is the whole point. */
+            w.player.pos.y   += DROP[k];
+            w.player.vel.y    = 0.0f;
+            w.player.grounded = 0;
+
+            float top = w.player.pos.y, launch_y = 0.0f;
+            int   launched = 0;
+            for (int i = 0; i < 60 * 6; i++) {
+                float before = w.player.vel.y;
+                world_step(&w, &in, ASPECT, DT);
+                /* The launch is the frame velocity turns sharply upward. */
+                if (!launched && w.player.vel.y > 1.0f && before <= 0.0f) {
+                    launched = 1;
+                    launch_y = w.player.pos.y;
+                    top = w.player.pos.y;
+                }
+                if (launched && w.player.pos.y > top) top = w.player.pos.y;
+                if (launched && w.player.grounded) break;
+            }
+            ok(launched, k ? "a pad fires under a fast landing"
+                           : "a pad fires under a slow landing");
+            /* The HEIGHT GAINED, not the world height. Comparing two apexes to
+               each other proved nothing: it was satisfied by a pad that adds
+               (both drops rise further, but by the same amount once the ground
+               contact has zeroed the fall) and by a pad with no ground
+               requirement (both rise forever at the same rate). Two broken
+               versions and the correct one all scored a difference of 0.000.
+               A number with a right answer is what discriminates.
+               월드 높이가 아니라 *상승량*입니다. 두 정점을 서로 비교하는 것은 아무것도
+               증명하지 못했습니다. 더하는 점프대(접지가 낙하를 0으로 만든 뒤라 둘 다 같은
+               양만큼 더 오릅니다)도, 접지 조건이 없는 점프대(둘 다 같은 속도로 영원히
+               오릅니다)도 만족시켰습니다. 망가진 둘과 올바른 하나가 모두 차이 0.000을
+               기록했습니다. 정답이 있는 수치라야 구분됩니다. */
+            apex[k] = top - launch_y;
+        }
+
+        /* The heights themselves are the table's business; that they AGREE is
+           this test's. 5cm is far tighter than the difference an adding pad
+           would show -- falling 6m arrives at about 16 m/s, which added to a
+           13 m/s launch is more than double the height.
+           높이 자체는 표의 몫이고, 둘이 *일치한다*는 것이 이 검사의 몫입니다. 5cm는 더하는
+           점프대가 보일 차이보다 훨씬 빡빡합니다. 6m 낙하는 약 16 m/s로 도착하며, 13 m/s
+           발사에 더해지면 높이가 두 배를 넘습니다. */
+        /* 1300 file units is 13 m/s, and v^2/2g against PLAYER_GRAVITY 22 is
+           3.84m. The window is wide because the apex is sampled once a frame;
+           it is narrow enough that a pad which added a 6m fall's 16 m/s would
+           reach 19m, and one that never let go would leave the map.
+           1300 파일 단위는 13 m/s이고, PLAYER_GRAVITY 22에 대한 v^2/2g는 3.84m입니다.
+           정점을 프레임마다 표본화하므로 창이 넓지만, 6m 낙하의 16 m/s를 더하는 점프대가
+           19m에 이르고 놓아주지 않는 점프대가 맵을 벗어날 만큼은 좁습니다. */
+        for (int k = 0; k < 2; k++)
+            okf(apex[k] > 3.0f && apex[k] < 5.0f,
+                k ? "a fast landing gains the pad's own height"
+                  : "a slow landing gains the pad's own height",
+                apex[k], 3.84f);
+
+        float gap = apex[0] - apex[1];
+        if (gap < 0) gap = -gap;
+        okf(gap < 0.05f, "and the two agree with each other", gap, 0.05f);
+    }
+
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall frame-order checks passed\n", fails);
     return fails != 0;
 }

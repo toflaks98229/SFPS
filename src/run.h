@@ -202,6 +202,43 @@ typedef struct {
     /** @brief The clock animated materials run against; wrapped, and frozen with the world. / 애니메이션 재질이 사용하는 시계. 순환하며 월드와 함께 정지합니다. */
     float world_time;
 
+    /**
+     * @brief Non-zero while the between-levels screen is up.
+     *
+     * ENGLISH
+     * -------
+     * Reaching an exit used to load the next level on the same frame. The
+     * player crossed a line and the world was simply a different world, with
+     * no moment in which anything was said about what they had just done --
+     * which makes finishing a level indistinguishable from walking through a
+     * door, and those are not the same event.
+     *
+     * Held in RunState rather than World because it is a property of the RUN:
+     * the world during the intermission is still the finished level, fully
+     * loaded and frozen. Putting it in World would have meant a World that is
+     * between two of them, which is a state every query into the level would
+     * then have to have an opinion about.
+     *
+     * 한국어
+     * ------
+     * 출구에 닿으면 같은 프레임에 다음 레벨을 불러왔습니다. 플레이어가 선을 넘으면 세계가
+     * 그냥 다른 세계가 되었고, 방금 한 일에 대해 무언가 말해지는 순간이 없었습니다. 그러면
+     * 레벨을 끝내는 것과 문을 지나는 것이 구분되지 않는데, 그 둘은 같은 사건이 아닙니다.
+     *
+     * World가 아니라 RunState에 두는 이유는 이것이 *플레이*의 속성이기 때문입니다.
+     * 인터미션 동안의 월드는 여전히 방금 끝낸 레벨이며 온전히 로드된 채 멈춰 있습니다.
+     * World에 두었다면 두 레벨 *사이*에 있는 World가 되고, 레벨에 대한 모든 질의가 그
+     * 상태에 대해 의견을 가져야 했을 것입니다.
+     */
+    int   between;
+
+    /** @brief Seconds the between-levels screen has been up. / 레벨 사이 화면이 떠 있던 시간(초). */
+    float between_time;
+
+    /** @brief The level just finished, and the one it leads to. / 방금 끝낸 레벨과 그것이 이어지는 레벨. */
+    char  cleared[32];
+    char  entering[32];
+
     /* --- lava hazard timers ------------------------------------------------
        These were function-local statics inside the frame loop, which put them
        somewhere a restart could not see. Harmless in practice -- the accumulator

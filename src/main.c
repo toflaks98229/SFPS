@@ -1047,6 +1047,18 @@ static void frame_draw(const World *w, Scene *sc, int vw, int vh, int frozen) {
         scene_draw_title(sc, vw, vh, w->run.title_time);
     else if (w->run.won)
         scene_draw_win(sc, vw, vh, &w->player, &w->weapon);
+    else if (w->run.between)
+        /* Before the death screen in this chain and after the win screen,
+           which is the order the states can actually co-exist in: the world is
+           frozen during the intermission so nothing can kill the player, but a
+           terminal level sets `won` instead of `between` and both must not be
+           reachable at once.
+           이 사슬에서 사망 화면보다 앞, 승리 화면보다 뒤입니다. 상태들이 실제로 공존할 수
+           있는 순서가 그렇습니다. 인터미션 동안 월드가 정지하므로 플레이어가 죽을 수 없고,
+           종착 레벨은 `between`이 아니라 `won`을 세우므로 둘이 동시에 성립해서는
+           안 됩니다. */
+        scene_draw_between(sc, vw, vh, w->run.cleared, w->run.entering,
+                           w->run.between_time, WORLD_BETWEEN_TIME);
     else if (w->run.dead)
         /* The overlay's clock starts when the COLLAPSE ends, not when the
            player dies. Fading a red wash in over the fall would hide the

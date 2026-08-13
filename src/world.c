@@ -444,10 +444,58 @@ static void step_exit(World *w) {
         return;
     }
 
+    /* ALREADY BETWEEN LEVELS: the exit is still under the player's feet and
+       level_exit_at keeps saying so, so without this the intermission would
+       re-arm itself every frame and its timer would never advance.
+       이미 레벨 사이입니다. 출구는 여전히 플레이어 발밑에 있고 level_exit_at은 계속 그렇게
+       말하므로, 이것이 없으면 인터미션이 매 프레임 자신을 다시 세우고 타이머가 결코
+       진행되지 않습니다. */
+    if (w->run.between) return;
+
+    /* The screen goes up; the level does NOT load yet. Loading here and
+       showing the names afterwards would put the intermission over the level
+       it is announcing, and the player would be reading "ENTERING VAULT" while
+       standing in the vault.
+       화면이 뜨고 레벨은 아직 로드되지 *않습니다*. 여기서 로드하고 이름을 나중에 보여
+       주면 인터미션이 자신이 알리는 그 레벨 위에 뜨게 되고, 플레이어는 금고 안에 서서
+       "ENTERING VAULT"를 읽게 됩니다. */
+    w->run.between      = 1;
+    w->run.between_time = 0.0f;
+    txt_copy(w->run.cleared,  sizeof w->run.cleared,  w->level.name, -1);
+    txt_copy(w->run.entering, sizeof w->run.entering, w->level.next, -1);
+    audio_play("exit", 90);
+}
+
+/* How long the names are up before the level behind them loads.
+ *
+ * A DURATION RATHER THAN A KEYPRESS. Doom's intermission waits for one, and
+ * Doom's intermission has tallies to read; ours has two names, and a prompt to
+ * dismiss two names is ceremony around nothing. Long enough to read them,
+ * short enough that it does not become the thing between the player and the
+ * next fight.
+ * 키 입력이 아니라 시간입니다. Doom의 인터미션은 입력을 기다리지만 그것에는 읽을 집계가
+ * 있습니다. 우리 것에는 이름 둘뿐이고, 이름 둘을 넘기기 위한 안내는 아무것도 아닌 것을
+ * 둘러싼 의식입니다. 읽을 만큼 길고, 플레이어와 다음 전투 사이를 가로막는 것이 되지 않을
+ * 만큼 짧습니다. */
+
+
+/* Advances the between-levels screen, and loads when it is done.
+ *
+ * The load is here rather than in step_exit so there is exactly one place that
+ * changes which level is running -- see world_load_level's own note on that.
+ * 로드가 step_exit이 아니라 이곳에 있는 이유는, 어느 레벨이 도는지를 바꾸는 곳이 정확히
+ * 하나이도록 하기 위해서입니다. */
+static void step_between(World *w, float dt) {
+    if (!w->run.between) return;
+
+    w->run.between_time += dt;
+    if (w->run.between_time < WORLD_BETWEEN_TIME) return;
+
+    w->run.between = 0;
+
     /* An unknown target changes nothing and leaves the player where they are;
        a typo does not win the game. */
-    if (world_load_level(w, w->level.next, WORLD_ENTER_CARRY))
-        audio_play("exit", 90);
+    world_load_level(w, w->run.entering, WORLD_ENTER_CARRY);
 }
 
 /* --------------------------------------------------------------------- api */
@@ -821,7 +869,16 @@ void world_restart(World *w) {
 }
 
 int world_frozen(const World *w, int paused) {
-    return w->run.won || w->run.dead || w->run.title || paused;
+    /* THE INTERMISSION FREEZES TOO. It is the same kind of state as the win
+       screen: a moment held over a level that is finished with. Without it the
+       player keeps walking and shooting behind the names, and the monsters
+       keep coming -- a player who dies during the screen announcing that they
+       cleared the level has been told two contradictory things.
+       인터미션도 정지시킵니다. 승리 화면과 같은 종류의 상태이며, 이미 끝난 레벨 위에
+       붙잡아 둔 순간입니다. 그러지 않으면 플레이어는 이름 뒤에서 계속 걷고 쏘고 몬스터도
+       계속 다가옵니다. 레벨을 클리어했다고 알리는 화면 도중에 죽는 플레이어는 서로
+       모순되는 두 가지를 들은 것입니다. */
+    return w->run.won || w->run.dead || w->run.title || w->run.between || paused;
 }
 
 int world_step(World *w, const Input *in, float aspect, float dt) {
@@ -878,6 +935,13 @@ int world_step(World *w, const Input *in, float aspect, float dt) {
                       &w->weapon, &w->player.keys, dt);
 
     if (!frozen) step_exit(w);
+
+    /* OUTSIDE the frozen test, because the intermission is itself what froze
+       the world -- gating its own clock on `!frozen` would stop the timer that
+       is supposed to end it, and the screen would stay up forever.
+       `frozen` 검사 *바깥*입니다. 인터미션 자신이 월드를 정지시킨 장본인이므로, 그 시계를
+       `!frozen`으로 막으면 그것을 끝내야 할 타이머가 멈추고 화면이 영원히 남습니다. */
+    step_between(w, dt);
 
     /* --- the clock animated materials run against ------------------------
        Advances with dt rather than being read from a system timer, so it stops

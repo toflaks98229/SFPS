@@ -20,6 +20,7 @@
  */
 
 #include <stdio.h>
+#include <string.h>   /* strcmp -- level names are compared by value */
 #include <math.h>
 
 #include "world.h"
@@ -703,6 +704,95 @@ int main(void) {
         okf(s.weapon.ammo[WP_SHOTGUN] == first.ammo[WP_SHOTGUN],
             "and restarting it replays what it was started with",
             (float)s.weapon.ammo[WP_SHOTGUN], (float)first.ammo[WP_SHOTGUN]);
+    }
+
+
+    /* --- the exit shows the names before it loads ------------------------
+     *
+     * Reaching an exit used to load the next level on the same frame: the
+     * player crossed a line and the world was simply a different world, with
+     * no moment in which anything was said about what they had just done.
+     *
+     * THE ORDER IS THE WHOLE FEATURE. If the load happened first and the names
+     * were shown afterwards, the screen would be sitting over the level it is
+     * announcing -- the player reading "ENTERING VAULT" while standing in the
+     * vault. So what is checked is not that a screen appears but that the
+     * level has NOT changed while it is up.
+     *
+     * 출구에 닿으면 같은 프레임에 다음 레벨을 불러왔습니다. 순서가 기능의 전부입니다. 로드가
+     * 먼저 일어나고 이름이 나중에 표시되면, 화면이 자신이 알리는 그 레벨 위에 뜨게 됩니다.
+     * 금고 안에 서서 "ENTERING VAULT"를 읽는 것입니다. 그래서 검사하는 것은 화면이
+     * 나타난다는 것이 아니라, 화면이 떠 있는 동안 레벨이 *바뀌지 않았다*는 것입니다.
+     */
+    {
+        World w;
+        fixture(&w, 0);
+        Input in = idle();
+
+        char started[32];
+        snprintf(started, sizeof(started), "%s", w.level.name);
+
+        /* An exit placed under the player, the same way the reach test above
+           places one -- the arena authors none, so a test that went looking
+           for one would be asserting about the map rather than about the code.
+           위의 도달 테스트와 같은 방식으로 플레이어 발밑에 출구를 놓습니다. 아레나는 출구를
+           작성하지 않으므로, 찾아 나서는 테스트는 코드가 아니라 맵에 대해 단언하게 됩니다. */
+        Entity *e = &w.level.ents[w.level.n_ents++];
+        e->kind[0] = 'e'; e->kind[1] = 'x'; e->kind[2] = 'i'; e->kind[3] = 't';
+        e->kind[4] = 0;
+        e->x = (short)(w.player.pos.x * 100.0f);
+        e->z = (short)(w.player.pos.z * 100.0f);
+
+        /* THE CHAIN IS SET HERE rather than relied on from the fixture. The
+           fixture's level has no `next`, so its exit is terminal and sets
+           `won` -- which is a different feature and would have made this test
+           silently assert nothing about the one it is for.
+           사슬을 fixture에 의존하지 않고 여기서 세웁니다. fixture의 레벨에는 `next`가
+           없어 그 출구는 종착이며 `won`을 세웁니다. 그것은 다른 기능이고, 그대로 두었다면
+           이 테스트가 정작 대상 기능에 대해 아무것도 단언하지 않았을 것입니다. */
+        snprintf(w.level.next, sizeof(w.level.next), "%s", "arena");
+        ok(w.level.next[0] != 0, "the level leads somewhere to go");
+
+        {
+            world_step(&w, &in, ASPECT, DT);
+            ok(w.run.between, "reaching the exit raises the between screen");
+            ok(!strcmp(w.level.name, started),
+               "and the finished level is still the one loaded");
+            ok(!strcmp(w.run.cleared, started),
+               "which is the name it reports as cleared");
+            ok(w.run.entering[0] != 0, "and it names where it is going");
+
+            /* Frozen: a player who dies during the screen announcing that they
+               cleared the level has been told two contradictory things.
+               정지 상태입니다. 레벨을 클리어했다고 알리는 화면 도중에 죽는 플레이어는 서로
+               모순되는 두 가지를 들은 것입니다. */
+            in.forward = 1;
+            v3 from = w.player.pos;
+            int frozen = world_step(&w, &in, ASPECT, DT);
+            float moved = v3len(v3sub(w.player.pos, from));
+            ok(frozen != 0, "the world is frozen while it is up");
+            okf(moved < 1e-5f, "so the player cannot walk out of it", moved, 0.0f);
+            in.forward = 0;
+
+            /* Halfway: still up, still the old level. The screen having a
+               DURATION is what this checks -- one that cleared itself on the
+               next frame would pass every assertion above.
+               중간 지점입니다. 여전히 떠 있고 여전히 이전 레벨입니다. 화면에 *지속 시간*이
+               있다는 것을 검사합니다. 다음 프레임에 사라지는 화면도 위의 모든 단언은
+               통과합니다. */
+            for (float t = 0; t < WORLD_BETWEEN_TIME * 0.5f; t += DT)
+                world_step(&w, &in, ASPECT, DT);
+            ok(w.run.between, "it is still up halfway through");
+            ok(!strcmp(w.level.name, started),
+               "and has still not loaded the next level");
+
+            /* Past its time: the level changes and the screen goes. */
+            for (float t = 0; t < WORLD_BETWEEN_TIME; t += DT)
+                world_step(&w, &in, ASPECT, DT);
+            ok(!w.run.between, "and comes down once its time is up");
+            ok(strcmp(w.level.name, started) != 0,
+               "having loaded the level it named");
+        }
     }
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall frame-order checks passed\n", fails);

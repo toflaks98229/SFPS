@@ -59,6 +59,29 @@
 #ifndef WORLD_H
 #define WORLD_H
 
+/* HOW LONG THE BETWEEN-LEVELS SCREEN STAYS UP, in seconds.
+ *
+ * A DURATION RATHER THAN A KEYPRESS. Doom's intermission waits for one, and
+ * Doom's intermission has tallies to read; ours has two names, and a prompt to
+ * dismiss two names is ceremony around nothing. Long enough to read them,
+ * short enough that it does not become the thing between the player and the
+ * next fight.
+ *
+ * Public because the screen fades against it: the drawer needs to know when it
+ * ends to fade out before it does, and a second constant on the drawing side
+ * would be a number that could disagree with the one that actually ends it --
+ * a screen that fades to nothing and then sits there, or cuts out mid-fade.
+ *
+ * 레벨 사이 화면이 떠 있는 시간(초)입니다. 키 입력이 아니라 시간인 이유는, Doom의
+ * 인터미션에는 읽을 집계가 있지만 우리 것에는 이름 둘뿐이고 이름 둘을 넘기기 위한 안내는
+ * 아무것도 아닌 것을 둘러싼 의식이기 때문입니다.
+ *
+ * 공개하는 이유는 화면이 이 값에 맞춰 사라지기 때문입니다. 그리는 쪽은 언제 끝나는지 알아야
+ * 그 전에 페이드 아웃할 수 있으며, 그리는 쪽의 두 번째 상수는 실제로 화면을 끝내는 값과
+ * 어긋날 수 있는 숫자가 됩니다. 다 사라진 뒤 한참 남아 있거나, 페이드 도중에 잘리는
+ * 화면이 그 결과입니다. */
+#define WORLD_BETWEEN_TIME 2.6f
+
 #include "level.h"
 #include "player.h"
 #include "weapon.h"

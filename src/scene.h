@@ -358,6 +358,31 @@ void scene_draw_hud(Scene *s, int vw, int vh, const Player *p, const Weapon *w);
 void scene_draw_win(Scene *s, int vw, int vh, const Player *p, const Weapon *w);
 
 /**
+ * @brief Draws the screen between two levels: what was cleared, what is next.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] s        Scene supplying the HUD buffer and mesh.
+ * @param[in]     vw,vh    Viewport size in pixels.
+ * @param[in]     cleared  Name of the level just finished.
+ * @param[in]     entering Name of the level it leads to.
+ * @param[in]     t        Seconds this screen has been up.
+ * @param[in]     total    How long it stays up, for the fade at each end.
+ * @note Takes the two names rather than the World, so it cannot accidentally
+ *       read the level that is CURRENTLY loaded -- which during this screen is
+ *       still the finished one, and would put the wrong name under "ENTERING".
+ *
+ * 한국어
+ * ------
+ * @brief 두 레벨 사이의 화면을 그립니다. 무엇을 끝냈고 다음은 무엇인지 표시합니다.
+ * @note World가 아니라 이름 둘을 받으므로, *현재* 로드된 레벨을 실수로 읽을 수 없습니다.
+ *       이 화면이 떠 있는 동안 그것은 여전히 방금 끝낸 레벨이며, "ENTERING" 아래에 틀린
+ *       이름을 넣게 됩니다.
+ */
+void scene_draw_between(Scene *s, int vw, int vh, const char *cleared,
+                        const char *entering, float t, float total);
+
+/**
  * @brief Draws the ESC menu over the frozen world.
  *
  * ENGLISH

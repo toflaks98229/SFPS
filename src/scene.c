@@ -121,6 +121,17 @@
 #define HUD_NOTICE_SIZE 2.2f
 #define HUD_NOTICE_Y    0.34f   /* fraction of viewport height */
 #define HUD_NOTICE_FADE 0.6f    /* seconds of fade at the tail */
+
+/* The between-levels screen. Dimmer than the win screen's wash, because the
+   level behind it is not over -- the player is passing through, not stopping,
+   and a full blackout would say otherwise.
+   레벨 사이 화면입니다. 승리 화면의 막보다 옅습니다. 뒤의 레벨이 끝난 것이 아니기
+   때문입니다. 플레이어는 멈추는 것이 아니라 지나가는 중이며, 완전한 암전은 그 반대를
+   말하게 됩니다. */
+#define BETWEEN_DIM        0.72f
+#define BETWEEN_FADE       0.45f   /* seconds at each end */
+#define BETWEEN_LABEL_SIZE 2.0f
+#define BETWEEN_NAME_SIZE  4.5f
 #define HURT_FLASH_MAX  0.4f    /* alpha of the full-screen wash at full hurt */
 
 /* --- win screen --- */
@@ -757,6 +768,64 @@ void scene_draw_win(Scene *s, int vw, int vh, const Player *p, const Weapon *w) 
     float hw = font_width(WIN_HINT_SIZE, hint);
     text_run(s, (vw - hw) * 0.5f, vh * 0.5f + 40.0f, WIN_HINT_SIZE, hint,
              0.55f, 0.55f, 0.58f, 1.0f);
+
+    ui_end();
+}
+
+void scene_draw_between(Scene *s, int vw, int vh, const char *cleared,
+                        const char *entering, float t, float total) {
+    DIAG_WANT_UI_PASS(post_in_world_pass());
+
+    ui_begin(vw, vh);
+
+    /* FADES IN AND BACK OUT, rather than appearing and vanishing. The level
+       behind it is still drawn and still lit; a screen that cut in over it
+       would read as the game having changed mode, and what actually happened
+       is that the player finished something. The fade is the difference
+       between a transition and a jump.
+       나타났다 사라지는 것이 아니라 서서히 들어오고 다시 나갑니다. 뒤의 레벨은 여전히
+       그려지고 여전히 밝습니다. 그 위로 잘라 들어오는 화면은 게임이 모드를 바꾼 것으로
+       읽히지만, 실제로 일어난 일은 플레이어가 무언가를 끝냈다는 것입니다. 페이드가
+       전환과 도약의 차이입니다. */
+    float k = 1.0f;
+    if (total > 0.0f) {
+        float in  = t / BETWEEN_FADE;
+        float out = (total - t) / BETWEEN_FADE;
+        k = in < out ? in : out;
+        if (k > 1.0f) k = 1.0f;
+        if (k < 0.0f) k = 0.0f;
+    }
+
+    full_screen_wash(s, vw, vh, 0.0f, 0.0f, 0.0f, BETWEEN_DIM * k);
+
+    rd_mode(RD_TEXT);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, font_texture());
+
+    /* Two lines, each a label over a name, because the two facts are not the
+       same kind of thing: one is what the player did and the other is where
+       they are going. Running them together as "ARENA -> VAULT" would be
+       shorter and would say neither.
+       각각 이름 위에 표제가 붙은 두 줄입니다. 두 사실이 같은 종류가 아니기 때문입니다.
+       하나는 플레이어가 한 일이고 다른 하나는 갈 곳입니다. "ARENA -> VAULT"로 붙이면 더
+       짧지만 둘 다 말하지 못합니다. */
+    const char *l1 = "CLEARED";
+    float w1 = font_width(BETWEEN_LABEL_SIZE, l1);
+    text_run(s, (vw - w1) * 0.5f, vh * 0.5f - 96.0f, BETWEEN_LABEL_SIZE, l1,
+             0.55f, 0.58f, 0.62f, k);
+
+    float wc = font_width(BETWEEN_NAME_SIZE, cleared);
+    text_run(s, (vw - wc) * 0.5f, vh * 0.5f - 58.0f, BETWEEN_NAME_SIZE, cleared,
+             0.95f, 0.85f, 0.35f, k);
+
+    const char *l2 = "ENTERING";
+    float w2 = font_width(BETWEEN_LABEL_SIZE, l2);
+    text_run(s, (vw - w2) * 0.5f, vh * 0.5f + 22.0f, BETWEEN_LABEL_SIZE, l2,
+             0.55f, 0.58f, 0.62f, k);
+
+    float we = font_width(BETWEEN_NAME_SIZE, entering);
+    text_run(s, (vw - we) * 0.5f, vh * 0.5f + 60.0f, BETWEEN_NAME_SIZE, entering,
+             0.60f, 0.80f, 0.95f, k);
 
     ui_end();
 }

@@ -53,6 +53,7 @@
 #include "font.h"
 #include "audio.h"
 #include "data.h"
+#include "decal.h"    /* bullet holes, blood and tracers -- what a shot leaves */
 #include "fx.h"       /* fx_draw -- the particles, on the world side of the pass */
 #include "diag.h"
 
@@ -956,8 +957,16 @@ static void frame_draw(const World *w, Scene *sc, int vw, int vh, int frozen) {
     scene_draw_proj   (sc, vp, cam.right, cam.up);
     fx_draw(vp, cam.right, cam.up);
 
-    /* --- bullet holes and tracers, still in world space --- */
+    /* --- what shots left behind, and the rope, still in world space ---
+       Both are billboards with one winding, so culling comes off for the pair.
+       decal_draw goes first because that is where these two used to sit inside
+       one function, and the order they were written in is the order they blend
+       correctly in.
+       둘 다 감김 방향이 하나인 빌보드이므로 두 호출을 위해 컬링을 끕니다. decal_draw가 먼저인
+       이유는 이 둘이 원래 한 함수 안에서 그 순서로 있었고, 작성된 순서가 곧 올바르게 블렌딩되는
+       순서이기 때문입니다. */
     glDisable(GL_CULL_FACE);
+    decal_draw(vp, eye_pos, cam.right, cam.up);
     wp_draw_world(&w->weapon, vp, eye_pos, cam.right, cam.up);
 
     /* --- the gun, over a cleared depth buffer ---
@@ -1152,6 +1161,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
     ShowWindow(g_wnd, show);
 
     rd_init();
+    decal_init();   /* pairs with decal_free below */
 
     /* The offscreen target, sized so that magnifying it back to the window is
        an exact integer scale in both axes. The sizing rule itself lives in
@@ -1363,6 +1373,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
        버퍼를 추가하는 사람이 참고하는 파일이 바로 이 파일입니다. 이곳에서 짝을 맞추지
        않으면 그 계약은 어디에서도 지켜지지 않게 됩니다. */
     scene_free(&scene);
+    decal_free();
 
     post_shutdown();
     audio_shutdown();

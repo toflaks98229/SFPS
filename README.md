@@ -1774,7 +1774,8 @@ is the reason the snap grid is a uniform rather than a compile-time constant.
 | [src/model.h](src/model.h) / [src/model.c](src/model.c) | model text parser → extruded geometry |
 | [src/data.h](src/data.h) / [src/data.c](src/data.c) | baked text in release, watched files in dev |
 | [src/player.h](src/player.h) / [src/player.c](src/player.c) | movement, momentum, collision — no GL |
-| [src/weapon.h](src/weapon.h) / [src/weapon.c](src/weapon.c) | hitscan, recoil, recoil-jump kick, view model, flash, tracers, decals |
+| [src/weapon.h](src/weapon.h) / [src/weapon.c](src/weapon.c) | hitscan, recoil, recoil-jump kick, view model, flash, HUD |
+| [src/decal.h](src/decal.h) / [src/decal.c](src/decal.c) | the marks a shot leaves: bullet holes, blood, sparks, tracers — spawning and ageing are GL-free |
 | [src/hook.c](src/hook.c) | the grapple: a projectile claw, the winch pull, the launch — no GL |
 | [src/enemy.h](src/enemy.h) / [src/enemy.c](src/enemy.c) | monster types, AI, spawning, collision, hitscan — no GL |
 | [src/pickup.h](src/pickup.h) / [src/pickup.c](src/pickup.c) | ammo/health pickups: spawn and collection — no GL |
@@ -1792,6 +1793,7 @@ is the reason the snap grid is a uniform rather than a compile-time constant.
 | [tools/diagtest.c](tools/diagtest.c) | headless diagnostics checks |
 | [tools/runtest.c](tools/runtest.c) | headless restart / run-state checks |
 | [tools/steptest.c](tools/steptest.c) | headless **whole-frame** checks: update order, what a freeze stops, the rebuild handshake |
+| [tools/decaltest.c](tools/decaltest.c) | headless decal checks: placement, the two lifetimes, the ring wrapping |
 | [tools/ui.h](tools/ui.h) / [tools/ui.c](tools/ui.c) | the editors' immediate-mode widget layer — only `ui_end` touches GL |
 | [tools/uitest.c](tools/uitest.c) | headless widget checks: drags, fields, click handshake |
 | [tools/sprtest.c](tools/sprtest.c) | headless sprite codec checks: both opcodes, the alphabet contract, the muzzle marker |

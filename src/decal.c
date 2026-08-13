@@ -1,0 +1,263 @@
+/**
+ * @file decal.c
+ * @brief The marks a shot leaves: bullet holes, blood, sparks and tracers.
+ */
+
+#include "decal.h"
+#include "render.h"
+#include <math.h>
+
+/* --- File-local types / 파일 지역 타입 --- */
+
+/**
+ * @struct Mark
+ * @brief One bullet hole or blood splat left on a surface.
+ *
+ * ENGLISH
+ * -------
+ * @note `blood` selects the material: a hit on a monster splatters rather than
+ *       chipping the wall. It also selects the LIFETIME, which is the reason
+ *       the field is stored rather than re-derived at draw time -- see the
+ *       fades below.
+ *
+ * 한국어
+ * ------
+ * 표면에 남은 탄흔 또는 혈흔 하나입니다.
+ * @note `blood`가 재질을 결정합니다. 몬스터에 명중하면 벽이 파이는 대신 피가 튑니다. 또한
+ *       *수명*도 결정하며, 이 필드를 그리는 시점에 다시 유도하지 않고 저장해 두는 이유가
+ *       그것입니다. 아래의 페이드를 참조하십시오.
+ */
+typedef struct { v3 p, n; float life; int blood; } Mark;
+
+/**
+ * @struct Tracer
+ * @brief One short-lived line from the muzzle to a pellet's impact point.
+ * / 총구에서 산탄이 명중한 지점까지 이어지는 짧은 수명의 선 하나입니다.
+ */
+typedef struct { v3 a, b; float life; } Tracer;
+
+/* --- Module state / 모듈 상태 --- */
+
+/** @brief Marks, overwritten oldest-first once full. / 자국. 가득 차면 오래된 것부터 덮어씁니다. */
+static Mark   g_marks[DECAL_MAX_MARKS];
+/** @brief Tracers, overwritten oldest-first once full. / 예광탄. 가득 차면 오래된 것부터 덮어씁니다. */
+static Tracer g_tracers[DECAL_MAX_TRACERS];
+/** @brief Write cursors into the two rings above. / 위 두 링의 쓰기 커서. */
+static int    g_mark_next, g_tracer_next;
+
+/** @brief Reusable GPU meshes for the billboards and the tracer lines. / 빌보드와 예광탄 선을 위한 재사용 GPU 메시. */
+static Mesh    g_fx_mesh, g_line_mesh;
+/** @brief CPU-side builders feeding the two meshes above, rebuilt every frame. / 위 두 메시에 데이터를 공급하는 CPU 측 빌더. 매 프레임 재구성됩니다. */
+static MeshBuf g_fx_buf,  g_line_buf;
+/** @brief Non-zero once ::decal_init has run. / ::decal_init이 실행되었으면 0이 아닙니다. */
+static int     g_ready;
+
+/* The blood mark must outlive the spark that appears with it and must not
+ * outlive the wall mark. Neither bound is arbitrary:
+ *
+ *   - shorter than DECAL_SPARK_TIME and the mark would vanish before the flash
+ *     that announced it, so a hit would end before it registered;
+ *   - as long as DECAL_WALL_LIFE and it is the bug the constant exists to fix
+ *     -- a stain left hanging where a monster used to be standing.
+ *
+ * A relationship that only holds because nobody has retuned one of the two is a
+ * relationship worth stating.
+ *
+ * 혈흔은 함께 나타나는 스파크보다는 오래 남아야 하고 벽의 자국보다는 오래 남아서는 안
+ * 됩니다. 두 경계 모두 임의의 값이 아닙니다. DECAL_SPARK_TIME보다 짧으면 자국이 그것을 알린
+ * 섬광보다 먼저 사라져 명중이 인지되기 전에 끝나 버리고, DECAL_WALL_LIFE만큼 길면 이 상수가
+ * 고치려는 바로 그 버그, 즉 몬스터가 서 있던 자리에 얼룩만 떠 있는 상황이 됩니다.
+ *
+ * 둘 중 하나를 아무도 재조정하지 않았기 때문에만 성립하는 관계라면 명시해 둘 가치가
+ * 있습니다. */
+_Static_assert(DECAL_BLOOD_LIFE > DECAL_SPARK_TIME,
+               "a blood mark must outlast the spark that announced it");
+_Static_assert(DECAL_BLOOD_LIFE < DECAL_WALL_LIFE,
+               "a blood mark must not linger like a wall mark -- monsters move");
+
+/* How long a mark of this kind was GIVEN. Every fade below divides by this
+   rather than by DECAL_WALL_LIFE: dividing a 0.55s blood mark by 6.0 leaves it
+   at 9% alpha from the moment it appears, which is a mark nobody ever sees
+   rather than one that fades, and it made every blood mark 5.45s old the
+   instant it spawned so its spark was skipped entirely.
+   이 종류의 자국이 *부여받은* 수명입니다. 아래의 모든 페이드는 DECAL_WALL_LIFE가 아니라
+   이것으로 나눕니다. 0.55초짜리 혈흔을 6.0으로 나누면 생성되는 순간부터 알파 9%가 되는데,
+   이는 페이드되는 자국이 아니라 아무도 볼 수 없는 자국입니다. 또한 모든 혈흔이 생성되는 순간
+   이미 5.45초 된 것이 되어 스파크가 통째로 건너뛰어졌습니다. */
+static float mark_span(const Mark *m) {
+    return m->blood ? DECAL_BLOOD_LIFE : DECAL_WALL_LIFE;
+}
+
+/* --- Public function definitions / 공개 함수 정의 --- */
+
+void decal_init(void) {
+    if (g_ready) return;
+    mb_init(&g_fx_buf,   DECAL_MAX_MARKS   * 6 + 64);
+    mb_init(&g_line_buf, DECAL_MAX_TRACERS * 2 + 32);
+    g_ready = 1;
+}
+
+void decal_free(void) {
+    if (!g_ready) return;
+    mb_free(&g_fx_buf);
+    mb_free(&g_line_buf);
+    g_ready = 0;
+}
+
+void decal_reset(void) {
+    for (int i = 0; i < DECAL_MAX_MARKS;   i++) g_marks[i].life   = 0.0f;
+    for (int i = 0; i < DECAL_MAX_TRACERS; i++) g_tracers[i].life = 0.0f;
+    g_mark_next = g_tracer_next = 0;
+}
+
+DecalPlace decal_hit(v3 end, v3 dir, v3 surf_n, int blood) {
+    Mark *m = &g_marks[g_mark_next];
+    g_mark_next = (g_mark_next + 1) % DECAL_MAX_MARKS;
+
+    /* Blood sprays back toward the shooter; a wall mark sits on the surface,
+       nudged off it so the mark wins the depth test.
+       피는 사수 쪽으로 튀고, 벽의 자국은 표면 위에 놓이되 깊이 테스트에서 이기도록 살짝
+       띄워집니다. */
+    m->p     = blood ? v3sub(end, v3scale(dir, 0.05f))
+                     : v3add(end, v3scale(surf_n, 0.012f));
+    m->n     = blood ? v3scale(dir, -1.0f) : surf_n;
+    m->life  = blood ? DECAL_BLOOD_LIFE : DECAL_WALL_LIFE;
+    m->blood = blood;
+
+    DecalPlace at = { m->p, m->n };
+    return at;
+}
+
+void decal_tracer(v3 from, v3 to) {
+    Tracer *t = &g_tracers[g_tracer_next];
+    g_tracer_next = (g_tracer_next + 1) % DECAL_MAX_TRACERS;
+    t->a = from;
+    t->b = to;
+    t->life = DECAL_TRACER_LIFE;
+}
+
+int decal_live_marks(void) {
+    int n = 0;
+    for (int i = 0; i < DECAL_MAX_MARKS; i++)
+        if (g_marks[i].life > 0.0f) n++;
+    return n;
+}
+
+int decal_live_tracers(void) {
+    int n = 0;
+    for (int i = 0; i < DECAL_MAX_TRACERS; i++)
+        if (g_tracers[i].life > 0.0f) n++;
+    return n;
+}
+
+void decal_update(float dt) {
+    for (int i = 0; i < DECAL_MAX_MARKS; i++)
+        if (g_marks[i].life > 0.0f) g_marks[i].life -= dt;
+    for (int i = 0; i < DECAL_MAX_TRACERS; i++)
+        if (g_tracers[i].life > 0.0f) g_tracers[i].life -= dt;
+}
+
+void decal_draw(mat4 view_proj, v3 cam_pos, v3 cam_right, v3 cam_up) {
+    if (!g_ready) return;
+
+    rd_mvp(view_proj);
+    rd_mode(RD_FLAT);
+    glEnable(GL_BLEND);
+    glDepthMask(GL_FALSE);
+
+    /* One upload, then a draw per mark so each can fade independently without
+       a per-vertex colour attribute. `order` maps a draw index back to the pool
+       slot it came from, because the buffer holds only the live ones.
+       한 번 업로드한 뒤 자국마다 한 번씩 그립니다. 그래야 정점별 색 속성 없이도 각각 따로
+       페이드할 수 있습니다. `order`는 그리기 인덱스를 그것이 온 풀 슬롯으로 되돌립니다.
+       버퍼는 살아 있는 것만 담기 때문입니다. */
+    int order[DECAL_MAX_MARKS];
+
+    /* --- the marks themselves --- */
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    mb_reset(&g_fx_buf);
+
+    int n_live = 0;
+    for (int i = 0; i < DECAL_MAX_MARKS; i++) {
+        if (g_marks[i].life <= 0.0f) continue;
+        v3 n = g_marks[i].n;
+        /* Any vector not parallel to n gives us a tangent basis. */
+        v3 hint = (n.y > 0.9f || n.y < -0.9f) ? v3f(1, 0, 0) : v3f(0, 1, 0);
+        v3 t = v3norm(v3cross(hint, n));
+        v3 b = v3cross(n, t);
+        mb_billboard(&g_fx_buf, g_marks[i].p, t, b, 0.085f, 0.085f);
+        order[n_live++] = i;
+    }
+    if (n_live) {
+        mesh_upload(&g_fx_mesh, &g_fx_buf, 1);
+        glBindVertexArray(g_fx_mesh.vao);
+        for (int k = 0; k < n_live; k++) {
+            const Mark *m = &g_marks[order[k]];
+            float a = m->life / mark_span(m);
+            if (a > 1.0f) a = 1.0f;
+            /* Blood stains dark red where a wall hole is near-black. */
+            if (m->blood) rd_color(0.30f, 0.02f, 0.02f, a * 0.85f);
+            else          rd_color(0.04f, 0.03f, 0.03f, a * 0.85f);
+            glDrawArrays(GL_TRIANGLES, k * 6, 6);
+        }
+    }
+
+    /* --- the spark on a fresh one: a brief additive flare so a hit reads
+           instantly. A dark bullet hole 30m down a fogged corridor is invisible
+           on its own. --- */
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+    mb_reset(&g_fx_buf);
+
+    int sn = 0;
+    for (int i = 0; i < DECAL_MAX_MARKS; i++) {
+        if (g_marks[i].life <= 0.0f) continue;
+        if (mark_span(&g_marks[i]) - g_marks[i].life > DECAL_SPARK_TIME) continue;
+        /* Billboarded to the camera, and scaled with distance so a far hit
+           stays legible instead of shrinking to a single pixel. */
+        float dist = v3len(v3sub(g_marks[i].p, cam_pos));
+        float size = 0.12f + dist * 0.012f;
+        mb_billboard(&g_fx_buf, g_marks[i].p, cam_right, cam_up, size, size);
+        order[sn++] = i;
+    }
+    if (sn) {
+        mesh_upload(&g_fx_mesh, &g_fx_buf, 1);
+        glBindVertexArray(g_fx_mesh.vao);
+        for (int k = 0; k < sn; k++) {
+            const Mark *m = &g_marks[order[k]];
+            float age = mark_span(m) - m->life;
+            float a   = 1.0f - age / DECAL_SPARK_TIME;
+            /* A red puff on flesh, a warm spark on stone. */
+            if (m->blood) rd_color(0.90f, 0.12f, 0.10f, a * 0.9f);
+            else          rd_color(1.0f, 0.85f, 0.50f, a * 0.9f);
+            glDrawArrays(GL_TRIANGLES, k * 6, 6);
+        }
+    }
+
+    /* --- tracers: additive, very short lived --- */
+    mb_reset(&g_line_buf);
+
+    int tn = 0;
+    for (int i = 0; i < DECAL_MAX_TRACERS; i++) {
+        if (g_tracers[i].life <= 0.0f) continue;
+        mb_line(&g_line_buf, g_tracers[i].a, g_tracers[i].b);
+        order[tn++] = i;
+    }
+    if (tn) {
+        mesh_upload(&g_line_mesh, &g_line_buf, 1);
+        glBindVertexArray(g_line_mesh.vao);
+        glLineWidth(2.0f);
+        for (int k = 0; k < tn; k++) {
+            float a = g_tracers[order[k]].life / DECAL_TRACER_LIFE;
+            rd_color(1.0f, 0.82f, 0.42f, a * 0.9f);
+            glDrawArrays(GL_LINES, k * 2, 2);
+        }
+    }
+
+    /* Left as they were found, so the pass that draws next is not handed a
+       depth mask somebody else switched off.
+       발견한 상태 그대로 되돌려 놓습니다. 그래야 다음에 그리는 패스가 다른 누군가 꺼 둔 깊이
+       마스크를 넘겨받지 않습니다. */
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+}

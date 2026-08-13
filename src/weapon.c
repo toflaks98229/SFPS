@@ -4,9 +4,20 @@
  *
  * ENGLISH
  * -------
- * The shotgun: a Quake-1-style six-pellet hitscan blast, its recoil kick, and
- * the impact/tracer/decal effects it leaves behind. Plus the view model and the
- * HUD, which are the parts of this file that necessarily touch GL.
+ * The shotgun: a Quake-1-style six-pellet hitscan blast and its recoil kick.
+ * Plus the view model and the HUD, which are the parts of this file that
+ * necessarily touch GL.
+ *
+ * The marks a shot leaves -- bullet holes, blood, the spark that announces a
+ * hit, and tracers -- used to live here too, and are now decal.c. They were
+ * spawned by whatever landed the hit and drawn a frame or six later by whoever
+ * was drawing the world, and this file was holding both ends of that plus the
+ * pools, the lifetimes and two hundred lines of GL in the middle. What is left
+ * of them here is two calls: ::decal_hit and ::decal_tracer.
+ * 사격이 남기는 자국(탄흔, 혈흔, 명중을 알리는 스파크, 예광탄)도 이곳에 있었고 이제
+ * decal.c입니다. 그것들은 명중시킨 무엇이든 생성하고 한 프레임에서 여섯 프레임 뒤에 월드를
+ * 그리는 누군가가 그렸는데, 이 파일이 그 양쪽 끝에 더해 풀과 수명과 그 사이의 GL 200줄을 함께
+ * 들고 있었습니다. 이곳에 남은 것은 ::decal_hit과 ::decal_tracer 두 호출입니다.
  *
  * @note The grapple used to live here too and now lives in hook.c. The two
  *       shared the ::Weapon struct and the habit of pushing the player by
@@ -47,7 +58,8 @@
 #include "diag.h"
 #include "post.h"     /* post_in_world_pass -- the pass-boundary guards */
 #include "sprite.h"   /* the hand-drawn viewmodel, when art replaces the model */
-#include "proj.h"     /* grenades and bolts: everything that travels */
+#include "proj.h"    /* grenades and bolts: everything that travels */
+#include "decal.h"   /* the marks a shot leaves; this file only spawns them */
 /* player.h is deliberately absent. It was here for PLAYER_GRAVITY, which the
    grapple's pull cancels while reeling -- and the pull now lives in hook.c,
    which includes it for that reason. Nothing left in this file names a
@@ -184,42 +196,6 @@ int wp_type_for(const char *name) {
 #define PUNCH_RETURN   7.0f
 #define FLASH_TIME     0.075f
 
-/* Decals last two very different lengths of time depending on what they are
- * stuck to, and using one constant for both was a real defect.
- *
- * A bullet hole in a WALL should persist: the wall is not going anywhere, and
- * a corridor accumulating the marks of a fight is most of what makes a fight
- * feel like it happened.
- *
- * A blood mark on a MONSTER cannot, because the monster moves. The decal is
- * placed in world space at the point of impact and never follows its target,
- * so after the monster walks away the mark is left hanging in mid-air. At six
- * seconds -- twelve times the 500ms the authored `blood` particles live -- the
- * spray was long gone while the stain stayed floating where the monster used
- * to be. Short enough that it reads as part of the same hit is the fix; it
- * disappears while the body is still roughly under it.
- *
- * 데칼은 무엇에 붙었느냐에 따라 지속 시간이 크게 달라야 하며, 둘에 같은 상수를 쓴 것이
- * 실제 결함이었습니다.
- *
- * *벽*의 탄흔은 남아야 합니다. 벽은 움직이지 않으며, 복도에 쌓인 교전의 흔적이 곧 그
- * 교전이 있었다는 느낌의 대부분입니다.
- *
- * *몬스터*의 혈흔은 남을 수 없습니다. 몬스터가 움직이기 때문입니다. 데칼은 충돌 지점의
- * 월드 좌표에 놓이고 대상을 따라가지 않으므로, 몬스터가 걸어가 버리면 자국만 허공에
- * 남습니다. 6초는 제작된 `blood` 파티클의 수명 500ms의 12배이며, 분출이 사라지고 한참
- * 뒤까지 얼룩이 몬스터가 있던 자리에 떠 있었습니다. 같은 피격의 일부로 읽힐 만큼 짧게
- * 만드는 것이 해법이며, 몸이 아직 그 아래에 있는 동안 사라집니다. */
-#define IMPACT_LIFE    6.0f     /* wall decals: the room keeps its scars */
-#define BLOOD_LIFE     0.55f    /* body decals: gone before the body moves off */
-#define TRACER_LIFE    0.055f
-
-
-/* Every trigger pull spawns PELLETS of each, so the ring buffers hold a few
-   full blasts rather than a few shots. */
-#define MAX_IMPACTS   48
-#define MAX_TRACERS   24
-
 /* Gun-local space: +x right, +y up, the barrel points down -z.
    The muzzle now comes from the model (see g_muzzle below), so redrawing the
    gun moves the flash and the tracers with it. */
@@ -252,67 +228,9 @@ GunPose g_gun_pose = {
 #define SWAY_ROT       3.0f    /* radians of pitch/yaw per metre of sway */
 #define SWAY_ROLL      1.5f
 
-#define SPARK_TIME     0.06f
-
-/* The blood decal must outlive the spark that appears with it and must not
- * outlive the wall decal. Neither bound is arbitrary:
- *
- *   - shorter than SPARK_TIME and the mark would vanish before the flash that
- *     announced it, so a hit would end before it registered;
- *   - as long as IMPACT_LIFE and it is the bug this constant exists to fix --
- *     a stain left hanging where a monster used to be standing.
- *
- * Checked here because the decals are file-local and never reach the public
- * API, so no headless test can observe them. A relationship that only holds
- * because nobody has retuned one of the two is a relationship worth stating.
- *
- * 혈흔 데칼은 함께 나타나는 스파크보다는 오래 남아야 하고 벽 데칼보다는 오래 남아서는
- * 안 됩니다. 두 경계 모두 임의의 값이 아닙니다. SPARK_TIME보다 짧으면 자국이 그것을
- * 알린 섬광보다 먼저 사라져 명중이 인지되기 전에 끝나 버리고, IMPACT_LIFE만큼 길면 이
- * 상수가 고치려는 바로 그 버그, 즉 몬스터가 서 있던 자리에 얼룩만 떠 있는 상황이 됩니다.
- *
- * 데칼은 파일 지역이며 공개 API에 도달하지 않으므로 어떤 헤드리스 테스트도 관측할 수
- * 없기에 이곳에서 검사합니다. 둘 중 하나를 아무도 재조정하지 않았기 때문에만 성립하는
- * 관계라면, 명시해 둘 가치가 있습니다. */
-_Static_assert(BLOOD_LIFE > SPARK_TIME,
-               "a blood mark must outlast the spark that announced it");
-_Static_assert(BLOOD_LIFE < IMPACT_LIFE,
-               "a blood mark must not linger like a wall decal -- monsters move");
-
 /* ------------------------------------------------------------ module state */
 
 /* --- File-local types / 파일 지역 타입 --- */
-
-/**
- * @struct Impact
- * @brief One bullet hole or blood splat left on a surface.
- *
- * ENGLISH
- * -------
- * @note `blood` selects the material: a hit on a monster splatters rather
- *       than chipping the wall.
- *
- * 한국어
- * ------
- * 표면에 남은 탄흔 또는 혈흔 하나입니다.
- * @note `blood`가 재질을 결정합니다. 몬스터에 명중하면 벽이 파이는 대신 피가
- *       튑니다.
- */
-typedef struct { v3 p, n; float life; int blood; } Impact;
-
-/**
- * @struct Tracer
- * @brief One short-lived line from the muzzle to a pellet's impact point.
- *
- * ENGLISH
- * -------
- * One short-lived line from the muzzle to a pellet's impact point.
- *
- * 한국어
- * ------
- * 총구에서 산탄이 명중한 지점까지 이어지는 짧은 수명의 선 하나입니다.
- */
-typedef struct { v3 a, b; float life; } Tracer;
 
 /* --- Level reference / 레벨 참조 --- */
 
@@ -357,13 +275,6 @@ static Mesh    g_fx_mesh, g_line_mesh;
 static MeshBuf g_fx_buf,  g_line_buf;
 
 /* --- Effect ring buffers / 효과 링 버퍼 --- */
-
-/** @brief Decals, overwritten oldest-first once full. / 자국. 가득 차면 오래된 것부터 덮어씁니다. */
-static Impact g_impacts[MAX_IMPACTS];
-/** @brief Tracers, overwritten oldest-first once full. / 예광탄. 가득 차면 오래된 것부터 덮어씁니다. */
-static Tracer g_tracers[MAX_TRACERS];
-/** @brief Write cursors into the two ring buffers above. / 위 두 링 버퍼의 쓰기 커서. */
-static int    g_impact_next, g_tracer_next;
 
 /* --- Muzzle flash randomisation / 총구 화염 무작위화 --- */
 
@@ -522,8 +433,14 @@ void wp_init(Weapon *w, const Level *level) {
     wp_set_model("shotgun");
     g_rope_mat = tex_mat("rope");
 
-    mb_init(&g_fx_buf,   MAX_IMPACTS * 6 + 64);
-    mb_init(&g_line_buf, MAX_TRACERS * 2 + 32);
+    /* Sized for what is drawn here now that the marks have their own buffers:
+       the claw, the muzzle flash, the view model's sprite, and the crosshair
+       and hook ring in lines. Initial capacities only -- mb_init grows.
+       자국이 자체 버퍼를 갖게 되었으므로 이곳에서 그리는 것에 맞춘 크기입니다. 클로, 총구
+       화염, 뷰 모델 스프라이트, 그리고 선으로 그리는 조준점과 훅 링입니다. 초기 용량일
+       뿐이며 mb_init은 필요하면 늘어납니다. */
+    mb_init(&g_fx_buf,   64);
+    mb_init(&g_line_buf, 128);
 }
 
 /* ------------------------------------------------------------------ firing */
@@ -727,17 +644,16 @@ static void fire_hitscan(Weapon *w, v3 eye, float yaw, float pitch,
         if (hit) hit_at = end;
 
         if (hit) {
-            Impact *im = &g_impacts[g_impact_next];
-            g_impact_next = (g_impact_next + 1) % MAX_IMPACTS;
-            /* Blood sprays back toward the shooter; a wall decal sits on the
-               surface, nudged off it so the decal wins the depth test. */
-            im->p = blood ? v3sub(end, v3scale(dir, 0.05f))
-                          : v3add(end, v3scale(n, 0.012f));
-            im->n = blood ? v3scale(dir, -1.0f) : n;
-            im->life = blood ? BLOOD_LIFE : IMPACT_LIFE;
-            im->blood = blood;
+            /* Where the mark went is decal.c's decision -- blood is pulled
+               back toward the shooter, a wall mark is nudged off the surface --
+               and it is handed back so the authored effect below lands on the
+               same point instead of recomputing the same offset here.
+               자국이 어디로 갔는지는 decal.c의 결정입니다(피는 사수 쪽으로 당겨지고, 벽의
+               자국은 표면에서 살짝 띄워집니다). 그리고 그 자리를 돌려받으므로, 아래의 제작된
+               이펙트가 이곳에서 같은 오프셋을 다시 계산하는 대신 같은 지점에 놓입니다. */
+            DecalPlace at = decal_hit(end, dir, n, blood);
 
-            /* The authored half of the same hit. The built-in decal and spark
+            /* The authored half of the same hit. The built-in mark and spark
                above stay: they are the shotgun's own feedback and are tuned
                against its fire rate. This adds whatever assets\effects.txt
                says a hit on this surface throws off, so the look can be
@@ -746,7 +662,7 @@ static void fire_hitscan(Weapon *w, v3 eye, float yaw, float pitch,
                그것은 샷건 자체의 피드백이며 발사 속도에 맞춰 조정된 것입니다. 여기서는
                assets\effects.txt가 이 표면 명중이 무엇을 튀기는지 정의한 대로 추가하므로,
                재빌드 없이 룩을 조정할 수 있습니다. */
-            fx_spawn(blood ? "blood" : "spark", im->p, im->n);
+            fx_spawn(blood ? "blood" : "spark", at.p, at.n);
             /* Stone gets the other three layers TE_SPIKE has -- the puff and
                the chip -- which are what make a hit look like it happened TO
                the surface rather than in front of it. Flesh does not: a puff
@@ -755,14 +671,12 @@ static void fire_hitscan(Weapon *w, v3 eye, float yaw, float pitch,
                *앞*이 아니라 표면 *에* 일어난 것처럼 보이게 만드는 것이 그것입니다.
                살에는 붙이지 않습니다. 몬스터에서 이는 먼지는 빗맞은 것으로 읽힙니다. */
             if (!blood) {
-                fx_spawn("smokepuff", im->p, im->n);
-                fx_spawn("debris",    im->p, im->n);
+                fx_spawn("smokepuff", at.p, at.n);
+                fx_spawn("debris",    at.p, at.n);
             }
         }
 
-        Tracer *tr = &g_tracers[g_tracer_next];
-        g_tracer_next = (g_tracer_next + 1) % MAX_TRACERS;
-        tr->a = muzzle; tr->b = end; tr->life = TRACER_LIFE;
+        decal_tracer(muzzle, end);
     }
 
     audio_play("shot", 100);
@@ -1064,10 +978,13 @@ void wp_update(Weapon *w, float dt, int firing, v3 eye, float yaw, float pitch,
     w->bob_phase += move_speed * dt * 1.7f;
     if (w->bob_phase > M_TAU * 64.0f) w->bob_phase -= M_TAU * 64.0f;
 
-    for (int i = 0; i < MAX_IMPACTS; i++)
-        if (g_impacts[i].life > 0.0f) g_impacts[i].life -= dt;
-    for (int i = 0; i < MAX_TRACERS; i++)
-        if (g_tracers[i].life > 0.0f) g_tracers[i].life -= dt;
+    /* Aged here rather than beside fx_update, so the marks freeze exactly when
+       the weapon does. They are this frame's shots getting older, and the frame
+       that does not advance the shot must not advance its scar either.
+       fx_update 옆이 아니라 이곳에서 노화시킵니다. 그래야 무기가 멈추는 바로 그때 자국도
+       멈춥니다. 자국은 이번 프레임의 사격이 나이를 먹는 것이며, 사격을 진행시키지 않는
+       프레임은 그 흔적도 진행시켜서는 안 됩니다. */
+    decal_update(dt);
 }
 
 /* ---------------------------------------------------------- world effects */
@@ -1079,102 +996,13 @@ void wp_draw_world(const Weapon *w, mat4 view_proj,
     glEnable(GL_BLEND);
     glDepthMask(GL_FALSE);
 
-    /* --- bullet holes: one upload, then a draw per hole so each can fade
-           independently without a per-vertex colour attribute --- */
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    mb_reset(&g_fx_buf);
-
-    int order[MAX_IMPACTS], n_live = 0;
-    for (int i = 0; i < MAX_IMPACTS; i++) {
-        if (g_impacts[i].life <= 0.0f) continue;
-        v3 n = g_impacts[i].n;
-        /* Any vector not parallel to n gives us a tangent basis. */
-        v3 hint = (n.y > 0.9f || n.y < -0.9f) ? v3f(1, 0, 0) : v3f(0, 1, 0);
-        v3 t = v3norm(v3cross(hint, n));
-        v3 b = v3cross(n, t);
-        mb_billboard(&g_fx_buf, g_impacts[i].p, t, b, 0.085f, 0.085f);
-        order[n_live++] = i;
-    }
-    if (n_live) {
-        mesh_upload(&g_fx_mesh, &g_fx_buf, 1);
-        glBindVertexArray(g_fx_mesh.vao);
-        for (int k = 0; k < n_live; k++) {
-            const Impact *im = &g_impacts[order[k]];
-            /* Fade against the life this decal was actually GIVEN, not against
-               the wall constant: dividing a 0.55s blood mark by 6.0 leaves it
-               at 9% alpha from the moment it appears, which is a decal nobody
-               ever sees rather than one that fades.
-               해당 데칼이 *실제로 부여받은* 수명을 기준으로 페이드합니다. 벽 상수를
-               쓰면 0.55초짜리 혈흔을 6.0으로 나누게 되어 생성되는 순간부터 알파 9%가
-               되며, 이는 페이드되는 데칼이 아니라 아무도 볼 수 없는 데칼입니다. */
-            float a = im->life / (im->blood ? BLOOD_LIFE : IMPACT_LIFE);
-            if (a > 1.0f) a = 1.0f;
-            /* Blood stains dark red where a wall hole is near-black. */
-            if (im->blood) rd_color(0.30f, 0.02f, 0.02f, a * 0.85f);
-            else           rd_color(0.04f, 0.03f, 0.03f, a * 0.85f);
-            glDrawArrays(GL_TRIANGLES, k * 6, 6);
-        }
-    }
-
-    /* --- impact sparks: a brief additive flare so a hit reads instantly.
-           A dark bullet hole 30m down a fogged corridor is invisible on its
-           own -- the spark is what tells the player they connected. --- */
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
-    mb_reset(&g_fx_buf);
-
-    int sn = 0;
-    for (int i = 0; i < MAX_IMPACTS; i++) {
-        /* Age against this decal's OWN starting life. Deriving it from the
-           wall constant made every blood impact 5.45s old the instant it
-           spawned, so its spark was skipped entirely and a hit on a monster
-           lost the flash that tells the player they connected.
-           이 데칼 *자신의* 시작 수명을 기준으로 나이를 계산합니다. 벽 상수로 유도하면
-           모든 혈흔이 생성되는 순간 이미 5.45초 된 것이 되어 스파크가 통째로
-           건너뛰어지며, 몬스터를 맞혔을 때 명중을 알리는 섬광이 사라집니다. */
-        float span = g_impacts[i].blood ? BLOOD_LIFE : IMPACT_LIFE;
-        float age  = span - g_impacts[i].life;
-        if (g_impacts[i].life <= 0.0f || age > SPARK_TIME) continue;
-        /* Billboarded to the camera, and scaled with distance so a far hit
-           stays legible instead of shrinking to a single pixel. */
-        float dist = v3len(v3sub(g_impacts[i].p, cam_pos));
-        float size = 0.12f + dist * 0.012f;
-        mb_billboard(&g_fx_buf, g_impacts[i].p, cam_right, cam_up, size, size);
-        order[sn++] = i;
-    }
-    if (sn) {
-        mesh_upload(&g_fx_mesh, &g_fx_buf, 1);
-        glBindVertexArray(g_fx_mesh.vao);
-        for (int k = 0; k < sn; k++) {
-            const Impact *im = &g_impacts[order[k]];
-            float span = im->blood ? BLOOD_LIFE : IMPACT_LIFE;
-            float age  = span - im->life;
-            float a = 1.0f - age / SPARK_TIME;
-            /* A red puff on flesh, a warm spark on stone. */
-            if (im->blood) rd_color(0.90f, 0.12f, 0.10f, a * 0.9f);
-            else           rd_color(1.0f, 0.85f, 0.50f, a * 0.9f);
-            glDrawArrays(GL_TRIANGLES, k * 6, 6);
-        }
-    }
-
-    /* --- tracers: additive, very short lived --- */
-    mb_reset(&g_line_buf);
-
-    int tn = 0;
-    for (int i = 0; i < MAX_TRACERS; i++) {
-        if (g_tracers[i].life <= 0.0f) continue;
-        mb_line(&g_line_buf, g_tracers[i].a, g_tracers[i].b);
-        order[tn++] = i;
-    }
-    if (tn) {
-        mesh_upload(&g_line_mesh, &g_line_buf, 1);
-        glBindVertexArray(g_line_mesh.vao);
-        glLineWidth(2.0f);
-        for (int k = 0; k < tn; k++) {
-            float a = g_tracers[order[k]].life / TRACER_LIFE;
-            rd_color(1.0f, 0.82f, 0.42f, a * 0.9f);
-            glDrawArrays(GL_LINES, k * 2, 2);
-        }
-    }
+    /* The marks a shot left are drawn by decal.c, before this and with the
+       same camera -- see main.c. What is left here is the one thing in the
+       world that belongs to the WEAPON rather than to the shot: the tether,
+       which exists only while this weapon's hook is out.
+       사격이 남긴 자국은 decal.c가 그립니다. 이보다 먼저, 같은 카메라로 그립니다. main.c를
+       참조하십시오. 이곳에 남은 것은 월드에서 사격이 아니라 *무기*에 속하는 유일한 것,
+       즉 로프입니다. 로프는 이 무기의 훅이 나가 있는 동안에만 존재합니다. */
 
     /* --- the grapple tether: a textured rope, not a flat-coloured line ---
        wp_draw_world is only ever given cam_right/cam_up, not the full camera

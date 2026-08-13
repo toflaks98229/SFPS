@@ -21,6 +21,7 @@
 #include "enemy.h"
 #include "pickup.h"
 #include "proj.h"
+#include "decal.h"
 #include "door.h"
 #include "fx.h"
 #include "audio.h"
@@ -646,6 +647,15 @@ int world_load_level(World *w, const char *name, WorldEnter how) {
        복사하며, 레벨이 아직 그것을 담고 있는 동안에만 가능합니다. */
     door_reset(&w->level);
     proj_reset();
+
+    /* A bullet hole belongs to the wall it was shot into, and that wall is
+       gone. These outlived a level change before -- six seconds of the last
+       map's firefight hanging in the air of the next one, which is brief enough
+       that nobody filed it and wrong enough that nobody would have defended it.
+       탄흔은 그것이 박힌 벽에 속하며, 그 벽은 사라졌습니다. 이전에는 레벨 전환을 넘어
+       살아남았습니다. 지난 맵 교전의 6초가 다음 맵의 허공에 떠 있었던 것인데, 아무도 신고하지
+       않을 만큼 짧고 아무도 옹호하지 않을 만큼 잘못된 상태였습니다. */
+    decal_reset();
 
     /* A hook mid-flight belongs to the level that is being left. Carrying it
        across would reel the player toward an anchor in geometry that no longer

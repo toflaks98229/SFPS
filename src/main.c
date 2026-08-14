@@ -1045,7 +1045,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
             wp_set_model("shotgun");
             wp_reload_texture();          /* also flushes the texture cache */
             audio_reload();
-            fx_reload();                  /* re-read effects.txt, drop live particles */
+            fx_reload(&g_world.pools);                  /* re-read effects.txt, drop live particles */
 
             /* After the flush, not before: tex_flush deletes every cached
                material, so resolving the level's materials first would leave

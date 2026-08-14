@@ -4,6 +4,7 @@
  */
 
 #include "enemy.h"
+#include "pools.h"
 #include "audio.h"
 #include "fx.h"
 #include "diag.h"
@@ -13,11 +14,13 @@
 /* --- 정적 변수 --- */
 
 /** @brief 모든 몬스터의 배열. */
-static Enemy g_enemies[ENEMY_MAX];
 /** @brief 현재 활성화된 몬스터의 수. */
-static int g_count;
 /** @brief 난수 생성을 위한 시드. */
-static unsigned g_rng = 0x9e3779b9u;
+/* The seed a pool starts from; a zeroed EnemyPool means "not seeded yet".
+   See fx.c for the same arrangement and the reason for it.
+   풀이 출발하는 씨앗이며, 0인 EnemyPool은 "아직 씨앗이 채워지지 않음"을 뜻합니다. 같은
+   구성과 그 이유는 fx.c를 참조하십시오. */
+#define ENEMY_RNG_SEED 0x9e3779b9u
 /* A `g_player_eye` used to sit here, assigned at the top of every enemy_update
    and read by nothing at all. Every helper below takes the eye as an argument
    -- can_see, sees_player and shot_fire all do -- so the global was a copy the
@@ -32,7 +35,6 @@ static unsigned g_rng = 0x9e3779b9u;
    헬퍼가 그것을 요청하는 대신 읽을 수 있었고, 그러면 호출 스택의 어디에 있느냐에 따라
    신선도가 달라지는 값을 읽게 됩니다. */
 /** @brief 활성화된 모든 발사체의 배열. */
-static Shot g_shots[ENEMY_MAX_SHOTS];
 
 /**
  * @brief 몬스터 타입별 스탯 테이블 (베스티어리).
@@ -98,10 +100,10 @@ static void types_check(void)
  * @brief 의사 난수를 생성합니다.
  * @return 0.0f에서 1.0f 사이의 float 값.
  */
-static float frand(void)
+static float frand(EnemyPool *e)
 {
-    g_rng = g_rng * 1664525u + 1013904223u;
-    return (g_rng >> 8) * (1.0f / 16777216.0f);
+    e->rng = e->rng * 1664525u + 1013904223u;
+    return (e->rng >> 8) * (1.0f / 16777216.0f);
 }
 
 /**
@@ -139,13 +141,13 @@ static void play_at(v3 p, const char *name, int base)
  * @param speed 발사체 속도.
  * @param damage 발사체 피해량.
  */
-static void shot_fire(v3 from, v3 at, float speed, int damage)
+static void shot_fire(Pools *pl, v3 from, v3 at, float speed, int damage)
 {
     Shot *s = 0;
     for (int i = 0; i < ENEMY_MAX_SHOTS; i++)
-        if (!g_shots[i].active)
+        if (!pl->enemy.shots[i].active)
         {
-            s = &g_shots[i];
+            s = &pl->enemy.shots[i];
             break;
         }
     /* Every other pool in the project reports when it turns something away,
@@ -191,13 +193,13 @@ static void shot_fire(v3 from, v3 at, float speed, int damage)
  * @param dt 프레임 시간.
  * @return 플레이어에게 가해진 총 피해량.
  */
-static int shots_update(const Level *l, v3 player_eye, float dt)
+static int shots_update(Pools *pl, const Level *l, v3 player_eye, float dt)
 {
     int dealt = 0;
 
     for (int i = 0; i < ENEMY_MAX_SHOTS; i++)
     {
-        Shot *s = &g_shots[i];
+        Shot *s = &pl->enemy.shots[i];
         if (!s->active)
             continue;
 
@@ -233,7 +235,7 @@ static int shots_update(const Level *l, v3 player_eye, float dt)
                trail has drifts behind the bolt rather than ahead of it.
                비행 방향의 반대로 던집니다. 그래야 궤적이 가진 약간의 산포가 볼트 앞이
                아니라 뒤로 흩어집니다. */
-            fx_spawn("bolttrail", s->pos, v3scale(dir, -1.0f));
+            fx_spawn(pl, "bolttrail", s->pos, v3scale(dir, -1.0f));
         }
 
         float t;
@@ -280,7 +282,7 @@ static int shots_update(const Level *l, v3 player_eye, float dt)
                off the thing it struck rather than continuing through it.
                볼트의 진행 방향 반대로 터뜨립니다. 그래야 대상을 통과하는 것이 아니라
                맞은 지점에서 튀어나오는 것으로 읽힙니다. */
-            fx_spawn("boltburst", s->pos, v3scale(dir, -1.0f));
+            fx_spawn(pl, "boltburst", s->pos, v3scale(dir, -1.0f));
             continue;
         }
 
@@ -289,7 +291,7 @@ static int shots_update(const Level *l, v3 player_eye, float dt)
             s->pos = v3add(s->pos, v3scale(dir, t));
             s->active = 0;
             play_at(s->pos, "ehit", 45);
-            fx_spawn("boltburst", s->pos, n);
+            fx_spawn(pl, "boltburst", s->pos, n);
             continue;
         }
 
@@ -409,13 +411,13 @@ static void change_yaw(Enemy *m, float yaw_speed_deg, float dt)
  * 그리는 몬스터가 벽에 대해 해야 할 일은 반대로 도는 것뿐이기 때문입니다. 방향은 매
  * 프레임 다시 고르지 않고 MON_SLIDE_HOLD 동안 유지합니다. Doom이 movecount를 두는 이유도
  * 같습니다. 프레임률로 다시 결정하는 몬스터는 제자리에서 떱니다. */
-static void ai_run_slide(const Level *l, const MonType *S, Enemy *m, float dt)
+static void ai_run_slide(Pools *pl, const Level *l, const MonType *S, Enemy *m, float dt)
 {
     float step = S->speed * dt;
 
     if (m->slide_wait <= 0.0f)
     {
-        m->lefty = (char)(frand() < 0.5f);
+        m->lefty = (char)(frand(&pl->enemy) < 0.5f);
         m->slide_wait = MON_SLIDE_HOLD;
     }
 
@@ -460,7 +462,7 @@ static void ai_run_slide(const Level *l, const MonType *S, Enemy *m, float dt)
  * 근접 공격도 가진 몬스터에 대한 절반 감소도 포함합니다. 물 수 있는 것은 거리를 좁히기를
  * 선호하므로 다가오는 동안 덜 쏩니다. 우리의 `shot_speed > 0`이 이미 "원거리"를 말하는
  * 필드이므로, 두 번째 플래그가 아니라 그것이 여기서도 결정합니다. */
-static int check_attack(const MonType *S, Enemy *m, float dist)
+static int check_attack(Pools *pl, const MonType *S, Enemy *m, float dist)
 {
     if (m->attack_wait > 0.0f)
         return 0;
@@ -482,7 +484,7 @@ static int check_attack(const MonType *S, Enemy *m, float dist)
     if (S->shot_speed <= 0.0f)
         return dist <= S->attack;
 
-    return frand() < chance;
+    return frand(&pl->enemy) < chance;
 }
 
 /**
@@ -627,39 +629,39 @@ int mon_type_for(const char *kind)
     return -1;
 }
 
-int enemy_shot_count(void) { return ENEMY_MAX_SHOTS; }
+int enemy_shot_count(const Pools *pl) { (void)pl; return ENEMY_MAX_SHOTS; }
 
-const Shot *enemy_shot_at(int i)
+const Shot *enemy_shot_at(const Pools *pl, int i)
 {
-    return (i >= 0 && i < ENEMY_MAX_SHOTS) ? &g_shots[i] : 0;
+    return (i >= 0 && i < ENEMY_MAX_SHOTS) ? &pl->enemy.shots[i] : 0;
 }
 
-void enemy_reset(void)
+void enemy_reset(Pools *pl)
 {
     for (int i = 0; i < ENEMY_MAX; i++)
-        g_enemies[i].active = 0;
+        pl->enemy.m[i].active = 0;
     for (int i = 0; i < ENEMY_MAX_SHOTS; i++)
-        g_shots[i].active = 0;
-    g_count = 0;
+        pl->enemy.shots[i].active = 0;
+    pl->enemy.count = 0;
 }
 
-int enemy_count(void) { return g_count; }
+int enemy_count(const Pools *pl) { return pl->enemy.count; }
 
-int enemy_alive(void)
+int enemy_alive(const Pools *pl)
 {
     int n = 0;
-    for (int i = 0; i < g_count; i++)
-        if (g_enemies[i].active && g_enemies[i].state != E_DEAD)
+    for (int i = 0; i < pl->enemy.count; i++)
+        if (pl->enemy.m[i].active && pl->enemy.m[i].state != E_DEAD)
             n++;
     return n;
 }
 
-const Enemy *enemy_at(int i)
+const Enemy *enemy_at(const Pools *pl, int i)
 {
-    return (i >= 0 && i < g_count) ? &g_enemies[i] : 0;
+    return (i >= 0 && i < pl->enemy.count) ? &pl->enemy.m[i] : 0;
 }
 
-void enemy_spawn_level(const Level *l)
+void enemy_spawn_level(Pools *pl, const Level *l)
 {
     /* Cheap, and this is the one call every level load and every headless test
        goes through, so a table that contradicts itself is reported on the first
@@ -668,7 +670,7 @@ void enemy_spawn_level(const Level *l)
        그래서 자기모순인 표는 누군가 알아채는 맵이 아니라 처음 여는 맵에서 보고됩니다. */
     types_check();
 
-    enemy_reset();
+    enemy_reset(pl);
     /* Runs over every entity even once full, rather than breaking out on the
        cap. Stopping early is the same amount of spawning but loses the count
        of what was skipped -- and "the level is missing monsters" is otherwise
@@ -689,13 +691,13 @@ void enemy_spawn_level(const Level *l)
         if (!level_ground(l, x, z, 1000.0f, S->height, &f, &c))
             continue;
 
-        if (g_count >= ENEMY_MAX)
+        if (pl->enemy.count >= ENEMY_MAX)
         {
             DIAG(DIAG_ENEMY_CAP);
             continue;
         }
 
-        Enemy *m = &g_enemies[g_count++];
+        Enemy *m = &pl->enemy.m[pl->enemy.count++];
         Enemy zero = {0};
         *m = zero;
         m->type = type;
@@ -703,18 +705,18 @@ void enemy_spawn_level(const Level *l)
         m->health = S->hp;
         m->state = E_IDLE;
         m->active = 1;
-        m->anim = frand() * 6.28f;
+        m->anim = frand(&pl->enemy) * 6.28f;
 
         /* Spread the sight refreshes across the period rather than lining them
            all up on the frame after a spawn. Derived from the index so it is
            deterministic -- the headless tests step this simulation and compare
-           exact outcomes, and frand() here would make which monster refreshes
+           exact outcomes, and frand(&pl->enemy) here would make which monster refreshes
            on which frame depend on how many spawned before it.
            시야 갱신을 생성 직후의 한 프레임에 몰지 않고 주기 전체에 분산시킵니다. 인덱스
            에서 유도하므로 결정론적입니다. 헤드리스 테스트가 이 시뮬레이션을 진행시키며
-           정확한 결과를 비교하는데, 이곳에서 frand()를 쓰면 어느 몬스터가 어느 프레임에
+           정확한 결과를 비교하는데, 이곳에서 frand(&pl->enemy)를 쓰면 어느 몬스터가 어느 프레임에
            갱신되는지가 그 앞에 몇 마리가 생성되었는지에 좌우됩니다. */
-        m->sight_age = (short)((g_count - 1) % SIGHT_PERIOD);
+        m->sight_age = (short)((pl->enemy.count - 1) % SIGHT_PERIOD);
     }
 }
 
@@ -742,7 +744,7 @@ void enemy_spawn_level(const Level *l)
  * @param[in]     dist 플레이어까지의 수평 거리 (미터).
  * @param[in]     dt   시간 간격 (초).
  */
-static void chase_brawler(const Level *l, const MonType *S, Enemy *m,
+static void chase_brawler(Pools *pl, const Level *l, const MonType *S, Enemy *m,
                           v3 to, float dist, float dt)
 {
     float inv = dist > 0.001f ? 1.0f / dist : 0.0f;
@@ -760,7 +762,7 @@ static void chase_brawler(const Level *l, const MonType *S, Enemy *m,
        사거리 안입니다. 여기의 굴림은 근접 대역에서 Quake의 0.9입니다. 거리를 좁히는 것이
        여전히 치명적일 만큼 높고, 몬스터가 코앞에서 공격 타이머만 돌리는 대신 이따금 자리를
        바꿀 만큼 낮습니다. */
-    if (check_attack(S, m, dist))
+    if (check_attack(pl, S, m, dist))
     {
         m->state = E_ATTACK;
         m->timer = 0.0f;
@@ -768,7 +770,7 @@ static void chase_brawler(const Level *l, const MonType *S, Enemy *m,
     }
     else
     {
-        ai_run_slide(l, S, m, dt);
+        ai_run_slide(pl, l, S, m, dt);
     }
 }
 
@@ -794,7 +796,7 @@ static void chase_brawler(const Level *l, const MonType *S, Enemy *m,
  * @param[in]     dist 플레이어까지의 수평 거리 (미터).
  * @param[in]     dt   시간 간격 (초).
  */
-static void chase_caster(const Level *l, const MonType *S, Enemy *m,
+static void chase_caster(Pools *pl, const Level *l, const MonType *S, Enemy *m,
                          v3 to, float dist, v3 player_eye, float dt)
 {
     float inv = dist > 0.001f ? 1.0f / dist : 0.0f;
@@ -831,7 +833,7 @@ static void chase_caster(const Level *l, const MonType *S, Enemy *m,
        선호하는 대역 안에서 플레이어를 정면으로 보고 있으면서도, 여전히 *가끔만* 쏩니다.
        나머지 시간에는 원을 그립니다. 그것이 캐스터를 포탑에서 방 안을 쫓아다녀야 하는
        무언가로 바꿉니다. */
-    if (check_attack(S, m, dist))
+    if (check_attack(pl, S, m, dist))
     {
         m->state = E_ATTACK;
         m->timer = 0.0f;
@@ -839,7 +841,7 @@ static void chase_caster(const Level *l, const MonType *S, Enemy *m,
     }
     else
     {
-        ai_run_slide(l, S, m, dt);
+        ai_run_slide(pl, l, S, m, dt);
     }
 }
 
@@ -909,24 +911,24 @@ static int release_swing(const MonType *S, Enemy *m, float dist)
  *          볼트당 한 번이라면 판정 비용을 감당할 수 있습니다. 감당할 수 없었던 것은
  *          ::chase_caster의 매 프레임 폴링입니다.
  */
-static void release_bolt(const Level *l, const MonType *S, Enemy *m, v3 player_eye)
+static void release_bolt(Pools *pl, const Level *l, const MonType *S, Enemy *m, v3 player_eye)
 {
     if (!can_see(l, m, player_eye))
         return;
 
     v3 from = v3f(m->pos.x, m->pos.y + S->eye, m->pos.z);
     v3 at = v3f(player_eye.x, player_eye.y - PLAYER_EYE * 0.35f, player_eye.z);
-    shot_fire(from, at, S->shot_speed, S->damage);
+    shot_fire(pl, from, at, S->shot_speed, S->damage);
     play_at(m->pos, "ecast", 90);
 }
 
-int enemy_update(const Level *l, v3 player_eye, float dt)
+int enemy_update(Pools *pl, const Level *l, v3 player_eye, float dt)
 {
-    int player_damage = shots_update(l, player_eye, dt);
+    int player_damage = shots_update(pl, l, player_eye, dt);
 
-    for (int i = 0; i < g_count; i++)
+    for (int i = 0; i < pl->enemy.count; i++)
     {
-        Enemy *m = &g_enemies[i];
+        Enemy *m = &pl->enemy.m[i];
         if (!m->active)
             continue;
         const MonType *S = &TYPES[m->type];
@@ -1006,9 +1008,9 @@ int enemy_update(const Level *l, v3 player_eye, float dt)
                `shot_speed > 0` 검사는 각각 "이것은 캐스터인가"를 뜻했고, 세 번째 아키타입이
                생기는 날 각각을 다시 찾아내야 했을 것입니다. */
             if (S->behaviour == AI_CASTER)
-                chase_caster(l, S, m, to, dist, player_eye, dt);
+                chase_caster(pl, l, S, m, to, dist, player_eye, dt);
             else
-                chase_brawler(l, S, m, to, dist, dt);
+                chase_brawler(pl, l, S, m, to, dist, dt);
             break;
 
         case E_ATTACK:
@@ -1017,7 +1019,7 @@ int enemy_update(const Level *l, v3 player_eye, float dt)
             {
                 m->swung = 1;
                 if (S->behaviour == AI_CASTER)
-                    release_bolt(l, S, m, player_eye);
+                    release_bolt(pl, l, S, m, player_eye);
                 else
                     player_damage += release_swing(S, m, dist);
             }
@@ -1028,7 +1030,7 @@ int enemy_update(const Level *l, v3 player_eye, float dt)
                    own cooldown. Fixed rests make a group of monsters fire in a
                    chorus forever, because nothing ever pushes them out of step
                    once they have fallen into it. */
-                m->attack_wait = frand() * MON_ATTACK_REST;
+                m->attack_wait = frand(&pl->enemy) * MON_ATTACK_REST;
 
                 /* A caster always returns to its band; a brawler that is still
                    in reach swings again without paying for the walk back.
@@ -1079,14 +1081,14 @@ int enemy_update(const Level *l, v3 player_eye, float dt)
     return player_damage;
 }
 
-int enemy_hitscan(v3 o, v3 d, float maxdist, float *out_t, int *out_idx)
+int enemy_hitscan(const Pools *pl, v3 o, v3 d, float maxdist, float *out_t, int *out_idx)
 {
     float best = maxdist;
     int hit = -1;
 
-    for (int i = 0; i < g_count; i++)
+    for (int i = 0; i < pl->enemy.count; i++)
     {
-        const Enemy *m = &g_enemies[i];
+        const Enemy *m = &pl->enemy.m[i];
         if (!m->active || m->state == E_DEAD)
             continue;
         const MonType *S = &TYPES[m->type];
@@ -1122,11 +1124,11 @@ int enemy_hitscan(v3 o, v3 d, float maxdist, float *out_t, int *out_idx)
     return 1;
 }
 
-void enemy_hurt(int idx, int dmg, v3 dir)
+void enemy_hurt(Pools *pl, int idx, int dmg, v3 dir)
 {
-    if (idx < 0 || idx >= g_count)
+    if (idx < 0 || idx >= pl->enemy.count)
         return;
-    Enemy *m = &g_enemies[idx];
+    Enemy *m = &pl->enemy.m[idx];
     if (!m->active || m->state == E_DEAD)
         return;
 
@@ -1153,11 +1155,11 @@ void enemy_hurt(int idx, int dmg, v3 dir)
         m->state = E_DEAD;
         m->timer = 0.6f;
         play_at(m->pos, "edie", 95);
-        fx_spawn("gib", mid, back);
+        fx_spawn(pl, "gib", mid, back);
         return;
     }
 
-    fx_spawn("blood", mid, back);
+    fx_spawn(pl, "blood", mid, back);
 
     play_at(m->pos, "epain", 70);
 

@@ -22,6 +22,16 @@
 
 #include "fx.h"
 #include "diag.h"
+#include "pools.h"
+/* The pools this file drives, owned here the way a ::World owns its own. The
+   five modules that used to keep these in file-scope arrays hand them back
+   now, which is why a fixture no longer inherits the previous case's monsters.
+   See src/pools.h.
+   이 파일이 구동하는 풀이며, ::World가 자기 것을 소유하듯 이곳에서 소유합니다. 이것을 파일
+   스코프 배열에 담고 있던 다섯 모듈이 이제 돌려주며, 그래서 픽스처가 이전 사례의 몬스터를
+   물려받지 않습니다. src/pools.h를 참조하십시오. */
+static Pools g_pools;
+
 
 static int fails;
 static void ok(int cond, const char *what) {
@@ -57,41 +67,41 @@ int main(void) {
 
     /* --- spawning by name -------------------------------------------------- */
     {
-        fx_reload();
-        okd(fx_live_count() == 0, "a reload leaves no live particles",
-            fx_live_count(), 0);
+        fx_reload(&g_pools);
+        okd(fx_live_count(&g_pools) == 0, "a reload leaves no live particles",
+            fx_live_count(&g_pools), 0);
 
-        fx_spawn("spark", v3f(0, 0, 0), v3f(0, 1, 0));
-        int after = fx_live_count();
+        fx_spawn(&g_pools, "spark", v3f(0, 0, 0), v3f(0, 1, 0));
+        int after = fx_live_count(&g_pools);
         ok(after > 0, "spawning a known effect produces particles");
 
         /* The whole point of the format: an effect nobody has authored yet is
            not an error. A typo costs a missing puff, not a crash. */
-        int before = fx_live_count();
-        fx_spawn("no-such-effect", v3f(0, 0, 0), v3f(0, 1, 0));
-        okd(fx_live_count() == before,
+        int before = fx_live_count(&g_pools);
+        fx_spawn(&g_pools, "no-such-effect", v3f(0, 0, 0), v3f(0, 1, 0));
+        okd(fx_live_count(&g_pools) == before,
             "an unknown name spawns nothing and does not crash",
-            fx_live_count(), before);
+            fx_live_count(&g_pools), before);
     }
 
     /* --- particles age out ------------------------------------------------- */
     {
-        fx_reload();
-        fx_spawn("spark", v3f(0, 0, 0), v3f(0, 1, 0));
-        ok(fx_live_count() > 0, "the burst is alive to begin with");
+        fx_reload(&g_pools);
+        fx_spawn(&g_pools, "spark", v3f(0, 0, 0), v3f(0, 1, 0));
+        ok(fx_live_count(&g_pools) > 0, "the burst is alive to begin with");
 
         /* Ten seconds is longer than any authored life, so everything must be
            gone -- a particle that never retires is a leak that only shows up
            as the pool slowly filling with the undead. */
-        for (int i = 0; i < 600; i++) fx_update(DT);
-        okd(fx_live_count() == 0,
+        for (int i = 0; i < 600; i++) fx_update(&g_pools, DT);
+        okd(fx_live_count(&g_pools) == 0,
             "and every particle retires once its life runs out",
-            fx_live_count(), 0);
+            fx_live_count(&g_pools), 0);
     }
 
     /* --- the pool has a hard ceiling --------------------------------------- */
     {
-        fx_reload();
+        fx_reload(&g_pools);
         /* Far more than the pool can hold. The excess must overwrite rather
            than overflow, and the count must never exceed the cap.
 
@@ -107,19 +117,19 @@ int main(void) {
            한 번의 생성은 최소 한 개의 입자이므로, FX_MAX_PARTICLES번 생성하면 상한이
            무엇이 되든 풀을 채우지 못할 수 없습니다. */
         for (int i = 0; i < FX_MAX_PARTICLES; i++)
-            fx_spawn("spark", v3f(0, 0, 0), v3f(0, 1, 0));
+            fx_spawn(&g_pools, "spark", v3f(0, 0, 0), v3f(0, 1, 0));
 
-        okd(fx_live_count() <= FX_MAX_PARTICLES,
+        okd(fx_live_count(&g_pools) <= FX_MAX_PARTICLES,
             "a flood never exceeds the particle pool",
-            fx_live_count(), FX_MAX_PARTICLES);
+            fx_live_count(&g_pools), FX_MAX_PARTICLES);
 
         /* That the flood REACHED the cap, so the check above is a ceiling
            being tested rather than one merely not approached.
            넘침이 상한에 *도달했음*을 확인합니다. 위의 검사가 다가가지도 못한 천장이
            아니라 실제로 시험된 천장이 되도록 합니다. */
-        okd(fx_live_count() == FX_MAX_PARTICLES,
+        okd(fx_live_count(&g_pools) == FX_MAX_PARTICLES,
             "and the flood is big enough to actually reach it",
-            fx_live_count(), FX_MAX_PARTICLES);
+            fx_live_count(&g_pools), FX_MAX_PARTICLES);
 
 #ifdef DIAG_ENABLED
         ok(diag_count(DIAG_FX_CAP) > 0,
@@ -150,16 +160,16 @@ int main(void) {
         const float WANT[2] = { 1.0f, 4.2f };   /* unit, and the grenade's */
 
         for (int k = 0; k < 2; k++) {
-            fx_reload();
-            fx_spawn_scaled("blastdome", AT, v3f(0, 1, 0), WANT[k]);
-            ok(fx_live_count() > 0, k ? "blastdome spawns at 4.2m"
+            fx_reload(&g_pools);
+            fx_spawn_scaled(&g_pools, "blastdome", AT, v3f(0, 1, 0), WANT[k]);
+            ok(fx_live_count(&g_pools) > 0, k ? "blastdome spawns at 4.2m"
                                       : "blastdome spawns at 1m");
             /* Its life is 300ms; run just past it so the shell is at full
                extent, and stop before the particles retire.
                수명이 300ms이므로 껍질이 최대로 퍼지도록 그 직전까지 돌리고, 입자가
                사라지기 전에 멈춥니다. */
-            for (int i = 0; i < 17; i++) fx_update(DT);
-            fx_radius_spread(AT, &reached[k], &width[k]);
+            for (int i = 0; i < 17; i++) fx_update(&g_pools, DT);
+            fx_radius_spread(&g_pools, AT, &reached[k], &width[k]);
         }
 
         okf(reached[1] > reached[0] * 3.0f,
@@ -203,13 +213,13 @@ int main(void) {
        the definition's numbers reach the simulation at all -- everything above
        would pass just as well if every field were ignored. */
     {
-        fx_reload();
-        fx_spawn("blood", v3f(0, 10.0f, 0), v3f(1, 0, 0));
-        ok(fx_live_count() > 0, "blood spawns for the gravity check");
+        fx_reload(&g_pools);
+        fx_spawn(&g_pools, "blood", v3f(0, 10.0f, 0), v3f(1, 0, 0));
+        ok(fx_live_count(&g_pools) > 0, "blood spawns for the gravity check");
 
         /* Run a good fraction of its life, but not past it. */
-        for (int i = 0; i < 20; i++) fx_update(DT);
-        ok(fx_live_count() > 0,
+        for (int i = 0; i < 20; i++) fx_update(&g_pools, DT);
+        ok(fx_live_count(&g_pools) > 0,
            "and is still alive partway through, so the check is meaningful");
     }
 
@@ -236,12 +246,12 @@ int main(void) {
     {
         const float START = 5.0f;
 
-        fx_reload();
-        fx_spawn("lavasmoke", v3f(0, START, 0), v3f(0, 1, 0));
-        ok(fx_live_count() > 0, "lavasmoke spawns for the rise check");
-        for (int i = 0; i < 30; i++) fx_update(DT);
-        float smoke_y = fx_mean_height();
-        ok(fx_live_count() > 0, "and is still alive partway through its life");
+        fx_reload(&g_pools);
+        fx_spawn(&g_pools, "lavasmoke", v3f(0, START, 0), v3f(0, 1, 0));
+        ok(fx_live_count(&g_pools) > 0, "lavasmoke spawns for the rise check");
+        for (int i = 0; i < 30; i++) fx_update(&g_pools, DT);
+        float smoke_y = fx_mean_height(&g_pools);
+        ok(fx_live_count(&g_pools) > 0, "and is still alive partway through its life");
         okf(smoke_y > START, "smoke rises above where it was spawned",
             smoke_y, START);
 
@@ -249,10 +259,10 @@ int main(void) {
            about this recipe and not about the simulation.
            떨어지는 이펙트에 같은 검사를 수행하여, "위로 갔다"가 시뮬레이션이 아니라 이
            레시피에 대한 진술이 되게 합니다. */
-        fx_reload();
-        fx_spawn("blood", v3f(0, START, 0), v3f(0, 1, 0));
-        for (int i = 0; i < 30; i++) fx_update(DT);
-        float blood_y = fx_mean_height();
+        fx_reload(&g_pools);
+        fx_spawn(&g_pools, "blood", v3f(0, START, 0), v3f(0, 1, 0));
+        for (int i = 0; i < 30; i++) fx_update(&g_pools, DT);
+        float blood_y = fx_mean_height(&g_pools);
         okf(blood_y < smoke_y,
             "while blood, which has positive gravity, ends up lower",
             blood_y, smoke_y);
@@ -263,13 +273,13 @@ int main(void) {
        reload rewrites that table in place. Carrying particles across would let
        one read a definition that has become a different effect. */
     {
-        fx_reload();
-        fx_spawn("spark", v3f(0, 0, 0), v3f(0, 1, 0));
-        ok(fx_live_count() > 0, "particles are alive before the reload");
-        fx_reload();
-        okd(fx_live_count() == 0,
+        fx_reload(&g_pools);
+        fx_spawn(&g_pools, "spark", v3f(0, 0, 0), v3f(0, 1, 0));
+        ok(fx_live_count(&g_pools) > 0, "particles are alive before the reload");
+        fx_reload(&g_pools);
+        okd(fx_live_count(&g_pools) == 0,
             "and a reload clears them rather than migrating them",
-            fx_live_count(), 0);
+            fx_live_count(&g_pools), 0);
     }
 
     /* --- malformed input must not derail the parser -----------------------
@@ -278,7 +288,7 @@ int main(void) {
        every keyword, still yields the definitions the game asks for by name.
        A parser that lost its place would drop the later ones. */
     {
-        fx_reload();
+        fx_reload(&g_pools);
         /* EVERY NAME THE GAME PASSES TO fx_spawn BELONGS HERE. A name is a
            string, so a typo or a renamed effect costs a silent nothing at the
            call site -- fx_spawn treats an unknown name as a no-op on purpose,
@@ -313,9 +323,9 @@ int main(void) {
                                 "smokepuff", "debris" };
         int found = 0;
         for (int i = 0; i < (int)(sizeof(NAMES)/sizeof(NAMES[0])); i++) {
-            fx_reload();
-            fx_spawn(NAMES[i], v3f(0, 0, 0), v3f(0, 1, 0));
-            if (fx_live_count() > 0) found++;
+            fx_reload(&g_pools);
+            fx_spawn(&g_pools, NAMES[i], v3f(0, 0, 0), v3f(0, 1, 0));
+            if (fx_live_count(&g_pools) > 0) found++;
             else printf("      '%s' spawned nothing\n", NAMES[i]);
         }
         okd(found == (int)(sizeof(NAMES)/sizeof(NAMES[0])),

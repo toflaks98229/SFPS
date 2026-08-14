@@ -30,6 +30,16 @@
 #include "tex.h"
 #include "player.h"
 #include "fx.h"
+#include "pools.h"
+
+/* The pools this file drives. Owned here the way a ::World owns its own; the
+   five modules that used to keep these in file-scope arrays hand them back now.
+   See src/pools.h.
+   이 파일이 구동하는 풀입니다. ::World가 자기 것을 소유하듯 이곳에서 소유합니다. 이것을
+   파일 스코프 배열에 담고 있던 다섯 모듈이 이제 그것을 돌려줍니다. src/pools.h를
+   참조하십시오. */
+static Pools g_pools;
+
 
 #define SHOT_W 1280
 #define SHOT_H 720
@@ -338,13 +348,13 @@ int main(int argc, char **argv) {
            고릅니다. */
         int at_frame = (argc > 3) ? atoi(argv[3]) : 14;
 
-        fx_spawn(argv[2], at, v3f(0.0f, 1.0f, 0.0f));
-        for (int i = 0; i < at_frame; i++) fx_update(1.0f / 60.0f);
+        fx_spawn(&g_pools, argv[2], at, v3f(0.0f, 1.0f, 0.0f));
+        for (int i = 0; i < at_frame; i++) fx_update(&g_pools, 1.0f / 60.0f);
 
         v3 cam_right = v3f(cy, 0.0f, -sy);
         v3 cam_up    = v3f(0.0f, 1.0f, 0.0f);
-        fx_draw(vp, cam_right, cam_up);
-        printf("  spawned '%s': %d particles live\n", argv[2], fx_live_count());
+        fx_draw(&g_pools, vp, cam_right, cam_up);
+        printf("  spawned '%s': %d particles live\n", argv[2], fx_live_count(&g_pools));
     }
 
     post_end(SHOT_W, SHOT_H);

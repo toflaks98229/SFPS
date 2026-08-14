@@ -148,7 +148,7 @@ int main(void) {
        A bolt that sagged would make the crosshair a lie at range. */
     {
         proj_reset(&g_pools);
-        enemy_reset();
+        enemy_reset(&g_pools);
         const WeaponType *S = wp_stats(WP_RAPID);
         v3 from = v3f(0, 5.0f, 0);
         proj_fire(&g_pools, from, v3f(0, 0, -1), S->proj_speed, S->proj_gravity,
@@ -172,7 +172,7 @@ int main(void) {
        that fall is what lets it be lobbed over things. */
     {
         proj_reset(&g_pools);
-        enemy_reset();
+        enemy_reset(&g_pools);
         const WeaponType *S = wp_stats(WP_GRENADE);
         proj_fire(&g_pools, v3f(0, 5.0f, 0), v3f(0, 0, -1), S->proj_speed, S->proj_gravity,
                   S->damage, PROJ_BLAST_RADIUS, PROJ_FUSE);
@@ -191,7 +191,7 @@ int main(void) {
        the fuse burns whether or not it is moving. */
     {
         proj_reset(&g_pools);
-        enemy_reset();
+        enemy_reset(&g_pools);
         const WeaponType *S = wp_stats(WP_GRENADE);
         proj_fire(&g_pools, v3f(0, 1.0f, 0), v3f(0, 0, -1), S->proj_speed, S->proj_gravity,
                   S->damage, PROJ_BLAST_RADIUS, PROJ_FUSE);
@@ -208,7 +208,7 @@ int main(void) {
        A grenade that hurt exactly one monster would be a slow shotgun. */
     {
         proj_reset(&g_pools);
-        enemy_reset();
+        enemy_reset(&g_pools);
 
         /* Three imps: one at the centre, one near the rim, one outside. */
         Level E = L;
@@ -219,18 +219,18 @@ int main(void) {
             e->x = (short)(k * 300);   /* 0m, 3m, 6m */
             e->z = 0;
         }
-        enemy_spawn_level(&E);
-        ok(enemy_alive() == 3, "three monsters to blast");
+        enemy_spawn_level(&g_pools, &E);
+        ok(enemy_alive(&g_pools) == 3, "three monsters to blast");
 
         int before[3];
-        for (int i = 0; i < 3; i++) before[i] = enemy_at(i)->health;
+        for (int i = 0; i < 3; i++) before[i] = enemy_at(&g_pools, i)->health;
 
         int hit = proj_blast(&g_pools, v3f(0, 0.85f, 0), PROJ_BLAST_RADIUS, 55);
         okd(hit == 2, "the blast reaches the two inside its radius", hit, 2);
 
-        int d0 = before[0] - enemy_at(0)->health;
-        int d1 = before[1] - enemy_at(1)->health;
-        int d2 = before[2] - enemy_at(2)->health;
+        int d0 = before[0] - enemy_at(&g_pools, 0)->health;
+        int d1 = before[1] - enemy_at(&g_pools, 1)->health;
+        int d2 = before[2] - enemy_at(&g_pools, 2)->health;
         ok(d0 > d1, "the near one takes more than the far one");
         okd(d2 == 0, "and the one outside takes nothing", d2, 0);
     }
@@ -240,22 +240,22 @@ int main(void) {
        frame, and a monster between this frame and the next must still be hit. */
     {
         proj_reset(&g_pools);
-        enemy_reset();
+        enemy_reset(&g_pools);
         Level E = L;
         E.n_ents = 0;
         Entity *e = &E.ents[E.n_ents++];
         e->kind[0]='i'; e->kind[1]='m'; e->kind[2]='p'; e->kind[3]=0;
         e->x = 0; e->z = -800;                 /* 8 m down the aim */
-        enemy_spawn_level(&E);
+        enemy_spawn_level(&g_pools, &E);
 
-        int before = enemy_at(0)->health;
+        int before = enemy_at(&g_pools, 0)->health;
         const WeaponType *S = wp_stats(WP_RAPID);
         proj_fire(&g_pools, v3f(0, 0.9f, 0), v3f(0, 0, -1), S->proj_speed, 0.0f,
                   S->damage, 0.0f, 0.0f);
 
         for (int i = 0; i < 30 && proj_live(&g_pools); i++) proj_update(&g_pools, &L, 1.0f / 60.0f);
 
-        ok(enemy_at(0)->health < before, "a bolt damages the monster it reaches");
+        ok(enemy_at(&g_pools, 0)->health < before, "a bolt damages the monster it reaches");
         okd(proj_live(&g_pools) == 0, "and is consumed by the hit", proj_live(&g_pools), 0);
     }
 

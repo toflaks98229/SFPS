@@ -29,6 +29,7 @@
  */
 
 #include "fx.h"
+#include "pools.h"
 #include "render.h"
 #include "data.h"
 #include "txt.h"
@@ -80,42 +81,7 @@ typedef struct {
     short face;             /**< FX_FACE_*. */
 } FxDef;
 
-/**
- * @struct FxParticle
- * @brief One live particle.
- *
- * ENGLISH
- * -------
- * @note `def` is an INDEX rather than a pointer. A pointer would dangle across
- *       a hot reload, which rewrites the definition table in place; an index
- *       at least stays in range, and ::fx_reload clears the particles anyway.
- *
- * 한국어
- * ------
- * @note `def`는 포인터가 아니라 *인덱스*입니다. 포인터는 정의 테이블을 제자리에서
- *       재작성하는 핫 리로드를 거치며 무효가 되지만, 인덱스는 최소한 범위 안에
- *       머무릅니다. 어차피 ::fx_reload가 입자를 정리합니다.
- */
-typedef struct {
-    v3    pos, vel;
-    v3    axis;       /**< Surface normal, for FX_FACE_NORMAL. / FX_FACE_NORMAL용 표면 법선. */
-    float life;       /**< Seconds remaining. 0 means the slot is free. / 남은 시간(초). 0이면 빈 슬롯. */
-    float life_max;   /**< What it started with, for the 0..1 fade. / 시작값. 0..1 페이드에 사용됩니다. */
-    /**
-     * @brief Roll angle, radians. Randomised at birth, advanced by `spin`.
-     *
-     * Per particle rather than per effect: a burst whose quads all sit at the
-     * same angle reads as one shape being scaled, because the square edges
-     * line up. Giving each its own starting roll is most of what makes a dozen
-     * billboards look like a dozen things.
-     *
-     * 이펙트 단위가 아니라 입자 단위입니다. 모든 사각형이 같은 각도로 놓인 폭발은 정사각형
-     * 모서리가 서로 맞아떨어지므로 하나의 형태가 커지는 것처럼 보입니다. 각각에 고유한
-     * 시작 회전각을 주는 것이, 빌보드 열두 개를 열두 개의 무언가로 보이게 만드는 핵심입니다.
-     */
-    float roll;
-    short def;
-} FxParticle;
+
 
 /* --- Static state / 정적 상태 --- */
 
@@ -123,23 +89,36 @@ static FxDef      g_defs[FX_MAX_DEFS];
 static int        g_n_defs;
 static int        g_parsed;
 
-static FxParticle g_parts[FX_MAX_PARTICLES];
-static int        g_next;        /**< Ring cursor. / 링 커서. */
 
 static MeshBuf    g_buf;
 static Mesh       g_mesh;
 static int        g_buf_ready;
 
 /** @brief Spawn randomness. Its own state so effects never disturb the weapon's. / 생성용 난수. 이펙트가 무기 쪽 난수를 교란하지 않도록 자체 상태를 둡니다. */
-static unsigned   g_rng = 0x9e3779b9u;
+/* The seed a pool starts from. A zeroed FxPool means "not seeded yet", which
+   is what lets a Pools live in a zero-initialised World and still produce a
+   spread rather than a straight line.
+   풀이 출발하는 씨앗입니다. 0인 FxPool은 "아직 씨앗이 채워지지 않음"을 뜻하며, 그래서
+   Pools가 0으로 초기화된 World 안에 있어도 직선이 아니라 퍼짐을 만들어 냅니다. */
+#define FX_RNG_SEED 0x9e3779b9u
 
 /* --- Static helpers / 정적 헬퍼 --- */
 
-static float frand(void) {
-    g_rng = g_rng * 1664525u + 1013904223u;
-    return ((g_rng >> 8) & 0xffff) / 65536.0f;
+static float frand(FxPool *fx) {
+    /* Seeded on first use rather than at construction, so that a zeroed FxPool
+       is a valid one. Pools lives inside a World that world_init clears
+       wholesale, and requiring a separate fx_init would be a second thing to
+       remember that nothing would remind anybody of -- exactly the shape of
+       fault this whole move is removing.
+       생성 시점이 아니라 첫 사용 시에 씨앗을 채우므로 0인 FxPool도 유효한 풀입니다. Pools는
+       world_init이 통째로 비우는 World 안에 있으며, 별도의 fx_init을 요구하는 것은 아무도
+       상기시켜 주지 않는 두 번째 기억거리가 됩니다. 이 이동 전체가 제거하고 있는 결함의
+       모양 그대로입니다. */
+    if (!fx->rng) fx->rng = FX_RNG_SEED;
+    fx->rng = fx->rng * 1664525u + 1013904223u;
+    return ((fx->rng >> 8) & 0xffff) / 65536.0f;
 }
-static float frand_signed(void) { return frand() * 2.0f - 1.0f; }
+static float frand_signed(FxPool *fx) { return frand(fx) * 2.0f - 1.0f; }
 
 /**
  * @brief Parses assets\effects.txt into ::g_defs.
@@ -291,11 +270,11 @@ static int find_def(const char *name) {
 
 /* --- Public API / 공개 API --- */
 
-void fx_spawn(const char *name, v3 pos, v3 normal) {
-    fx_spawn_scaled(name, pos, normal, 1.0f);
+void fx_spawn(Pools *pl, const char *name, v3 pos, v3 normal) {
+    fx_spawn_scaled(pl, name, pos, normal, 1.0f);
 }
 
-void fx_spawn_scaled(const char *name, v3 pos, v3 normal, float scale) {
+void fx_spawn_scaled(Pools *pl, const char *name, v3 pos, v3 normal, float scale) {
     if (!g_parsed) parse_defs();
 
     int di = find_def(name);
@@ -317,11 +296,11 @@ void fx_spawn_scaled(const char *name, v3 pos, v3 normal, float scale) {
            player is looking at.
            오래된 것부터 덮어씁니다. 풀이 가득 차면 최신 것을 거부하지 않고 *가장 오래된*
            것을 버립니다. 방금 생성된 입자가 바로 플레이어가 보고 있는 것이기 때문입니다. */
-        FxParticle *q = &g_parts[g_next];
+        FxParticle *q = &pl->fx.parts[pl->fx.next];
         if (q->life > 0.0f) DIAG(DIAG_FX_CAP);
-        g_next = (g_next + 1) % FX_MAX_PARTICLES;
+        pl->fx.next = (pl->fx.next + 1) % FX_MAX_PARTICLES;
 
-        float sp = (d->speed + d->spread * frand_signed()) * 0.01f * scale;
+        float sp = (d->speed + d->spread * frand_signed(&pl->fx)) * 0.01f * scale;
         v3 dir = n;
 
         /* A SHELL, not a burst. Every particle gets the same speed and a
@@ -346,9 +325,9 @@ void fx_spawn_scaled(const char *name, v3 pos, v3 normal, float scale) {
                반구에 균일하게 분포시킵니다. 각도가 아니라 코사인을 [0,1]에서 균일하게
                뽑습니다. 그러지 않으면 입자가 극에 몰려 돔의 꼭대기만 밝고 자락이
                얇아집니다. */
-            float c   = frand();
+            float c   = frand(&pl->fx);
             float s2  = sqrtf(1.0f - c * c);
-            float phi = frand() * 6.2831853f;
+            float phi = frand(&pl->fx) * 6.2831853f;
             dir = v3norm(v3add(v3scale(n, c),
                                v3add(v3scale(t, s2 * cosf(phi)),
                                      v3scale(b, s2 * sinf(phi)))));
@@ -360,8 +339,8 @@ void fx_spawn_scaled(const char *name, v3 pos, v3 normal, float scale) {
                as a jet. */
             float k = 0.5f * (float)d->spread / (float)(d->speed ? d->speed : 1);
             if (k > 1.0f) k = 1.0f;
-            dir = v3norm(v3add(n, v3add(v3scale(t, frand_signed() * k),
-                                        v3scale(b, frand_signed() * k))));
+            dir = v3norm(v3add(n, v3add(v3scale(t, frand_signed(&pl->fx) * k),
+                                        v3scale(b, frand_signed(&pl->fx) * k))));
         }
 
         /* Scatter the start point. Every particle leaving the same spot makes
@@ -374,9 +353,9 @@ void fx_spawn_scaled(const char *name, v3 pos, v3 normal, float scale) {
         v3 at = pos;
         if (d->spawn_r) {
             float rr = d->spawn_r * 0.01f;
-            at = v3add(at, v3f(frand_signed() * rr,
-                               frand_signed() * rr,
-                               frand_signed() * rr));
+            at = v3add(at, v3f(frand_signed(&pl->fx) * rr,
+                               frand_signed(&pl->fx) * rr,
+                               frand_signed(&pl->fx) * rr));
         }
 
         q->pos      = at;
@@ -389,14 +368,14 @@ void fx_spawn_scaled(const char *name, v3 pos, v3 normal, float scale) {
            read as one shape.
            spin이 0이어도 시작 회전각은 무작위입니다. 각도 자체가 중요한데, 동일하게
            정렬된 정사각형들은 모서리가 맞아떨어져 하나의 형태로 읽히기 때문입니다. */
-        q->roll     = frand() * 6.2831853f;
+        q->roll     = frand(&pl->fx) * 6.2831853f;
         q->def      = (short)di;
     }
 }
 
-void fx_update(float dt) {
+void fx_update(Pools *pl, float dt) {
     for (int i = 0; i < FX_MAX_PARTICLES; i++) {
-        FxParticle *q = &g_parts[i];
+        FxParticle *q = &pl->fx.parts[i];
         if (q->life <= 0.0f) continue;
 
         const FxDef *d = &g_defs[q->def];
@@ -424,32 +403,32 @@ void fx_update(float dt) {
     }
 }
 
-void fx_reload(void) {
-    for (int i = 0; i < FX_MAX_PARTICLES; i++) g_parts[i].life = 0.0f;
-    g_next   = 0;
+void fx_reload(Pools *pl) {
+    for (int i = 0; i < FX_MAX_PARTICLES; i++) pl->fx.parts[i].life = 0.0f;
+    pl->fx.next   = 0;
     g_parsed = 0;
 }
 
-int fx_live_count(void) {
+int fx_live_count(const Pools *pl) {
     int n = 0;
-    for (int i = 0; i < FX_MAX_PARTICLES; i++) if (g_parts[i].life > 0.0f) n++;
+    for (int i = 0; i < FX_MAX_PARTICLES; i++) if (pl->fx.parts[i].life > 0.0f) n++;
     return n;
 }
 
-float fx_mean_height(void) {
+float fx_mean_height(const Pools *pl) {
     float sum = 0.0f;
     int   n   = 0;
     for (int i = 0; i < FX_MAX_PARTICLES; i++)
-        if (g_parts[i].life > 0.0f) { sum += g_parts[i].pos.y; n++; }
+        if (pl->fx.parts[i].life > 0.0f) { sum += pl->fx.parts[i].pos.y; n++; }
     return n ? sum / (float)n : 0.0f;
 }
 
-void fx_radius_spread(v3 origin, float *mean, float *width) {
+void fx_radius_spread(const Pools *pl, v3 origin, float *mean, float *width) {
     float sum = 0.0f, wide = 0.0f;
     int   n   = 0;
     for (int i = 0; i < FX_MAX_PARTICLES; i++) {
-        if (g_parts[i].life <= 0.0f) continue;
-        v3 d = v3sub(g_parts[i].pos, origin);
+        if (pl->fx.parts[i].life <= 0.0f) continue;
+        v3 d = v3sub(pl->fx.parts[i].pos, origin);
         sum += v3len(d); n++;
         /* Distance from the vertical axis, not from the point. A dome's
            equator goes sideways; a burst thrown along one direction does not,
@@ -491,12 +470,12 @@ int fx_def_count(void) {
  * 트레이드오프이며 이유도 같습니다. 정점별 색상 속성을 두면 일괄 처리가 가능하지만,
  * 프로젝트의 모든 정점에 4바이트를 더하는 대가를 치릅니다.
  */
-static void draw_pass(int blend, v3 cam_right, v3 cam_up) {
+static void draw_pass(const Pools *pl, int blend, v3 cam_right, v3 cam_up) {
     int idx[FX_MAX_PARTICLES], n = 0;
 
     mb_reset(&g_buf);
     for (int i = 0; i < FX_MAX_PARTICLES; i++) {
-        const FxParticle *q = &g_parts[i];
+        const FxParticle *q = &pl->fx.parts[i];
         if (q->life <= 0.0f) continue;
         const FxDef *d = &g_defs[q->def];
         if (d->blend != blend) continue;
@@ -536,7 +515,7 @@ static void draw_pass(int blend, v3 cam_right, v3 cam_up) {
     mesh_upload(&g_mesh, &g_buf, 1);
     glBindVertexArray(g_mesh.vao);
     for (int k = 0; k < n; k++) {
-        const FxParticle *q = &g_parts[idx[k]];
+        const FxParticle *q = &pl->fx.parts[idx[k]];
         const FxDef *d = &g_defs[q->def];
         float u = 1.0f - q->life / q->life_max;
         float a = (d->alpha0 + (d->alpha1 - d->alpha0) * u) * 0.01f;
@@ -560,7 +539,7 @@ static void draw_pass(int blend, v3 cam_right, v3 cam_up) {
     }
 }
 
-void fx_draw(mat4 vp, v3 cam_right, v3 cam_up) {
+void fx_draw(const Pools *pl, mat4 vp, v3 cam_right, v3 cam_up) {
     DIAG_WANT_WORLD_PASS(post_in_world_pass());
 
     if (!g_buf_ready) {
@@ -583,10 +562,10 @@ void fx_draw(mat4 vp, v3 cam_right, v3 cam_up) {
        알파를 먼저, 가산을 나중에 그립니다. 발광은 자신이 나온 연기 위에 놓여야 하며,
        순서를 바꾸면 발광이 묻힙니다. */
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    draw_pass(FX_BLEND_ALPHA, cam_right, cam_up);
+    draw_pass(pl, FX_BLEND_ALPHA, cam_right, cam_up);
 
     glBlendFunc(GL_SRC_ALPHA, GL_ONE);
-    draw_pass(FX_BLEND_ADD, cam_right, cam_up);
+    draw_pass(pl, FX_BLEND_ADD, cam_right, cam_up);
 
     glDisable(GL_BLEND);
     glDepthMask(GL_TRUE);

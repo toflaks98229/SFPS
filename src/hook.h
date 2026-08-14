@@ -458,7 +458,7 @@ int wp_hook_locks_aim(const Weapon *w);
  * @warning 호출할 때마다 레벨을 판정하며, HUD에서 프레임당 한 번 호출됩니다. 이
  *          레벨 크기에서는 저렴하지만 공짜는 아니므로 루프 안에서 호출하지 마십시오.
  */
-int wp_hook_in_range(const Weapon *w, const Level *l,
+int wp_hook_in_range(const Weapon *w, const Pools *pl, const Level *l,
                      v3 eye, float yaw, float pitch);
 
 /**
@@ -539,7 +539,7 @@ void wp_hook_arm(Weapon *w);
  * @warning 부수 효과로 피해를 입히므로 프레임당 정확히 한 번만 호출해야 합니다. 두 번
  *          호출하면 걸린 몬스터가 두 번 피해를 입습니다.
  */
-int wp_hook_update(Weapon *w, const Level *l, v3 *pos, v3 *vel, float dt);
+int wp_hook_update(Weapon *w, Pools *pl, const Level *l, v3 *pos, v3 *vel, float dt);
 
 /**
  * @brief Cancels the hook immediately, wherever it is in its cycle.

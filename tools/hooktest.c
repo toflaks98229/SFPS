@@ -72,7 +72,7 @@ static void box(Level *l, short x0, short z0, short x1, short z1,
 static int run_hook(Weapon *w, const Level *l, v3 *pos, v3 *vel, int max_frames) {
     int frames = 0;
     while (w->hook_state != HOOK_IDLE && frames < max_frames) {
-        wp_hook_update(w, l, pos, vel, DT);
+        wp_hook_update(w, &g_pools, l, pos, vel, DT);
         /* Gravity and integration, as player_move would apply them. */
         vel->y -= PLAYER_GRAVITY * DT;
         *pos = v3add(*pos, v3scale(*vel, DT));
@@ -115,7 +115,7 @@ int main(void) {
            after one 60Hz frame. If this ever passes instantly, the projectile
            has silently become a raycast again. */
         v3 pos = eye, vel = v3f(0,0,0);
-        wp_hook_update(&w, &L, &pos, &vel, DT);
+        wp_hook_update(&w, &g_pools, &L, &pos, &vel, DT);
         ok(w.hook_state == HOOK_FLYING, "and is still in the air one frame later");
         ok(v3len(v3sub(w.hook_pos, eye)) > 0.5f, "having actually travelled");
         ok(v3len(vel) < 1e-4f, "and the player has not moved -- flight pulls nothing");
@@ -129,7 +129,7 @@ int main(void) {
 
         int frames = 0;
         while (w.hook_state == HOOK_FLYING && frames < 600) {
-            wp_hook_update(&w, &L, &pos, &vel, DT);
+            wp_hook_update(&w, &g_pools, &L, &pos, &vel, DT);
             frames++;
         }
         ok(w.hook_state == HOOK_PULLING, "the claw reaches the wall and latches");
@@ -171,7 +171,7 @@ int main(void) {
             int triggers = 0, pulled = 0;
             float prev = -1.0f;
             for (int i = 0; i < 60 && w.hook_state == HOOK_PULLING; i++) {
-                wp_hook_update(&w, &L, &pos, &vel, DT);
+                wp_hook_update(&w, &g_pools, &L, &pos, &vel, DT);
                 if (w.hook_state != HOOK_PULLING) break;
                 pulled++;
                 /* Sample AFTER the update. wp_hook_update decrements and
@@ -205,7 +205,7 @@ int main(void) {
         wp_hook_fire(&w, pos, 0.0f, 0.0f);
         int frames = 0;
         while (w.hook_state != HOOK_IDLE && frames < 600) {
-            wp_hook_update(&w, 0, &pos, &vel, DT);
+            wp_hook_update(&w, &g_pools, 0, &pos, &vel, DT);
             frames++;
         }
         ok(w.hook_state == HOOK_IDLE, "a throw that hits nothing ends on its own");
@@ -252,7 +252,7 @@ int main(void) {
         float lowest = pos.y;
         int frames = 0;
         while (w.hook_state != HOOK_IDLE && frames < 60 * 8) {
-            wp_hook_update(&w, &L, &pos, &vel, DT);
+            wp_hook_update(&w, &g_pools, &L, &pos, &vel, DT);
             vel.y -= PLAYER_GRAVITY * DT;
             pos = v3add(pos, v3scale(vel, DT));
             if (pos.y < lowest) lowest = pos.y;
@@ -354,11 +354,11 @@ int main(void) {
         M.ents[0].kind[2] = 'p'; M.ents[0].kind[3] = 0;
         M.ents[0].x = 0; M.ents[0].z = -1000;      /* 10 m ahead */
 
-        enemy_reset();
-        enemy_spawn_level(&M);
-        ok(enemy_count() == 1, "the fixture spawned exactly one monster");
+        enemy_reset(&g_pools);
+        enemy_spawn_level(&g_pools, &M);
+        ok(enemy_count(&g_pools) == 1, "the fixture spawned exactly one monster");
 
-        const Enemy *e = enemy_at(0);
+        const Enemy *e = enemy_at(&g_pools, 0);
         int hp_before = e ? e->health : 0;
         ok(hp_before > 0, "and it starts alive");
 
@@ -371,7 +371,7 @@ int main(void) {
            anything the pull might do. */
         int frames = 0;
         while (w.hook_state == HOOK_FLYING && frames < 600) {
-            wp_hook_update(&w, &M, &pos, &vel, DT);
+            wp_hook_update(&w, &g_pools, &M, &pos, &vel, DT);
             frames++;
         }
         ok(w.hook_state == HOOK_PULLING, "the claw latches onto the monster");
@@ -379,21 +379,21 @@ int main(void) {
             (float)w.hook_enemy, 0.0f);
 
         /* Damage is dealt on ARRIVAL, not on the hit -- so nothing yet. */
-        e = enemy_at(0);
+        e = enemy_at(&g_pools, 0);
         okf(e && e->health == hp_before,
             "latching alone deals no damage -- the impact is on arrival",
             e ? (float)e->health : -1.0f, (float)hp_before);
 
         run_hook(&w, &M, &pos, &vel, 60 * 8);
 
-        e = enemy_at(0);
+        e = enemy_at(&g_pools, 0);
         ok(e && e->health < hp_before, "arriving hurts the monster it hooked");
         okf(e && hp_before - e->health == HOOK_IMPACT_DAMAGE,
             "by exactly HOOK_IMPACT_DAMAGE, once -- not per frame of contact",
             e ? (float)(hp_before - e->health) : -1.0f, (float)HOOK_IMPACT_DAMAGE);
         ok(vel.y > 1.0f, "and still launches, the same as hooking geometry");
 
-        enemy_reset();
+        enemy_reset(&g_pools);
     }
 
     /* --- hooking geometry damages nothing ---------------------------------
@@ -402,7 +402,7 @@ int main(void) {
     {
         Weapon w = {0};
         v3 pos = v3f(0.0f, STAND_Y, 0.0f), vel = v3f(0,0,0);
-        enemy_reset();
+        enemy_reset(&g_pools);
         wp_hook_fire(&w, pos, 0.0f, 0.0f);
         run_hook(&w, &L, &pos, &vel, 60 * 8);
         ok(w.hook_enemy < 0, "a wall hook never claims a monster target");
@@ -419,28 +419,28 @@ int main(void) {
         M.ents[0].kind[2] = 'p'; M.ents[0].kind[3] = 0;
         M.ents[0].x = 0; M.ents[0].z = -1500;
 
-        enemy_reset();
-        enemy_spawn_level(&M);
+        enemy_reset(&g_pools);
+        enemy_spawn_level(&g_pools, &M);
 
         Weapon w = {0};
         v3 pos = v3f(0.0f, 1.7f, 0.0f), vel = v3f(0,0,0);
         wp_hook_fire(&w, pos, 0.0f, 0.0f);
         while (w.hook_state == HOOK_FLYING)
-            wp_hook_update(&w, &M, &pos, &vel, DT);
+            wp_hook_update(&w, &g_pools, &M, &pos, &vel, DT);
         ok(w.hook_state == HOOK_PULLING, "hooked a monster for the death test");
 
         /* Kill it outright, mid-pull. */
-        const Enemy *e = enemy_at(0);
-        if (e) enemy_hurt(0, e->health + 100, v3f(0,0,-1));
+        const Enemy *e = enemy_at(&g_pools, 0);
+        if (e) enemy_hurt(&g_pools, 0, e->health + 100, v3f(0,0,-1));
 
         v3 vel_before = vel;
-        wp_hook_update(&w, &M, &pos, &vel, DT);
+        wp_hook_update(&w, &g_pools, &M, &pos, &vel, DT);
         ok(w.hook_state == HOOK_IDLE, "the hook ends when its target dies");
         okf(fabsf(vel.y - vel_before.y) < 1e-3f,
             "with no launch -- there was nothing left to bounce off",
             vel.y, vel_before.y);
 
-        enemy_reset();
+        enemy_reset(&g_pools);
     }
 
     /* --- a pull that cannot finish ends, and ends QUICKLY -------------------
@@ -467,7 +467,7 @@ int main(void) {
         v3 pos = v3f(0.0f, STAND_Y, 0.0f), vel = v3f(0,0,0);
         wp_hook_fire(&w, pos, 0.0f, 0.0f);
         while (w.hook_state == HOOK_FLYING)
-            wp_hook_update(&w, &L, &pos, &vel, DT);
+            wp_hook_update(&w, &g_pools, &L, &pos, &vel, DT);
 
         /* Hold the player still: the pull can never close the distance. */
         v3 fixed = pos;
@@ -475,7 +475,7 @@ int main(void) {
         while (w.hook_state != HOOK_IDLE && frames < 60 * 20) {
             v3 scratch = fixed;
             v3 v2 = v3f(0,0,0);
-            wp_hook_update(&w, &L, &scratch, &v2, DT);
+            wp_hook_update(&w, &g_pools, &L, &scratch, &v2, DT);
             frames++;
         }
         ok(w.hook_state == HOOK_IDLE, "a pull that cannot arrive gives up");
@@ -516,7 +516,7 @@ int main(void) {
         int frames = 0, pull_frames = 0;
         while (w.hook_state != HOOK_IDLE && frames < 60 * 10) {
             int pulling = (w.hook_state == HOOK_PULLING);
-            wp_hook_update(&w, &L, &pos, &vel, DT);
+            wp_hook_update(&w, &g_pools, &L, &pos, &vel, DT);
             if (pulling) pull_frames++;
             /* Integrate and stand on the floor, as player_move would -- the
                floor is the whole reason the distance stops shrinking. */
@@ -546,11 +546,11 @@ int main(void) {
        answer -- otherwise the UI teaches the player something false. */
     {
         Weapon w = {0};
-        enemy_reset();
+        enemy_reset(&g_pools);
 
         /* Facing the north wall, 20 m away: well inside the 40 m range. */
         v3 eye = v3f(0.0f, STAND_Y, 0.0f);
-        ok(wp_hook_in_range(&w, &L, eye, 0.0f, 0.0f),
+        ok(wp_hook_in_range(&w, &g_pools, &L, eye, 0.0f, 0.0f),
            "a wall inside HOOK_RANGE lights the indicator");
 
         /* And a throw from the same place does connect. */
@@ -559,7 +559,7 @@ int main(void) {
         wp_hook_fire(&w2, pos, 0.0f, 0.0f);
         int frames = 0;
         while (w2.hook_state == HOOK_FLYING && frames < 600) {
-            wp_hook_update(&w2, &L, &pos, &vel, DT);
+            wp_hook_update(&w2, &g_pools, &L, &pos, &vel, DT);
             frames++;
         }
         ok(w2.hook_state == HOOK_PULLING,
@@ -572,8 +572,8 @@ int main(void) {
        fixture 40 m across. */
     {
         Weapon w = {0};
-        enemy_reset();
-        ok(!wp_hook_in_range(&w, 0, v3f(0.0f, STAND_Y, 0.0f), 0.0f, 0.0f),
+        enemy_reset(&g_pools);
+        ok(!wp_hook_in_range(&w, &g_pools, 0, v3f(0.0f, STAND_Y, 0.0f), 0.0f, 0.0f),
            "nothing in range leaves the indicator dark");
     }
 
@@ -583,20 +583,20 @@ int main(void) {
        to darken it too. */
     {
         Weapon w = {0};
-        enemy_reset();
+        enemy_reset(&g_pools);
         v3 eye = v3f(0.0f, STAND_Y, 0.0f);
 
         w.hook_cooldown = 0.5f;
-        ok(!wp_hook_in_range(&w, &L, eye, 0.0f, 0.0f),
+        ok(!wp_hook_in_range(&w, &g_pools, &L, eye, 0.0f, 0.0f),
            "on cooldown, the indicator stays dark despite the wall");
 
         w.hook_cooldown = 0.0f;
         w.hook_latched  = 1;
-        ok(!wp_hook_in_range(&w, &L, eye, 0.0f, 0.0f),
+        ok(!wp_hook_in_range(&w, &g_pools, &L, eye, 0.0f, 0.0f),
            "and while the press is still latched");
 
         w.hook_latched = 0;
-        ok(wp_hook_in_range(&w, &L, eye, 0.0f, 0.0f),
+        ok(wp_hook_in_range(&w, &g_pools, &L, eye, 0.0f, 0.0f),
            "but lights again once the launcher is genuinely ready");
     }
 
@@ -609,13 +609,13 @@ int main(void) {
         M.ents[0].kind[2] = 'p'; M.ents[0].kind[3] = 0;
         M.ents[0].x = 0; M.ents[0].z = -1000;
 
-        enemy_reset();
-        enemy_spawn_level(&M);
+        enemy_reset(&g_pools);
+        enemy_spawn_level(&g_pools, &M);
 
         Weapon w = {0};
-        ok(wp_hook_in_range(&w, &M, v3f(0.0f, 1.7f, 0.0f), 0.0f, 0.0f),
+        ok(wp_hook_in_range(&w, &g_pools, &M, v3f(0.0f, 1.7f, 0.0f), 0.0f, 0.0f),
            "a monster in range lights the indicator as well");
-        enemy_reset();
+        enemy_reset(&g_pools);
     }
 
     /* --- the aim is locked for the whole cycle ----------------------------
@@ -632,7 +632,7 @@ int main(void) {
         ok(wp_hook_locks_aim(&w), "throwing locks it immediately");
 
         while (w.hook_state == HOOK_FLYING)
-            wp_hook_update(&w, &L, &pos, &vel, DT);
+            wp_hook_update(&w, &g_pools, &L, &pos, &vel, DT);
         ok(w.hook_state == HOOK_PULLING && wp_hook_locks_aim(&w),
            "and it stays locked through the pull, not just the flight");
 
@@ -774,7 +774,7 @@ int main(void) {
             v3 anchor = v3f(0,0,0);
             int frames = 0, latched = 0;
             while (w.hook_state != HOOK_IDLE && frames < 600) {
-                wp_hook_update(&w, &L, &pos, &vel, DT);
+                wp_hook_update(&w, &g_pools, &L, &pos, &vel, DT);
                 if (w.hook_state == HOOK_PULLING && !latched) {
                     latched = 1;
                     anchor  = w.hook_target;

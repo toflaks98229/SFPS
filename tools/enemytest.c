@@ -13,6 +13,16 @@
 #include <math.h>
 #include "enemy.h"
 #include "level.h"
+#include "pools.h"
+/* The pools this file drives, owned here the way a ::World owns its own. The
+   five modules that used to keep these in file-scope arrays hand them back
+   now, which is why a fixture no longer inherits the previous case's monsters.
+   See src/pools.h.
+   이 파일이 구동하는 풀이며, ::World가 자기 것을 소유하듯 이곳에서 소유합니다. 이것을 파일
+   스코프 배열에 담고 있던 다섯 모듈이 이제 돌려주며, 그래서 픽스처가 이전 사례의 몬스터를
+   물려받지 않습니다. src/pools.h를 참조하십시오. */
+static Pools g_pools;
+
 #include "player.h"   /* PLAYER_EYE -- projectiles are aimed at a standing body */
 
 #define DT (1.0f / 60.0f)
@@ -54,20 +64,20 @@ int main(void) {
     build();
 
     /* --- spawning --- */
-    enemy_spawn_level(&L);
-    ok(enemy_count() == 1, "one monster spawned from the spawn entity");
-    ok(enemy_alive() == 1, "and it is alive");
+    enemy_spawn_level(&g_pools, &L);
+    ok(enemy_count(&g_pools) == 1, "one monster spawned from the spawn entity");
+    ok(enemy_alive(&g_pools) == 1, "and it is alive");
 
-    const Enemy *m = enemy_at(0);
+    const Enemy *m = enemy_at(&g_pools, 0);
     okf(fabsf(m->pos.y) < 0.001f, "it stands on the floor", m->pos.y, 0.0f);
 
     /* --- chase closes the distance --- */
     {
         v3 player = v3f(15.0f, 1.7f, 0.0f);       /* opposite side of the room */
-        float d0 = dist_xz(enemy_at(0)->pos, player);
-        for (int i = 0; i < 120; i++) enemy_update(&L, player, DT);   /* 2 s */
-        float d1 = dist_xz(enemy_at(0)->pos, player);
-        ok(enemy_at(0)->state != E_IDLE, "it noticed the player and gave chase");
+        float d0 = dist_xz(enemy_at(&g_pools, 0)->pos, player);
+        for (int i = 0; i < 120; i++) enemy_update(&g_pools, &L, player, DT);   /* 2 s */
+        float d1 = dist_xz(enemy_at(&g_pools, 0)->pos, player);
+        ok(enemy_at(&g_pools, 0)->state != E_IDLE, "it noticed the player and gave chase");
         okf(d1 < d0 - 3.0f, "and closed at least 3 m in two seconds", d0 - d1, 3.0f);
     }
 
@@ -76,7 +86,7 @@ int main(void) {
         v3 player = v3f(15.0f, 1.7f, 0.0f);
         int total = 0;
         for (int i = 0; i < 60 * 20; i++)      /* up to 20 s to arrive + swing */
-            total += enemy_update(&L, player, DT);
+            total += enemy_update(&g_pools, &L, player, DT);
         ok(total > 0, "it eventually lands a melee hit on the player");
         ok(total >= mon_stats(MON_IMP)->damage, "for at least one swing of damage");
     }
@@ -84,44 +94,44 @@ int main(void) {
     /* --- it stays inside the map the whole time --- */
     {
         float f, c;
-        int inside = level_ground(&L, enemy_at(0)->pos.x, enemy_at(0)->pos.z,
-                                  enemy_at(0)->pos.y, 1e9f, &f, &c);
+        int inside = level_ground(&L, enemy_at(&g_pools, 0)->pos.x, enemy_at(&g_pools, 0)->pos.z,
+                                  enemy_at(&g_pools, 0)->pos.y, 1e9f, &f, &c);
         ok(inside, "the monster never walked out of the map");
     }
 
     /* --- shooting it: hitscan connects, damage kills, corpse is inert --- */
     {
-        enemy_spawn_level(&L);                 /* fresh, full health */
-        const Enemy *e = enemy_at(0);
+        enemy_spawn_level(&g_pools, &L);                 /* fresh, full health */
+        const Enemy *e = enemy_at(&g_pools, 0);
         const MonType *S = mon_stats(MON_IMP);
         v3 eye = v3f(e->pos.x, e->pos.y + S->eye, e->pos.z - 5.0f);
         v3 dir = v3f(0, 0, 1);                  /* straight at it */
 
         float t; int idx;
-        ok(enemy_hitscan(eye, dir, 100.0f, &t, &idx),
+        ok(enemy_hitscan(&g_pools, eye, dir, 100.0f, &t, &idx),
            "a ray through the monster reports a hit");
         okf(fabsf(t - (5.0f - S->radius)) < 0.05f,
             "at the front of its body", t, 5.0f - S->radius);
 
         v3 miss_dir = v3f(0, 0, 1);
         v3 miss_eye = v3f(e->pos.x + 5.0f, e->pos.y + S->eye, e->pos.z - 5.0f);
-        ok(!enemy_hitscan(miss_eye, miss_dir, 100.0f, &t, &idx),
+        ok(!enemy_hitscan(&g_pools, miss_eye, miss_dir, 100.0f, &t, &idx),
            "a ray beside the monster misses");
 
         int swings = 0;
-        while (enemy_alive() && swings < 100) {
-            enemy_hurt(0, 7, dir);             /* a shotgun pellet's worth */
+        while (enemy_alive(&g_pools) && swings < 100) {
+            enemy_hurt(&g_pools, 0, 7, dir);             /* a shotgun pellet's worth */
             swings++;
         }
         int want = (int)ceilf(S->hp / 7.0f);
-        ok(enemy_at(0)->state == E_DEAD, "enough damage kills it");
+        ok(enemy_at(&g_pools, 0)->state == E_DEAD, "enough damage kills it");
         okf(swings == want, "in exactly the expected number of pellets",
             (float)swings, (float)want);
 
         /* A corpse must not still be shootable, or you keep 'killing' it. */
-        ok(!enemy_hitscan(eye, dir, 100.0f, &t, &idx),
+        ok(!enemy_hitscan(&g_pools, eye, dir, 100.0f, &t, &idx),
            "the corpse cannot be hit again");
-        ok(enemy_alive() == 0, "no monster is counted as alive");
+        ok(enemy_alive(&g_pools) == 0, "no monster is counted as alive");
     }
 
     /* --- the types are actually distinct -------------------------------------
@@ -172,10 +182,10 @@ int main(void) {
         e->kind[0]='b';e->kind[1]='r';e->kind[2]='u';e->kind[3]='t';e->kind[4]='e';e->kind[5]=0;
         e->x = 0; e->z = 0;
 
-        enemy_spawn_level(&b);
-        ok(enemy_at(0)->type == MON_BRUTE, "the brute entity spawned a brute");
+        enemy_spawn_level(&g_pools, &b);
+        ok(enemy_at(&g_pools, 0)->type == MON_BRUTE, "the brute entity spawned a brute");
         int pellets = 0;
-        while (enemy_alive() && pellets < 200) { enemy_hurt(0, 7, v3f(0,0,1)); pellets++; }
+        while (enemy_alive(&g_pools) && pellets < 200) { enemy_hurt(&g_pools, 0, 7, v3f(0,0,1)); pellets++; }
         int imp_pellets = (int)ceilf(mon_stats(MON_IMP)->hp / 7.0f);
         ok(pellets > imp_pellets * 2, "and took more than twice an imp's pellets");
     }
@@ -196,24 +206,24 @@ int main(void) {
         e->x = 0; e->z = 0;
 
         const MonType *C = mon_stats(MON_CASTER);
-        enemy_spawn_level(&r);
-        ok(enemy_at(0)->type == MON_CASTER, "the caster entity spawned a caster");
+        enemy_spawn_level(&g_pools, &r);
+        ok(enemy_at(&g_pools, 0)->type == MON_CASTER, "the caster entity spawned a caster");
 
         /* Starting well outside its range, it should walk in and then stop. */
         v3 player = v3f(0.0f, PLAYER_EYE, 30.0f);
-        for (int i = 0; i < 60 * 12; i++) enemy_update(&r, player, DT);
-        float held = dist_xz(enemy_at(0)->pos, player);
+        for (int i = 0; i < 60 * 12; i++) enemy_update(&g_pools, &r, player, DT);
+        float held = dist_xz(enemy_at(&g_pools, 0)->pos, player);
         okf(held <= C->attack + 1.0f && held >= C->attack * 0.5f,
             "from far off it closes only to its firing range", held, C->attack);
         ok(held > mon_stats(MON_IMP)->attack * 2.0f,
            "which is nowhere near melee reach");
 
         /* Standing on top of it, it should give ground rather than stand there. */
-        enemy_spawn_level(&r);
+        enemy_spawn_level(&g_pools, &r);
         v3 close = v3f(0.0f, PLAYER_EYE, 2.5f);
-        float d0 = dist_xz(enemy_at(0)->pos, close);
-        for (int i = 0; i < 60 * 3; i++) enemy_update(&r, close, DT);
-        float d1 = dist_xz(enemy_at(0)->pos, close);
+        float d0 = dist_xz(enemy_at(&g_pools, 0)->pos, close);
+        for (int i = 0; i < 60 * 3; i++) enemy_update(&g_pools, &r, close, DT);
+        float d1 = dist_xz(enemy_at(&g_pools, 0)->pos, close);
         okf(d1 > d0 + 1.0f, "crowded, it backs away instead of standing still",
             d1 - d0, 1.0f);
     }
@@ -230,14 +240,14 @@ int main(void) {
         e->kind[4]='e';e->kind[5]='r';e->kind[6]=0;
         e->x = 0; e->z = 0;
 
-        enemy_spawn_level(&r);
+        enemy_spawn_level(&g_pools, &r);
         v3 player = v3f(0.0f, PLAYER_EYE, 10.0f);   /* inside its firing band */
 
         int seen_shot = 0, damage = 0;
         for (int i = 0; i < 60 * 8; i++) {
-            damage += enemy_update(&r, player, DT);
-            for (int k = 0; k < enemy_shot_count(); k++)
-                if (enemy_shot_at(k)->active) { seen_shot = 1; break; }
+            damage += enemy_update(&g_pools, &r, player, DT);
+            for (int k = 0; k < enemy_shot_count(&g_pools); k++)
+                if (enemy_shot_at(&g_pools, k)->active) { seen_shot = 1; break; }
         }
         ok(seen_shot, "a bolt appears in the world once it attacks");
         ok(damage > 0, "and standing in front of it costs health");
@@ -245,10 +255,10 @@ int main(void) {
            "for at least one full bolt's worth");
 
         /* Nothing should still be in flight forever: bolts expire or land. */
-        for (int i = 0; i < 60 * 10; i++) enemy_update(&r, v3f(200,PLAYER_EYE,200), DT);
+        for (int i = 0; i < 60 * 10; i++) enemy_update(&g_pools, &r, v3f(200,PLAYER_EYE,200), DT);
         int stuck = 0;
-        for (int k = 0; k < enemy_shot_count(); k++)
-            if (enemy_shot_at(k)->active) stuck++;
+        for (int k = 0; k < enemy_shot_count(&g_pools); k++)
+            if (enemy_shot_at(&g_pools, k)->active) stuck++;
         okf(stuck == 0, "and no bolt is left hanging in the air once it misses",
             (float)stuck, 0.0f);
     }
@@ -274,15 +284,15 @@ int main(void) {
         e->kind[4]='e';e->kind[5]='r';e->kind[6]=0;
         e->x = 0; e->z = 0;                          /* in the west room */
 
-        enemy_spawn_level(&r);
-        ok(enemy_count() == 1, "the walled-off caster spawned");
+        enemy_spawn_level(&g_pools, &r);
+        ok(enemy_count(&g_pools) == 1, "the walled-off caster spawned");
 
         v3 player = v3f(30.0f, PLAYER_EYE, 0.0f);    /* in the east room */
         int damage = 0, any_shot = 0;
         for (int i = 0; i < 60 * 8; i++) {
-            damage += enemy_update(&r, player, DT);
-            for (int k = 0; k < enemy_shot_count(); k++)
-                if (enemy_shot_at(k)->active) any_shot = 1;
+            damage += enemy_update(&g_pools, &r, player, DT);
+            for (int k = 0; k < enemy_shot_count(&g_pools); k++)
+                if (enemy_shot_at(&g_pools, k)->active) any_shot = 1;
         }
         okf(any_shot == 0, "with a wall between, it never fires",
             (float)any_shot, 0.0f);
@@ -312,7 +322,7 @@ int main(void) {
            옮깁니다. 즉시 도는 몬스터는 뒤를 잡을 수 없고 횡이동이 어떤 각도도 얻지
            못합니다. 나머지가 존재하는 이유 전체가 그것입니다. */
         Level r = L;
-        enemy_spawn_level(&r);
+        enemy_spawn_level(&g_pools, &r);
 
         /* Placed relative to where the monster IS, once it has settled. The
            first draft put the player on the spawn point itself, so the monster
@@ -323,17 +333,17 @@ int main(void) {
            지점 자체에 두어 몬스터가 플레이어 안에 서 있었고, `to`가 영벡터가 되어
            atan2f(0,0)이 변할 수 없는 방향을 주었습니다. 돌아야 할 대상이 없는 몬스터에
            대해 검사가 "돌지 않았다"고 보고했습니다. */
-        v3 home = enemy_at(0)->pos;
+        v3 home = enemy_at(&g_pools, 0)->pos;
         v3 player = v3f(home.x, PLAYER_EYE, home.z + 6.0f);
-        for (int i = 0; i < 60 * 8; i++) enemy_update(&r, player, DT);
+        for (int i = 0; i < 60 * 8; i++) enemy_update(&g_pools, &r, player, DT);
 
-        v3 settled = enemy_at(0)->pos;
-        float faced = enemy_at(0)->yaw;
+        v3 settled = enemy_at(&g_pools, 0)->pos;
+        float faced = enemy_at(&g_pools, 0)->yaw;
 
         /* Straight through the monster to the far side, in one frame. */
         v3 behind = v3f(settled.x, PLAYER_EYE, settled.z - 6.0f);
-        enemy_update(&r, behind, DT);
-        float after = enemy_at(0)->yaw;
+        enemy_update(&g_pools, &r, behind, DT);
+        float after = enemy_at(&g_pools, 0)->yaw;
 
         float turned = after - faced;
         while (turned >  3.14159265f) turned -= 6.28318531f;
@@ -379,7 +389,7 @@ int main(void) {
         be->kind[0]='b'; be->kind[1]='r'; be->kind[2]='u'; be->kind[3]='t';
         be->kind[4]='e'; be->kind[5]=0;
         be->x = -1500; be->z = -1500;
-        enemy_spawn_level(&r);
+        enemy_spawn_level(&g_pools, &r);
 
         /* FAR ENOUGH THAT IT STAYS IN CHASE for the whole measurement. The
            first draft put the player on the spawn point, so the monster was
@@ -393,9 +403,9 @@ int main(void) {
            않았고, "경직이 몬스터를 가두는가"를 검사하는 테스트가 검사 대상에 닿지 못한 채
            1.000 만점을 받았습니다. 임프는 초당 3m를 걷고 이 검사는 4초간 돌므로, 25m면
            끝까지 걷고 있습니다. */
-        v3 home = enemy_at(0)->pos;
+        v3 home = enemy_at(&g_pools, 0)->pos;
         v3 player = v3f(home.x, PLAYER_EYE, home.z + 25.0f);
-        for (int i = 0; i < 60 * 2; i++) enemy_update(&r, player, DT);
+        for (int i = 0; i < 60 * 2; i++) enemy_update(&g_pools, &r, player, DT);
 
         int acted = 0, frames = 60 * 2;
         for (int i = 0; i < frames; i++) {
@@ -405,12 +415,12 @@ int main(void) {
                경직 0.16초보다 훨씬 짧은 간격입니다. 총 60 피해이고 브루트의 체력은
                120이므로 내내 살아 있으며, 측정의 모든 프레임이 살아 있는 몬스터의
                프레임입니다. */
-            if ((i & 1) == 0) enemy_hurt(0, 1, v3f(0, 0, 1));
-            enemy_update(&r, player, DT);
-            if (enemy_count() > 0 && enemy_at(0)->state == E_CHASE) acted++;
+            if ((i & 1) == 0) enemy_hurt(&g_pools, 0, 1, v3f(0, 0, 1));
+            enemy_update(&g_pools, &r, player, DT);
+            if (enemy_count(&g_pools) > 0 && enemy_at(&g_pools, 0)->state == E_CHASE) acted++;
         }
-        ok(enemy_at(0)->state != E_DEAD, "and is still alive at the end");
-        ok(enemy_count() > 0, "the monster survives the stun-lock test");
+        ok(enemy_at(&g_pools, 0)->state != E_DEAD, "and is still alive at the end");
+        ok(enemy_count(&g_pools) > 0, "the monster survives the stun-lock test");
 
         /* THE FRACTION, not merely "more than none". The first draft asked
            whether the monster ever acted at all, and that passed with the
@@ -446,12 +456,12 @@ int main(void) {
         e->kind[0]='c'; e->kind[1]='a'; e->kind[2]='s'; e->kind[3]='t';
         e->kind[4]='e'; e->kind[5]='r'; e->kind[6]=0;
         e->x = 0; e->z = 0;
-        enemy_spawn_level(&r);
+        enemy_spawn_level(&g_pools, &r);
 
         /* Parked at the caster's own preferred distance, so it neither closes
            nor backs off and the only thing left to do is circle. */
         v3 player = v3f(0.0f, PLAYER_EYE, 11.0f);
-        for (int i = 0; i < 60; i++) enemy_update(&r, player, DT);
+        for (int i = 0; i < 60; i++) enemy_update(&g_pools, &r, player, DT);
 
         /* TANGENTIAL travel only -- movement at right angles to the player.
            Total distance does not separate circling from the closing and
@@ -462,11 +472,11 @@ int main(void) {
            것과, 캐스터가 이미 하던 접근·후퇴를 구분하지 못하며, 초안은 총 거리를 재어
            횡이동을 지워도 통과했습니다. 반경 방향 운동이 예전 동작이고 옆으로 가는 운동이
            새 동작입니다. */
-        v3 prev = enemy_at(0)->pos;
+        v3 prev = enemy_at(&g_pools, 0)->pos;
         float sideways = 0.0f;
         for (int i = 0; i < 60 * 6; i++) {
-            enemy_update(&r, player, DT);
-            v3 now = enemy_at(0)->pos;
+            enemy_update(&g_pools, &r, player, DT);
+            v3 now = enemy_at(&g_pools, 0)->pos;
 
             float rx = player.x - prev.x, rz = player.z - prev.z;
             float rl = sqrtf(rx*rx + rz*rz);

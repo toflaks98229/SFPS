@@ -307,7 +307,7 @@ void scene_draw_level(const Scene *s, mat4 vp, v3 eye);
  * @note 빌보드는 단면이며 어느 쪽을 향할지 알 수 없으므로 이 패스 동안 컬링을
  *       비활성화하고, 반환 전에 복원합니다.
  */
-void scene_draw_enemies(Scene *s, mat4 vp, v3 eye, v3 cam_right);
+void scene_draw_enemies(Scene *s, const Pools *pl, mat4 vp, v3 eye, v3 cam_right);
 
 /**
  * @brief Draws the pickups as bobbing billboards on the same sprite path.
@@ -364,7 +364,7 @@ void scene_draw_pickups(Scene *s, const Pools *pl, mat4 vp, v3 eye, v3 cam_right
  * @note 깊이를 기록하지 않으며(발광체는 가리지 않습니다) 반환 전에 깊이 마스크,
  *       블렌딩, 컬링을 복원합니다.
  */
-void scene_draw_shots(Scene *s, mat4 vp, v3 cam_right, v3 cam_up);
+void scene_draw_shots(Scene *s, const Pools *pl, mat4 vp, v3 cam_right, v3 cam_up);
 
 /**
  * @brief Draws the player's grenades and bolts.

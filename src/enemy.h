@@ -420,6 +420,47 @@ typedef struct {
     float trail_timer;
 } Shot;
 
+/**
+ * @struct EnemyPool
+ * @brief The monsters in this level and the shots they have in the air.
+ *
+ * The last of the five pools to move out of a module and into the run that
+ * owns it. It is also the one the others were waiting on: ::proj_blast has
+ * carried a `(void)pl` since the projectiles moved, because the monsters it
+ * damages were still reachable only through enemy.c's own arrays.
+ *
+ * `count` bounds the monsters -- they are laid out once when the level loads
+ * and a dead one keeps its slot so its corpse can lie there -- while the shots
+ * are a ring with no count, because they are spawned and retired constantly
+ * and their order does not matter.
+ *
+ * The RNG moved with them for the reason fx's did: it decides which way a
+ * monster dodges, and sharing it would make one World's fights depend on how
+ * many the other had run.
+ *
+ * 다섯 개 풀 중 마지막으로 모듈을 떠나 그것을 소유하는 플레이로 옮겨 온 것입니다. 동시에
+ * 나머지가 기다리고 있던 것이기도 합니다. ::proj_blast는 발사체가 옮겨 간 이후로 `(void)pl`을
+ * 달고 있었는데, 그것이 피해를 주는 몬스터에 enemy.c 자신의 배열로만 닿을 수 있었기
+ * 때문입니다.
+ *
+ * `count`가 몬스터의 범위를 정합니다. 레벨 로드 시 한 번 배치되고 죽은 몬스터도 시체가 그
+ * 자리에 누울 수 있도록 슬롯을 유지합니다. 반면 발사체는 개수 없는 링입니다. 끊임없이
+ * 생성되고 회수되며 순서가 중요하지 않기 때문입니다.
+ *
+ * RNG가 함께 옮겨 온 이유는 fx의 것과 같습니다. 몬스터가 어느 쪽으로 피할지를 정하므로,
+ * 공유하면 한 World의 전투가 다른 World가 몇 번을 돌렸는지에 의존하게 됩니다.
+ */
+typedef struct {
+    Enemy    m[ENEMY_MAX];             /**< Monsters, packed to `count`. / `count`까지 채워진 몬스터. */
+    int      count;                    /**< How many the level laid out. / 레벨이 배치한 수. */
+    Shot     shots[ENEMY_MAX_SHOTS];   /**< Their projectiles, a ring. / 그들의 발사체이며 링입니다. */
+    unsigned rng;                      /**< Fight randomness. 0 means "seed me". / 전투 난수. 0이면 "씨앗을 채워라". */
+} EnemyPool;
+
+/* The bundle that holds this pool. See proj.h for why the calls take it. */
+typedef struct Pools Pools;
+
+
 /* --- 함수 --- */
 
 /**
@@ -440,44 +481,44 @@ int mon_type_for(const char *kind);
  * @brief 현재 활성화된 발사체의 수를 반환합니다 (비활성 슬롯 포함).
  * @return 스캔할 총 발사체 슬롯 수.
  */
-int enemy_shot_count(void);
+int enemy_shot_count(const Pools *pl);
 
 /**
  * @brief 지정된 인덱스의 발사체 정보를 가져옵니다.
  * @param i 발사체 인덱스.
  * @return Shot 구조체에 대한 const 포인터, 유효하지 않은 인덱스 시 NULL.
  */
-const Shot *enemy_shot_at(int i);
+const Shot *enemy_shot_at(const Pools *pl, int i);
 
 /**
  * @brief 모든 몬스터와 발사체를 초기화합니다. (재)스폰 전에 호출해야 합니다.
  */
-void enemy_reset(void);
+void enemy_reset(Pools *pl);
 
 /**
  * @brief 레벨의 "spawn" 종류 엔티티 위치에 몬스터를 스폰합니다.
  * @param l 몬스터를 스폰할 레벨 데이터.
  */
-void enemy_spawn_level(const Level *l);
+void enemy_spawn_level(Pools *pl, const Level *l);
 
 /**
  * @brief 현재 레벨의 총 몬스터 수를 반환합니다 (시체 포함).
  * @return 몬스터 수.
  */
-int enemy_count(void);
+int enemy_count(const Pools *pl);
 
 /**
  * @brief 살아있는 몬스터의 수를 반환합니다 (E_DEAD 상태 제외).
  * @return 살아있는 몬스터 수.
  */
-int enemy_alive(void);
+int enemy_alive(const Pools *pl);
 
 /**
  * @brief 지정된 인덱스의 몬스터 정보를 가져옵니다.
  * @param i 몬스터 인덱스.
  * @return Enemy 구조체에 대한 const 포인터, 유효하지 않은 인덱스 시 NULL.
  */
-const Enemy *enemy_at(int i);
+const Enemy *enemy_at(const Pools *pl, int i);
 
 /**
  * @brief 모든 몬스터와 발사체의 상태를 한 프레임 업데이트합니다.
@@ -490,7 +531,7 @@ const Enemy *enemy_at(int i);
  * @param dt 마지막 프레임 이후 경과 시간 (초).
  * @return 플레이어가 입은 총 피해량.
  */
-int enemy_update(const Level *l, v3 player_eye, float dt);
+int enemy_update(Pools *pl, const Level *l, v3 player_eye, float dt);
 
 /**
  * @brief 광선이 부딪히는 가장 가까운 살아있는 몬스터를 찾습니다 (수직 실린더로 판정).
@@ -503,7 +544,7 @@ int enemy_update(const Level *l, v3 player_eye, float dt);
  * @param out_idx [out] 부딪힌 몬스터의 인덱스를 저장할 포인터.
  * @return `maxdist` 내에서 몬스터를 맞추면 1, 그렇지 않으면 0.
  */
-int enemy_hitscan(v3 o, v3 d, float maxdist, float *out_t, int *out_idx);
+int enemy_hitscan(const Pools *pl, v3 o, v3 d, float maxdist, float *out_t, int *out_idx);
 
 /**
  * @brief 몬스터에게 피해를 입히고, 경직시키거나 죽입니다.
@@ -511,6 +552,6 @@ int enemy_hitscan(v3 o, v3 d, float maxdist, float *out_t, int *out_idx);
  * @param dmg 피해량.
  * @param dir 사격 방향, 향후 넉백 및 사망 방향에 사용.
  */
-void enemy_hurt(int idx, int dmg, v3 dir);
+void enemy_hurt(Pools *pl, int idx, int dmg, v3 dir);
 
 #endif

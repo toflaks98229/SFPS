@@ -98,8 +98,25 @@ static void fixture(World *w, short hurt) {
     w->player.grounded = 1;
     w->player.health   = PLAYER_MAX_HP;
 
-    enemy_reset();
-    proj_reset(&w->pools);
+    /* No enemy_reset, no proj_reset, no decal_reset, no fx cleanup. world_init
+       cleared the whole World a few lines up and the pools are inside it now,
+       so owning them IS emptying them. Those four calls were here because the
+       pools were file-scope arrays and a fixture inherited whatever the
+       previous case left in them; that is what World::pools removed.
+
+       The two that remain are not pool resets. pickup_spawn_level LAYS OUT the
+       level's items rather than clearing them, and the doors are still module
+       state keyed to a level -- door.c holds a DoorState array of its own, and
+       it is the one thing on this list that has not moved.
+
+       enemy_reset도 proj_reset도 decal_reset도 fx 정리도 없습니다. 몇 줄 위에서 world_init이
+       World 전체를 비웠고 이제 풀이 그 안에 있으므로, 소유하는 것이 곧 비우는 것입니다. 그 네
+       호출이 이곳에 있던 이유는 풀이 파일 스코프 배열이었고 픽스처가 이전 사례가 남긴 것을
+       물려받았기 때문입니다. World::pools가 없앤 것이 바로 그것입니다.
+
+       남은 둘은 풀 초기화가 아닙니다. pickup_spawn_level은 레벨의 아이템을 지우는 것이 아니라
+       *배치*하며, 문은 여전히 레벨에 매인 모듈 상태입니다. door.c가 자기 DoorState 배열을
+       보유하고 있고, 이 목록에서 아직 옮겨지지 않은 유일한 것입니다. */
     pickup_spawn_level(&w->pools, &w->level);
     door_reset(&w->level);
 }

@@ -66,12 +66,11 @@ int proj_fire(Pools *pl, v3 from, v3 dir, float speed, float gravity,
 }
 
 int proj_blast(Pools *pl, v3 at, float radius, int damage) {
-    (void)pl;   /* the monsters it damages are still a module global -- D4e */
     if (radius <= 0.0f) return 0;
     int hits = 0;
 
-    for (int i = 0; i < enemy_count(); i++) {
-        const Enemy *m = enemy_at(i);
+    for (int i = 0; i < enemy_count(pl); i++) {
+        const Enemy *m = enemy_at(pl, i);
         if (!m || !m->active || m->state == E_DEAD) continue;
 
         /* Measured to the monster's MIDDLE, not its feet. A blast beside a
@@ -102,7 +101,7 @@ int proj_blast(Pools *pl, v3 at, float radius, int damage) {
         /* Pushed outward from the blast, so the spray leaves the body away
            from where the explosion was. */
         v3 away = dist > 1e-4f ? v3scale(d, 1.0f / dist) : v3f(0, 1, 0);
-        enemy_hurt(i, dmg, away);
+        enemy_hurt(pl, i, dmg, away);
         hits++;
     }
     return hits;
@@ -130,12 +129,12 @@ static void detonate(Pools *pl, Proj *p, v3 at, v3 normal) {
            없는 플레이어는 짐작하게 되기 때문입니다. 표면 법선이 아니라 +Y로 생성하는
            이유는, 폭발이 지면에 선 반구이고 벽의 법선을 따라 기울어진 돔은 데미지가 갖지
            않은 모양을 주장하기 때문입니다. */
-        fx_spawn_scaled("blastdome", at, v3f(0, 1, 0), p->blast);
+        fx_spawn_scaled(pl, "blastdome", at, v3f(0, 1, 0), p->blast);
 
-        fx_spawn("blastcore",   at, normal);
-        fx_spawn("blastsmoke",  at, v3f(0, 1, 0));
-        fx_spawn("blastdebris", at, normal);
-        fx_spawn("boltburst",   at, normal);
+        fx_spawn(pl, "blastcore",   at, normal);
+        fx_spawn(pl, "blastsmoke",  at, v3f(0, 1, 0));
+        fx_spawn(pl, "blastdebris", at, normal);
+        fx_spawn(pl, "boltburst",   at, normal);
 
         /* ITS OWN SOUND, AND FROM WHERE IT HAPPENED. This was `impact`, which
            is DSPUNCH -- a punch -- at a flat gain of 100 wherever in the level
@@ -148,7 +147,7 @@ static void detonate(Pools *pl, Proj *p, v3 at, v3 normal) {
            짚을 수 없는 유탄은 피하는 법을 배울 수 없는 유탄입니다. */
         audio_play_at("blast", 100, at);
     } else {
-        fx_spawn("spark", at, normal);
+        fx_spawn(pl, "spark", at, normal);
         audio_play_at("impact", 45, at);
     }
     p->active = 0;
@@ -186,9 +185,9 @@ void proj_update(Pools *pl, const Level *l, float dt) {
            한 스텝 전체에 걸쳐 훑습니다. 70m/s의 탄은 한 프레임에 1미터 이상 이동하므로,
            이번 프레임 위치와 다음 위치 사이에 선 몬스터를 그대로 통과하게 됩니다. */
         float et; int eidx;
-        if (enemy_hitscan(p->pos, dir, dist + PROJ_RADIUS, &et, &eidx)) {
+        if (enemy_hitscan(pl, p->pos, dir, dist + PROJ_RADIUS, &et, &eidx)) {
             v3 at = v3add(p->pos, v3scale(dir, et));
-            if (p->blast <= 0.0f) enemy_hurt(eidx, p->damage, dir);
+            if (p->blast <= 0.0f) enemy_hurt(pl, eidx, p->damage, dir);
             detonate(pl, p, at, v3scale(dir, -1.0f));
             continue;
         }

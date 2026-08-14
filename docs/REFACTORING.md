@@ -161,11 +161,28 @@
 
 | | 모듈 | 상태 |
 |---|---|---|
-| D4a | `proj` (`ProjPool`) | ✅ **완료** |
-| D4b | `pickup` | ☐ |
-| D4c | `decal` | ☐ |
-| D4d | `fx` | ☐ |
-| D4e | `enemy` | ☐ |
+| D4a | `proj` (`ProjPool`) | ✅ **완료** (`a68b144`) |
+| D4b | `pickup` (`PickupPool`) | ✅ **완료** (`1f59476`) |
+| D4c | `decal` (`DecalPool`) | ✅ **완료** (`687ad6c`) |
+| D4d | `fx` (`FxPool`) | ✅ **완료** — D4e와 함께 |
+| D4e | `enemy` (`EnemyPool`) | ✅ **완료** — D4d와 함께 |
+
+**D4d·D4e를 함께 한 이유:** `enemy.c`와 `hook.c`가 `fx_spawn`을 부르고, `fx`의 호출이 풀을 받으려면 그 함수들이 먼저 풀을 가져야 합니다. 반대로 `enemy`가 옮겨지려면 자기가 부르는 `fx_spawn`이 풀을 받아야 합니다. **상호 의존이라 쪼갤 수 없었습니다.**
+
+**모듈에 남은 상태 (의도된 잔류):**
+
+| 모듈 | 남은 것 | 왜 |
+|---|---|---|
+| `proj.c`·`pickup.c` | **없음** | 완전히 이동 |
+| `decal.c` | `Mesh`×2, `MeshBuf`×2 | 프로세스당 정점 버퍼 |
+| `fx.c` | 파싱된 `effects.txt`, GL 버퍼 | 제작 데이터 + 프로세스 자원 |
+| `enemy.c` | `TYPES` | `const` 표이지 상태가 아님 |
+
+**RNG도 함께 옮겼습니다.** `fx`와 `enemy`의 난수는 입자 방향과 몬스터 회피를 정합니다. 공유된 채로 두면 한 World의 전투가 *다른 World가 몇 번을 돌렸는지*에 의존하게 됩니다 — 이 작업 전체가 없애고 있는 결합입니다. 0인 풀은 "아직 씨앗 없음"으로 읽고 첫 사용 시 채웁니다.
+
+**가시적 성과:** `steptest` 픽스처의 손수 리셋이 **4개 → 0개**. `world_init`이 `World`를 통째로 비우고 풀이 그 안에 있으므로 **소유하는 것이 곧 비우는 것**입니다. 남은 두 줄은 리셋이 아닙니다(`pickup_spawn_level`은 배치, `door_reset`은 아직 모듈 상태인 문).
+
+**`proj_blast`의 `(void)pl`이 사라졌습니다** — 기다리던 몬스터가 도착했습니다.
 
 **D4a에서 한 일:** `static Proj g_proj[PROJ_MAX]` 제거 → `World::pools.proj`. `proj_*` 6개 함수가 `Pools *`를 받고, `wp_update`·`wp_axe_land`·`attack`·`fire_projectile`이 그것을 꿰어 전달합니다. `scene_draw_proj`도 인자를 받습니다.
 

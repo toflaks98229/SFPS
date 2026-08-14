@@ -138,6 +138,85 @@ typedef struct MeshBuf MeshBuf;
 #define FX_MAX_PARTICLES 1536
 #define FX_NAME_LEN      16   ///< @brief Longest effect name. / 이펙트 이름의 최대 길이.
 
+/**
+ * @struct FxParticle
+ * @brief One live particle.
+ *
+ * ENGLISH
+ * -------
+ * @note `def` is an INDEX rather than a pointer. A pointer would dangle across
+ *       a hot reload, which rewrites the definition table in place; an index
+ *       at least stays in range, and ::fx_reload clears the particles anyway.
+ *
+ * 한국어
+ * ------
+ * @note `def`는 포인터가 아니라 *인덱스*입니다. 포인터는 정의 테이블을 제자리에서
+ *       재작성하는 핫 리로드를 거치며 무효가 되지만, 인덱스는 최소한 범위 안에
+ *       머무릅니다. 어차피 ::fx_reload가 입자를 정리합니다.
+ */
+typedef struct {
+    v3    pos, vel;
+    v3    axis;       /**< Surface normal, for FX_FACE_NORMAL. / FX_FACE_NORMAL용 표면 법선. */
+    float life;       /**< Seconds remaining. 0 means the slot is free. / 남은 시간(초). 0이면 빈 슬롯. */
+    float life_max;   /**< What it started with, for the 0..1 fade. / 시작값. 0..1 페이드에 사용됩니다. */
+    /**
+     * @brief Roll angle, radians. Randomised at birth, advanced by `spin`.
+     *
+     * Per particle rather than per effect: a burst whose quads all sit at the
+     * same angle reads as one shape being scaled, because the square edges
+     * line up. Giving each its own starting roll is most of what makes a dozen
+     * billboards look like a dozen things.
+     *
+     * 이펙트 단위가 아니라 입자 단위입니다. 모든 사각형이 같은 각도로 놓인 폭발은 정사각형
+     * 모서리가 서로 맞아떨어지므로 하나의 형태가 커지는 것처럼 보입니다. 각각에 고유한
+     * 시작 회전각을 주는 것이, 빌보드 열두 개를 열두 개의 무언가로 보이게 만드는 핵심입니다.
+     */
+    float roll;
+    short def;
+} FxParticle;
+
+/**
+ * @struct FxPool
+ * @brief The particles a run has spawned, owned by the caller.
+ *
+ * A THIRD of this module's state, not all of it. fx.c also holds the parsed
+ * `effects.txt` -- the definitions every effect is spawned FROM -- and the
+ * vertex buffer they are drawn with. Neither moved:
+ *
+ *   the definitions   authored data, parsed once, read-only afterwards. Like
+ *                     the texture cache: one per process, and a second World
+ *                     would want the same effects, not different ones.
+ *   the buffer        one MeshBuf and one Mesh, the same as decal.c's. Two
+ *                     runs mean two sets of sparks, not two GPUs.
+ *
+ * The RNG moved. It seeds every particle's direction and roll, so leaving it
+ * shared would make one World's bursts depend on how many the other had
+ * spawned -- which is exactly the kind of coupling this whole exercise is
+ * removing. ::RunState already keeps its own `smoke_rng` for the same reason.
+ *
+ * 이 모듈 상태의 *3분의 1*이며 전부가 아닙니다. fx.c는 파싱된 `effects.txt`(모든 이펙트가
+ * 그것으로부터 생성되는 정의들)와 그것을 그리는 정점 버퍼도 보유합니다. 둘 다 옮기지
+ * 않았습니다.
+ *
+ *   정의   제작된 데이터이며 한 번 파싱되고 이후 읽기 전용입니다. 텍스처 캐시와 같습니다.
+ *          프로세스당 하나이며, 두 번째 World는 다른 이펙트가 아니라 같은 이펙트를 원합니다.
+ *   버퍼   MeshBuf 하나와 Mesh 하나로, decal.c의 것과 같습니다. 두 판의 플레이는 두 벌의
+ *          불꽃을 뜻하지 두 개의 GPU를 뜻하지 않습니다.
+ *
+ * RNG는 옮겼습니다. 모든 입자의 방향과 회전각을 씨앗으로 삼으므로, 공유된 채로 두면 한
+ * World의 폭발이 다른 World가 몇 개를 생성했는지에 의존하게 됩니다. 이 작업 전체가 제거하고
+ * 있는 바로 그 종류의 결합입니다. ::RunState도 같은 이유로 자기 `smoke_rng`를 갖습니다.
+ */
+typedef struct {
+    FxParticle parts[FX_MAX_PARTICLES];  /**< Slots; `life` 0 means free. / 슬롯. `life`가 0이면 비어 있습니다. */
+    int        next;                     /**< Ring cursor: the oldest is overwritten. / 링 커서. 가장 오래된 것을 덮어씁니다. */
+    unsigned   rng;                      /**< Particle randomness. 0 means "seed me". / 입자 난수. 0이면 "씨앗을 채워라"입니다. */
+} FxPool;
+
+/* The bundle that holds this pool. See proj.h for why the calls take it. */
+typedef struct Pools Pools;
+
+
 /* --- Public function prototypes / 공개 함수 프로토타입 --- */
 
 /**
@@ -174,7 +253,7 @@ typedef struct MeshBuf MeshBuf;
  * @warning GL을 전혀 사용하지 않습니다. 시뮬레이션 코드와 헤드리스 도구에서 호출해도
  *          안전하며, 이 덕분에 생성 로직을 컨텍스트 없이 테스트할 수 있습니다.
  */
-void fx_spawn(const char *name, v3 pos, v3 normal);
+void fx_spawn(Pools *pl, const char *name, v3 pos, v3 normal);
 
 /**
  * @brief Spawns an effect with its speeds multiplied.
@@ -206,7 +285,7 @@ void fx_spawn(const char *name, v3 pos, v3 normal);
  * @note 크기나 수명이 아니라 속력만 조절합니다. 돔은 `speed * life`까지 도달하므로,
  *       속력만 조절하면 가장자리가 움직이되 입자는 작성된 크기 그대로 남습니다.
  */
-void fx_spawn_scaled(const char *name, v3 pos, v3 normal, float scale);
+void fx_spawn_scaled(Pools *pl, const char *name, v3 pos, v3 normal, float scale);
 
 /**
  * @brief Advances every live particle one frame.
@@ -224,7 +303,7 @@ void fx_spawn_scaled(const char *name, v3 pos, v3 normal, float scale);
  * @note 순수 시뮬레이션입니다. 위치를 적분하고 중력을 적용하며 나이를 먹이고 죽은 것을
  *       회수합니다. GL을 사용하지 않습니다.
  */
-void fx_update(float dt);
+void fx_update(Pools *pl, float dt);
 
 /**
  * @brief Draws every live particle.
@@ -252,7 +331,7 @@ void fx_update(float dt);
  *       자신이 나온 연기 아래가 아니라 위에 놓입니다.
  * @warning 활성 GL 컨텍스트가 필요합니다.
  */
-void fx_draw(mat4 vp, v3 cam_right, v3 cam_up);
+void fx_draw(const Pools *pl, mat4 vp, v3 cam_right, v3 cam_up);
 
 /**
  * @brief Drops every live particle and forces the definitions to be re-read.
@@ -271,7 +350,7 @@ void fx_draw(mat4 vp, v3 cam_right, v3 cam_up);
  *       리로드는 그 테이블을 제자리에서 재작성하므로, 입자를 그대로 넘길 수 없습니다.
  *       연기 한 줌을 잃는 편이, 입자가 다른 것으로 바뀐 정의를 읽는 것보다 낫습니다.
  */
-void fx_reload(void);
+void fx_reload(Pools *pl);
 
 /**
  * @brief How many particles are currently alive. For tests and the debug HUD.
@@ -280,7 +359,7 @@ void fx_reload(void);
  * ------
  * @brief 현재 살아 있는 입자의 수입니다. 테스트와 디버그 HUD용입니다.
  */
-int fx_live_count(void);
+int fx_live_count(const Pools *pl);
 
 /**
  * @brief How many effect definitions the text supplied. For tests.
@@ -323,7 +402,7 @@ int fx_def_count(void);
  * @warning 범용 접근자가 아닙니다. 하나의 질문에 저렴하게 답할 뿐이며, 실제 입자별
  *          데이터가 필요한 쪽은 이 함수를 거쳐서는 안 됩니다.
  */
-float fx_mean_height(void);
+float fx_mean_height(const Pools *pl);
 
 /**
  * @brief Mean distance from a point, and the near-to-far spread.
@@ -361,6 +440,6 @@ float fx_mean_height(void);
  *       둘을 구분할 수 없기 때문입니다. 모든 입자의 속력이 같으면 어느 방향으로 가든 같은
  *       거리에 있으므로, 그 값은 돔에서도 기둥에서도 ~0입니다.
  */
-void fx_radius_spread(v3 origin, float *mean, float *width);
+void fx_radius_spread(const Pools *pl, v3 origin, float *mean, float *width);
 
 #endif

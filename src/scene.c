@@ -362,14 +362,14 @@ void scene_draw_level(const Scene *s, mat4 vp, v3 eye) {
 
 /* --------------------------------------------------------------- world pass */
 
-void scene_draw_enemies(Scene *s, mat4 vp, v3 eye, v3 cam_right) {
+void scene_draw_enemies(Scene *s, const Pools *pl, mat4 vp, v3 eye, v3 cam_right) {
     DIAG_WANT_WORLD_PASS(post_in_world_pass());
 
-    int n = enemy_count();
+    int n = enemy_count(pl);
     mb_reset(&s->enemy_buf);
 
     for (int i = 0; i < n; i++) {
-        const Enemy *m = enemy_at(i);
+        const Enemy *m = enemy_at(pl, i);
         if (!m->active) continue;
 
         const MonType *S = mon_stats(m->type);
@@ -412,7 +412,7 @@ void scene_draw_enemies(Scene *s, mat4 vp, v3 eye, v3 cam_right) {
     glBindVertexArray(s->enemy_mesh.vao);
     int q = 0;
     for (int i = 0; i < n; i++) {
-        const Enemy *m = enemy_at(i);
+        const Enemy *m = enemy_at(pl, i);
         if (!m->active) continue;
         float flash = m->flash > 0.0f ? m->flash : 0.0f;
         float shade = 1.0f;
@@ -455,16 +455,16 @@ void scene_draw_pickups(Scene *s, const Pools *pl, mat4 vp, v3 eye, v3 cam_right
     glEnable(GL_CULL_FACE);
 }
 
-void scene_draw_shots(Scene *s, mat4 vp, v3 cam_right, v3 cam_up) {
+void scene_draw_shots(Scene *s, const Pools *pl, mat4 vp, v3 cam_right, v3 cam_up) {
     DIAG_WANT_WORLD_PASS(post_in_world_pass());
 
     const int quads  = SHOT_HALOS + SHOT_CORES;
     const int stride = quads * 6;
-    int sn = enemy_shot_count(), live = 0;
+    int sn = enemy_shot_count(pl), live = 0;
 
     mb_reset(&s->shot_buf);
     for (int i = 0; i < sn; i++) {
-        const Shot *sh = enemy_shot_at(i);
+        const Shot *sh = enemy_shot_at(pl, i);
         if (!sh->active) continue;
 
         /* Spin each bolt by its own remaining life, so a volley does not look
@@ -1394,11 +1394,11 @@ void scene_frame(const World *w, Scene *sc, int vw, int vh, int frozen) {
        Sprite passes, each building its billboards on the CPU and uploading
        once. They stay on the world side of the pass boundary so they are
        pixelised and dithered along with everything else -- see scene.h. */
-    scene_draw_enemies(sc, vp, eye_pos, cam.right);
+    scene_draw_enemies(sc, &w->pools, vp, eye_pos, cam.right);
     scene_draw_pickups(sc, &w->pools, vp, eye_pos, cam.right);
-    scene_draw_shots  (sc, vp, cam.right, cam.up);
+    scene_draw_shots  (sc, &w->pools, vp, cam.right, cam.up);
     scene_draw_proj   (sc, &w->pools, vp, cam.right, cam.up);
-    fx_draw(vp, cam.right, cam.up);
+    fx_draw(&w->pools, vp, cam.right, cam.up);
 
     /* --- what shots left behind, and the rope, still in world space ---
        Both are billboards with one winding, so culling comes off for the pair.
@@ -1451,7 +1451,7 @@ void scene_frame(const World *w, Scene *sc, int vw, int vh, int frozen) {
            inside the draw call -- see the note on wp_draw_hud.
            사거리 판정은 레벨을 탐색하므로 그리기 호출 내부가 아니라 이곳에서
            수행합니다. wp_draw_hud의 참고 사항을 확인하십시오. */
-        int hook_ready = wp_hook_in_range(&w->weapon, &w->level,
+        int hook_ready = wp_hook_in_range(&w->weapon, &w->pools, &w->level,
                                           w->player.pos, w->yaw, w->pitch);
         wp_draw_hud(&w->weapon, aspect, hook_ready);
         glEnable(GL_CULL_FACE);

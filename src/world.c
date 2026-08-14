@@ -181,7 +181,7 @@ static void step_look_move(World *w, const Input *in, float aspect, float dt) {
 
        Runs every frame regardless of the button, because flight and pull
        continue on their own once thrown. */
-    wp_hook_update(&w->weapon, &w->level, &w->player.pos, &w->player.vel, dt);
+    wp_hook_update(&w->weapon, &w->pools, &w->level, &w->player.pos, &w->player.vel, dt);
 
     /* Jump is suppressed only while actually being pulled. It would not fire
        mid-pull anyway (jumping needs `grounded`), but suppressing it keeps the
@@ -233,7 +233,7 @@ static void step_damage(World *w, float dt) {
        측정되므로, 나중에 설정하면 이번 프레임의 소리가 지난 프레임의 위치로 값이 매겨집니다. */
     audio_listener(w->player.pos);
 
-    int dmg = enemy_update(&w->level, w->player.pos, dt);
+    int dmg = enemy_update(&w->pools, &w->level, w->player.pos, dt);
     if (dmg > 0 && w->player.health > 0) {
         w->player.health -= dmg;
         if (w->player.health < 0) w->player.health = 0;
@@ -402,7 +402,7 @@ static void step_smoke(World *w, float dt) {
             if (dx*dx + dz*dz > LAVA_SMOKE_RANGE * LAVA_SMOKE_RANGE) continue;
 
             v3 at = v3f(x, sec->floor * 0.01f + 0.05f, z);
-            fx_spawn("lavasmoke", at, v3f(0.0f, 1.0f, 0.0f));
+            fx_spawn(&w->pools, "lavasmoke", at, v3f(0.0f, 1.0f, 0.0f));
             break;
         }
     }
@@ -714,7 +714,7 @@ int world_load_level(World *w, const char *name, WorldEnter how) {
     world_progress_read(w, &w->entry);
 
     /* Monsters and pickups are placed from the level's own entities. */
-    enemy_spawn_level(&w->level);
+    enemy_spawn_level(&w->pools, &w->level);
     pickup_spawn_level(&w->pools, &w->level);
 
     /* After the sectors exist and before the first door_update: door.c copies
@@ -954,7 +954,7 @@ int world_step(World *w, const Input *in, float aspect, float dt) {
        would strand whatever was in flight when the exit was reached.
        승리 화면에서도 입자는 진행합니다. 월드를 공중에서 정지시키면 출구에 도달한 순간
        날아가던 것들이 그대로 멈춰 버립니다. */
-    fx_update(dt);
+    fx_update(&w->pools, dt);
 
     /* Pickups top up health, ammo and the roster when walked over. The weapon
        is passed whole rather than one ammo pointer, because a box says which

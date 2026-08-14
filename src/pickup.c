@@ -186,7 +186,7 @@ void pickup_update(Pools *pl, v3 player_eye, int *health, int health_max,
            motion from something breaking apart where it stood.
            위쪽으로 던집니다. 아이템이 플레이어에게 *들어가는* 것이며, 이는 제자리에서
            부서지는 것과는 다른 움직임입니다. */
-        fx_spawn("pickup", v3f(p->pos.x, p->pos.y + 0.4f, p->pos.z), v3f(0, 1, 0));
+        fx_spawn(pl, "pickup", v3f(p->pos.x, p->pos.y + 0.4f, p->pos.z), v3f(0, 1, 0));
     }
 }
 

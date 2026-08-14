@@ -634,10 +634,10 @@ static void fire_hitscan(Weapon *w, Pools *pl, v3 eye, float yaw, float pitch,
            gives the wall distance (or RANGE on a miss); anything the enemy
            hitscan finds inside that is what the pellet actually strikes. */
         float et; int eidx;
-        int blood = enemy_hitscan(eye, dir, hit ? t : RANGE, &et, &eidx);
+        int blood = enemy_hitscan(pl, eye, dir, hit ? t : RANGE, &et, &eidx);
 
         if (blood) {
-            enemy_hurt(eidx, PELLET_DAMAGE, dir);
+            enemy_hurt(pl, eidx, PELLET_DAMAGE, dir);
             t = et;
             hit = 1;
         }
@@ -664,7 +664,7 @@ static void fire_hitscan(Weapon *w, Pools *pl, v3 eye, float yaw, float pitch,
                그것은 샷건 자체의 피드백이며 발사 속도에 맞춰 조정된 것입니다. 여기서는
                assets\effects.txt가 이 표면 명중이 무엇을 튀기는지 정의한 대로 추가하므로,
                재빌드 없이 룩을 조정할 수 있습니다. */
-            fx_spawn(blood ? "blood" : "spark", at.p, at.n);
+            fx_spawn(pl, blood ? "blood" : "spark", at.p, at.n);
             /* Stone gets the other three layers TE_SPIKE has -- the puff and
                the chip -- which are what make a hit look like it happened TO
                the surface rather than in front of it. Flesh does not: a puff
@@ -673,8 +673,8 @@ static void fire_hitscan(Weapon *w, Pools *pl, v3 eye, float yaw, float pitch,
                *앞*이 아니라 표면 *에* 일어난 것처럼 보이게 만드는 것이 그것입니다.
                살에는 붙이지 않습니다. 몬스터에서 이는 먼지는 빗맞은 것으로 읽힙니다. */
             if (!blood) {
-                fx_spawn("smokepuff", at.p, at.n);
-                fx_spawn("debris",    at.p, at.n);
+                fx_spawn(pl, "smokepuff", at.p, at.n);
+                fx_spawn(pl, "debris",    at.p, at.n);
             }
         }
 
@@ -811,7 +811,7 @@ static void fire_projectile(Weapon *w, Pools *pl, const WeaponType *S,
        필드이므로 이것도 그것이 결정합니다. 탄은 에너지이고 아무것도 남기지 않으며, 퍼프를
        주면 추진제를 태운다고 말하게 되는데 그것은 이 무기에 대한 사실이 아닙니다. 근평면에
        걸리지 않도록 눈보다 조금 앞에, 발사한 방향으로 흐르도록 조준선을 따라 던집니다. */
-    if (arcs) fx_spawn("smokepuff", v3add(eye, v3scale(dir, 0.6f)), dir);
+    if (arcs) fx_spawn(pl, "smokepuff", v3add(eye, v3scale(dir, 0.6f)), dir);
 
     audio_play(S->fire_snd, arcs ? 100 : 70);
 }
@@ -844,7 +844,7 @@ static void fire_projectile(Weapon *w, Pools *pl, const WeaponType *S,
  * @note 명중 여부와 무관하게 대쉬가 발동합니다. 샷건의 반동과 같은 이유로, 플레이어가
  *       요청한 이동이지 명중에 대한 보상이 아니기 때문입니다.
  */
-static void fire_melee(Weapon *w, const WeaponType *S,
+static void fire_melee(Weapon *w, Pools *pl, const WeaponType *S,
                        v3 eye, float yaw, float pitch, v3 *player_vel) {
     (void)w;
     float cy = cosf(yaw), sy = sinf(yaw);
@@ -874,10 +874,10 @@ static void fire_melee(Weapon *w, const WeaponType *S,
        옅은 분사를 던지고(톱이 돌고 있다는 뜻입니다), 접촉은 날이 실제로 닿은 지점에
        단단한 불꽃 원뿔과 피를 더합니다. */
     v3 reach = v3add(eye, v3scale(fwd, S->melee_range * 0.6f));
-    fx_spawn("sawspark", reach, fwd);
+    fx_spawn(pl, "sawspark", reach, fwd);
 
-    if (enemy_hitscan(eye, fwd, S->melee_range, &et, &eidx)) {
-        enemy_hurt(eidx, S->damage, fwd);
+    if (enemy_hitscan(pl, eye, fwd, S->melee_range, &et, &eidx)) {
+        enemy_hurt(pl, eidx, S->damage, fwd);
         v3 bite = v3add(eye, v3scale(fwd, et));
         /* Sparks back ALONG the blade rather than away from it: steel grinding
            into something throws them at the person holding it, and thrown
@@ -886,8 +886,8 @@ static void fire_melee(Weapon *w, const WeaponType *S,
            날에서 멀어지는 방향이 아니라 날을 *따라 되돌아오는* 방향입니다. 무언가에
            갈리는 강철은 그것을 쥔 사람 쪽으로 불꽃을 던지며, 앞으로 던지면 총구 섬광처럼
            읽힙니다. 이 무기가 가져서는 안 되는 바로 그것입니다. */
-        fx_spawn("sawgrind", bite, v3scale(fwd, -1.0f));
-        fx_spawn("blood",    bite, v3scale(fwd, -1.0f));
+        fx_spawn(pl, "sawgrind", bite, v3scale(fwd, -1.0f));
+        fx_spawn(pl, "blood",    bite, v3scale(fwd, -1.0f));
         /* The saw's own bite rather than the generic impact. Doom separates
            DSSAWFUL from DSSAWHIT for exactly the reason the sparks are
            separate: the swing and the connection are different events, and
@@ -918,7 +918,7 @@ static void attack(Weapon *w, Pools *pl, v3 eye, float yaw, float pitch,
 
     if (S->pellets > 0)          fire_hitscan(w, pl, eye, yaw, pitch, player_vel, player_grounded);
     else if (S->proj_speed > 0)  fire_projectile(w, pl, S, eye, yaw, pitch);
-    else if (S->melee_range > 0) fire_melee(w, S, eye, yaw, pitch, player_vel);
+    else if (S->melee_range > 0) fire_melee(w, pl, S, eye, yaw, pitch, player_vel);
 
     attack_feedback(w, S);
 }
@@ -1694,8 +1694,8 @@ int wp_axe_land(Weapon *w, Pools *pl, v3 feet, int grounded, float dt) {
        눈이 아니라 발을 중심으로 합니다. 도끼는 바닥으로 내려오며, 1.7m 위를 중심으로 한
        폭발은 플레이어가 뒤에 서 있는 낮은 벽을 넘어갑니다. */
     proj_blast(pl, feet, AXE_SLAM_RADIUS, AXE_SLAM_DAMAGE);
-    fx_spawn("boltburst", feet, v3f(0, 1, 0));
-    fx_spawn("spark", feet, v3f(0, 1, 0));
+    fx_spawn(pl, "boltburst", feet, v3f(0, 1, 0));
+    fx_spawn(pl, "spark", feet, v3f(0, 1, 0));
     audio_play_at("impact", 100, feet);
 
     w->punch += wp_stats(WP_AXE)->punch * 1.5f;

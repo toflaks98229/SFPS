@@ -163,7 +163,7 @@ int wp_hook_locks_aim(const Weapon *w) {
     return w->hook_state != HOOK_IDLE;
 }
 
-int wp_hook_in_range(const Weapon *w, const Level *l,
+int wp_hook_in_range(const Weapon *w, const Pools *pl, const Level *l,
                      v3 eye, float yaw, float pitch) {
     /* "Would a throw connect right now" -- so the same refusals wp_hook_fire
        applies count as out of range. A crosshair that lights up while the
@@ -184,7 +184,7 @@ int wp_hook_in_range(const Weapon *w, const Level *l,
        몬스터를 먼저, 그다음 지오메트리를 확인합니다. hook_fly와 동일한 우선순위이므로
        표시가 클로가 실제로 맞힐 대상과 일치합니다. */
     float t; int idx;
-    if (enemy_hitscan(eye, fwd, HOOK_RANGE, &t, &idx)) return 1;
+    if (enemy_hitscan(pl, eye, fwd, HOOK_RANGE, &t, &idx)) return 1;
 
     v3 n;
     return (l && level_trace(l, eye, fwd, HOOK_RANGE, &t, &n)) ? 1 : 0;
@@ -262,7 +262,7 @@ int wp_hook_fire(Weapon *w, v3 eye, float yaw, float pitch) {
  *       선 몬스터가 있으면 뒤쪽 벽이 아니라 몬스터가 걸립니다. 그것이 이 메커니즘의
  *       핵심이며, 우선순위를 반대로 하면 엄폐물 근처에서 고장 난 것처럼 느껴집니다.
  */
-static int hook_fly(Weapon *w, const Level *l, float dt) {
+static int hook_fly(Weapon *w, Pools *pl, const Level *l, float dt) {
     v3 to_end = v3sub(w->hook_target, w->hook_pos);
     float remaining = v3len(to_end);
     if (remaining < 1e-4f) { hook_end(w); return 0; }   /* reached max range */
@@ -284,7 +284,7 @@ static int hook_fly(Weapon *w, const Level *l, float dt) {
         /* Monsters first: a demon in front of a wall is the target, not the
            wall. 몬스터 우선: 벽 앞의 악마가 대상이지 벽이 아닙니다. */
         float et; int ei;
-        if (enemy_hitscan(from, dir, step, &et, &ei)) {
+        if (enemy_hitscan(pl, from, dir, step, &et, &ei)) {
             w->hook_pos    = v3add(from, v3scale(dir, et));
             w->hook_target = w->hook_pos;
             w->hook_enemy  = ei;
@@ -296,7 +296,7 @@ static int hook_fly(Weapon *w, const Level *l, float dt) {
                살점: 둔탁한 소리, 어두운 분출, 스파크 없음. 클로가 문 재질은 로프 뒤에서
                플레이어가 볼 수 없는 유일한 정보이므로 소리로 전달되어야 합니다. */
             audio_play("hbiteb", 80);
-            fx_spawn("hookbiteb", w->hook_pos, v3scale(dir, -1.0f));
+            fx_spawn(pl, "hookbiteb", w->hook_pos, v3scale(dir, -1.0f));
             return 1;
         }
 
@@ -317,7 +317,7 @@ static int hook_fly(Weapon *w, const Level *l, float dt) {
                돌: 표면에서 튀는 밝은 파편. `ln`은 벽 자신의 법선이며, level_trace가
                법선을 광선 쪽으로 되돌리므로 스파크가 올바르게 튀어나옵니다. */
             audio_play("hbite", 75);
-            fx_spawn("hookbite", w->hook_pos, ln);
+            fx_spawn(pl, "hookbite", w->hook_pos, ln);
             return 1;
         }
 
@@ -440,18 +440,18 @@ static void hook_launch(v3 travel, float speed, v3 to_anchor, v3 *vel) {
     *vel = out;
 }
 
-int wp_hook_update(Weapon *w, const Level *l, v3 *pos, v3 *vel, float dt) {
+int wp_hook_update(Weapon *w, Pools *pl, const Level *l, v3 *pos, v3 *vel, float dt) {
     if (w->hook_state == HOOK_IDLE) return 0;
 
     w->hook_timer += dt;
 
     /* --- beat 1: the claw is still travelling ---------------------------- */
     if (w->hook_state == HOOK_FLYING)
-        return hook_fly(w, l, dt);
+        return hook_fly(w, pl, l, dt);
 
     /* --- the target may have moved --------------------------------------- */
     if (w->hook_enemy >= 0) {
-        const Enemy *e = enemy_at(w->hook_enemy);
+        const Enemy *e = enemy_at(pl, w->hook_enemy);
         /* A dead or despawned target ends the hook without a launch: there is
            nothing left to bounce off. Tracking by index rather than position
            is what makes this detectable at all.
@@ -583,8 +583,8 @@ int wp_hook_update(Weapon *w, const Level *l, v3 *pos, v3 *vel, float dt) {
            3단계: 몬스터를 거는 것은 공격입니다. 접촉하는 매 프레임이 아니라 이곳에서
            한 번만 적용됩니다. */
         if (w->hook_enemy >= 0) {
-            enemy_hurt(w->hook_enemy, HOOK_IMPACT_DAMAGE, travel);
-            fx_spawn("blood", w->hook_target, v3scale(travel, -1.0f));
+            enemy_hurt(pl, w->hook_enemy, HOOK_IMPACT_DAMAGE, travel);
+            fx_spawn(pl, "blood", w->hook_target, v3scale(travel, -1.0f));
         }
 
         /* Beat 4: bounce off automatically. No button, no timing.
@@ -602,7 +602,7 @@ int wp_hook_update(Weapon *w, const Level *l, v3 *pos, v3 *vel, float dt) {
          * 두 번 말하면 더 크고 나중에 나는 소리가 정보를 전달하게 되는데, 이는 순서가
          * 뒤바뀐 것입니다. */
         audio_play("hland", 85);
-        fx_spawn("hookland", w->hook_target, v3scale(travel, -1.0f));
+        fx_spawn(pl, "hookland", w->hook_target, v3scale(travel, -1.0f));
 
         /* `to` is the anchor relative to the player, computed above -- exactly
            the direction the launch must not point along.

@@ -104,7 +104,12 @@ $libs = @('-Wl,--gc-sections', "-Wl,-Map=$mapFile",
 # executes when something has gone wrong is the code that goes untested. Passing
 # a small -DMAX_CACHED forces it. $suffix keeps the variant beside the normal
 # build rather than overwriting it.
-function Invoke-ToolBuild([string]$name, [string[]]$extraDefines = @(), [string]$suffix = '') {
+#
+# $noHotReload drops HOT_RELOAD, which is the one thing this function otherwise
+# forces. See the note at the call to gcc for why it is normally mandatory and
+# why exactly one variant is allowed to go without it.
+function Invoke-ToolBuild([string]$name, [string[]]$extraDefines = @(),
+                          [string]$suffix = '', [bool]$noHotReload = $false) {
     $src = Join-Path $root "tools\$name.c"
     if (-not (Test-Path $src)) { throw "No tool source at $src" }
     $script:lastToolExe = Join-Path $outDir "$name$suffix.exe"
@@ -126,11 +131,35 @@ function Invoke-ToolBuild([string]$name, [string[]]$extraDefines = @(), [string]
     # stale snapshot and its save would silently overwrite whatever the user
     # had actually written in assets\.
     #
+    # THE ONE EXCEPTION IS A READ-ONLY TEST OF THE SHIPPED PATH. That reason
+    # above is about WRITING: an editor must not save over a snapshot. A test
+    # that only reads has nothing to overwrite, and dropping HOT_RELOAD is the
+    # only way to exercise what game.exe actually does -- data_map reading a
+    # .map out of the baked blob instead of off disk. Every tool being a
+    # hot-reload build meant the blob scanner, which is the code that ships,
+    # was never run by anything that could assert on it.
+    #
+    # HOT_RELOAD가 도구에 필수인 이유는 *쓰기*에 관한 것입니다. 에디터가 낡은 스냅숏 위에
+    # 저장해서는 안 됩니다. 읽기만 하는 테스트에는 덮어쓸 것이 없고, HOT_RELOAD를 빼는 것이
+    # game.exe가 실제로 하는 일(data_map이 디스크가 아니라 구워 넣은 블롭에서 .map을 읽는
+    # 것)을 실행해 볼 유일한 방법입니다. 모든 도구가 핫 리로드 빌드라는 것은, 정작 출하되는
+    # 코드인 블롭 판독기가 그것에 대해 단언할 수 있는 무엇에 의해서도 실행되지 않았다는
+    # 뜻이었습니다.
+    #
     # Anything gcc prints to stdout would otherwise become part of this
     # function's return value, so the result is published through a script
     # variable instead of returned.
     # -I src so a tool may include "level.h" as well as "../src/level.h".
-    & $gcc '-std=c11' '-O1' '-g' '-Wall' '-Wextra' '-mconsole' '-DHOT_RELOAD' `
+    # [string[]] and not a bare `if` expression. PowerShell unrolls a
+    # single-element array to a scalar, and splatting a scalar STRING iterates
+    # its characters -- gcc received a lone `-` and reported "input is from
+    # standard input", which names neither the flag nor this line.
+    # 단순 `if` 식이 아니라 [string[]]입니다. PowerShell은 원소가 하나인 배열을 스칼라로
+    # 풀어 버리고, 스칼라 *문자열*을 스플랫하면 문자 단위로 순회합니다. gcc는 홀로 남은 `-`를
+    # 받아 "입력이 표준 입력에서 온다"고 보고했는데, 그 말은 플래그도 이 줄도 지목하지 않습니다.
+    [string[]]$hot = @()
+    if (-not $noHotReload) { $hot = @('-DHOT_RELOAD') }
+    & $gcc '-std=c11' '-O1' '-g' '-Wall' '-Wextra' '-mconsole' @hot `
            @extraDefines `
            '-I' (Join-Path $root 'src') `
            $src @shared -o $script:lastToolExe `
@@ -158,6 +187,25 @@ $toolVariants = @{
     # "테이블이 가득 참: 그래도 판정하고, 저장하지 않고, 센다" 경로가 결코 실행되지 않는
     # 대신 실행됩니다.
     'leveltest' = @{ Defines = @('-DLIGHT_CACHE_SLOTS=256'); Suffix = '_tinylcache' }
+
+    # THE SHIPPED DATA PATH, which no other binary here takes. Every tool is a
+    # HOT_RELOAD build, so data_map reads assets\maps\<name>.map off disk and
+    # the blob scanner that game.exe actually runs goes unexecuted. Dropping
+    # HOT_RELOAD makes this variant read the map out of gen_assets.h exactly as
+    # the shipped binary does.
+    #
+    # Run it from a directory with no assets\ beside it and it still passes,
+    # which is the whole claim: the levels are IN the executable, and a floppy
+    # carries one file.
+    #
+    # 출하되는 데이터 경로이며 이곳의 다른 어떤 바이너리도 그 길을 가지 않습니다. 모든 도구가
+    # HOT_RELOAD 빌드이므로 data_map은 assets\maps\<name>.map을 디스크에서 읽고, 정작
+    # game.exe가 실행하는 블롭 판독기는 실행되지 않습니다. HOT_RELOAD를 빼면 이 변형이 출하
+    # 바이너리와 똑같이 gen_assets.h에서 맵을 읽습니다.
+    #
+    # 옆에 assets\가 없는 디렉터리에서 실행해도 통과하며, 그것이 주장의 전부입니다. 레벨은
+    # 실행 파일 *안에* 있고, 플로피는 파일 하나를 나릅니다.
+    'tracetest' = @{ Defines = @(); Suffix = '_baked'; NoHotReload = $true }
 }
 
 if ($Tool) {
@@ -182,7 +230,7 @@ if ($Tool) {
 
     if ($toolVariants.ContainsKey($Tool)) {
         $v = $toolVariants[$Tool]
-        Invoke-ToolBuild $Tool $v.Defines $v.Suffix
+        Invoke-ToolBuild $Tool $v.Defines $v.Suffix ([bool]$v.NoHotReload)
     }
 
     Write-Host "`nLaunching $Tool..." -ForegroundColor Cyan
@@ -339,7 +387,7 @@ if ($Tools) {
         # exercised too. See $toolVariants.
         if ($toolVariants.ContainsKey($toolName)) {
             $v = $toolVariants[$toolName]
-            Invoke-ToolBuild $toolName $v.Defines $v.Suffix
+            Invoke-ToolBuild $toolName $v.Defines $v.Suffix ([bool]$v.NoHotReload)
         }
     }
 }

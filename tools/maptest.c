@@ -820,6 +820,145 @@ static void test_geometry(void) {
     mb_free(&GB);
 }
 
+/* --- editing it in TrenchBroom and saving it back ------------------------
+ *
+ * TrenchBroom does not preserve the three points a face was written with. It
+ * keeps the PLANE, and on save it writes whichever triple it likes -- normally
+ * a small right-angled triangle rather than the corners a person would type.
+ * So "the map still works after the editor has touched it" is really the claim
+ * that our parse depends on the plane and not on which points name it.
+ *
+ * This re-emits atrium with every face named by a different triple taken off
+ * its own polygon, parses that, and compares. Anything that depended on the
+ * original points -- the winding, the offsets, the derived Standard axes --
+ * comes apart here.
+ *
+ * WHAT IT CANNOT TELL YOU is whether TrenchBroom opens the file, because that
+ * needs somebody to look at a window. It tells you that if it does open it,
+ * saving it back changes nothing this engine reads.
+ *
+ * TrenchBroom은 면이 기록되었던 세 점을 보존하지 않습니다. *평면*을 유지하고, 저장할 때
+ * 자기가 원하는 삼중항을 씁니다. 보통은 사람이 입력할 법한 모서리가 아니라 작은 직각삼각형
+ * 입니다. 따라서 "에디터가 건드린 뒤에도 맵이 동작한다"는 실은 우리 파싱이 평면에만 의존하고
+ * 어느 점이 그것을 지목했는지에는 의존하지 않는다는 주장입니다.
+ *
+ * 이 시험은 atrium을 다시 내보내되 각 면을 자기 폴리곤에서 취한 다른 삼중항으로 지목하고,
+ * 그것을 파싱해 비교합니다. 원래의 점에 의존하던 것은 무엇이든(감김 방향, 오프셋, 유도된
+ * Standard 축) 이곳에서 무너집니다.
+ *
+ * 이 시험이 말해 줄 수 없는 것은 TrenchBroom이 그 파일을 여는지 여부입니다. 그것은 누군가
+ * 창을 들여다봐야 합니다. 말해 주는 것은, 만약 연다면 그것을 다시 저장해도 이 엔진이 읽는
+ * 무엇도 달라지지 않는다는 사실입니다.
+ */
+static BrushMap RT;
+
+/* World metres back to the map units the file speaks, rounded. The brushes are
+   authored on integer coordinates and the clip that produced these vertices
+   lands within a thousandth of them, so rounding recovers the exact value the
+   author typed rather than drifting the plane. */
+static int to_map_x(v3 p) { return (int)(p.x / BRUSH_UNIT + (p.x < 0 ? -0.5f : 0.5f)); }
+static int to_map_y(v3 p) { return (int)(-p.z / BRUSH_UNIT + (-p.z < 0 ? -0.5f : 0.5f)); }
+static int to_map_z(v3 p) { return (int)(p.y / BRUSH_UNIT + (p.y < 0 ? -0.5f : 0.5f)); }
+
+static int emit_axis(char *o, int cap, int pos, const char *open,
+                     v3 axis, float off) {
+    pos = txt_append_str(o, cap, pos, open);
+    pos = txt_append_int(o, cap, pos, to_map_x(axis));
+    pos = txt_append_str(o, cap, pos, " ");
+    pos = txt_append_int(o, cap, pos, to_map_y(axis));
+    pos = txt_append_str(o, cap, pos, " ");
+    pos = txt_append_int(o, cap, pos, to_map_z(axis));
+    pos = txt_append_str(o, cap, pos, " ");
+    pos = txt_append_int(o, cap, pos, (int)off);
+    return txt_append_str(o, cap, pos, " ] ");
+}
+
+static void test_roundtrip(void) {
+    printf("\nre-saved the way an editor re-saves it\n");
+
+    int len = 0;
+    const char *text = data_map("atrium", &len);
+    if (!text || !brush_parse(text, len, &M2)) {
+        printf("  no atrium.map to round-trip\n"); fails++; return;
+    }
+
+    const int cap = (int)sizeof(BIG);
+    int pos = txt_append_str(BIG, cap, 0, "{\n\"classname\" \"worldspawn\"\n");
+    int emitted = 0, skipped = 0;
+
+    for (int bi = 0; bi < M2.n_brushes; bi++) {
+        const Brush *b = &M2.brushes[bi];
+        pos = txt_append_str(BIG, cap, pos, "{\n");
+
+        for (int fi = 0; fi < b->n_faces; fi++) {
+            const BrushFace *f = &M2.faces[b->first_face + fi];
+            v3 poly[BR_MAX_POLY];
+            int n = brush_face_poly(&M2, bi, fi, poly, BR_MAX_POLY);
+            if (n < 3) { skipped++; continue; }
+
+            /* A different triple on the same plane. The polygon is wound
+               counter-clockwise about the normal, and Quake reads
+               cross(q0-q1, q2-q1), so q0=poly[1], q1=poly[0], q2=poly[2]
+               reproduces the same normal from different points. */
+            v3 q[3] = { poly[1], poly[0], poly[2] };
+            for (int k = 0; k < 3; k++)
+                pos = emit_pt(BIG, cap, pos, to_map_x(q[k]), to_map_y(q[k]), to_map_z(q[k]));
+
+            pos = txt_append_str(BIG, cap, pos, f->tex);
+            pos = txt_append_str(BIG, cap, pos, " ");
+            pos = emit_axis(BIG, cap, pos, "[ ", f->uaxis, f->uoff);
+            pos = emit_axis(BIG, cap, pos, "[ ", f->vaxis, f->voff);
+            pos = txt_append_str(BIG, cap, pos, "0 ");
+            pos = txt_append_int(BIG, cap, pos, (int)f->uscale);
+            pos = txt_append_str(BIG, cap, pos, " ");
+            pos = txt_append_int(BIG, cap, pos, (int)f->vscale);
+            pos = txt_append_str(BIG, cap, pos, "\n");
+            emitted++;
+        }
+        pos = txt_append_str(BIG, cap, pos, "}\n");
+    }
+    pos = txt_append_str(BIG, cap, pos, "}\n");
+    check(pos < cap - 1, "the re-emitted map fitted in its buffer");
+    check(emitted > 50, "every drawable face was re-emitted");
+    /* An editor re-saving cannot write a face that bounds nothing, because it
+       has no polygon to take three points off. atrium has none, so nothing is
+       lost here -- a level that did would come back with fewer planes, and
+       that is a real difference worth seeing rather than tolerating. */
+    checki(skipped, 0, "and no face had to be dropped for want of a polygon");
+
+    check(brush_parse(BIG, pos, &RT) == 1, "the re-emitted map parses");
+    checki(RT.n_brushes, M2.n_brushes, "same brush count");
+
+    /* The faces that had a polygon to re-emit must come back on the same
+       planes. A face that bounded nothing was dropped, which is why the counts
+       are compared against `emitted` rather than against each other. */
+    int same_planes = 0, same_tex = 0, cmp = 0;
+    for (int bi = 0; bi < RT.n_brushes && bi < M2.n_brushes; bi++) {
+        const Brush *a = &M2.brushes[bi], *r = &RT.brushes[bi];
+        for (int fi = 0; fi < r->n_faces; fi++) {
+            /* Same order, because dropped faces shift nothing: they were at
+               the end of each brush in atrium or absent entirely. */
+            if (fi >= a->n_faces) break;
+            const BrushFace *fa = &M2.faces[a->first_face + fi];
+            const BrushFace *fr = &RT.faces[r->first_face + fi];
+            cmp++;
+            if (v3len(v3sub(fa->normal, fr->normal)) < 0.001f &&
+                fabsf(fa->dist - fr->dist) < 0.002f) same_planes++;
+            if (str_same(fa->tex, fr->tex)) same_tex++;
+        }
+    }
+    checki(same_planes, cmp, "every plane came back identical");
+    checki(same_tex,    cmp, "every texture name came back identical");
+
+    /* And the boxes, which are derived from the polygons rather than the
+       planes -- so this catches a winding that survived the plane test. */
+    int same_box = 0;
+    for (int i = 0; i < RT.n_brushes && i < M2.n_brushes; i++)
+        if (v3len(v3sub(RT.brushes[i].min, M2.brushes[i].min)) < 0.01f &&
+            v3len(v3sub(RT.brushes[i].max, M2.brushes[i].max)) < 0.01f) same_box++;
+    checki(same_box, M2.n_brushes, "and every brush occupies the same space");
+}
+
 int main(void) {
     printf("maptest\n");
     printf("  1 map unit = %g m   (grid 32 = %g m)\n",
@@ -836,6 +975,7 @@ int main(void) {
     test_bounded_parse();
     test_atrium();
     test_bake_matches();
+    test_roundtrip();
     test_geometry();
     test_capacity();
 

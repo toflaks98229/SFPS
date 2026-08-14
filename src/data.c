@@ -38,8 +38,16 @@ typedef struct {
 static Baked g_baked[DATA_COUNT] = {
     BAKED(ASSET_MODELS), BAKED(ASSET_RECIPES), BAKED(ASSET_SOUNDS),
     BAKED(ASSET_MESHES), BAKED(ASSET_LEVELS),  BAKED(ASSET_SPRITES),
-    BAKED(ASSET_EFFECTS),
+    BAKED(ASSET_EFFECTS), BAKED(ASSET_MAPS),
 };
+
+/* Same argument as FILENAMES below, one step earlier: a row missing here shifts
+   every asset after it onto another asset's bytes, and the first symptom would
+   be a level that inflates as a sprite sheet.
+   아래 FILENAMES와 같은 논거를 한 단계 앞에서 적용합니다. 이곳에 행이 빠지면 그 뒤의 모든
+   에셋이 다른 에셋의 바이트로 밀려나며, 첫 증상은 스프라이트 시트로 펼쳐지는 레벨입니다. */
+_Static_assert(sizeof(g_baked) / sizeof(g_baked[0]) == DATA_COUNT,
+               "g_baked needs exactly one entry per DataAsset");
 
 const char *data_baked(int which) {
     if ((unsigned)which >= (unsigned)DATA_COUNT) which = DATA_LEVELS;
@@ -73,6 +81,88 @@ const char *data_baked(int which) {
     return buf;
 }
 
+/* ------------------------------------------------------- the maps blob ----
+ *
+ * ENGLISH
+ * -------
+ * `m <name> <bytes> <payload>`, repeated, with a space between records. bake.ps1
+ * builds it; see the note there for why the .map files are packed rather than
+ * shipped one asset each.
+ *
+ * SCANNED BY HAND rather than with txt.h. ::txt_skip treats `#` as a comment
+ * running to the end of a line, and the bake has already flattened every
+ * newline to a space -- so a single `#` anywhere in a map would swallow the
+ * whole rest of the blob. A `#` is perfectly legal in a texture name or a
+ * `message` value, and nothing about writing one looks like a mistake.
+ *
+ * The LENGTH is what separates one record from the next, not a delimiter. A
+ * delimiter is a byte sequence a map could contain; a length cannot be
+ * imitated by content.
+ *
+ * 한국어
+ * ------
+ * `m <name> <바이트 수> <내용>`이 반복되며 레코드 사이에 공백 하나가 있습니다. bake.ps1이
+ * 만듭니다. .map 파일을 각각의 에셋으로 싣지 않고 포장하는 이유는 그곳의 설명을
+ * 참조하십시오.
+ *
+ * txt.h가 아니라 직접 훑습니다. ::txt_skip은 `#`을 줄 끝까지 이어지는 주석으로 취급하는데,
+ * 베이크는 이미 모든 줄바꿈을 공백으로 평탄화했습니다. 따라서 어느 맵에든 `#`이 하나 있으면
+ * 블롭의 나머지 전체를 삼킵니다. `#`은 텍스처 이름이나 `message` 값에 완벽히 적법하며, 그것을
+ * 쓰는 일의 무엇도 실수처럼 보이지 않습니다.
+ *
+ * 레코드를 나누는 것은 구분자가 아니라 *길이*입니다. 구분자는 맵이 담을 수 있는 바이트
+ * 나열이지만, 길이는 내용이 흉내 낼 수 없습니다.
+ */
+static const char *map_in_blob(const char *name, int *out_len) {
+    const char *p = data_baked(DATA_MAPS);
+    /* raw_len is the authority on where the blob ends. An inflate that failed
+       leaves `text` null and data_baked returns "", so this is 0 and the loop
+       below stops immediately rather than walking off an empty string.
+       블롭이 어디서 끝나는지에 대한 권위는 raw_len입니다. 펼치기에 실패하면 `text`가 널로
+       남고 data_baked가 ""를 반환하므로 이 값은 0이 되며, 아래 루프는 빈 문자열 밖으로
+       걸어 나가는 대신 즉시 멈춥니다. */
+    const char *end = p + (g_baked[DATA_MAPS].text ? g_baked[DATA_MAPS].raw_len : 0);
+
+    while (p < end) {
+        while (p < end && *p == ' ') p++;
+        if (end - p < 2 || p[0] != 'm' || p[1] != ' ') return 0;
+        p += 2;
+        while (p < end && *p == ' ') p++;
+
+        const char *nm = p;
+        while (p < end && *p != ' ') p++;
+        int nlen = (int)(p - nm);
+        while (p < end && *p == ' ') p++;
+
+        if (p >= end || *p < '0' || *p > '9') return 0;
+        int len = 0;
+        while (p < end && *p >= '0' && *p <= '9') len = len * 10 + (*p++ - '0');
+
+        /* Exactly one space, then the payload starts. Consuming a run here
+           would shift the payload and make every length in the blob one too
+           many; the bake writes one, so one is read.
+           공백 정확히 하나 뒤에 내용이 시작됩니다. 이곳에서 연속된 공백을 소비하면 내용이
+           밀려 블롭의 모든 길이가 하나씩 어긋납니다. 베이크가 하나를 쓰므로 하나를 읽습니다. */
+        if (p >= end || *p != ' ') return 0;
+        p++;
+        if (len < 0 || len > (int)(end - p)) return 0;
+
+        if (txt_is(nm, nlen, name)) { *out_len = len; return p; }
+        p += len;
+    }
+    return 0;
+}
+
+/* Public on both paths, because the question it answers -- "what did the bake
+   produce" -- is the same one in either build, and only a HOT_RELOAD build has
+   anything to compare it against.
+   양쪽 경로 모두에서 공개됩니다. 이 함수가 답하는 질문("베이크가 무엇을 만들었는가")은 어느
+   빌드에서나 같고, 그것과 비교할 무언가를 가진 것은 HOT_RELOAD 빌드뿐이기 때문입니다. */
+const char *data_map_baked(const char *name, int *out_len) {
+    if (!name || !out_len) return 0;
+    return map_in_blob(name, out_len);
+}
+
 #ifndef HOT_RELOAD
 /*
  * 릴리스 빌드 구현:
@@ -83,6 +173,11 @@ const char *data_baked(int which) {
 const char *data_text(int which) { return data_baked(which); }
 int data_poll(void) { return 0; }
 int data_from_file(int which) { (void)which; return 0; }
+
+const char *data_map(const char *name, int *out_len) {
+    if (!name || !out_len) return 0;
+    return map_in_blob(name, out_len);
+}
 
 #else
 /*
@@ -101,7 +196,12 @@ static const char *FILENAMES[DATA_COUNT] = {
     0,                        /* 메시는 .obj 파일에서 구워지므로 파일 없음 */
     "assets\\levels.txt",
     0,                        /* 스프라이트는 .png에서 구워지므로 파일 없음 */
-    "assets\\effects.txt"
+    "assets\\effects.txt",
+    /* 맵은 파일이 하나가 아니라 여럿이므로 이 표에 담을 수 없습니다. ::data_map이 이름으로
+       경로를 만들어 직접 읽습니다.
+       Maps are many files rather than one, so they cannot sit in this table.
+       ::data_map builds the path from the name and reads it itself. */
+    0
 };
 
 /* Indexed by DataAsset, so a missing entry would silently shift every path
@@ -120,6 +220,7 @@ _Static_assert(sizeof(FILENAMES) / sizeof(FILENAMES[0]) == DATA_COUNT,
 typedef struct {
     char     path[MAX_PATH]; /**< 파일의 전체 경로. */
     char    *text;           /**< 힙에 복사된 파일 내용, 첫 로드 전까지 NULL. */
+    int      len;            /**< 그 길이(바이트). 널 종료 문자 제외. */
     FILETIME stamp;          /**< 마지막으로 확인한 파일의 타임스탬프. */
     int      resolved;       /**< 경로가 확인되었는지 여부. */
 } Slot;
@@ -191,6 +292,15 @@ static int reload(Slot *s) {
         buf[got] = 0;
         if (s->text) HeapFree(GetProcessHeap(), 0, s->text);
         s->text = buf;
+        /* Recorded because a .map is read by LENGTH, not to a terminator: the
+           baked blob packs the maps end to end and ::data_map must hand back
+           the same shape from either source, or a hot-reload build would parse
+           a different amount of text than the shipped one.
+           .map은 종료 문자까지가 아니라 *길이*로 읽히므로 기록합니다. 구워 넣은 블롭은
+           맵을 끝과 끝을 맞대어 포장하며, ::data_map은 어느 출처에서든 같은 형태를
+           돌려주어야 합니다. 그러지 않으면 핫 리로드 빌드가 배포 빌드와 다른 분량의
+           텍스트를 파싱하게 됩니다. */
+        s->len = (int)got;
     } else {
         if (buf) HeapFree(GetProcessHeap(), 0, buf);
         buf = 0;
@@ -217,8 +327,75 @@ int data_from_file(int which) {
     return s->text != 0;
 }
 
+/**
+ * The one map most recently asked for, so ::data_poll can watch it.
+ *
+ * ENGLISH: One slot rather than a table, because that is the shape of the
+ * question: the game has one level open, and the map an author is editing is
+ * the one they just loaded. A cache of several would have to decide which to
+ * watch and would keep pointers alive that ::data_map's contract says expire.
+ *
+ * 한국어: 표가 아니라 슬롯 하나인 이유는 질문의 형태가 그렇기 때문입니다. 게임은 레벨 하나를
+ * 열어 두고 있고, 제작자가 편집 중인 맵은 방금 불러온 그 맵입니다. 여러 개를 담는 캐시는
+ * 어느 것을 감시할지 정해야 하고, ::data_map의 계약이 만료된다고 말한 포인터를 살려 두게
+ * 됩니다.
+ */
+static Slot g_map;
+static int  g_map_watched;
+
+const char *data_map(const char *name, int *out_len) {
+    if (!name || !out_len) return 0;
+
+    /* assets\maps\<name>.map. Built by appending into the remaining capacity
+       each time, which is the concatenation ::resolve already uses -- a name
+       long enough to fill the buffer truncates instead of overrunning.
+       assets\maps\<name>.map입니다. 매번 남은 용량에 이어 붙이며, 이는 ::resolve가 이미
+       쓰는 연결 방식입니다. 버퍼를 채울 만큼 긴 이름은 넘치지 않고 잘립니다. */
+    char rel[MAX_PATH];
+    int n = txt_copy(rel, (int)sizeof(rel), "assets\\maps\\", -1);
+    n += txt_copy(rel + n, (int)sizeof(rel) - n, name, -1);
+    txt_copy(rel + n, (int)sizeof(rel) - n, ".map", -1);
+
+    g_map.resolved = 0;
+    resolve(&g_map, rel);
+
+    if (reload(&g_map)) {
+        stamp_of(g_map.path, &g_map.stamp);
+        g_map_watched = 1;
+        *out_len = g_map.len;
+        return g_map.text;
+    }
+
+    /* No such file. Falling back to the baked copy is the same promise
+       ::data_text makes: a missing file gives the shipped content, never an
+       empty world. Watching stops, because there is nothing to watch.
+       그런 파일이 없습니다. 구워 넣은 사본으로 되돌아가는 것은 ::data_text가 하는 것과 같은
+       약속입니다. 없는 파일은 빈 세계가 아니라 배포된 내용을 줍니다. 감시할 것이 없으므로
+       감시는 멈춥니다. */
+    g_map_watched = 0;
+    return map_in_blob(name, out_len);
+}
+
 int data_poll(void) {
     int changed = 0;
+
+    /* The open map, checked but NOT re-read. Re-reading here would free the
+       buffer the last ::data_map call handed out while a caller may still be
+       parsing it; reporting the change instead lets that caller ask again when
+       it is ready to.
+       열려 있는 맵은 검사하되 다시 읽지 *않습니다*. 이곳에서 다시 읽으면 마지막
+       ::data_map 호출이 건네준 버퍼를, 호출자가 아직 파싱 중일 수 있는 동안 해제하게
+       됩니다. 대신 변경 사실만 보고하면 그 호출자가 준비되었을 때 다시 물을 수 있습니다. */
+    if (g_map_watched && g_map.resolved) {
+        FILETIME now;
+        if (stamp_of(g_map.path, &now) &&
+            (now.dwLowDateTime  != g_map.stamp.dwLowDateTime ||
+             now.dwHighDateTime != g_map.stamp.dwHighDateTime)) {
+            g_map.stamp = now;
+            changed = 1;
+        }
+    }
+
     for (int i = 0; i < DATA_COUNT; i++) {
         if (!FILENAMES[i]) continue;
         Slot *s = &g_slots[i];

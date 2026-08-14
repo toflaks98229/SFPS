@@ -30,6 +30,20 @@ enum DataAsset {
     DATA_LEVELS,      /**< 레벨 레이아웃 및 엔티티 */
     DATA_SPRITES,     /**< PNG에서 변환된 팔레트 인덱스 스프라이트. DATA_MESHES와 마찬가지로 감시할 파일이 없습니다. */
     DATA_EFFECTS,     /**< 파티클 이펙트 레시피 (fx.c). 감시 대상 파일이 있습니다. */
+    /**
+     * @brief Every assets\maps\*.map packed into one blob. Read with ::data_map.
+     *
+     * ENGLISH: No single file behind it, like DATA_SPRITES and for the same
+     * reason -- there are many source files, not one. Unlike those two, the
+     * sources here are plain text a person edits, so ::data_map has its own
+     * hot-reload path that reads the individual .map rather than this blob.
+     *
+     * 한국어: DATA_SPRITES와 마찬가지로, 그리고 같은 이유로 뒤에 파일 하나가 없습니다.
+     * 원본 파일이 하나가 아니라 여럿이기 때문입니다. 다만 그 둘과 달리 이곳의 원본은
+     * 사람이 편집하는 평문이므로, ::data_map은 이 블롭이 아니라 개별 .map을 읽는 자체
+     * 핫 리로드 경로를 가집니다.
+     */
+    DATA_MAPS,
     DATA_COUNT        /**< 총 데이터 에셋 수 */
 };
 
@@ -70,6 +84,105 @@ const char *data_text(int which);
  */
 const char *data_baked(int which);
 
+
+/**
+ * @brief Finds one named .map inside the packed maps blob.
+ *
+ * ENGLISH
+ * -------
+ * @param[in]  name    Level name, which is the .map's filename without the
+ *                     extension: `assets\maps\atrium.map` is "atrium".
+ * @param[out] out_len Receives the length in bytes. The text is NOT null
+ *                     terminated -- the next map follows it -- so the length is
+ *                     the only thing that says where this map ends. Pass it to
+ *                     ::brush_parse rather than relying on a terminator.
+ * @return A pointer to the map text, or NULL when no map of that name exists.
+ *
+ * @warning The returned pointer is valid until the NEXT call. A hot-reload
+ *          build reads the file into one reusable buffer, so holding two maps
+ *          at once is holding one map twice. Nothing needs to: a level is
+ *          parsed into a ::BrushMap and the text is done with.
+ *
+ * @note THE NAME IS THE FILENAME, deliberately. TrenchBroom's unit of work is a
+ *       file, so a level is a file and its name is what the author called it --
+ *       there is no name recorded inside the map that could disagree with the
+ *       one on disk. ::Level::name comes from a `l <name>` line in levels.txt
+ *       and could; that is the shape being left behind.
+ * @note A HOT_RELOAD build reads `assets\maps\<name>.map` straight off disk and
+ *       falls back to the baked blob when there is no such file, which is what
+ *       lets an author save in the editor and reload without a build. See
+ *       ::data_poll.
+ *
+ * 한국어
+ * ------
+ * @brief 포장된 맵 블롭 안에서 이름이 주어진 .map 하나를 찾습니다.
+ * @param[in]  name    레벨 이름이며 확장자를 뺀 .map 파일명입니다.
+ *                     `assets\maps\atrium.map`은 "atrium"입니다.
+ * @param[out] out_len 바이트 길이를 받습니다. 텍스트는 널로 끝나지 *않습니다*. 뒤에 다음
+ *                     맵이 이어지므로 이 맵이 어디서 끝나는지를 말해 주는 것은 길이뿐입니다.
+ *                     종료 문자에 기대지 말고 ::brush_parse에 그대로 넘기십시오.
+ * @return 맵 텍스트를 가리키는 포인터. 그런 이름의 맵이 없으면 NULL.
+ *
+ * @warning 반환된 포인터는 *다음* 호출까지만 유효합니다. 핫 리로드 빌드는 파일을 재사용
+ *          버퍼 하나에 읽으므로, 두 맵을 동시에 들고 있는 것은 한 맵을 두 번 들고 있는
+ *          것입니다. 그럴 필요가 있는 것은 없습니다. 레벨은 ::BrushMap으로 파싱되고 텍스트는
+ *          그것으로 끝입니다.
+ *
+ * @note 이름이 곧 파일명인 것은 의도적입니다. TrenchBroom의 작업 단위는 파일이므로 레벨은
+ *       파일이고 그 이름은 제작자가 붙인 이름입니다. 맵 *안에* 기록되어 디스크의 이름과
+ *       어긋날 수 있는 이름이 존재하지 않습니다. ::Level::name은 levels.txt의 `l <name>`
+ *       줄에서 오며 어긋날 수 있습니다. 그것이 떠나보내는 형태입니다.
+ * @note HOT_RELOAD 빌드는 `assets\maps\<name>.map`을 디스크에서 바로 읽고, 그런 파일이 없으면
+ *       구워 넣은 블롭으로 되돌아갑니다. 그 덕분에 제작자가 에디터에서 저장하고 빌드 없이
+ *       다시 불러올 수 있습니다. ::data_poll을 참조하십시오.
+ */
+const char *data_map(const char *name, int *out_len);
+
+/**
+ * @brief The BAKED text for one map, ignoring any file on disk.
+ *
+ * ENGLISH
+ * -------
+ * @param[in]  name    Level name, as ::data_map takes it.
+ * @param[out] out_len Receives the length in bytes.
+ * @return A pointer into the packed blob, or NULL when no map of that name was
+ *         baked. Valid for the life of the process; unlike ::data_map's return
+ *         there is no reusable buffer involved.
+ *
+ * THE SHIPPED PATH HAS NO OTHER WAY IN. build.ps1 compiles every tool with
+ * HOT_RELOAD, so ::data_map in a tool reads assets\maps\<name>.map and the blob
+ * scanner -- the code the release binary actually runs -- is never executed by
+ * anything that can assert on it. That is the shape of bug that ships: it works
+ * in every build a person looks at and fails in the only one anybody plays.
+ *
+ * It also makes the bake checkable. The blob is the file with its comments
+ * stripped and its newlines flattened, which is a transformation with a right
+ * answer: parsing both must give the same brushes, the same planes and the same
+ * entities. A test that compares them catches a packing fault -- a length off
+ * by one, an escape that did not survive -- at the point it is introduced
+ * rather than at the point somebody loads the second level in a shipped game.
+ *
+ * 한국어
+ * ------
+ * @brief 디스크의 파일을 무시하고 맵 하나의 *구워 넣은* 텍스트를 반환합니다.
+ * @param[in]  name    ::data_map이 받는 것과 같은 레벨 이름.
+ * @param[out] out_len 바이트 길이를 받습니다.
+ * @return 포장된 블롭 안을 가리키는 포인터. 그런 이름으로 구워진 맵이 없으면 NULL.
+ *         프로세스가 살아 있는 동안 유효하며, ::data_map의 반환값과 달리 재사용 버퍼가
+ *         개입하지 않습니다.
+ *
+ * 배포 경로에는 다른 입구가 없습니다. build.ps1은 모든 도구를 HOT_RELOAD로 컴파일하므로
+ * 도구 안의 ::data_map은 assets\maps\<name>.map을 읽고, 블롭 스캐너(배포 바이너리가 실제로
+ * 실행하는 코드)는 그것에 대해 단언할 수 있는 무엇에 의해서도 실행되지 않습니다. 그것이
+ * 출하되는 버그의 형태입니다. 사람이 들여다보는 모든 빌드에서 동작하고, 정작 사람들이
+ * 플레이하는 단 하나의 빌드에서 실패합니다.
+ *
+ * 베이크 자체도 검사 가능해집니다. 블롭은 주석을 걷어 내고 줄바꿈을 평탄화한 파일이며, 이는
+ * 정답이 있는 변환입니다. 양쪽을 파싱하면 같은 브러시, 같은 평면, 같은 엔티티가 나와야
+ * 합니다. 둘을 비교하는 테스트는 포장 결함(하나 어긋난 길이, 살아남지 못한 이스케이프)을
+ * 도입되는 시점에 잡아냅니다. 누군가 배포된 게임에서 두 번째 레벨을 불러오는 시점이 아니라.
+ */
+const char *data_map_baked(const char *name, int *out_len);
 
 /**
  * @brief 감시 중인 파일이 이전 호출 이후 변경되었는지 확인합니다.

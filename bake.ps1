@@ -1098,6 +1098,147 @@ if (Test-Path $spriteDir) {
     }
 }
 
+# --- .map levels -----------------------------------------------------------
+#
+# assets\maps\*.map, one file per level, exactly as TrenchBroom writes them.
+# There is no container format on disk and no converter: the editor's output IS
+# the asset, which is the whole argument in src\brush.h. What happens here is
+# packaging, not translation -- the bytes are stripped of comments and packed
+# with a length in front so the game can find one map inside one blob.
+#
+# WHY COMMENTS GO AND NEWLINES BECOME SPACES. The blob is emitted as a C string
+# literal, and a literal cannot span lines. Every other asset here solves that
+# by flattening whitespace, and .map is whitespace-delimited too -- except that
+# `//` runs to the end of a line, so flattening FIRST would make the first
+# comment swallow the rest of the file. So comments are removed before the
+# newlines they depend on are.
+#
+# The stripper tracks quotes. A value may legitimately contain `//` -- Quake's
+# own `wad` key holds paths -- and a line-by-line regex deleting from `//`
+# onward would eat the rest of that entity. build.ps1's GLSL check carries the
+# same lesson from the same mistake.
+#
+# assets\maps\*.map이며 레벨당 파일 하나로, TrenchBroom이 쓰는 그대로입니다. 디스크에는
+# 컨테이너 형식도 변환기도 없습니다. 에디터의 출력이 곧 에셋이며, 그것이 src\brush.h의
+# 논지 전체입니다. 이곳에서 일어나는 일은 번역이 아니라 포장입니다. 주석을 걷어 내고 길이를
+# 앞에 붙여, 게임이 하나의 블롭 안에서 맵 하나를 찾을 수 있게 합니다.
+#
+# 주석을 없애고 줄바꿈을 공백으로 바꾸는 이유: 블롭은 C 문자열 리터럴로 방출되고 리터럴은
+# 줄을 넘을 수 없습니다. 이곳의 다른 모든 에셋은 공백을 평탄화해 그것을 해결하며 .map도
+# 공백으로 구분됩니다. 다만 `//`가 줄 끝까지 이어지므로, *먼저* 평탄화하면 첫 주석이 파일의
+# 나머지를 통째로 삼킵니다. 그래서 줄바꿈이 의존하는 주석을 먼저 제거합니다.
+#
+# 스트리퍼는 따옴표를 추적합니다. 값에는 `//`가 정당하게 들어갈 수 있고(Quake의 `wad` 키가
+# 경로를 담습니다) `//`부터 지우는 줄 단위 정규식은 그 엔티티의 나머지를 먹어 치웁니다.
+# build.ps1의 GLSL 검사가 같은 실수에서 얻은 같은 교훈을 담고 있습니다.
+function ConvertTo-MapText([string]$text) {
+    $out = New-Object Text.StringBuilder
+    $i = 0
+    $n = $text.Length
+    $inQuote = $false
+    $lastWasSpace = $false
+    while ($i -lt $n) {
+        $c = $text[$i]
+        if ($inQuote) {
+            [void]$out.Append($c)
+            if ($c -eq '"') { $inQuote = $false }
+            $i++
+            continue
+        }
+        if ($c -eq '"') {
+            [void]$out.Append($c); $inQuote = $true; $lastWasSpace = $false; $i++
+            continue
+        }
+        if ($c -eq '/' -and $i + 1 -lt $n -and $text[$i + 1] -eq '/') {
+            while ($i -lt $n -and $text[$i] -ne "`n") { $i++ }
+            continue
+        }
+        if ($c -eq ' ' -or $c -eq "`t" -or $c -eq "`r" -or $c -eq "`n") {
+            if (-not $lastWasSpace) { [void]$out.Append(' '); $lastWasSpace = $true }
+            $i++
+            continue
+        }
+        [void]$out.Append($c); $lastWasSpace = $false; $i++
+    }
+    return $out.ToString().Trim()
+}
+
+$mapDir  = Join-Path $root 'assets\maps'
+$mapText = New-Object Text.StringBuilder
+if (Test-Path $mapDir) {
+    foreach ($f in (Get-ChildItem $mapDir -Filter *.map | Sort-Object Name)) {
+        $rawMap = Get-Content $f.FullName -Raw
+        $body   = ConvertTo-MapText $rawMap
+        $nm     = [IO.Path]::GetFileNameWithoutExtension($f.Name)
+
+        # The record length is a byte count and the reader jumps by it, so a
+        # character that is not one byte would shift every map after this one.
+        # Thrown rather than replaced: ASCII.GetBytes turns a non-ASCII
+        # character into '?' silently, which keeps the length right and makes
+        # the CONTENT wrong -- a texture name that no longer matches anything.
+        # Comments are already gone by here, so this only ever fires on a name
+        # or a value, which is a thing the author can fix.
+        # 레코드 길이는 바이트 수이고 판독기는 그만큼 건너뛰므로, 1바이트가 아닌 문자는
+        # 이 맵 뒤의 모든 맵을 밀어냅니다. 대체하지 않고 예외를 던집니다.
+        # ASCII.GetBytes는 비ASCII 문자를 조용히 '?'로 바꾸는데, 그러면 길이는 맞고
+        # *내용*이 틀립니다. 아무것과도 일치하지 않는 텍스처 이름이 됩니다. 이 지점에서
+        # 주석은 이미 사라졌으므로, 이것이 발생하는 곳은 이름이나 값뿐이며 제작자가 고칠
+        # 수 있는 대상입니다.
+        foreach ($ch in $body.ToCharArray()) {
+            if ([int]$ch -gt 127) {
+                throw ("$($f.Name): non-ASCII character '$ch' outside a comment. " +
+                       "Map names, keys, values and texture names must be ASCII.")
+            }
+        }
+
+        # `m <name> <bytes> <payload>` and a space between records. The length
+        # is what separates one map from the next, rather than a delimiter that
+        # a map could contain.
+        [void]$mapText.Append("m $nm $($body.Length) $body ")
+
+        $report += [pscustomobject]@{
+            Asset  = "maps\$($f.Name)"
+            Source = $rawMap.Length
+            Baked  = $body.Length
+            Saved  = "$([math]::Round((1 - $body.Length / $rawMap.Length) * 100))%"
+        }
+    }
+}
+
+# WRAPPING CANNOT SPLIT AN ESCAPE PAIR. Every other asset here wraps at a fixed
+# 76 characters and gets away with it because its grammar contains no quote and
+# no backslash to escape -- the note beside $sets says exactly that. A .map is
+# the first asset where escaping actually happens, and `"classname"` puts a
+# `\"` every few characters. A chunk that ended between the backslash and the
+# quote would emit a C literal ending in `\"`, which is an unterminated string
+# and a compile error hundreds of lines into a generated file.
+#
+# 줄바꿈이 이스케이프 쌍을 가를 수 없습니다. 이곳의 다른 모든 에셋은 고정된 76자에서
+# 줄을 바꾸고도 무사한데, 그 문법에 이스케이프할 따옴표도 역슬래시도 없기 때문입니다.
+# $sets 옆의 설명이 바로 그 말을 합니다. .map은 실제로 이스케이프가 일어나는 첫 에셋이며
+# `"classname"`이 몇 글자마다 `\"`를 놓습니다. 역슬래시와 따옴표 사이에서 끝나는 조각은
+# `\"`로 끝나는 C 리터럴을 만들고, 그것은 종료되지 않은 문자열이자 생성된 파일 수백 줄
+# 안쪽에서 터지는 컴파일 오류입니다.
+$escMap = $mapText.ToString().Replace('\', '\\').Replace('"', '\"')
+[void]$sb.AppendLine('static const char ASSET_MAPS[] =')
+if ($escMap.Length -eq 0) {
+    [void]$sb.AppendLine('    ""')
+} else {
+    $i = 0
+    while ($i -lt $escMap.Length) {
+        $len = [Math]::Min(76, $escMap.Length - $i)
+        # An odd run of backslashes at the end means the last one escapes
+        # whatever comes next, so the chunk stops one character earlier.
+        $bs = 0
+        while ($bs -lt $len -and $escMap[$i + $len - 1 - $bs] -eq '\') { $bs++ }
+        if ($bs % 2 -eq 1) { $len-- }
+        [void]$sb.AppendLine("    `"$($escMap.Substring($i, $len))`"")
+        $i += $len
+    }
+}
+[void]$sb.AppendLine('    ;')
+[void]$sb.AppendLine()
+
 $escSpr = $spriteText.Replace('\', '\\').Replace('"', '\"').
                       Replace("`r", '').Replace("`n", ' ')
 [void]$sb.AppendLine('static const char ASSET_SPRITES[] =')
@@ -1143,7 +1284,30 @@ function Compress-AssetArrays([string]$text) {
         $lits = [regex]::Matches($m.Groups[2].Value, '"((?:[^"\\]|\\.)*)"')
         $sbp  = New-Object Text.StringBuilder
         foreach ($l in $lits) { [void]$sbp.Append($l.Groups[1].Value) }
-        $payload = $sbp.ToString().Replace('\"','"').Replace('\','')
+        # One left-to-right pass, not two Replace calls. The pair of Replaces
+        # this had before handled `\"` and mangled `\\`: the first left it
+        # alone and the second dropped BOTH characters, so an escaped backslash
+        # came back as nothing. No asset contained one until .map arrived --
+        # Quake's `wad` key holds paths -- and the symptom would have been a
+        # blob one byte short of every length recorded in it, which the map
+        # reader would have followed into the middle of the next map.
+        # 두 번의 Replace가 아니라 왼쪽에서 오른쪽으로 한 번 훑습니다. 이전의 Replace 쌍은
+        # `\"`는 처리하고 `\\`는 망가뜨렸습니다. 첫 번째는 건드리지 않고 두 번째가 두 문자를
+        # *모두* 지워, 이스케이프된 역슬래시가 아무것도 아닌 것으로 돌아왔습니다. .map이
+        # 오기 전까지는 어떤 에셋도 그것을 담지 않았고(Quake의 `wad` 키가 경로를 담습니다)
+        # 그 증상은 자신이 기록한 모든 길이보다 1바이트 짧은 블롭이었을 것이며, 맵 판독기는
+        # 그것을 따라 다음 맵 한가운데로 들어갔을 것입니다.
+        $raw = $sbp.ToString()
+        $unesc = New-Object Text.StringBuilder
+        $k = 0
+        while ($k -lt $raw.Length) {
+            if ($raw[$k] -eq '\' -and $k + 1 -lt $raw.Length) {
+                [void]$unesc.Append($raw[$k + 1]); $k += 2
+            } else {
+                [void]$unesc.Append($raw[$k]); $k++
+            }
+        }
+        $payload = $unesc.ToString()
         $bytes = [Text.Encoding]::ASCII.GetBytes($payload)
 
         $ms = New-Object IO.MemoryStream

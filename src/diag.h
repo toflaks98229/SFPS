@@ -172,6 +172,74 @@ typedef enum {
      * 조합입니다.
      */
     DIAG_LIGHT_CACHE,
+
+    /**
+     * @brief A .map asked brush.h's tables for more than they hold: brushes,
+     *        faces, or a texture name longer than ::BR_TEX.
+     *
+     * ENGLISH: A dropped brush is a hole in the world and nothing else -- the
+     * room around it still draws, the player still walks up to where the wall
+     * was, and walks through. That is the same class of silent fault as a
+     * truncated sector, and it is worth a counter for the same reason: the
+     * symptom points at the collision code, and the cause is a number in
+     * brush.h.
+     *
+     * One counter for both caps rather than two, because they fail together in
+     * practice -- a map too big for the brush table is too big for the face
+     * pool -- and because the fix is the same edit either way.
+     *
+     * 한국어: 버려진 브러시는 월드의 구멍일 뿐 그 이상이 아닙니다. 주변의 방은 여전히
+     * 그려지고, 플레이어는 벽이 있던 자리까지 걸어가 그대로 통과합니다. 잘려 나간 섹터와
+     * 같은 부류의 조용한 결함이며, 같은 이유로 카운터를 둘 가치가 있습니다. 증상은 충돌
+     * 코드를 가리키지만 원인은 brush.h의 숫자입니다.
+     *
+     * 두 상한에 카운터를 둘이 아니라 하나만 두는 이유는, 실제로 둘이 함께 실패하기
+     * 때문입니다. 브러시 표에 비해 큰 맵은 면 풀에 비해서도 큽니다. 그리고 어느 쪽이든
+     * 고치는 방법이 같은 수정이기 때문입니다.
+     */
+    DIAG_BRUSH_CAP,
+
+    /**
+     * @brief A .map declared more entities or entity keys than ::BR_MAX_ENTS
+     *        and ::BR_MAX_KEYS hold; the surplus was dropped.
+     *
+     * ENGLISH: Separate from ::DIAG_BRUSH_CAP because the symptom is different
+     * and so is the map that causes it. Too many brushes is a level that is too
+     * detailed; too many entities is a level that is too populated, and the
+     * result is a missing monster or a door that never opens because the key
+     * naming its target did not fit. Reading one counter and finding the other
+     * cap was the real one would send the reader to the wrong number.
+     *
+     * 한국어: ::DIAG_BRUSH_CAP과 분리하는 이유는 증상이 다르고 그것을 유발하는 맵도 다르기
+     * 때문입니다. 브러시가 너무 많은 것은 지나치게 정교한 레벨이고, 엔티티가 너무 많은 것은
+     * 지나치게 붐비는 레벨입니다. 그 결과는 사라진 몬스터이거나, 대상을 지목하는 키가 들어가지
+     * 못해 결코 열리지 않는 문입니다. 한쪽 카운터를 읽고서 실제 원인이 다른 쪽 상한이었음을
+     * 알게 되는 일은 읽는 사람을 엉뚱한 숫자로 보냅니다.
+     */
+    DIAG_MAPENT_CAP,
+
+    /**
+     * @brief A brush's planes do not close a volume; the unbounded faces were
+     *        dropped.
+     *
+     * ENGLISH: Not a capacity overflow but an authoring error, and it is here
+     * because it has the same shape: something is missing from the world and
+     * nothing on screen says why. ::brush_face_poly clips a face's plane
+     * against the brush's other planes, and on a closed brush what remains is
+     * the face. On an open one -- five planes where six were needed, or a
+     * brush dragged inside out -- what remains is the starting quad, kilometres
+     * across. Drawing that would fill the screen with one surface; the face is
+     * dropped instead and counted here.
+     *
+     * 한국어: 용량 초과가 아니라 제작 오류이며, 형태가 같기 때문에 이곳에 있습니다. 월드에서
+     * 무언가가 사라졌는데 화면의 무엇도 그 이유를 말하지 않습니다. ::brush_face_poly는 면의
+     * 평면을 브러시의 다른 평면들로 잘라 내며, 닫힌 브러시에서 남는 것이 곧 그 면입니다.
+     * 열린 브러시에서는(여섯이 필요한 자리에 평면 다섯 개이거나, 안팎이 뒤집히도록 끌린
+     * 브러시) 남는 것이 수 킬로미터 크기의 시작 사각형입니다. 그것을 그리면 화면이 하나의
+     * 면으로 가득 차므로, 대신 그 면을 버리고 이곳에 셉니다.
+     */
+    DIAG_BRUSH_OPEN,
+
     DIAG_COUNT          /**< Number of counters. / 카운터의 개수. */
 } DiagKind;
 

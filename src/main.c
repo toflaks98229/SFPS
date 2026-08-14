@@ -53,7 +53,8 @@
 #include "world.h"    /* World and Input: the simulation this file drives */
 #include "render.h"   /* rd_init -- the one call that needs a context and no frame */
 #include "scene.h"    /* scene_frame: the draw order, and everything it owns */
-#include "weapon.h"   /* wp_init and the hook's rearm: state, not drawing, now */
+#include "weapon.h"       /* wp_stats and the hook's rearm: rules, no GL */
+#include "weaponview.h"   /* wpview_set_model / wpview_reload_texture: hot reload */
 #include "hook.h"
 #include "post.h"
 #include "menu.h"     /* the ESC menu: pause, settings, restart, quit */
@@ -920,27 +921,30 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
     /* --- everything below is generated, nothing is loaded --- */
     font_init();
 
-    /* The draw passes and everything they own: the level's geometry, the
-       per-frame billboard buffers, and the sprite atlases. One struct so that
-       every mb_init has an mb_free -- see scene.h. */
-    Scene scene;
-    scene_init(&scene);
-
-    /* The world, on the title screen, in WORLD_START_LEVEL but not yet loaded. */
+    /* The world, on the title screen, in WORLD_START_LEVEL but not yet loaded.
+       Brings up its own weapon: world_init calls wp_init now that doing so no
+       longer needs a GL context. The paragraph that used to sit below this one
+       -- explaining why wp_init had to be called here, after the context and
+       before the first load -- described a constraint that no longer exists.
+       타이틀 화면 상태의 월드이며, WORLD_START_LEVEL을 대상으로 하되 아직 로드되지
+       않았습니다. 자기 무기도 함께 준비합니다. 그렇게 하는 데 더 이상 GL 컨텍스트가 필요하지
+       않으므로 world_init이 wp_init을 호출합니다. 이 아래에 있던 문단, 즉 컨텍스트 이후이자
+       첫 로드 이전인 이 자리에서 wp_init을 호출해야 하는 이유를 설명하던 문단은 이제
+       존재하지 않는 제약을 설명하고 있었습니다. */
     world_init(&g_world);
 
-    /* Before the first world_load_level, which calls wp_hook_release on the
-       weapon: wp_init is what zeroes it and records the level shots trace
-       against. It is not part of world_init because it uploads the view model's
-       texture and so needs the GL context that exists here and nowhere else --
-       which is also what lets tools\steptest.c drive a World with no context at
-       all.
-       첫 world_load_level보다 먼저 호출합니다. 그것이 무기에 wp_hook_release를 호출하는데,
-       무기를 0으로 초기화하고 사격 판정 대상 레벨을 기록하는 것이 wp_init이기 때문입니다.
-       world_init의 일부가 아닌 이유는 뷰 모델의 텍스처를 업로드하므로 이곳에만 존재하는 GL
-       컨텍스트를 필요로 하기 때문입니다. 그것이 또한 tools\steptest.c가 컨텍스트 없이
-       World를 구동할 수 있게 하는 이유입니다. */
-    wp_init(&g_world.weapon, &g_world.level);
+    /* The draw passes and everything they own: the level's geometry, the
+       per-frame billboard buffers, the sprite atlases, and the gun. One struct
+       so that every mb_init has an mb_free -- see scene.h.
+
+       Takes the weapon because loading the gun model is how the weapon learns
+       where its barrel ends; that is the one fact that crosses the
+       weapon/weaponview seam. See weaponview.h.
+       무기를 받는 이유는 총기 모델을 로드하는 것이 곧 무기가 자기 총열이 어디서 끝나는지
+       알게 되는 경로이기 때문입니다. weapon/weaponview 이음매를 넘는 단 하나의 사실입니다.
+       weaponview.h를 참조하십시오. */
+    Scene scene;
+    scene_init(&scene, &g_world.weapon);
 
     /* WORLD_ENTER_NEW: a fresh start begins at full health with the boot belt,
        which is what wp_init just set. It also leaves the stage checkpoint a
@@ -1042,8 +1046,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
            with the real lighting and fog -- without a rebuild. Compiled to
            nothing in release, where data_poll() is a constant 0. */
         if (data_poll()) {
-            wp_set_model("shotgun");
-            wp_reload_texture();          /* also flushes the texture cache */
+            wpview_set_model(&scene.wpview, &g_world.weapon, "shotgun");
+            wpview_reload_texture(&scene.wpview);   /* also flushes the texture cache */
             audio_reload();
             fx_reload(&g_world.pools);                  /* re-read effects.txt, drop live particles */
 

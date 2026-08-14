@@ -636,6 +636,18 @@ void world_init(World *w) {
        대입이 아니라 하나의 함수가 만들어 낸 상태에서 출발합니다. 애초에 그 둘이 어긋난
        이유가 바로 그것이었습니다. ::RunState를 참조하십시오. */
     run_reset(&w->run, 1);
+    /* The weapon, which world_init could not touch while weapon.c needed a GL
+       context to load its model. It does not any more -- the drawn gun is
+       ::WeaponView now -- so the World brings up the whole of itself and the
+       "call wp_init after the context and before the first load" rule that
+       three files used to repeat has nothing left to warn about.
+       무기입니다. weapon.c가 모델을 로드하기 위해 GL 컨텍스트를 필요로 하는 동안에는
+       world_init이 이것을 건드릴 수 없었습니다. 이제는 그렇지 않으므로(그려지는 총은
+       ::WeaponView입니다) World가 자기 자신 전부를 준비하며, 세 개의 파일이 반복하던
+       "컨텍스트 이후, 첫 로드 이전에 wp_init을 호출하라"는 규칙은 경고할 대상이
+       없어졌습니다. */
+    wp_init(&w->weapon, &w->level);
+
 }
 
 /* ------------------------------------------------------------ level loading */

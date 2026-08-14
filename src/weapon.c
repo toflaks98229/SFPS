@@ -47,19 +47,18 @@
  *       다른 두 장치가 아니라, 같은 종류의 밀어내기를 하는 두 가지입니다.
  */
 
+/* No tex.h, model.h, sprite.h or post.h: this file no longer uploads, looks up
+   or draws anything. That is the whole point of the split -- see weaponview.h.
+   tex.h, model.h, sprite.h, post.h가 없습니다. 이 파일은 더 이상 무엇도 업로드하거나
+   조회하거나 그리지 않습니다. 그것이 분리의 목적 전부입니다. weaponview.h를 참조하십시오. */
 #include "weapon.h"
 #include "pools.h"   /* firing reaches the projectile pool, and the blast the monsters */
 #include "hook.h"
-#include "tex.h"
-#include "model.h"
 #include "audio.h"
 #include "level.h"
 #include "enemy.h"
 #include "fx.h"       /* authored particle effects, spawned by name */
-#include "txt.h"      /* txt_copy -- the model name buffer */
 #include "diag.h"
-#include "post.h"     /* post_in_world_pass -- the pass-boundary guards */
-#include "sprite.h"   /* the hand-drawn viewmodel, when art replaces the model */
 #include "proj.h"    /* grenades and bolts: everything that travels */
 #include "decal.h"   /* the marks a shot leaves; this file only spawns them */
 /* player.h is deliberately absent. It was here for PLAYER_GRAVITY, which the
@@ -73,23 +72,6 @@
    파일에는 PLAYER_* 상수를 언급하는 것이 더 이상 남아 있지 않으므로, include를 남겨 두면
    헤더 그래프가 존재하지 않는 의존성을 설명하게 됩니다. model.h/tex.h/sprite.h에 대한
    main.c의 주석과 같은 규칙입니다. */
-
-/* Material names are authored against LVL_MAT and looked up through tex_mat,
-   whose cache can only hold TEX_NAME_MAX. If the authoring limit ever grew
-   past the cache's, every over-long name would miss the cache forever and be
-   rebuilt from its recipe on each lookup -- correct on screen, quietly
-   expensive, and reported only as a diag counter. Checked here because this
-   is a file that already includes both headers and passes level-authored
-   names to tex_mat; no new dependency is introduced to make the check possible.
-
-   재질 이름은 LVL_MAT을 기준으로 제작되고 tex_mat을 통해 조회되는데, tex_mat의 캐시는
-   TEX_NAME_MAX까지만 담을 수 있습니다. 제작 상한이 캐시의 상한을 넘어서면, 초과하는 모든
-   이름이 영원히 캐시 미스가 되어 조회할 때마다 레시피로부터 재생성됩니다. 화면상으로는
-   올바르지만 조용히 비용이 들며, diag 카운터로만 보고됩니다. 이 파일이 두 헤더를 이미
-   포함하고 있고 레벨에서 제작된 이름을 tex_mat에 전달하므로 이곳에서 검사합니다. 검사를
-   위해 새로운 의존성을 추가하지 않습니다. */
-_Static_assert(TEX_NAME_MAX >= LVL_MAT,
-               "tex_mat's cache must hold any name a level can author");
 
 /* ------------------------------------------------------------------ tuning */
 
@@ -156,26 +138,26 @@ static const WeaponType WEAPONS[WP_TYPES] = {
        임시방편이기를 그만두고 적극적으로 거짓말을 시작했습니다. 샷건처럼 터지는 전기톱은
        플레이어에게 자기 무기가 아닌 것을 말하며, 도끼의 총구 섬광과 같은 결함입니다. */
     /* name       model      snd      draw     reload  start max pick dmg  cool   spread  pel  spd   grav  melee  recoil punch hook */
-    { "shotgun", "shotgun", "shot",   NULL,    "pump",     20,  50,   8,   7, 0.50f, 0.040f,  6, 0.0f,  0.0f, 0.0f, 0.055f, 0.085f, 1 },
+    { "shotgun", "shotgun", "shot",   0   ,    "pump",     20,  50,   8,   7, 0.50f, 0.040f,  6, 0.0f,  0.0f, 0.0f, 0.055f, 0.085f, 1 },
 
     /* Arcs and bounces, so it reaches what you cannot see. The fuse is long
        enough to bank a shot off a wall and short enough that a grenade at your
        feet is your problem.
        곡선을 그리며 튕기므로 보이지 않는 것에 닿습니다. 도화선은 벽에 튕겨 넣을 만큼
        길고, 발밑의 유탄이 스스로의 문제가 될 만큼 짧습니다. */
-    { "grenade", "shotgun", "launch", NULL,    NULL,        6,  20,   3,  55, 0.85f, 0.010f,  0, 26.0f, 26.0f, 0.0f, 0.075f, 0.130f, 1 },
+    { "grenade", "shotgun", "launch", 0   ,    0   ,        6,  20,   3,  55, 0.85f, 0.010f,  0, 26.0f, 26.0f, 0.0f, 0.075f, 0.130f, 1 },
 
     /* No hitscan: the bolts travel, so a moving target has to be led. That is
        the cost of the highest sustained damage in the roster.
        히트스캔이 아닙니다. 탄이 날아가므로 움직이는 표적은 예측 사격이 필요합니다.
        구성 내 최고 지속 피해량의 대가입니다. */
-    { "rapid",   "shotgun", "plasma", NULL,    NULL,       80, 200,  40,   9, 0.085f, 0.030f, 0, 70.0f,  0.0f, 0.0f, 0.012f, 0.022f, 1 },
+    { "rapid",   "shotgun", "plasma", 0   ,    0   ,       80, 200,  40,   9, 0.085f, 0.030f, 0, 70.0f,  0.0f, 0.0f, 0.012f, 0.022f, 1 },
 
     /* Melee, and the only row with no hook: right-click leaps instead. Its
        "ammo" is slam charges, which is why it is not simply free.
        근접이며 훅이 없는 유일한 행입니다. 우클릭이 대신 도약합니다. "탄약"은 내려찍기
        충전량이며, 그래서 완전히 공짜는 아닙니다. */
-    { "axe",     "shotgun", "saw",    "sawup", NULL,        3,   6,   2,  45, 0.42f, 0.0f,    0, 0.0f,  0.0f, 2.2f, 0.090f, 0.150f, 0 },
+    { "axe",     "shotgun", "saw",    "sawup", 0   ,        3,   6,   2,  45, 0.42f, 0.0f,    0, 0.0f,  0.0f, 2.2f, 0.090f, 0.150f, 0 },
 };
 
 const WeaponType *wp_stats(int type) {
@@ -196,10 +178,13 @@ int wp_type_for(const char *name) {
 #define RECOIL_RETURN  6.5f     /* springback rate */
 #define PUNCH_KICK     0.085f   /* metres the view model recoils */
 #define PUNCH_RETURN   7.0f
-#define FLASH_TIME     0.075f
+/* FLASH_TIME moved to weapon.h: firing sets w->flash against it and the view
+   model fades the flash by it, so the two halves of the split both need it.
+   FLASH_TIME은 weapon.h로 옮겼습니다. 발사가 이 값을 기준으로 w->flash를 설정하고 뷰
+   모델이 그 값으로 화염을 사라지게 하므로, 분리된 두 절반이 모두 필요로 합니다. */
 
 /* Gun-local space: +x right, +y up, the barrel points down -z.
-   The muzzle now comes from the model (see g_muzzle below), so redrawing the
+   The muzzle now comes from the model (see w->muzzle below), so redrawing the
    gun moves the flash and the tracers with it. */
 
 /* The model is built at life size (~1.3m nose to stock). Drawn at that scale
@@ -234,56 +219,17 @@ GunPose g_gun_pose = {
 
 /* --- File-local types / 파일 지역 타입 --- */
 
-/* --- Level reference / 레벨 참조 --- */
+/* WHAT USED TO BE HERE. Sixteen file-scope variables: the level, the gun mesh
+   and its materials, the muzzle, the per-frame camera and two vertex buffers.
+   Eleven of them were the DRAWN gun and moved to ::WeaponView in weaponview.c;
+   the other five were properties of this weapon in this run and moved into
+   ::Weapon itself. Nothing mutable is left at file scope in this file.
 
-/** @brief Level shots are traced against. Borrowed from wp_init; not owned. / 사격 판정 대상 레벨. wp_init에서 빌려 온 것이며 소유하지 않습니다. */
-static const Level *g_level;
-
-/* --- Gun model and materials / 총기 모델 및 재질 --- */
-
-/** @brief The gun's vertex buffer, shared by every material run. / 총기의 정점 버퍼. 모든 재질 구간이 공유합니다. */
-static Mesh     g_gun_mesh;
-
-/* The gun is drawn as one run per material, so a blued barrel, a steel
-   receiver and a walnut grip can share a single vertex buffer. */
-/** @brief Index ranges, one per material. / 재질별 인덱스 구간. */
-static MdlRange g_gun_ranges[MDL_MAX_RANGES];
-/** @brief Materials matching ::g_gun_ranges entry for entry. / ::g_gun_ranges의 각 항목에 대응하는 재질. */
-static Mat      g_gun_tex[MDL_MAX_RANGES];
-/** @brief How many entries of the two arrays above are in use. / 위 두 배열에서 사용 중인 항목의 개수. */
-static int      g_gun_range_count;
-
-/* Muzzle in gun-local units, loaded with the model. */
-/** @brief Muzzle position in gun-local units, loaded with the model. / 총기 로컬 좌표계의 총구 위치. 모델과 함께 로드됩니다. */
-static v3      g_muzzle = {0.0f, 0.01f, -1.02f};
-
-/* The tether's material. Loaded once and refreshed alongside the gun's own
-   materials, the same way g_gun_tex is -- see wp_reload_texture. */
-/** @brief The tether's material, refreshed alongside the gun's own. / 로프의 재질. 총기 재질과 함께 갱신됩니다. */
-static Mat     g_rope_mat;
-
-/* --- Per-frame camera setup / 프레임별 카메라 설정 --- */
-
-/* Camera setup for the current frame, so effects spawned during firing can be
-   placed in the world. Set by wp_update. */
-/** @brief World camera fov and aspect for this frame. Set by wp_update. / 이번 프레임의 월드 카메라 시야각과 종횡비. wp_update가 설정합니다. */
-static float   g_world_fov = 1.5708f, g_aspect = 1.777f;
-
-/* --- Effect geometry / 효과 지오메트리 --- */
-
-/** @brief Reusable GPU meshes for billboarded effects and for line/ribbon geometry. / 빌보드 효과와 선/리본 지오메트리를 위한 재사용 GPU 메시. */
-static Mesh    g_fx_mesh, g_line_mesh;
-/** @brief CPU-side builders feeding the two meshes above, rebuilt every frame. / 위 두 메시에 데이터를 공급하는 CPU 측 빌더. 매 프레임 재구성됩니다. */
-static MeshBuf g_fx_buf,  g_line_buf;
-
-/* --- Effect ring buffers / 효과 링 버퍼 --- */
-
-/* --- Muzzle flash randomisation / 총구 화염 무작위화 --- */
-
-/** @brief Randomised size of the current flash, so no two shots look alike. / 현재 화염의 무작위 크기. 두 발이 똑같아 보이지 않게 합니다. */
-static float g_flash_scale = 1.0f;
-/** @brief Randomised roll of the current flash, in radians. / 현재 화염의 무작위 회전 (라디안). */
-static float g_flash_roll;
+   이곳에 있던 것. 열여섯 개의 파일 스코프 변수입니다. 레벨, 총기 메시와 재질, 총구,
+   프레임별 카메라, 그리고 정점 버퍼 둘입니다. 그중 열한 개는 *그려지는* 총이며
+   weaponview.c의 ::WeaponView로 옮겼습니다. 나머지 다섯은 이번 플레이의 이 무기에 속한
+   성질이며 ::Weapon 자신으로 옮겼습니다. 이 파일의 파일 스코프에는 가변 상태가 하나도
+   남아 있지 않습니다. */
 
 /* ---------------------------------------------------------------- raycast */
 
@@ -311,9 +257,9 @@ static float g_flash_roll;
  * @note 0을 반환하는 경우에도 사용 가능한 대체 값을 기록하므로, 예광탄을 그리는
  *       호출자는 분기 없이 항상 끝점을 배치할 수 있습니다.
  */
-static int trace(v3 o, v3 d, float *out_t, v3 *out_n) {
-    if (!g_level) return 0;
-    if (level_trace(g_level, o, d, RANGE, out_t, out_n)) return 1;
+static int trace(const Level *lv, v3 o, v3 d, float *out_t, v3 *out_n) {
+    if (!lv) return 0;
+    if (level_trace(lv, o, d, RANGE, out_t, out_n)) return 1;
     /* Miss: report the full range and an arbitrary upward normal, so the
        caller still has somewhere to draw to.
        빗나감: 최대 사거리와 임의의 상향 법선을 보고하여, 호출자가 그릴 지점을
@@ -369,37 +315,6 @@ static float frand_signed(Weapon *w) { return frand(w) * 2.0f - 1.0f; }
 
 /* ------------------------------------------------------------------ setup */
 
-/** @brief Name of the currently loaded gun model, kept so hot reload can rebuild it. / 현재 로드된 총기 모델의 이름. 핫 리로드가 재생성할 수 있도록 보관합니다. */
-static char g_model_name[32] = "shotgun";
-
-void wp_reload_texture(void) {
-    /* Materials are named by the model, so a recipe change means rebuilding
-       the whole lookup rather than one hardcoded texture. */
-    tex_flush();
-    for (int i = 0; i < g_gun_range_count; i++)
-        g_gun_tex[i] = tex_mat(g_gun_ranges[i].mat);
-    g_rope_mat = tex_mat("rope");
-}
-
-void wp_set_model(const char *name) {
-    Model m;
-    if (!mdl_load(name, &m)) return;
-
-    txt_copy(g_model_name, sizeof(g_model_name), name, -1);
-
-    MeshBuf gun;
-    mb_init(&gun, MDL_MAX_VERTS);
-    g_gun_range_count = mdl_geometry(&gun, &m, g_gun_ranges, MDL_MAX_RANGES);
-    mesh_upload(&g_gun_mesh, &gun, 0);
-    mb_free(&gun);
-
-    for (int r = 0; r < g_gun_range_count; r++)
-        g_gun_tex[r] = tex_mat(g_gun_ranges[r].mat);
-
-    g_muzzle = v3f(m.muzzle[0] / 100.0f, m.muzzle[1] / 100.0f,
-                   m.muzzle[2] / 100.0f);
-}
-
 void wp_start_belt(Weapon *w) {
     /* Every weapon's own belt, and only the shotgun is in hand at the start.
        A roster the player is handed complete has no pickups worth finding.
@@ -430,19 +345,19 @@ void wp_init(Weapon *w, const Level *level) {
        HOOK_IDLE이 이를 도달 불가능하게 만들지만, 필드 자체가 의미를 말해야 합니다. */
     w->hook_enemy = -1;
 
-    g_level = level;
+    w->level  = level;
 
-    wp_set_model("shotgun");
-    g_rope_mat = tex_mat("rope");
+    /* The muzzle a model has not been loaded for yet. wpview_set_model
+       overwrites it with the real one the moment there is a context to load a
+       model in; until then this is where a headless fixture's shots come from.
+       모델이 아직 로드되지 않은 상태의 총구입니다. 모델을 로드할 컨텍스트가 생기는 즉시
+       wpview_set_model이 실제 값으로 덮어씁니다. 그 전까지는 헤드리스 픽스처의 사격이
+       나가는 자리가 이곳입니다. */
+    w->muzzle = WP_MUZZLE_DEFAULT;
 
-    /* Sized for what is drawn here now that the marks have their own buffers:
-       the claw, the muzzle flash, the view model's sprite, and the crosshair
-       and hook ring in lines. Initial capacities only -- mb_init grows.
-       자국이 자체 버퍼를 갖게 되었으므로 이곳에서 그리는 것에 맞춘 크기입니다. 클로, 총구
-       화염, 뷰 모델 스프라이트, 그리고 선으로 그리는 조준점과 훅 링입니다. 초기 용량일
-       뿐이며 mb_init은 필요하면 늘어납니다. */
-    mb_init(&g_fx_buf,   64);
-    mb_init(&g_line_buf, 128);
+    /* Defaults until the first wp_update reports the real camera. */
+    w->world_fov = 1.5708f;
+    w->aspect    = 1.777f;
 }
 
 /* ------------------------------------------------------------------ firing */
@@ -466,11 +381,11 @@ void wp_init(Weapon *w, const Level *level) {
  *       the world camera at a fixed distance. The alternative -- hand-tuned
  *       world offsets -- drifts the moment anyone moves the gun or redraws
  *       the model.
- * @note Takes an arbitrary gun-local point rather than hardcoding ::g_muzzle,
+ * @note Takes an arbitrary gun-local point rather than hardcoding ::w->muzzle,
  *       so the same projection serves both the barrel (tracers) and the hook
  *       launcher slung underneath it (the tether) without two copies of this
  *       maths.
- * @warning Reads ::g_world_fov and ::g_aspect, which ::wp_update sets. Calling
+ * @warning Reads ::w->world_fov and ::w->aspect, which ::wp_update sets. Calling
  *          this before the first wp_update uses the initial defaults.
  *
  * 한국어
@@ -494,7 +409,7 @@ void wp_init(Weapon *w, const Level *level) {
  * @warning ::wp_update가 설정하는 ::g_world_fov와 ::g_aspect를 읽습니다. 첫
  *          wp_update 이전에 호출하면 초기 기본값이 사용됩니다.
  */
-static v3 muzzle_world_at(const Weapon *w, v3 local, v3 eye, v3 right, v3 up, v3 fwd) {
+v3 wp_muzzle_world_at(const Weapon *w, v3 local, v3 eye, v3 right, v3 up, v3 fwd) {
     v3 mv = mat4_mul_pt(wp_gun_matrix(w), local);
     /* A point at or behind the near plane would divide by ~0 and fling the
        result off screen.
@@ -505,7 +420,7 @@ static v3 muzzle_world_at(const Weapon *w, v3 local, v3 eye, v3 right, v3 up, v3
     /* Perspective divide under the VIEW MODEL's projection, yielding NDC.
        뷰 모델의 투영을 기준으로 원근 나눗셈을 수행하여 NDC를 얻습니다. */
     float t_vm  = tanf(g_gun_pose.fov * 0.5f);
-    float ndc_x = (mv.x / -mv.z) / (t_vm * g_aspect);
+    float ndc_x = (mv.x / -mv.z) / (t_vm * w->aspect);
     float ndc_y = (mv.y / -mv.z) / t_vm;
 
     /* Rebuild a world point at a fixed distance under the WORLD projection.
@@ -515,10 +430,10 @@ static v3 muzzle_world_at(const Weapon *w, v3 local, v3 eye, v3 right, v3 up, v3
        임의의 값입니다. 어떤 값이든 효과는 화면상 동일한 픽셀에 놓이며, 이 값은
        단지 근평면에서 충분히 떨어뜨리기 위한 것입니다. */
     const float dist = 0.7f;
-    float t_w = tanf(g_world_fov * 0.5f);
+    float t_w = tanf(w->world_fov * 0.5f);
 
     return v3add(eye,
-             v3add(v3scale(right, ndc_x * t_w * g_aspect * dist),
+             v3add(v3scale(right, ndc_x * t_w * w->aspect * dist),
                v3add(v3scale(up, ndc_y * t_w * dist),
                      v3scale(fwd, dist))));
 }
@@ -546,7 +461,7 @@ static v3 muzzle_world_at(const Weapon *w, v3 local, v3 eye, v3 right, v3 up, v3
  * @return 예광탄이 시작되는, 화면에 그려진 총구의 월드 좌표.
  */
 static v3 muzzle_world(const Weapon *w, v3 eye, v3 right, v3 up, v3 fwd) {
-    return muzzle_world_at(w, g_muzzle, eye, right, up, fwd);
+    return wp_muzzle_world_at(w, w->muzzle, eye, right, up, fwd);
 }
 
 /* Where the hook launches from, in gun-local units: the main barrel's own
@@ -555,8 +470,8 @@ static v3 muzzle_world(const Weapon *w, v3 eye, v3 right, v3 up, v3 fwd) {
    itself still traces from the eye (see wp_hook_fire), the same way the
    shotgun's own pellets do, so the crosshair stays honest about what gets
    hooked regardless of where the tether appears to leave the gun. */
-static v3 hook_muzzle(void) {
-    return v3f(g_muzzle.x, g_muzzle.y - HOOK_MUZZLE_DROP, g_muzzle.z + HOOK_MUZZLE_BACK);
+v3 wp_hook_muzzle(const Weapon *w) {
+    return v3f(w->muzzle.x, w->muzzle.y - HOOK_MUZZLE_DROP, w->muzzle.z + HOOK_MUZZLE_BACK);
 }
 
 /**
@@ -628,7 +543,7 @@ static void fire_hitscan(Weapon *w, Pools *pl, v3 eye, float yaw, float pitch,
                           v3scale(up,    frand_signed(w) * PELLET_SPREAD))));
 
         float t; v3 n;
-        int hit = trace(eye, dir, &t, &n);
+        int hit = trace(w->level, eye, dir, &t, &n);
 
         /* A monster nearer than the wall stops the pellet. The trace above
            gives the wall distance (or RANGE on a miss); anything the enemy
@@ -747,8 +662,8 @@ static void attack_feedback(Weapon *w, const WeaponType *S) {
        줍니다. */
     w->pump_timer = S->cooldown * PUMP_SHARE;
 
-    g_flash_scale = 1.1f + frand(w) * 0.7f;
-    g_flash_roll  = frand(w) * M_TAU;
+    w->flash_scale = 1.1f + frand(w) * 0.7f;
+    w->flash_roll  = frand(w) * M_TAU;
 }
 
 /**
@@ -927,8 +842,8 @@ static void attack(Weapon *w, Pools *pl, v3 eye, float yaw, float pitch,
 void wp_update(Weapon *w, Pools *pl, float dt, int firing, v3 eye, float yaw, float pitch,
                float move_speed, float mouse_dx, float mouse_dy,
                float world_fov, float aspect, v3 *player_vel, int player_grounded) {
-    g_world_fov = world_fov;
-    g_aspect    = aspect;
+    w->world_fov = world_fov;
+    w->aspect    = aspect;
 
     /* Wrapped rather than left to grow: a float that has been accumulating for
        an hour loses the precision a 0.23s cycle needs.
@@ -989,119 +904,6 @@ void wp_update(Weapon *w, Pools *pl, float dt, int firing, v3 eye, float yaw, fl
     decal_update(pl, dt);
 }
 
-/* ---------------------------------------------------------- world effects */
-
-void wp_draw_world(const Weapon *w, mat4 view_proj,
-                   v3 cam_pos, v3 cam_right, v3 cam_up) {
-    rd_mvp(view_proj);
-    rd_mode(RD_FLAT);
-    glEnable(GL_BLEND);
-    glDepthMask(GL_FALSE);
-
-    /* The marks a shot left are drawn by decal.c, before this and with the
-       same camera -- see main.c. What is left here is the one thing in the
-       world that belongs to the WEAPON rather than to the shot: the tether,
-       which exists only while this weapon's hook is out.
-       사격이 남긴 자국은 decal.c가 그립니다. 이보다 먼저, 같은 카메라로 그립니다. main.c를
-       참조하십시오. 이곳에 남은 것은 월드에서 사격이 아니라 *무기*에 속하는 유일한 것,
-       즉 로프입니다. 로프는 이 무기의 훅이 나가 있는 동안에만 존재합니다. */
-
-    /* --- the grapple tether: a textured rope, not a flat-coloured line ---
-       wp_draw_world is only ever given cam_right/cam_up, not the full camera
-       basis, so fwd is recovered from them rather than growing the signature:
-       cam_up = cross(cam_right, cam_fwd) inverts to cam_fwd = cross(cam_up,
-       cam_right), since right and fwd are orthogonal unit vectors.
-
-       mb_ribbon gives the strip real UVs (u along its length, v across its
-       width), so it is drawn with a real material -- RD_SWATCH, unlit and
-       unfogged, the same mode the editor's palette swatches use -- rather
-       than a solid rd_color. `rope`'s twist bands (see textures.txt) wrap
-       around the strip as utile grows with distance, so the tether visibly
-       stretches instead of just getting a longer flat line. Swapping the rope
-       for a chain, a cable, anything else tileable is a texture-recipe edit,
-       not a rendering change. */
-    if (w->hook_state != HOOK_IDLE) {
-        v3 fwd = v3cross(cam_up, cam_right);
-        v3 muzzle = muzzle_world_at(w, hook_muzzle(), cam_pos, cam_right, cam_up, fwd);
-
-        /* Drawn to the CLAW while it flies and to the anchor once it has
-           landed. hook_pos tracks the projectile in flight; on a hit both it
-           and hook_target hold the impact point, so the far end is correct in
-           either state without a branch. A tether drawn straight to the
-           target during flight would arrive before the claw does, which gives
-           the throw away.
-           비행 중에는 *클로*까지, 착지 후에는 고정점까지 그립니다. hook_pos는 비행
-           중인 발사체를 추적하며, 명중 시에는 hook_pos와 hook_target이 모두 충돌
-           지점을 담으므로 분기 없이 어느 상태에서든 끝점이 올바릅니다. 비행 중에
-           대상까지 곧바로 로프를 그리면 클로보다 먼저 도착해 버려 투척 연출이
-           무너집니다. */
-        v3 far_end = (w->hook_state == HOOK_FLYING) ? w->hook_pos : w->hook_target;
-
-        float len = v3len(v3sub(far_end, muzzle));
-        mb_reset(&g_line_buf);
-        mb_ribbon(&g_line_buf, muzzle, far_end, cam_pos,
-                 ROPE_WIDTH, len / ROPE_TILE_LENGTH);
-        mesh_upload(&g_line_mesh, &g_line_buf, 1);
-
-        rd_mode(RD_SWATCH);
-        glActiveTexture(GL_TEXTURE0);
-        tex_use(&g_rope_mat);
-        mesh_draw(&g_line_mesh);
-        rd_mode(RD_FLAT);   /* restore -- the rest of this function assumes it */
-
-        /* The claw itself.
-         *
-         * Without this the throw is a rope that grows out of the gun toward
-         * nothing -- the flight time is there and the tether tracks it, but
-         * the thing supposedly doing the travelling is invisible, so the
-         * projectile reads as a stretching line rather than as an object
-         * thrown. A billboard at hook_pos is what makes the flight legible.
-         *
-         * It SPINS while flying and stops on impact. The spin is the whole
-         * animation: a rotating quad at this pixel size reads as a tumbling
-         * hook, and stopping it the instant the claw bites is what sells the
-         * bite. hook_timer is already counting for the pull timeout, so the
-         * angle costs nothing extra to track.
-         *
-         * 클로 자체입니다.
-         *
-         * 이것이 없으면 투척은 총에서 아무것도 없는 곳을 향해 자라나는 로프일 뿐입니다.
-         * 비행 시간도 있고 로프도 그것을 추적하지만, 정작 날아간다는 대상이 보이지
-         * 않으므로 발사체가 아니라 늘어나는 선처럼 읽힙니다. hook_pos 위치의 빌보드가
-         * 비행을 눈에 보이게 만듭니다.
-         *
-         * 비행 중에는 *회전*하고 충돌 시 멈춥니다. 회전이 곧 애니메이션 전부입니다. 이
-         * 픽셀 크기에서 회전하는 사각형은 구르는 갈고리로 읽히며, 클로가 박히는 순간
-         * 회전을 멈추는 것이 그 물림을 설득력 있게 만듭니다. hook_timer는 견인 시간
-         * 초과 판정을 위해 이미 카운트되고 있으므로 각도 추적에 추가 비용이 들지
-         * 않습니다. */
-        {
-            /* Spinning while in flight, frozen once it has bitten. */
-            float spin = (w->hook_state == HOOK_FLYING)
-                       ? w->hook_timer * HOOK_CLAW_SPIN : 0.0f;
-            float cs = cosf(spin), sn = sinf(spin);
-
-            /* Rotate the billboard's own axes rather than the quad, so the
-               claw tumbles in the screen plane while still facing the camera.
-               사각형이 아니라 빌보드 자체의 축을 회전시킵니다. 그래야 클로가 카메라를
-               향한 채로 화면 평면 안에서 구릅니다. */
-            v3 r = v3add(v3scale(cam_right,  cs), v3scale(cam_up, sn));
-            v3 u = v3add(v3scale(cam_right, -sn), v3scale(cam_up, cs));
-
-            mb_reset(&g_fx_buf);
-            mb_billboard(&g_fx_buf, far_end, r, u,
-                         HOOK_CLAW_SIZE, HOOK_CLAW_SIZE);
-            mesh_upload(&g_fx_mesh, &g_fx_buf, 1);
-
-            rd_color(0.72f, 0.74f, 0.80f, 1.0f);   /* bare steel, unlit */
-            mesh_draw(&g_fx_mesh);
-        }
-    }
-
-    glDepthMask(GL_TRUE);
-    glDisable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-}
 
 /* -------------------------------------------------------------- viewmodel */
 
@@ -1274,7 +1076,7 @@ static const AnimStep *anim_pick(const AnimStep *step, int n, float f) {
     return &step[n - 1];
 }
 
-static int wp_sprite_frame(const Weapon *w) {
+int wp_sprite_frame(const Weapon *w) {
     int t = (w->cur >= 0 && w->cur < WP_TYPES) ? w->cur : 0;
 
     /* The pump timer is the animation clock for every weapon, not just the
@@ -1307,334 +1109,7 @@ static int wp_sprite_frame(const Weapon *w) {
     return anim_pick(ANIM[t].idle, ANIM[t].idle_n, p)->frame;
 }
 
-/**
- * @brief Draws the hand-drawn viewmodel: a screen-aligned quad, Doom-style.
- *
- * ENGLISH
- * -------
- * @param[in] w      The weapon.
- * @param[in] aspect Viewport aspect, so the quad keeps its proportions.
- *
- * The same bob, sway and punch the 3D path uses, applied as 2D offsets rather
- * than as a transform. That is what keeps the feel across the switch: the
- * numbers driving the motion are the weapon's, not the renderer's, so a gun
- * that felt right as a model feels the same as a drawing.
- *
- * @note Drawn under an ORTHO projection covering the viewport, so the sprite
- *       occupies a fixed share of the screen at any resolution. A perspective
- *       projection would make the gun's apparent size depend on the FOV, which
- *       is correct for a 3D model sitting in front of the eye and wrong for a
- *       drawing that is meant to be a fixed part of the frame.
- * @note Alpha-tested through ::RD_SPRITE rather than blended, because the art's
- *       alpha is a silhouette mask. Blending would leave a fringe of half-lit
- *       pixels around every edge the artist drew sharp.
- *
- * 한국어
- * ------
- * @brief 손으로 그린 뷰 모델을 그립니다. Doom 방식의 화면 정렬 쿼드입니다.
- *
- * 3D 경로가 쓰는 것과 동일한 흔들림·스웨이·반동을 변환 행렬이 아니라 2D 오프셋으로
- * 적용합니다. 그것이 전환을 넘어 감각을 유지하는 방법입니다. 움직임을 구동하는 수치는
- * 렌더러가 아니라 무기의 것이므로, 모델일 때 좋았던 총기는 그림이 되어도 같게 느껴집니다.
- *
- * @note 뷰포트를 덮는 *정사영* 투영으로 그리므로, 스프라이트가 어떤 해상도에서도 화면의
- *       일정한 비율을 차지합니다. 원근 투영은 총기의 겉보기 크기를 시야각에 의존하게
- *       만드는데, 눈앞에 놓인 3D 모델에는 옳지만 프레임의 고정된 일부여야 하는 그림에는
- *       틀립니다.
- * @note 블렌딩이 아니라 ::RD_SPRITE의 알파 테스트를 씁니다. 아트의 알파가 실루엣
- *       마스크이기 때문입니다. 블렌딩하면 아티스트가 선명하게 그린 모든 가장자리에 반쯤
- *       밝은 픽셀의 테두리가 남습니다.
- */
-static void wp_draw_view_sprite(const Weapon *w, float aspect) {
-    /* A 1x1 box with y up, so every offset below is a fraction of the screen
-       and none of them has to know the pixel size.
-       y가 위로 향하는 1x1 상자입니다. 아래의 모든 오프셋이 화면에 대한 비율이 되며, 어느
-       것도 픽셀 크기를 알 필요가 없습니다. */
-    mat4 proj = mat4_ortho(0.0f, 1.0f, 0.0f, 1.0f, -1.0f, 1.0f);
 
-    /* THE QUAD IS DOOM'S SCREEN, not a box sized to taste.
-       The cell spans Doom's full 320-unit width and its bottom 144 rows, and
-       the frame's place in the cell is its place on that screen -- so this has
-       to put the cell exactly where Doom's screen would be, or the offsets the
-       art was drawn with land somewhere else.
-       Doom's 320x200 was displayed at 4:3, so the screen is (4/3)*height wide
-       whatever the window's shape, and the weapon layer is letterboxed inside
-       a widescreen viewport rather than stretched across it. Height is the
-       cell's share of those 200 rows. Neither number is a taste dial: change
-       one and every weapon moves off the position its artist chose.
-       쿼드는 취향껏 정한 상자가 아니라 *Doom의 화면*입니다. 셀은 Doom의 320단위 너비
-       전체와 아래 144행을 덮으며, 프레임의 셀 안 위치가 곧 그 화면에서의 위치입니다.
-       따라서 이 코드는 셀을 Doom 화면이 있었을 자리에 정확히 놓아야 하고, 그러지 않으면
-       아트가 지니고 온 오프셋이 엉뚱한 곳에 떨어집니다. Doom의 320x200은 4:3으로
-       표시되었으므로 창의 모양과 무관하게 화면 너비는 높이의 4/3이며, 무기 레이어는
-       와이드스크린 뷰포트에 늘어나지 않고 레터박스로 들어갑니다. */
-    /* The viewport IS Doom's 3D view, so the cell's share of it is the cell's
-       share of those 168 rows. Width follows from the 320x200 screen being
-       displayed at 4:3: our height covers VIEW rows, so the full screen is
-       (4/3)*FULL/VIEW of it across. Matching FULL instead of VIEW is what left
-       the shotgun a fifth too small with its bottom balanced on the edge.
-       뷰포트가 곧 Doom의 3D 뷰이므로, 셀이 차지하는 비율은 그 168행 중 셀의 비율입니다.
-       너비는 320x200 화면이 4:3으로 표시된다는 사실에서 나옵니다. 우리 높이가 VIEW행을
-       담으므로 화면 전체는 그 (4/3)*FULL/VIEW배만큼 넓습니다. VIEW가 아니라 FULL에
-       맞춘 것이 샷건을 5분의 1만큼 작게, 아래를 가장자리에 걸터앉게 만든 원인입니다. */
-    const float SH = (float)(WPN_DOOM_VIEW - WPN_DOOM_TOP) / (float)WPN_DOOM_VIEW;
-    float sw = (4.0f / 3.0f) * (float)WPN_DOOM_FULL / (float)WPN_DOOM_VIEW
-             / (aspect > 0.01f ? aspect : 1.0f);
-
-    /* The weapon's own motion, as screen fractions. The scales are small
-       because a viewmodel that swings a visible fraction of the screen reads
-       as the camera being loose rather than as a held weapon.
-       무기 자신의 움직임을 화면 비율로 표현합니다. 배율이 작은 이유는, 화면의 눈에 띄는
-       비율만큼 흔들리는 뷰 모델은 쥐고 있는 무기가 아니라 카메라가 헐거운 것처럼 읽히기
-       때문입니다. */
-    float bx = sinf(w->bob_phase)         * 0.012f;
-    float by = -fabsf(cosf(w->bob_phase)) * 0.010f;
-    float cx = 0.5f + bx + w->sway_x * 0.9f;
-    float cy = 0.0f + by + w->sway_y * 0.9f - w->punch * 0.35f;
-
-    float x0 = cx - sw * 0.5f, x1 = cx + sw * 0.5f;
-    float y0 = cy,             y1 = cy + SH;
-
-    int frame = wp_sprite_frame(w);
-    float u0, v0, u1, v1;
-    weapon_uv(w->cur, frame, &u0, &v0, &u1, &v1);
-
-    mb_reset(&g_fx_buf);
-    v3 n = v3f(0, 0, 1);
-    mb_vtx(&g_fx_buf, v3f(x0, y0, 0), n, u0, v0);
-    mb_vtx(&g_fx_buf, v3f(x1, y0, 0), n, u1, v0);
-    mb_vtx(&g_fx_buf, v3f(x1, y1, 0), n, u1, v1);
-    mb_vtx(&g_fx_buf, v3f(x0, y0, 0), n, u0, v0);
-    mb_vtx(&g_fx_buf, v3f(x1, y1, 0), n, u1, v1);
-    mb_vtx(&g_fx_buf, v3f(x0, y1, 0), n, u0, v1);
-    mesh_upload(&g_fx_mesh, &g_fx_buf, 1);
-
-    rd_mvp(proj);
-    rd_mode(RD_SPRITE2D);
-    rd_color(1.0f, 1.0f, 1.0f, 0.0f);
-    rd_snap(0.0f, 0.0f);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, weapon_atlas());
-    glDisable(GL_CULL_FACE);
-    mesh_draw(&g_fx_mesh);
-    glEnable(GL_CULL_FACE);
-
-    /* --- the muzzle flash, at the point the DRAWING marked ---
-       Skipped entirely when the art carried no marker: a flash at a guessed
-       position is worse than none, because it tells the artist the marker is
-       working when it is not.
-       그림이 표식을 담지 않았으면 완전히 건너뜁니다. 추측한 위치의 화염은 없는 것보다
-       나쁩니다. 표식이 동작하지 않는데도 동작한다고 아티스트에게 알려 주기 때문입니다. */
-    float mu, mv;
-    if (w->flash > 0.0f && weapon_muzzle(w->cur, frame, &mu, &mv)) {
-        float k  = w->flash / FLASH_TIME;
-        float fs = (0.10f + 0.07f * k) * g_flash_scale;
-        float fx = x0 + mu * (x1 - x0);
-        float fy = y0 + mv * (y1 - y0);
-
-        mb_reset(&g_fx_buf);
-        for (int i = 0; i < 3; i++) {
-            float a = g_flash_roll + i * (M_PI_F / 3.0f);
-            v3 r = v3f(cosf(a) / (aspect > 0.01f ? aspect : 1.0f), sinf(a), 0.0f);
-            v3 u = v3f(-sinf(a) / (aspect > 0.01f ? aspect : 1.0f), cosf(a), 0.0f);
-            mb_billboard(&g_fx_buf, v3f(fx, fy, 0.0f), r, u, fs, fs);
-        }
-        mesh_upload(&g_fx_mesh, &g_fx_buf, 1);
-
-        rd_mode(RD_FLAT);
-        rd_color(1.0f, 0.80f, 0.38f, k * 0.85f);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE);
-        glDepthMask(GL_FALSE);
-        glDisable(GL_CULL_FACE);
-        mesh_draw(&g_fx_mesh);
-        glEnable(GL_CULL_FACE);
-        glDepthMask(GL_TRUE);
-        glDisable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    }
-}
-
-void wp_draw_view(const Weapon *w, float aspect) {
-    /* The view model belongs to the WORLD pass: it shares the scene's
-       lighting, and a crisp weapon over a pixelated world reads as a bug.
-       뷰 모델은 *월드* 패스에 속합니다. 장면의 조명을 공유하며, 픽셀화된 월드 위의
-       선명한 무기는 버그처럼 보입니다. */
-    DIAG_WANT_WORLD_PASS(post_in_world_pass());
-
-    /* --- hand-drawn art REPLACES the model, when it exists ---------------
-       One question, asked once a frame, answered by whether the files are
-       there. Adding art is dropping `gun0.png` into assets/sprites/ and
-       removing it is deleting the file; nothing else in the project changes
-       and there is no flag to keep in agreement with the directory.
-
-       The depth buffer is still cleared first, because the sprite path draws
-       over the world exactly as the model did.
-
-       손으로 그린 아트가 있으면 모델을 *대체*합니다. 프레임마다 한 번 묻는 하나의
-       질문이며, 답은 파일이 있는지 여부입니다. 아트를 추가하는 것은 assets/sprites/에
-       `gun0.png`를 넣는 것이고 제거하는 것은 파일을 지우는 것입니다. 프로젝트의 다른
-       무엇도 바뀌지 않으며, 디렉터리와 일치시켜야 할 플래그도 없습니다.
-
-       깊이 버퍼는 여전히 먼저 지웁니다. 스프라이트 경로도 모델과 똑같이 월드 위에
-       그리기 때문입니다. */
-    if (weapon_has_art()) {
-        glClear(GL_DEPTH_BUFFER_BIT);
-        wp_draw_view_sprite(w, aspect);
-        return;
-    }
-
-    /* A narrower FOV than the world camera keeps the gun from looking
-       fish-eyed, and a fresh depth buffer stops it clipping into walls. */
-    glClear(GL_DEPTH_BUFFER_BIT);
-    mat4 proj  = mat4_perspective(g_gun_pose.fov, aspect, 0.005f, 4.0f);
-    mat4 model = wp_gun_matrix(w);
-
-    rd_mvp(mat4_mul(proj, model));
-    rd_mode(RD_VIEWMODEL);
-    /* No vertex snap on the gun. It sits at a fixed distance in the centre of
-       the screen, so snapping makes it vibrate continuously in the one place
-       the eye is least willing to forgive it -- the world wobbles because the
-       camera moves relative to it, but the gun never moves relative to the
-       camera at all.
-       총기에는 정점 스냅을 적용하지 않습니다. 화면 중앙의 고정된 거리에 있으므로 스냅하면
-       눈이 가장 용납하지 않는 바로 그 위치에서 계속 진동합니다. 월드는 카메라가 그에 대해
-       상대적으로 움직이기 때문에 흔들리지만, 총기는 카메라에 대해 전혀 움직이지 않습니다. */
-    rd_snap(0.0f, 0.0f);
-    glActiveTexture(GL_TEXTURE0);
-
-    /* One draw per material. At ~200 vertices the extra calls cost nothing,
-       and this avoids a texture atlas -- which would break badly here, since
-       the UVs tile several times per unit and would sample across cells. */
-    for (int r = 0; r < g_gun_range_count; r++) {
-        tex_use(&g_gun_tex[r]);
-        mesh_draw_range(&g_gun_mesh, g_gun_ranges[r].first, g_gun_ranges[r].count);
-    }
-
-    /* --- muzzle flash: a star of quads sharing the muzzle plane, each
-           rotated within it, plus one flare lying along the barrel --- */
-    if (w->flash > 0.0f) {
-        float k = w->flash / FLASH_TIME;
-        float s = (0.16f + 0.10f * k) * g_flash_scale;
-
-        mb_reset(&g_fx_buf);
-        v3 tip = g_muzzle;
-        for (int i = 0; i < 3; i++) {
-            float a = g_flash_roll + i * (M_PI_F / 3.0f);
-            v3 r = v3f(cosf(a), sinf(a), 0.0f);
-            v3 u = v3f(-sinf(a), cosf(a), 0.0f);
-            mb_billboard(&g_fx_buf, tip, r, u, s, s);
-        }
-        /* A short flare along the barrel sells the light better than the
-           star alone. */
-        mb_billboard(&g_fx_buf,
-                     v3f(tip.x, tip.y, tip.z - s * 0.35f),
-                     v3f(1, 0, 0), v3f(0, 0, -1), s * 0.7f, s * 1.4f);
-
-        mesh_upload(&g_fx_mesh, &g_fx_buf, 1);
-        rd_mode(RD_FLAT);
-        rd_color(1.0f, 0.80f, 0.38f, k * 0.85f);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE);
-        glDepthMask(GL_FALSE);
-        /* The star quads always face the camera, but the barrel flare is
-           edge-on and its winding flips with the view -- culling would drop
-           it half the time. */
-        glDisable(GL_CULL_FACE);
-        mesh_draw(&g_fx_mesh);
-        glEnable(GL_CULL_FACE);
-        glDepthMask(GL_TRUE);
-        glDisable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    }
-}
-
-/* ------------------------------------------------------------------- HUD */
-
-void wp_draw_hud(const Weapon *w, float aspect, int hook_ready) {
-    /* The crosshair belongs to the UI pass: a dithered, magnified reticle is
-       unreadable, and the range brackets are one pixel wide.
-       조준점은 *UI* 패스에 속합니다. 디더링되고 확대된 조준선은 읽을 수 없으며, 사거리
-       괄호는 1픽셀 폭입니다. */
-    DIAG_WANT_UI_PASS(post_in_world_pass());
-    /* Drawn straight in clip space: uMVP only corrects for aspect so the
-       crosshair stays square. */
-    mat4 ndc = mat4_scale(v3f(1.0f / aspect, 1.0f, 1.0f));
-    rd_mvp(ndc);
-    rd_mode(RD_FLAT);
-
-    /* Gap tracks spread, so the crosshair bloom is the actual accuracy. */
-    float gap = 0.012f + w->spread * 1.1f;
-    float len = 0.022f;
-
-    mb_reset(&g_line_buf);
-    mb_line(&g_line_buf, v3f(-gap - len, 0, 0), v3f(-gap, 0, 0));
-    mb_line(&g_line_buf, v3f( gap, 0, 0),       v3f( gap + len, 0, 0));
-    mb_line(&g_line_buf, v3f(0, -gap - len, 0), v3f(0, -gap, 0));
-    mb_line(&g_line_buf, v3f(0,  gap, 0),       v3f(0,  gap + len, 0));
-    mesh_upload(&g_line_mesh, &g_line_buf, 1);
-
-    glDisable(GL_DEPTH_TEST);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glLineWidth(2.0f);
-    rd_color(0.95f, 0.97f, 1.0f, 0.75f);
-    mesh_draw_lines(&g_line_mesh);
-
-    /* --- the hook's range indicator --------------------------------------
-       Four corner brackets around the crosshair, drawn only when a throw
-       right now would connect. HOOK_RANGE is 40m and nothing else on screen
-       says where that ends, so without this the only way to learn the range
-       is to throw and miss -- and a miss costs the cooldown.
-
-       Brackets rather than a colour change on the crosshair itself: the
-       crosshair already encodes the shotgun's spread through its gap, and
-       overloading the same four lines with a second meaning would make both
-       harder to read. A separate mark can be ignored when you are not
-       thinking about the hook.
-
-       Drawn OUTSIDE the crosshair's own arms, so it never collides with the
-       spread bloom however wide that grows.
-
-       훅의 사거리 표시입니다.
-
-       조준점 주위의 네 모서리 괄호이며, 지금 발사하면 명중하는 경우에만 그려집니다.
-       HOOK_RANGE는 40m인데 화면의 어떤 요소도 그 끝이 어디인지 알려 주지 않으므로, 이
-       표시가 없으면 사거리를 아는 유일한 방법은 던져서 빗맞히는 것뿐이며 빗나감은
-       쿨다운을 소모합니다.
-
-       조준점 자체의 색을 바꾸지 않고 괄호를 쓴 이유: 조준점은 이미 간격으로 샷건의
-       산포도를 표현하고 있으며, 같은 네 개의 선에 두 번째 의미를 겹치면 양쪽 모두
-       읽기 어려워집니다. 별도의 표식은 훅을 생각하지 않을 때 무시할 수 있습니다.
-
-       조준점의 팔 *바깥쪽*에 그리므로, 산포도가 아무리 넓어져도 겹치지 않습니다. */
-    if (hook_ready) {
-        float r = gap + len + 0.018f;   /* clear of the widest bloom */
-        float a = 0.010f;               /* arm length of each bracket */
-
-        mb_reset(&g_line_buf);
-        /* Top-left, top-right, bottom-left, bottom-right: two strokes each,
-           so the mark reads as a frame rather than as four more ticks.
-           좌상, 우상, 좌하, 우하 각각 두 획씩입니다. 그래야 표식이 눈금 네 개가 아니라
-           하나의 틀로 읽힙니다. */
-        mb_line(&g_line_buf, v3f(-r, r, 0), v3f(-r + a, r, 0));
-        mb_line(&g_line_buf, v3f(-r, r, 0), v3f(-r, r - a, 0));
-        mb_line(&g_line_buf, v3f( r, r, 0), v3f( r - a, r, 0));
-        mb_line(&g_line_buf, v3f( r, r, 0), v3f( r, r - a, 0));
-        mb_line(&g_line_buf, v3f(-r, -r, 0), v3f(-r + a, -r, 0));
-        mb_line(&g_line_buf, v3f(-r, -r, 0), v3f(-r, -r + a, 0));
-        mb_line(&g_line_buf, v3f( r, -r, 0), v3f( r - a, -r, 0));
-        mb_line(&g_line_buf, v3f( r, -r, 0), v3f( r, -r + a, 0));
-        mesh_upload(&g_line_mesh, &g_line_buf, 1);
-
-        glLineWidth(1.0f);
-        rd_color(0.45f, 0.95f, 0.60f, 0.85f);   /* green: the hook will bite */
-        mesh_draw_lines(&g_line_mesh);
-    }
-
-    glDisable(GL_BLEND);
-    glEnable(GL_DEPTH_TEST);
-}
 
 /* ------------------------------------------------------------- the axe leap */
 

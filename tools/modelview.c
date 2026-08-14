@@ -32,6 +32,7 @@
  */
 
 #include "../src/weapon.h"
+#include "../src/weaponview.h"
 #include "../src/model.h"
 #include "../src/tex.h"
 #include "../src/level.h"
@@ -204,11 +205,19 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
 
     /* wp_init records the level its shots trace against. The viewer never
        fires, but handing it the real level keeps the tool on exactly the
-       same code path as the game. */
+       same code path as the game.
+
+       The view is a local rather than a Scene: this tool draws one model, not
+       a world, and wpview_set_model is the whole of what it wants from it.
+       Scene이 아니라 지역 변수인 이유는, 이 도구가 월드가 아니라 모델 하나를 그리며
+       wpview_set_model이 그로부터 원하는 전부이기 때문입니다. */
     static Level level;
     level_load("arena", &level);
     wp_init(&g_weapon, &level);
-    wp_set_model(model);
+
+    static WeaponView view;
+    wpview_init(&view, &g_weapon);
+    wpview_set_model(&view, &g_weapon, model);
 
     MeshBuf mb;
     mb_init(&mb, MDL_MAX_VERTS);

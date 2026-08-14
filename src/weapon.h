@@ -584,7 +584,103 @@ typedef struct {
      * 되어 버립니다.
      */
     int   hook_latched;
+
+    /* --- what firing needs to know, which used to be file-scope in weapon.c --
+       These five were `g_level`, `g_muzzle`, `g_world_fov`/`g_aspect` and the
+       two flash randomisers. Every one of them is a property of THIS weapon in
+       THIS run -- what its shots hit, where its barrel ends, the camera its
+       effects are placed against, and how the current shot's flash is turned --
+       and holding them per-process meant a second Weapon silently shared the
+       first one's answers.
+
+       The same argument pools.h makes for the five spawn pools, applied to the
+       one module that was left out of it. What did NOT move here is the drawn
+       view model: the mesh, its materials and the buffers they are built in are
+       one gun per GL context, and they now live in ::WeaponView.
+
+       이 다섯은 `g_level`, `g_muzzle`, `g_world_fov`/`g_aspect`, 그리고 두 개의 화염
+       무작위화 값이었습니다. 전부 *이번 플레이의 이 무기*에 속한 성질입니다. 사격이 무엇에
+       맞는지, 총열이 어디서 끝나는지, 효과를 배치할 기준 카메라가 무엇인지, 이번 사격의
+       화염이 얼마나 돌아가는지입니다. 이것들을 프로세스당 하나로 두면 두 번째 Weapon이 첫
+       번째의 답을 조용히 공유하게 됩니다.
+
+       pools.h가 다섯 개 스폰 풀에 대해 편 논거를, 거기서 빠져 있던 하나의 모듈에 적용한
+       것입니다. 이곳으로 오지 *않은* 것은 그려지는 뷰 모델입니다. 메시와 그 재질, 그리고
+       그것들을 만드는 버퍼는 GL 컨텍스트당 총 하나이며 이제 ::WeaponView에 있습니다. */
+
+    /**
+     * @brief The level this weapon's shots are traced against. Borrowed, not owned.
+     *
+     * ENGLISH: Set by ::wp_init and by ::world_load_level when the level
+     * changes. Null is a valid state and means every trace misses -- which is
+     * what a headless fixture that never loaded a level should see.
+     *
+     * 한국어: ::wp_init과, 레벨이 바뀔 때 ::world_load_level이 설정합니다. 널도 유효한
+     * 상태이며 모든 판정이 빗나감을 뜻합니다. 레벨을 로드한 적 없는 헤드리스 픽스처가
+     * 보아야 할 값이 바로 그것입니다.
+     */
+    const Level *level;
+
+    /**
+     * @brief Barrel tip in gun-local units, where muzzle effects leave from.
+     *
+     * ENGLISH: Comes from the loaded model, so ::wpview_set_model writes it.
+     * Until then it holds ::WP_MUZZLE_DEFAULT, which is where the shotgun's
+     * barrel is -- so a weapon that has never had a model loaded still fires
+     * from a sensible place instead of from the camera's origin.
+     *
+     * 한국어: 로드된 모델에서 오므로 ::wpview_set_model이 기록합니다. 그 전까지는
+     * ::WP_MUZZLE_DEFAULT를 담습니다. 샷건 총열의 위치이며, 따라서 모델을 한 번도
+     * 로드하지 않은 무기도 카메라 원점이 아니라 그럴듯한 자리에서 발사합니다.
+     */
+    v3    muzzle;
+
+    /**
+     * @brief The world camera this frame, for placing effects on screen.
+     *
+     * ENGLISH: Set by ::wp_update from its arguments. Held rather than passed
+     * down because the firing path is four calls deep and every one of them
+     * would otherwise carry two floats it does not use itself.
+     *
+     * 한국어: ::wp_update가 자신의 인자로부터 설정합니다. 아래로 전달하지 않고 보관하는
+     * 이유는 발사 경로가 네 단계 깊이이며, 그러지 않으면 그 전부가 스스로는 쓰지 않는
+     * float 두 개를 들고 다녀야 하기 때문입니다.
+     */
+    float world_fov, aspect;
+
+    /** @brief This shot's muzzle flash size, randomised at fire time. / 이번 사격의 총구 화염 크기. 발사 시점에 무작위로 정해집니다. */
+    float flash_scale;
+    /** @brief This shot's muzzle flash roll in radians. / 이번 사격의 총구 화염 회전 (라디안). */
+    float flash_roll;
 } Weapon;
+
+/**
+ * @brief Where the muzzle sits before any model has been loaded.
+ *
+ * ENGLISH: The shotgun's barrel tip, which is what ::wp_init assumes. A
+ * headless fixture never loads a model, so this is the muzzle every test sees.
+ *
+ * 한국어: 샷건 총열 끝이며 ::wp_init이 가정하는 값입니다. 헤드리스 픽스처는 모델을 로드하지
+ * 않으므로, 모든 테스트가 보게 되는 총구 위치가 이것입니다.
+ */
+#define WP_MUZZLE_DEFAULT v3f(0.0f, 0.01f, -1.02f)
+
+/**
+ * @brief How long a muzzle flash lasts, in seconds.
+ *
+ * ENGLISH: In the header rather than in weapon.c because it is shared across
+ * the split: firing sets ::Weapon::flash to it, ::wp_update counts it down,
+ * and weaponview.c fades the drawn flash by the fraction remaining. A copy in
+ * each file is a copy that drifts, and the symptom -- a flash that fades at a
+ * different rate than it lives -- is invisible until someone changes one.
+ *
+ * 한국어: weapon.c가 아니라 헤더에 두는 이유는 분리된 양쪽이 공유하기 때문입니다. 발사가
+ * ::Weapon::flash를 이 값으로 설정하고, ::wp_update가 그것을 감소시키며, weaponview.c가
+ * 남은 비율로 그려지는 화염을 사라지게 합니다. 파일마다 사본을 두면 어긋나게 되며, 그
+ * 증상(화염이 지속 시간과 다른 속도로 사라지는 것)은 누군가 한쪽을 고치기 전까지 보이지
+ * 않습니다.
+ */
+#define FLASH_TIME 0.075f
 
 /**
  * @brief Right-click with the axe: leap, then slam where you land.
@@ -773,80 +869,6 @@ void wp_update(Weapon *w, Pools *pl, float dt, int firing, v3 eye, float yaw, fl
    발사되며, 헤더 경계를 더 깔끔해 *보이게* 하려고 다섯 개 파일에 걸쳐 여섯 함수의 이름을
    바꾸는 것은 반대편에 읽는 사람이 없는 변경입니다. */
 
-/* --- Public function prototypes: rendering / 공개 함수 프로토타입: 렌더링 --- */
-
-/**
- * @brief Draws world-space effects: bullet holes, impact sparks, tracers and the tether.
- *
- * ENGLISH
- * -------
- * @param[in] w         Weapon whose effects are drawn.
- * @param[in] view_proj Combined view-projection matrix.
- * @param[in] cam_pos   Camera position, used to billboard sparks and to
- *                      orient the tether ribbon toward the viewer.
- * @param[in] cam_right Camera right basis vector.
- * @param[in] cam_up    Camera up basis vector.
- * @warning Requires a current GL context.
- *
- * 한국어
- * ------
- * @param[in] w         효과를 그릴 대상 무기.
- * @param[in] view_proj 뷰-투영 결합 행렬.
- * @param[in] cam_pos   카메라 위치. 스파크를 빌보드 처리하고 로프 리본을 시점
- *                      방향으로 정렬하는 데 사용됩니다.
- * @param[in] cam_right 카메라의 우측 기저 벡터.
- * @param[in] cam_up    카메라의 상향 기저 벡터.
- * @warning 활성 GL 컨텍스트가 필요합니다.
- */
-void wp_draw_world(const Weapon *w, mat4 view_proj,
-                   v3 cam_pos, v3 cam_right, v3 cam_up);
-
-/**
- * @brief Draws the gun itself over a cleared depth buffer so it never clips walls.
- *
- * ENGLISH
- * -------
- * @param[in] w      Weapon to draw.
- * @param[in] aspect Viewport aspect ratio.
- * @warning Clears the depth buffer as a side effect; call after all
- *          world geometry has been drawn.
- *
- * 한국어
- * ------
- * @param[in] w      그릴 무기.
- * @param[in] aspect 뷰포트 종횡비.
- * @warning 부수 효과로 깊이 버퍼를 지웁니다. 모든 월드 지오메트리를 그린 뒤에
- *          호출하십시오.
- */
-void wp_draw_view(const Weapon *w, float aspect);
-
-/**
- * @brief Draws the crosshair, sized to the current spread.
- *
- * ENGLISH
- * -------
- * @param[in] w      Weapon whose spread sets the crosshair size.
- * @param[in] aspect Viewport aspect ratio, keeping the crosshair square.
- *
- * 한국어
- * ------
- * @param[in] w      조준점 크기를 결정하는 산포도를 가진 무기.
- * @param[in] aspect 뷰포트 종횡비. 조준점을 정사각형으로 유지합니다.
- */
-/**
- * @param[in] hook_ready Non-zero to draw the hook's range brackets around the
- *                       crosshair. Pass the result of ::wp_hook_in_range.
- * @note Passed in rather than queried here so this stays a pure draw call:
- *       the range test traces the level, and a draw that silently does
- *       collision work is a surprise waiting to happen.
- * @param[in] hook_ready 0이 아니면 조준점 주위에 훅의 사거리 괄호를 그립니다.
- *                       ::wp_hook_in_range의 결과를 전달하십시오.
- * @note 이 함수를 순수한 그리기로 유지하기 위해 내부에서 조회하지 않고 인자로 받습니다.
- *       사거리 판정은 레벨을 탐색하며, 그리기 호출이 조용히 충돌 연산을 수행하는 것은
- *       언젠가 문제가 될 놀라움입니다.
- */
-void wp_draw_hud(const Weapon *w, float aspect, int hook_ready);
-
 /**
  * @brief Builds the model-to-view matrix for the gun.
  *
@@ -866,41 +888,80 @@ void wp_draw_hud(const Weapon *w, float aspect, int hook_ready);
  */
 mat4 wp_gun_matrix(const Weapon *w);
 
-/* --- Public function prototypes: asset reloading / 공개 함수 프로토타입: 에셋 재로드 --- */
+/* --- Public function prototypes: what the view half asks this one
+       / 공개 함수 프로토타입: 뷰 쪽이 이 파일에 묻는 것 --- */
 
 /**
- * @brief Uploads the named model as the gun mesh.
+ * @brief Re-projects a gun-local point into the world so effects leave the gun on screen.
  *
  * ENGLISH
  * -------
- * @param[in] name Model name to look up in the baked model text.
- * @note Called by ::wp_init; exposed so the preview tool can hot-swap models
- *       and so hot reload can rebuild it.
- * @warning Requires a current GL context.
+ * @param[in] w     Weapon supplying the live view model transform and camera.
+ * @param[in] local Point in gun-local space to project.
+ * @param[in] eye   Camera position.
+ * @param[in] right Camera right basis vector.
+ * @param[in] up    Camera up basis vector.
+ * @param[in] fwd   Camera forward basis vector.
+ * @return A world position that lines up with the drawn point on screen.
+ *
+ * @note The view model is drawn with its own, narrower projection, so no point
+ *       on it has an honest world position. To make an effect leave the gun
+ *       *on screen* anyway, this takes the point's normalised device
+ *       coordinates under the view-model projection and re-projects them into
+ *       the world camera at a fixed distance.
+ * @note Maths, not drawing, which is why it stayed on this side of the split:
+ *       the tracer that leaves the barrel is placed by the firing code, and
+ *       weaponview.c calls this for the tether's anchor.
+ * @note Reads ::Weapon::world_fov and ::Weapon::aspect, which ::wp_update sets.
+ *       Before the first ::wp_update those hold their defaults.
  *
  * 한국어
  * ------
- * @param[in] name 내장된 모델 텍스트에서 찾을 모델 이름.
- * @note ::wp_init이 호출합니다. 프리뷰 도구가 모델을 즉시 교체할 수 있도록,
- *       그리고 핫 리로드가 이를 재생성할 수 있도록 외부에 공개되어 있습니다.
- * @warning 활성 GL 컨텍스트가 필요합니다.
+ * @brief 총기 로컬 좌표의 점을 월드로 재투영하여, 효과가 화면상 총기에서 나가도록 합니다.
+ * @param[in] w     실시간 뷰 모델 변환과 카메라를 제공하는 무기.
+ * @param[in] local 투영할 총기 로컬 공간의 점.
+ * @param[in] eye   카메라 위치.
+ * @param[in] right 카메라의 우측 기저 벡터.
+ * @param[in] up    카메라의 상향 기저 벡터.
+ * @param[in] fwd   카메라의 전방 기저 벡터.
+ * @return 화면에 그려진 지점과 일치하는 월드 좌표.
+ *
+ * @note 뷰 모델은 더 좁은 자체 투영으로 그려지므로 그 위의 어떤 점도 정확한 월드 좌표를
+ *       갖지 않습니다. 그럼에도 효과가 *화면상* 총기에서 나가도록, 뷰 모델 투영 기준
+ *       정규화 장치 좌표를 구해 고정 거리에서 월드 카메라로 재투영합니다.
+ * @note 그리기가 아니라 수학이며, 그래서 분리 이후에도 이쪽에 남았습니다. 총열에서 나가는
+ *       예광탄은 발사 코드가 배치하고, weaponview.c는 로프의 고정점을 위해 호출합니다.
+ * @note ::wp_update가 설정하는 ::Weapon::world_fov와 ::Weapon::aspect를 읽습니다. 첫
+ *       ::wp_update 이전에는 기본값이 들어 있습니다.
  */
-void wp_set_model(const char *name);
+v3 wp_muzzle_world_at(const Weapon *w, v3 local, v3 eye, v3 right, v3 up, v3 fwd);
 
 /**
- * @brief Regenerates the gun texture from the current recipe text.
+ * @brief Where the hook launcher sits, in gun-local units.
  *
- * ENGLISH
- * -------
- * @warning Requires a current GL context. Replaces the existing texture, so
- *          any cached binding of it becomes stale.
+ * ENGLISH: Slung below and behind the barrel, so the tether does not leave
+ * from the same point the tracers do. Derived from ::Weapon::muzzle rather
+ * than authored separately, so moving the gun model moves both.
  *
- * 한국어
- * ------
- * @warning 활성 GL 컨텍스트가 필요합니다. 기존 텍스처를 교체하므로, 캐시된
- *          바인딩은 무효가 됩니다.
+ * 한국어: 총열 아래 뒤쪽에 매달려 있으므로, 로프는 예광탄과 같은 지점에서 나가지
+ * 않습니다. 따로 제작하지 않고 ::Weapon::muzzle에서 유도하므로, 총기 모델을 옮기면 둘 다
+ * 함께 움직입니다.
  */
-void wp_reload_texture(void);
+v3 wp_hook_muzzle(const Weapon *w);
+
+/**
+ * @brief Which sprite frame the view model should be drawing right now.
+ *
+ * ENGLISH: State, not drawing -- it reads the pump timer, the flash and the
+ * idle clock and picks a row from the animation tables. It stayed on this side
+ * of the split for that reason, and because ::weapon_sprite_frame_at exists to
+ * let a headless test check exactly this without a context.
+ *
+ * 한국어: 그리기가 아니라 상태입니다. 펌프 타이머와 화염과 대기 시계를 읽어 애니메이션
+ * 표에서 한 행을 고릅니다. 그 이유로 분리 이후 이쪽에 남았으며, ::weapon_sprite_frame_at이
+ * 헤드리스 테스트가 컨텍스트 없이 바로 이것을 검사하도록 존재하기 때문이기도 합니다.
+ */
+int wp_sprite_frame(const Weapon *w);
 
 #ifdef HOT_RELOAD
 /**

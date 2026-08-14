@@ -52,6 +52,7 @@
 #include "player.h"
 #include "weapon.h"
 #include "world.h"    /* World: ::scene_frame draws one, and only reads it */
+#include "weaponview.h" /* WeaponView: the drawn gun, owned here beside the atlases */
 
 /**
  * @struct Scene
@@ -94,6 +95,21 @@ typedef struct {
     MdlRange level_ranges[LVL_MAX_RANGES]; /**< One run per material. / 재질별 구간. */
     Mat      level_tex[LVL_MAX_RANGES];    /**< The material each run draws with. / 각 구간이 사용하는 재질. */
     int      level_range_count;         /**< Runs in use. / 사용 중인 구간의 수. */
+
+    /**
+     * @brief The drawn gun: its mesh, materials and the buffers they build in.
+     *
+     * ENGLISH: Owned here rather than by ::World because it is one gun per GL
+     * context, exactly like ::sprite_tex above -- two runs in one process draw
+     * the same shotgun. It was file-scope state in weapon.c, which is why that
+     * file needed a context and ::world_init could not call ::wp_init.
+     *
+     * 한국어: ::World가 아니라 이곳이 소유하는 이유는 이것이 GL 컨텍스트당 총 하나이기
+     * 때문이며, 위의 ::sprite_tex와 정확히 같습니다. 한 프로세스의 두 플레이는 같은
+     * 샷건을 그립니다. 이전에는 weapon.c의 파일 스코프 상태였고, 그래서 그 파일이
+     * 컨텍스트를 필요로 했으며 ::world_init이 ::wp_init을 호출할 수 없었습니다.
+     */
+    WeaponView wpview;
 } Scene;
 
 /* --- Lifecycle / 수명 주기 --- */
@@ -119,7 +135,7 @@ typedef struct {
  *       수행하게 됩니다.
  * @warning 활성 GL 컨텍스트가 필요합니다. 아틀라스가 이곳에서 업로드됩니다.
  */
-void scene_init(Scene *s);
+void scene_init(Scene *s, Weapon *w);
 
 /**
  * @brief Releases the buffers ::scene_init allocated.

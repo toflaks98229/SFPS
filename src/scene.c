@@ -251,7 +251,7 @@
    충분히 크며, 어느 쪽이든 종료 시 해제됩니다. */
 #define LEVEL_BUF_VERTS 16384
 
-void scene_init(Scene *s) {
+void scene_init(Scene *s, Weapon *w) {
     /* Sized from the cap of what each draws, so a full level never grows one
        mid-frame. mb_vtx drops vertices rather than growing, so a buffer that
        is too small loses geometry instead of allocating -- which is reported,
@@ -285,6 +285,14 @@ void scene_init(Scene *s) {
 
     s->sprite_tex = sprite_atlas();
     s->pickup_tex = pickup_atlas();
+
+    /* The gun, and the one fact that crosses back: loading the model is how
+       the Weapon learns where its barrel ends. `w` is what makes this
+       function take a Weapon at all -- see weaponview.h.
+       총이며, 되돌아 건너오는 하나의 사실입니다. 모델을 로드하는 것이 Weapon이 자기
+       총열이 어디서 끝나는지 알게 되는 경로입니다. 이 함수가 Weapon을 받는 이유가
+       `w`이며, weaponview.h를 참조하십시오. */
+    wpview_init(&s->wpview, w);
 }
 
 void scene_free(Scene *s) {
@@ -294,6 +302,7 @@ void scene_free(Scene *s) {
     mb_free(&s->shot_buf);
     mb_free(&s->hud_buf);
     mb_free(&s->level_buf);
+    wpview_free(&s->wpview);
 }
 
 /* ----------------------------------------------------------- level geometry */
@@ -1410,7 +1419,7 @@ void scene_frame(const World *w, Scene *sc, int vw, int vh, int frozen) {
        순서이기 때문입니다. */
     glDisable(GL_CULL_FACE);
     decal_draw(&w->pools, vp, eye_pos, cam.right, cam.up);
-    wp_draw_world(&w->weapon, vp, eye_pos, cam.right, cam.up);
+    wpview_draw_world(&sc->wpview, &w->weapon, vp, eye_pos, cam.right, cam.up);
 
     /* --- the gun, over a cleared depth buffer ---
        Dropped the moment the player dies. The view model is drawn in its own
@@ -1423,7 +1432,7 @@ void scene_frame(const World *w, Scene *sc, int vw, int vh, int frozen) {
        완벽히 수평으로 떠 있게 되는데, 그것은 그냥 없는 것보다 훨씬 요란한 표시입니다.
        죽은 손은 놓습니다. */
     glEnable(GL_CULL_FACE);
-    if (!w->run.dead) wp_draw_view(&w->weapon, aspect);
+    if (!w->run.dead) wpview_draw_view(&sc->wpview, &w->weapon, aspect);
 
     /* --- resolve the offscreen buffer to the window ---------------------
        A no-op when the effect is off or unavailable, in which case the frame
@@ -1448,12 +1457,12 @@ void scene_frame(const World *w, Scene *sc, int vw, int vh, int frozen) {
            패스들이 자체적으로 상태를 설정합니다. HUD는 원래 깊이 테스트를 필요로 하지
            않았으므로 이미 그렇게 하고 있었습니다. */
         /* The range test traces the level, so it happens here rather than
-           inside the draw call -- see the note on wp_draw_hud.
+           inside the draw call -- see the note on wpview_draw_hud.
            사거리 판정은 레벨을 탐색하므로 그리기 호출 내부가 아니라 이곳에서
-           수행합니다. wp_draw_hud의 참고 사항을 확인하십시오. */
+           수행합니다. wpview_draw_hud의 참고 사항을 확인하십시오. */
         int hook_ready = wp_hook_in_range(&w->weapon, &w->pools, &w->level,
                                           w->player.pos, w->yaw, w->pitch);
-        wp_draw_hud(&w->weapon, aspect, hook_ready);
+        wpview_draw_hud(&sc->wpview, &w->weapon, aspect, hook_ready);
         glEnable(GL_CULL_FACE);
     }
 

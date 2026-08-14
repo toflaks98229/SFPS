@@ -353,6 +353,47 @@ int main(void) {
         ok(!gun_moved, "and a weapon with a one-frame idle stays still");
     }
 
+    /* --- wp_init needs no GL context -------------------------------------
+       This is the property the weapon/weaponview split exists to produce, and
+       the only one of its claims a test can hold. There is no context in this
+       process -- no window, no gl_bootstrap, nothing -- so before the split
+       this call uploaded a texture through a null function pointer.
+       tools\hooktest.c worked around that by never calling wp_init and
+       building its Weapon with `= {0}`, which meant every hook fixture ran
+       against a weapon the game never produces: no belt, no rng seed, and
+       hook_enemy 0 rather than -1.
+
+       If this ever needs a context again, something drawable has moved back
+       into weapon.c, and the crash lands here rather than in a fixture that
+       looked unrelated.
+
+       wp_init에 GL 컨텍스트가 필요 없다는 것. weapon/weaponview 분리가 만들어 내려는 성질
+       자체이며, 그 주장 중 테스트가 붙잡을 수 있는 유일한 것입니다. 이 프로세스에는
+       컨텍스트가 없습니다. 창도, gl_bootstrap도 없습니다. 따라서 분리 이전에 이 호출은 널
+       함수 포인터를 통해 텍스처를 업로드했습니다. tools\hooktest.c는 wp_init을 아예
+       호출하지 않고 `= {0}`으로 Weapon을 만들어 우회했는데, 그것은 모든 훅 픽스처가 게임이
+       결코 만들지 않는 무기(탄약대 없음, 난수 시드 없음, hook_enemy가 -1이 아니라 0)를
+       대상으로 돌았다는 뜻입니다. */
+    {
+        Level lv = {0};
+        Weapon w;
+        wp_init(&w, &lv);
+
+        ok(w.level == &lv, "wp_init records the level with no GL context in the process");
+        ok(w.owned[WP_SHOTGUN] && w.ammo[WP_SHOTGUN] == WEAPON_START_AMMO,
+           "and hands over the boot belt");
+        ok(w.hook_enemy == -1, "and marks the hook as attached to nothing");
+        ok(w.rng != 0u, "and seeds the rng, which `= {0}` never did");
+
+        /* The muzzle a headless weapon fires from: no model has been loaded,
+           so this is the default rather than whatever a previous one left.
+           헤드리스 무기가 발사하는 총구입니다. 모델이 로드된 적 없으므로 이전 모델이 남긴
+           값이 아니라 기본값입니다. */
+        v3 d = WP_MUZZLE_DEFAULT;
+        ok(w.muzzle.x == d.x && w.muzzle.y == d.y && w.muzzle.z == d.z,
+           "and starts at the default muzzle, not at the camera origin");
+    }
+
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall weapon checks passed\n", fails);
     return fails != 0;
 }

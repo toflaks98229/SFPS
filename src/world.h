@@ -549,12 +549,12 @@ typedef enum {
  * -------
  * @param[out] w Zeroed and seeded. No level is loaded yet.
  *
- * @note Does NOT call ::wp_init, and that is deliberate twice over. ::wp_init
- *       uploads the view model's texture, so it needs a GL context the caller
- *       may not have -- which is exactly why a headless test can drive a World
- *       without one. A caller that does have a context must make the call
- *       before its first ::world_load_level, because loading releases the hook
- *       and ::wp_init is what zeroes the weapon it would be releasing.
+ * @note CALLS ::wp_init, which it could not do while weapon.c needed a GL
+ *       context to load the gun's model. The drawn gun is ::WeaponView now and
+ *       ::wp_init touches nothing but the ::Weapon, so a ::World brings up the
+ *       whole of itself -- and a headless test still drives one with no
+ *       context, which is what the old arrangement was protecting and what
+ *       this keeps for free.
  * @note Seeds the smoke rng and zeroes every clock, through ::run_reset, so a
  *       fresh start and a restart begin from a state one function produced.
  *
@@ -563,12 +563,12 @@ typedef enum {
  * @brief ::WORLD_START_LEVEL을 대상으로, 타이틀 화면 상태의 ::World를 준비합니다.
  * @param[out] w 0으로 초기화되고 기본값이 설정됩니다. 레벨은 아직 로드되지 않습니다.
  *
- * @note ::wp_init을 호출하지 *않으며*, 이는 두 가지 이유로 의도적입니다. ::wp_init은 뷰
- *       모델의 텍스처를 업로드하므로 호출자가 갖고 있지 않을 수도 있는 GL 컨텍스트를
- *       필요로 합니다. 그것이 바로 헤드리스 테스트가 컨텍스트 없이 World를 구동할 수 있는
- *       이유입니다. 컨텍스트를 가진 호출자는 첫 ::world_load_level 이전에 그 호출을 해야
- *       합니다. 로드가 훅을 해제하는데, 해제 대상인 무기를 0으로 초기화하는 것이
- *       ::wp_init이기 때문입니다.
+ * @note ::wp_init을 *호출합니다*. weapon.c가 총기 모델을 로드하기 위해 GL 컨텍스트를
+ *       필요로 하는 동안에는 그럴 수 없었습니다. 이제 그려지는 총은 ::WeaponView이고
+ *       ::wp_init은 ::Weapon 외에는 아무것도 건드리지 않으므로, ::World가 자기 자신
+ *       전부를 준비합니다. 그리고 헤드리스 테스트는 여전히 컨텍스트 없이 World를
+ *       구동합니다. 기존 방식이 지키려던 것이 그것이며, 이 변경은 그것을 공짜로
+ *       유지합니다.
  * @note ::run_reset을 통해 연기 난수의 시드를 설정하고 모든 시계를 0으로 만들므로, 새 시작과
  *       재시작이 하나의 함수가 만들어 낸 상태에서 출발합니다.
  */

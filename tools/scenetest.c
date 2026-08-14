@@ -62,7 +62,7 @@
 #include "post.h"
 #include "scene.h"    /* scene_frame -- the order under test */
 #include "world.h"
-#include "weapon.h"   /* wp_init: the view model needs a context, so WinMain
+#include "weapon.h"   /* the weapon's rules; scene_init takes one, so WinMain
                          does it separately from world_init and so does this */
 #include "font.h"
 #include "decal.h"
@@ -218,11 +218,14 @@ int main(void) {
         return 1;
     }
 
-    /* The same order WinMain brings things up in, for the same reasons. The
-       one that matters here is wp_init after the context and before the level
-       load, because it uploads the view model's texture.
-       WinMain이 같은 이유로 세우는 것과 같은 순서입니다. 이곳에서 중요한 것은 컨텍스트
-       이후, 레벨 로드 이전의 wp_init입니다. 뷰 모델의 텍스처를 업로드하기 때문입니다. */
+    /* The same order WinMain brings things up in, for the same reasons. What
+       used to matter here -- calling wp_init after the context and before the
+       level load, because it uploaded the view model's texture -- no longer
+       does: the drawn gun is scene_init's business now. See weaponview.h.
+       WinMain이 같은 이유로 세우는 것과 같은 순서입니다. 이곳에서 중요했던 것, 즉 뷰
+       모델의 텍스처를 업로드하므로 컨텍스트 이후이자 레벨 로드 이전에 wp_init을 호출해야
+       한다는 점은 더 이상 해당되지 않습니다. 그려지는 총은 이제 scene_init의 소관입니다.
+       weaponview.h를 참조하십시오. */
     rd_init();
     decal_init();
     menu_init(0);
@@ -250,12 +253,11 @@ int main(void) {
        것은 여전히 패스를 통과한 프레임입니다. */
     post_set_dither(12.0f, 0.0f, 0.0f);   /* NORMAL levels, Bayer, no grain */
 
-    Scene scene;
-    scene_init(&scene);
-
     static World w;
     world_init(&w);
-    wp_init(&w.weapon, &w.level);
+
+    Scene scene;
+    scene_init(&scene, &w.weapon);
     if (!world_load_level(&w, w.cur_level, WORLD_ENTER_NEW)) {
         printf("  world_load_level FAILED\n");
         return 1;

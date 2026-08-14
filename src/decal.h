@@ -138,6 +138,78 @@ typedef struct {
     v3 n;   /**< Which way it faces. / 자국이 향하는 방향. */
 } DecalPlace;
 
+/* --- What a run leaves behind / 플레이가 남기는 것 --- */
+
+/**
+ * @struct Mark
+ * @brief One bullet hole or blood splat left on a surface.
+ *
+ * ENGLISH
+ * -------
+ * @note `blood` selects the material: a hit on a monster splatters rather than
+ *       chipping the wall. It also selects the LIFETIME, which is the reason
+ *       the field is stored rather than re-derived at draw time -- see the
+ *       fades below.
+ *
+ * 한국어
+ * ------
+ * 표면에 남은 탄흔 또는 혈흔 하나입니다.
+ * @note `blood`가 재질을 결정합니다. 몬스터에 명중하면 벽이 파이는 대신 피가 튑니다. 또한
+ *       *수명*도 결정하며, 이 필드를 그리는 시점에 다시 유도하지 않고 저장해 두는 이유가
+ *       그것입니다. 아래의 페이드를 참조하십시오.
+ */
+typedef struct { v3 p, n; float life; int blood; } Mark;
+
+/**
+ * @struct Tracer
+ * @brief One short-lived line from the muzzle to a pellet's impact point.
+ * / 총구에서 산탄이 명중한 지점까지 이어지는 짧은 수명의 선 하나입니다.
+ */
+typedef struct { v3 a, b; float life; } Tracer;
+
+/**
+ * @struct DecalPool
+ * @brief The marks and tracers a run has left, owned by the caller.
+ *
+ * ONLY HALF OF THIS MODULE'S STATE IS HERE, and the split is the point. decal.c
+ * also holds two ::Mesh objects and the ::MeshBuf pair they are built from --
+ * GL names and heap allocations made by ::decal_init and destroyed by
+ * ::decal_free. Those stay where they are. They are one set of buffers per
+ * PROCESS, like the texture cache or the offscreen target, and a second World
+ * wants its own bullet holes but has no use for a second vertex buffer to draw
+ * them with.
+ *
+ * The rule that sorts them: would a second ::World want a second one? Two runs
+ * mean two sets of marks. They do not mean two GPUs.
+ *
+ * ::Mark and ::Tracer moved up here from decal.c to make this possible, which
+ * is the price of owning a pool by value rather than by handle. proj.h and
+ * pickup.h publish their element types for the same reason.
+ *
+ * 이 모듈 상태의 *절반만* 이곳에 있으며, 그 분리가 요점입니다. decal.c는 ::Mesh 두 개와
+ * 그것을 만드는 ::MeshBuf 쌍도 보유합니다. ::decal_init이 만들고 ::decal_free가 파괴하는 GL
+ * 이름과 힙 할당입니다. 그것들은 있던 자리에 남습니다. 텍스처 캐시나 오프스크린 타깃처럼
+ * *프로세스*당 한 벌이며, 두 번째 World는 자기 탄흔을 원하지 그것을 그릴 두 번째 정점 버퍼를
+ * 원하지 않습니다.
+ *
+ * 가르는 기준: 두 번째 ::World가 두 번째 것을 원하는가? 두 판의 플레이는 두 벌의 자국을
+ * 뜻하지만 두 개의 GPU를 뜻하지는 않습니다.
+ *
+ * 이것을 가능하게 하려고 ::Mark과 ::Tracer가 decal.c에서 이곳으로 올라왔습니다. 풀을 핸들이
+ * 아니라 값으로 소유하는 대가입니다. proj.h와 pickup.h도 같은 이유로 원소 타입을
+ * 공개합니다.
+ */
+typedef struct {
+    Mark   marks[DECAL_MAX_MARKS];      /**< Bullet holes and blood. / 탄흔과 혈흔. */
+    Tracer tracers[DECAL_MAX_TRACERS];  /**< The streaks a shot leaves. / 사격이 남기는 궤적. */
+    int    mark_next;                   /**< Ring cursor: the oldest is overwritten. / 링 커서. 가장 오래된 것을 덮어씁니다. */
+    int    tracer_next;                 /**< The same, for tracers. / 예광탄에 대해서도 같습니다. */
+} DecalPool;
+
+/* The bundle that holds this pool. See proj.h for why the calls take it. */
+typedef struct Pools Pools;
+
+
 /* --- API --- */
 
 /**
@@ -172,7 +244,7 @@ void decal_free(void);
  * @brief 모든 자국과 예광탄을 지웁니다.
  * @note 레벨 전환용입니다. 구멍은 그것이 박힌 벽에 속하며, 그 벽은 더 이상 존재하지 않습니다.
  */
-void decal_reset(void);
+void decal_reset(Pools *pl);
 
 /**
  * @brief Leaves a mark where something was hit.
@@ -194,7 +266,7 @@ void decal_reset(void);
  * @param[in] blood  맞은 대상이 몬스터이면 0이 아닙니다.
  * @return 자국이 놓인 자리. 그것과 일치해야 하는 이펙트를 위한 값입니다.
  */
-DecalPlace decal_hit(v3 end, v3 dir, v3 surf_n, int blood);
+DecalPlace decal_hit(Pools *pl, v3 end, v3 dir, v3 surf_n, int blood);
 
 /**
  * @brief Leaves a tracer line from a muzzle to where the shot ended.
@@ -210,7 +282,7 @@ DecalPlace decal_hit(v3 end, v3 dir, v3 surf_n, int blood);
  * @param[in] from 총구.
  * @param[in] to   명중 여부와 무관하게 사격이 멈춘 지점.
  */
-void decal_tracer(v3 from, v3 to);
+void decal_tracer(Pools *pl, v3 from, v3 to);
 
 /**
  * @brief Ages every mark and tracer, retiring the ones that run out.
@@ -229,7 +301,7 @@ void decal_tracer(v3 from, v3 to);
  * @note 월드의 dt로 호출되므로 월드가 멈추면 자국도 멈춥니다. 일시정지 메뉴 뒤에 공중에 멈춘
  *       예광탄은 게임이 멈춰 있는데도 돌아가고 있다고 말하는 셈입니다.
  */
-void decal_update(float dt);
+void decal_update(Pools *pl, float dt);
 
 /**
  * @brief Draws the marks, their sparks and the tracers.
@@ -259,7 +331,7 @@ void decal_update(float dt);
  *       빌보드입니다.
  * @note ::decal_init 이전에는 아무 동작도 하지 않습니다.
  */
-void decal_draw(mat4 view_proj, v3 cam_pos, v3 cam_right, v3 cam_up);
+void decal_draw(const Pools *pl, mat4 view_proj, v3 cam_pos, v3 cam_right, v3 cam_up);
 
 /**
  * @brief How many marks are still alive.
@@ -283,9 +355,9 @@ void decal_draw(mat4 view_proj, v3 cam_pos, v3 cam_right, v3 cam_up);
  *       모두 오직 이것을 통해서만 관측됩니다. 자국이 놓인 자리는 ::decal_hit이 보고하므로,
  *       둘을 합치면 헤드리스 테스트가 이 모듈 전체를 구동할 수 있습니다.
  */
-int decal_live_marks(void);
+int decal_live_marks(const Pools *pl);
 
 /** @brief How many tracers are still alive. / 아직 살아 있는 예광탄의 수. */
-int decal_live_tracers(void);
+int decal_live_tracers(const Pools *pl);
 
 #endif

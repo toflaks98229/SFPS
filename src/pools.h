@@ -69,6 +69,7 @@
 
 #include "proj.h"
 #include "pickup.h"
+#include "decal.h"
 
 /**
  * @struct Pools
@@ -85,6 +86,7 @@
 struct Pools {
     ProjPool   proj;     /**< Grenades and bolts in flight. / 비행 중인 유탄과 볼트. */
     PickupPool pickup;   /**< Items the level laid out, and which are left. / 레벨이 배치한 아이템과 남아 있는 것들. */
+    DecalPool  decal;    /**< The marks and tracers a shot leaves. / 사격이 남긴 자국과 예광탄. */
 };
 
 #endif

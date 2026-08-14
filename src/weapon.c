@@ -593,7 +593,7 @@ static v3 hook_muzzle(void) {
  *       명중 대상에 대해 정직하게 유지되면서도, 효과는 총열에서 나온 것처럼
  *       보입니다.
  */
-static void fire_hitscan(Weapon *w, v3 eye, float yaw, float pitch,
+static void fire_hitscan(Weapon *w, Pools *pl, v3 eye, float yaw, float pitch,
                          v3 *player_vel, int player_grounded) {
     float cy = cosf(yaw), sy = sinf(yaw);
     float cp = cosf(pitch), sp = sinf(pitch);
@@ -653,7 +653,7 @@ static void fire_hitscan(Weapon *w, v3 eye, float yaw, float pitch,
                자국이 어디로 갔는지는 decal.c의 결정입니다(피는 사수 쪽으로 당겨지고, 벽의
                자국은 표면에서 살짝 띄워집니다). 그리고 그 자리를 돌려받으므로, 아래의 제작된
                이펙트가 이곳에서 같은 오프셋을 다시 계산하는 대신 같은 지점에 놓입니다. */
-            DecalPlace at = decal_hit(end, dir, n, blood);
+            DecalPlace at = decal_hit(pl, end, dir, n, blood);
 
             /* The authored half of the same hit. The built-in mark and spark
                above stay: they are the shotgun's own feedback and are tuned
@@ -678,7 +678,7 @@ static void fire_hitscan(Weapon *w, v3 eye, float yaw, float pitch,
             }
         }
 
-        decal_tracer(muzzle, end);
+        decal_tracer(pl, muzzle, end);
     }
 
     audio_play("shot", 100);
@@ -916,7 +916,7 @@ static void attack(Weapon *w, Pools *pl, v3 eye, float yaw, float pitch,
                    v3 *player_vel, int player_grounded) {
     const WeaponType *S = wp_stats(w->cur);
 
-    if (S->pellets > 0)          fire_hitscan(w, eye, yaw, pitch, player_vel, player_grounded);
+    if (S->pellets > 0)          fire_hitscan(w, pl, eye, yaw, pitch, player_vel, player_grounded);
     else if (S->proj_speed > 0)  fire_projectile(w, pl, S, eye, yaw, pitch);
     else if (S->melee_range > 0) fire_melee(w, S, eye, yaw, pitch, player_vel);
 
@@ -986,7 +986,7 @@ void wp_update(Weapon *w, Pools *pl, float dt, int firing, v3 eye, float yaw, fl
        fx_update 옆이 아니라 이곳에서 노화시킵니다. 그래야 무기가 멈추는 바로 그때 자국도
        멈춥니다. 자국은 이번 프레임의 사격이 나이를 먹는 것이며, 사격을 진행시키지 않는
        프레임은 그 흔적도 진행시켜서는 안 됩니다. */
-    decal_update(dt);
+    decal_update(pl, dt);
 }
 
 /* ---------------------------------------------------------- world effects */

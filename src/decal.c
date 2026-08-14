@@ -4,46 +4,19 @@
  */
 
 #include "decal.h"
+#include "pools.h"
 #include "render.h"
 #include <math.h>
 
 /* --- File-local types / 파일 지역 타입 --- */
 
-/**
- * @struct Mark
- * @brief One bullet hole or blood splat left on a surface.
- *
- * ENGLISH
- * -------
- * @note `blood` selects the material: a hit on a monster splatters rather than
- *       chipping the wall. It also selects the LIFETIME, which is the reason
- *       the field is stored rather than re-derived at draw time -- see the
- *       fades below.
- *
- * 한국어
- * ------
- * 표면에 남은 탄흔 또는 혈흔 하나입니다.
- * @note `blood`가 재질을 결정합니다. 몬스터에 명중하면 벽이 파이는 대신 피가 튑니다. 또한
- *       *수명*도 결정하며, 이 필드를 그리는 시점에 다시 유도하지 않고 저장해 두는 이유가
- *       그것입니다. 아래의 페이드를 참조하십시오.
- */
-typedef struct { v3 p, n; float life; int blood; } Mark;
 
-/**
- * @struct Tracer
- * @brief One short-lived line from the muzzle to a pellet's impact point.
- * / 총구에서 산탄이 명중한 지점까지 이어지는 짧은 수명의 선 하나입니다.
- */
-typedef struct { v3 a, b; float life; } Tracer;
 
 /* --- Module state / 모듈 상태 --- */
 
 /** @brief Marks, overwritten oldest-first once full. / 자국. 가득 차면 오래된 것부터 덮어씁니다. */
-static Mark   g_marks[DECAL_MAX_MARKS];
 /** @brief Tracers, overwritten oldest-first once full. / 예광탄. 가득 차면 오래된 것부터 덮어씁니다. */
-static Tracer g_tracers[DECAL_MAX_TRACERS];
 /** @brief Write cursors into the two rings above. / 위 두 링의 쓰기 커서. */
-static int    g_mark_next, g_tracer_next;
 
 /** @brief Reusable GPU meshes for the billboards and the tracer lines. / 빌보드와 예광탄 선을 위한 재사용 GPU 메시. */
 static Mesh    g_fx_mesh, g_line_mesh;
@@ -104,15 +77,15 @@ void decal_free(void) {
     g_ready = 0;
 }
 
-void decal_reset(void) {
-    for (int i = 0; i < DECAL_MAX_MARKS;   i++) g_marks[i].life   = 0.0f;
-    for (int i = 0; i < DECAL_MAX_TRACERS; i++) g_tracers[i].life = 0.0f;
-    g_mark_next = g_tracer_next = 0;
+void decal_reset(Pools *pl) {
+    for (int i = 0; i < DECAL_MAX_MARKS;   i++) pl->decal.marks[i].life   = 0.0f;
+    for (int i = 0; i < DECAL_MAX_TRACERS; i++) pl->decal.tracers[i].life = 0.0f;
+    pl->decal.mark_next = pl->decal.tracer_next = 0;
 }
 
-DecalPlace decal_hit(v3 end, v3 dir, v3 surf_n, int blood) {
-    Mark *m = &g_marks[g_mark_next];
-    g_mark_next = (g_mark_next + 1) % DECAL_MAX_MARKS;
+DecalPlace decal_hit(Pools *pl, v3 end, v3 dir, v3 surf_n, int blood) {
+    Mark *m = &pl->decal.marks[pl->decal.mark_next];
+    pl->decal.mark_next = (pl->decal.mark_next + 1) % DECAL_MAX_MARKS;
 
     /* Blood sprays back toward the shooter; a wall mark sits on the surface,
        nudged off it so the mark wins the depth test.
@@ -128,36 +101,36 @@ DecalPlace decal_hit(v3 end, v3 dir, v3 surf_n, int blood) {
     return at;
 }
 
-void decal_tracer(v3 from, v3 to) {
-    Tracer *t = &g_tracers[g_tracer_next];
-    g_tracer_next = (g_tracer_next + 1) % DECAL_MAX_TRACERS;
+void decal_tracer(Pools *pl, v3 from, v3 to) {
+    Tracer *t = &pl->decal.tracers[pl->decal.tracer_next];
+    pl->decal.tracer_next = (pl->decal.tracer_next + 1) % DECAL_MAX_TRACERS;
     t->a = from;
     t->b = to;
     t->life = DECAL_TRACER_LIFE;
 }
 
-int decal_live_marks(void) {
+int decal_live_marks(const Pools *pl) {
     int n = 0;
     for (int i = 0; i < DECAL_MAX_MARKS; i++)
-        if (g_marks[i].life > 0.0f) n++;
+        if (pl->decal.marks[i].life > 0.0f) n++;
     return n;
 }
 
-int decal_live_tracers(void) {
+int decal_live_tracers(const Pools *pl) {
     int n = 0;
     for (int i = 0; i < DECAL_MAX_TRACERS; i++)
-        if (g_tracers[i].life > 0.0f) n++;
+        if (pl->decal.tracers[i].life > 0.0f) n++;
     return n;
 }
 
-void decal_update(float dt) {
+void decal_update(Pools *pl, float dt) {
     for (int i = 0; i < DECAL_MAX_MARKS; i++)
-        if (g_marks[i].life > 0.0f) g_marks[i].life -= dt;
+        if (pl->decal.marks[i].life > 0.0f) pl->decal.marks[i].life -= dt;
     for (int i = 0; i < DECAL_MAX_TRACERS; i++)
-        if (g_tracers[i].life > 0.0f) g_tracers[i].life -= dt;
+        if (pl->decal.tracers[i].life > 0.0f) pl->decal.tracers[i].life -= dt;
 }
 
-void decal_draw(mat4 view_proj, v3 cam_pos, v3 cam_right, v3 cam_up) {
+void decal_draw(const Pools *pl, mat4 view_proj, v3 cam_pos, v3 cam_right, v3 cam_up) {
     if (!g_ready) return;
 
     rd_mvp(view_proj);
@@ -179,20 +152,20 @@ void decal_draw(mat4 view_proj, v3 cam_pos, v3 cam_right, v3 cam_up) {
 
     int n_live = 0;
     for (int i = 0; i < DECAL_MAX_MARKS; i++) {
-        if (g_marks[i].life <= 0.0f) continue;
-        v3 n = g_marks[i].n;
+        if (pl->decal.marks[i].life <= 0.0f) continue;
+        v3 n = pl->decal.marks[i].n;
         /* Any vector not parallel to n gives us a tangent basis. */
         v3 hint = (n.y > 0.9f || n.y < -0.9f) ? v3f(1, 0, 0) : v3f(0, 1, 0);
         v3 t = v3norm(v3cross(hint, n));
         v3 b = v3cross(n, t);
-        mb_billboard(&g_fx_buf, g_marks[i].p, t, b, 0.085f, 0.085f);
+        mb_billboard(&g_fx_buf, pl->decal.marks[i].p, t, b, 0.085f, 0.085f);
         order[n_live++] = i;
     }
     if (n_live) {
         mesh_upload(&g_fx_mesh, &g_fx_buf, 1);
         glBindVertexArray(g_fx_mesh.vao);
         for (int k = 0; k < n_live; k++) {
-            const Mark *m = &g_marks[order[k]];
+            const Mark *m = &pl->decal.marks[order[k]];
             float a = m->life / mark_span(m);
             if (a > 1.0f) a = 1.0f;
             /* Blood stains dark red where a wall hole is near-black. */
@@ -210,20 +183,20 @@ void decal_draw(mat4 view_proj, v3 cam_pos, v3 cam_right, v3 cam_up) {
 
     int sn = 0;
     for (int i = 0; i < DECAL_MAX_MARKS; i++) {
-        if (g_marks[i].life <= 0.0f) continue;
-        if (mark_span(&g_marks[i]) - g_marks[i].life > DECAL_SPARK_TIME) continue;
+        if (pl->decal.marks[i].life <= 0.0f) continue;
+        if (mark_span(&pl->decal.marks[i]) - pl->decal.marks[i].life > DECAL_SPARK_TIME) continue;
         /* Billboarded to the camera, and scaled with distance so a far hit
            stays legible instead of shrinking to a single pixel. */
-        float dist = v3len(v3sub(g_marks[i].p, cam_pos));
+        float dist = v3len(v3sub(pl->decal.marks[i].p, cam_pos));
         float size = 0.12f + dist * 0.012f;
-        mb_billboard(&g_fx_buf, g_marks[i].p, cam_right, cam_up, size, size);
+        mb_billboard(&g_fx_buf, pl->decal.marks[i].p, cam_right, cam_up, size, size);
         order[sn++] = i;
     }
     if (sn) {
         mesh_upload(&g_fx_mesh, &g_fx_buf, 1);
         glBindVertexArray(g_fx_mesh.vao);
         for (int k = 0; k < sn; k++) {
-            const Mark *m = &g_marks[order[k]];
+            const Mark *m = &pl->decal.marks[order[k]];
             float age = mark_span(m) - m->life;
             float a   = 1.0f - age / DECAL_SPARK_TIME;
             /* A red puff on flesh, a warm spark on stone. */
@@ -238,8 +211,8 @@ void decal_draw(mat4 view_proj, v3 cam_pos, v3 cam_right, v3 cam_up) {
 
     int tn = 0;
     for (int i = 0; i < DECAL_MAX_TRACERS; i++) {
-        if (g_tracers[i].life <= 0.0f) continue;
-        mb_line(&g_line_buf, g_tracers[i].a, g_tracers[i].b);
+        if (pl->decal.tracers[i].life <= 0.0f) continue;
+        mb_line(&g_line_buf, pl->decal.tracers[i].a, pl->decal.tracers[i].b);
         order[tn++] = i;
     }
     if (tn) {
@@ -247,7 +220,7 @@ void decal_draw(mat4 view_proj, v3 cam_pos, v3 cam_right, v3 cam_up) {
         glBindVertexArray(g_line_mesh.vao);
         glLineWidth(2.0f);
         for (int k = 0; k < tn; k++) {
-            float a = g_tracers[order[k]].life / DECAL_TRACER_LIFE;
+            float a = pl->decal.tracers[order[k]].life / DECAL_TRACER_LIFE;
             rd_color(1.0f, 0.82f, 0.42f, a * 0.9f);
             glDrawArrays(GL_LINES, k * 2, 2);
         }

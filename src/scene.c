@@ -1409,7 +1409,7 @@ void scene_frame(const World *w, Scene *sc, int vw, int vh, int frozen) {
        이유는 이 둘이 원래 한 함수 안에서 그 순서로 있었고, 작성된 순서가 곧 올바르게 블렌딩되는
        순서이기 때문입니다. */
     glDisable(GL_CULL_FACE);
-    decal_draw(vp, eye_pos, cam.right, cam.up);
+    decal_draw(&w->pools, vp, eye_pos, cam.right, cam.up);
     wp_draw_world(&w->weapon, vp, eye_pos, cam.right, cam.up);
 
     /* --- the gun, over a cleared depth buffer ---

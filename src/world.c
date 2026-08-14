@@ -18,6 +18,7 @@
  */
 
 #include "world.h"
+#include "hook.h"
 #include "enemy.h"
 #include "pickup.h"
 #include "proj.h"

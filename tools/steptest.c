@@ -24,12 +24,19 @@
 #include <math.h>
 
 #include "world.h"
+#include "hook.h"
 #include "enemy.h"    /* enemy_reset -- the monster pool is global, and shared */
 #include "pickup.h"   /* pickup_spawn_level, for the same reason */
 #include "proj.h"     /* proj_reset, likewise */
 #include "door.h"     /* door_reset, and the DOOR_* axes */
 #include "diag.h"     /* diag_count -- a stale door is counted, not printed */
 #include "txt.h"      /* txt_copy -- walking the level chain by name */
+/* level_geometry, to fill the light cache the checks below watch being
+   dropped. CPU side only: mb_init/mb_free need no GL context, and only
+   mesh_upload would.
+   아래 검사들이 버려지는 것을 지켜보는 라이트 캐시를 채우기 위한 level_geometry입니다.
+   CPU 측뿐이며 mb_init/mb_free는 GL 컨텍스트가 필요 없습니다. */
+#include "render.h"
 
 #define DT     (1.0f / 60.0f)
 #define ASPECT 1.7777f          /* 16:9. Only the muzzle solve reads it. */
@@ -899,6 +906,91 @@ int main(void) {
         float gap = apex[0] - apex[1];
         if (gap < 0) gap = -gap;
         okf(gap < 0.05f, "and the two agree with each other", gap, 0.05f);
+    }
+
+    /* --- the baked light belongs to the level it was traced against -------
+       ::level_geometry keeps each vertex's static light under that vertex's
+       position and normal, so a door moving does not re-trace what did not
+       move. The cost of that is a rule: a reading is only valid for the level
+       it was taken in, and a level that becomes a DIFFERENT level has to drop
+       every one of them. A missed path does not crash and does not look wrong
+       in the code -- it lights the new map with the old map's shadows, which
+       is plausible enough to walk past.
+
+       The reset lives inside ::level_load, which is the one place a Level can
+       become another Level, so every path below should already be covered.
+       That is a reason to believe it, not a reason not to check it: the same
+       shape of fault has been in this project before, when a `!s->n` guard was
+       copied to two places and fixed in one.
+
+       Checked from here rather than from leveltest because these are WORLD
+       paths -- a restart, a stage transition, a fresh run -- and world.c is
+       what owns them.
+
+       ::level_geometry는 각 정점의 정적 조명을 그 정점의 위치와 법선 아래 보관하여, 문이
+       움직여도 움직이지 않은 것을 다시 판정하지 않게 합니다. 그 대가는 하나의 규칙입니다.
+       판정 결과는 그것을 얻은 레벨에서만 유효하며, *다른* 레벨이 된 레벨은 그 전부를 버려야
+       합니다. 놓친 경로는 죽지도 않고 코드상 틀려 보이지도 않습니다. 새 맵을 옛 맵의
+       그림자로 밝히며, 그것은 그냥 지나칠 만큼 그럴듯합니다.
+
+       리셋은 ::level_load 안에 있고 그곳이 Level이 다른 Level이 될 수 있는 유일한
+       지점이므로, 아래의 모든 경로는 이미 덮여 있어야 합니다. 그것은 믿을 이유이지 검사하지
+       않을 이유가 아닙니다. 같은 형태의 결함이 이 프로젝트에 이미 있었습니다. `!s->n` 가드가
+       두 곳에 복사되어 한 곳만 고쳐졌을 때입니다.
+
+       leveltest가 아니라 이곳에서 검사하는 이유는 이것들이 *월드* 경로이기 때문입니다.
+       재시작, 스테이지 전환, 새 플레이이며, 그것들을 소유하는 것은 world.c입니다. */
+    printf("\n  --- the light cache belongs to one level ---\n");
+    {
+        static World w;
+        MeshBuf b;
+        mb_init(&b, 32768);
+
+        /* Fills the cache, so that a path which forgot to drop it would be
+           carrying something to notice. Asserting emptiness after a reset that
+           was already empty proves nothing.
+           캐시를 채웁니다. 그래야 버리기를 잊은 경로가 눈에 띌 무언가를 들고 있게 됩니다.
+           이미 비어 있던 것을 리셋한 뒤 비었다고 단언하는 것은 아무것도 증명하지
+           않습니다. */
+        world_init(&w);
+        world_load_level(&w, w.cur_level, WORLD_ENTER_NEW);
+        level_geometry(&b, &w.level, 0, 0);
+        int filled = level_light_cache_count();
+        ok(filled > 0, "a build fills the cache, so an empty one means something");
+
+        /* 1. A fresh load. */
+        world_load_level(&w, w.cur_level, WORLD_ENTER_NEW);
+        ok(level_light_cache_count() == 0, "loading a level drops the cache");
+
+        /* 2. A restart, which replays the stage the player is in. */
+        level_geometry(&b, &w.level, 0, 0);
+        world_restart(&w);
+        ok(level_light_cache_count() == 0, "and so does a restart");
+
+        /* 3. A stage transition. step_between loads the next level once the
+              intermission clock runs out, so this drives it the way a frame
+              does rather than calling the loader directly.
+              step_between은 인터미션 시계가 끝나면 다음 레벨을 로드하므로, 로더를 직접
+              호출하지 않고 프레임이 하는 방식으로 구동합니다. */
+        level_geometry(&b, &w.level, 0, 0);
+        int before_stage = level_light_cache_count();
+
+        w.run.between      = 1;
+        w.run.between_time = 0.0f;
+        txt_copy(w.run.entering, sizeof(w.run.entering),
+                 w.level.next, (int)strlen(w.level.next));
+
+        Input in = {0};
+        in.paused = 0;
+        for (int i = 0; i < 200 && w.run.between; i++)
+            world_step(&w, &in, 1.6f, 1.0f / 60.0f);
+
+        ok(before_stage > 0 && !w.run.between,
+           "the intermission ran out and loaded the next stage");
+        ok(level_light_cache_count() == 0,
+           "and a stage transition drops the cache too");
+
+        mb_free(&b);
     }
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall frame-order checks passed\n", fails);

@@ -150,6 +150,68 @@ int main(int argc, char **argv) {
     static Level lv;
     if (!level_load(level_name, &lv)) { printf("no level '%s'\n", level_name); return 1; }
 
+    /* `-door <0..100>` opens every door in the level that far before the
+     * geometry is built, and `-yaw <degrees>` turns the camera off the spawn
+     * heading. Both exist for the same question, which nothing in this project
+     * could previously answer: WHAT DOES AN OPEN DOOR LOOK LIKE?
+     *
+     * That stopped being rhetorical when the light bake landed. A level's
+     * lamps are compiled into its vertices at load, and the vertices a door
+     * did not move keep the light they were given -- so a door opening onto a
+     * lit room no longer brightens the room behind it. That is Quake's
+     * behaviour and it is a deliberate trade, but "deliberate" is an argument
+     * and an argument is not an observation. A dark doorway reads as a fault
+     * to whoever walks up to it, and the only way to find out whether this one
+     * does is to look at it.
+     *
+     * The doors are moved exactly as door.c's apply() moves them, which is
+     * copied logic and worth saying so: this tool has no DoorState, no touch
+     * test and no keys, and reproducing those to take a photograph would be
+     * building the door system twice.
+     *
+     * `-door <0..100>`은 지오메트리를 만들기 전에 레벨의 모든 문을 그만큼 열고,
+     * `-yaw <도>`는 카메라를 스폰 방향에서 돌립니다. 둘 다 같은 질문을 위해 있으며, 이
+     * 프로젝트의 어떤 것도 이전에는 답할 수 없던 질문입니다. *열린 문은 어떻게 보이는가?*
+     *
+     * 조명 베이크가 들어오면서 그것은 수사적 질문이기를 그쳤습니다. 레벨의 등은 로드 시
+     * 정점에 구워지고, 문이 움직이지 않은 정점은 받았던 빛을 유지합니다. 따라서 밝은 방으로
+     * 열리는 문이 더 이상 뒤쪽 방을 밝히지 않습니다. 이는 Quake의 동작이며 의도된 거래이지만,
+     * "의도"는 논증이고 논증은 관찰이 아닙니다. 어두운 문간은 그 앞에 선 사람에게 결함으로
+     * 읽히며, 이 문간이 그런지 알아내는 유일한 방법은 보는 것입니다.
+     *
+     * 문은 door.c의 apply()가 움직이는 것과 정확히 같게 움직입니다. 복제된 논리이며 그렇다고
+     * 말해 둘 가치가 있습니다. 이 도구에는 DoorState도, 접촉 판정도, 열쇠도 없고, 사진 한 장을
+     * 찍기 위해 그것을 재현하는 것은 문 시스템을 두 번 만드는 일입니다. */
+    float door_t = 0.0f;
+    for (int i = 2; i + 1 < argc; i++)
+        if (argv[i][0] == '-' && argv[i][1] == 'd' && argv[i][2] == 'o')
+            door_t = (float)atoi(argv[i + 1]) / 100.0f;
+
+    if (door_t > 0.0f) {
+        if (door_t > 1.0f) door_t = 1.0f;
+        int nd = lv.n_doors > LVL_MAX_DOORS ? LVL_MAX_DOORS : lv.n_doors;
+        for (int i = 0; i < nd; i++) {
+            const DoorDef *d = &lv.doors[i];
+            if (d->sector < 0 || d->sector >= lv.n_sectors) continue;
+            Sector *s = &lv.sectors[d->sector];
+            switch (d->axis) {
+            case DOOR_UP:   s->ceil  = (short)(s->ceil  + d->amount * door_t); break;
+            case DOOR_DOWN: s->floor = (short)(s->floor - d->amount * door_t); break;
+            case DOOR_X:
+            case DOOR_Z: {
+                int off = (d->axis == DOOR_X) ? 0 : 1;
+                for (int k = 0; k < s->n; k++)
+                    s->pts[k*2 + off] = (short)(s->pts[k*2 + off] + d->amount * door_t);
+                level_bounds(s);
+                break;
+            }
+            default: break;
+            }
+        }
+        level_grid_build(&lv);
+        printf("  %d door(s) opened to %.0f%%\n", nd, door_t * 100.0f);
+    }
+
     MeshBuf  mb;  mb_init(&mb, 16384);
     Mesh     mesh = {0};
     MdlRange ranges[LVL_MAX_RANGES];
@@ -162,6 +224,15 @@ int main(int argc, char **argv) {
        the shot frames whatever the author pointed the start at. */
     Player p = {0};
     float yaw = player_spawn(&p, &lv);
+
+    /* `-yaw <degrees>` turns off the spawn heading. The author points a start
+       at whatever the level opens with, which is rarely the door somebody
+       needs to photograph.
+       `-yaw <도>`는 스폰 방향에서 돌립니다. 제작자는 시작 지점을 레벨이 열리는 광경 쪽으로
+       두며, 그것이 누군가 촬영해야 하는 문인 경우는 드뭅니다. */
+    for (int i = 2; i + 1 < argc; i++)
+        if (argv[i][0] == '-' && argv[i][1] == 'y')
+            yaw += (float)atoi(argv[i + 1]) * 0.0174533f;
 
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
@@ -181,9 +252,17 @@ int main(int argc, char **argv) {
        정확한 순간에 죽으며 스크린샷 키를 준비하지 않고도 자세를 확인할 수 있습니다.
        이징과 세 상수는 main.c가 쓰는 것이며 사본이 아닙니다. 미리보기 대상과 어긋난
        미리보기는 없느니만 못합니다. */
+    /* `-de`, not `-d`: `-door` begins with the same letter and used to match
+       this test too, so asking for an open door also asked for the death
+       collapse and the shot came back rolled 35 degrees. A one-letter flag
+       test is fine until the second flag starting with that letter arrives.
+       `-d`가 아니라 `-de`입니다. `-door`가 같은 글자로 시작해서 이 검사에도 걸렸고, 그래서
+       문을 열어 달라는 요청이 쓰러짐 연출까지 함께 요청하여 촬영이 35도 기울어진 채로
+       돌아왔습니다. 한 글자짜리 플래그 검사는 그 글자로 시작하는 두 번째 플래그가 나타나기
+       전까지만 괜찮습니다. */
     float death_k = 0.0f;
     for (int i = 2; i + 1 < argc; i++)
-        if (argv[i][0] == '-' && argv[i][1] == 'd')
+        if (argv[i][0] == '-' && argv[i][1] == 'd' && argv[i][2] == 'e')
             death_k = (float)atoi(argv[i + 1]) / 100.0f;
 
     v3    eye_pos   = p.pos;
@@ -287,8 +366,10 @@ int main(int argc, char **argv) {
     {
         DWORD n = GetModuleFileNameA(0, path, MAX_PATH);
         while (n > 0 && path[n - 1] != '\\') n--;
-        if (has_fx) wsprintfA(path + n, "fx_%s.png", argv[2]);
-        else          wsprintfA(path + n, "dither_duotone_%03d.png", d100);
+        if (has_fx)            wsprintfA(path + n, "fx_%s.png", argv[2]);
+        else if (door_t > 0.0f) wsprintfA(path + n, "door_%s_%03d.png",
+                                          level_name, (int)(door_t * 100.0f + 0.5f));
+        else                    wsprintfA(path + n, "dither_duotone_%03d.png", d100);
     }
 
     if (write_png(path, px, SHOT_W, SHOT_H))

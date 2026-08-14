@@ -270,7 +270,52 @@ typedef struct {
     short key;      /**< A KEY_* mask, or ::KEY_NONE. / KEY_* 마스크 또는 ::KEY_NONE. */
 } DoorDef;
 
-#define LVL_MAX_LIGHTS  8
+/**
+ * @brief How many lamps one level may declare.
+ *
+ * ENGLISH
+ * -------
+ * Was 8, and was 8 because ::RD_MAX_LIGHTS was: lighting was point lights
+ * evaluated per fragment, so a lamp the shader could not hold was a lamp the
+ * level did not have. The static bake ended that. A level's lamps are compiled
+ * into its vertices when it loads -- all of them, shadowed -- and the shader
+ * never sees one, so this cap now answers a different question: how many can
+ * an author place before the load gets slow?
+ *
+ * 64, matching ::LVL_MAX_SECTORS, because the case that raised it is a level
+ * where every sector carries its own brightness -- which is what a converted
+ * Doom map is. One lamp per sector is the shape that data arrives in.
+ *
+ * @note What this costs is `.bss` and load time, never frame time. The bake is
+ *       a ray per vertex per lamp IN RANGE, so a level of many small lamps
+ *       costs far less than the product suggests: the radius test rejects most
+ *       pairs before anything is traced.
+ * @note Lamps past this are parsed and dropped, and that is reported through
+ *       ::DIAG_LIGHT_CAP. A room darker than its author intended gives no hint
+ *       that a cap was the cause.
+ *
+ * 한국어
+ * ------
+ * @brief 한 레벨이 선언할 수 있는 등의 개수입니다.
+ *
+ * 8이었고, 8이었던 이유는 ::RD_MAX_LIGHTS가 8이었기 때문입니다. 조명이 프래그먼트마다
+ * 평가되는 점광원이었으므로, 셰이더가 담을 수 없는 등은 곧 레벨에 없는 등이었습니다. 정적
+ * 베이크가 그것을 끝냈습니다. 레벨의 등은 로드될 때 정점에 구워지며(그림자까지 포함해 전부)
+ * 셰이더는 하나도 보지 않으므로, 이 상한은 이제 다른 질문에 답합니다. 로드가 느려지기
+ * 전까지 제작자가 몇 개를 놓을 수 있는가?
+ *
+ * ::LVL_MAX_SECTORS와 같은 64입니다. 이 값을 올리게 만든 사례가 *섹터마다 자기 밝기를 지닌*
+ * 레벨이고, 변환된 Doom 맵이 바로 그것이기 때문입니다. 섹터당 등 하나가 그 데이터가 도착하는
+ * 형태입니다.
+ *
+ * @note 이것이 치르는 비용은 `.bss`와 로드 시간이며 프레임 시간은 결코 아닙니다. 베이크는
+ *       정점마다 *사거리 안의* 등마다 광선 하나이므로, 작은 등이 많은 레벨은 곱이 시사하는
+ *       것보다 훨씬 적게 듭니다. 반경 검사가 무엇을 판정하기도 전에 대부분의 쌍을
+ *       기각합니다.
+ * @note 이를 넘는 등은 파싱되되 버려지며 ::DIAG_LIGHT_CAP으로 보고됩니다. 제작자의 의도보다
+ *       어두운 방은 상한이 원인이라는 단서를 주지 않기 때문입니다.
+ */
+#define LVL_MAX_LIGHTS  64
 #define LVL_MAT         16     ///< @brief Maximum length of a material or entity kind name. / 재질 또는 엔티티 종류 이름의 최대 길이.
 
 /**
@@ -948,6 +993,128 @@ void level_grid_build(Level *l);
  *          누락시킵니다. 이것이 바로 ::LVL_MAX_RANGES가 방지하려는 버그입니다.
  */
 int level_geometry(MeshBuf *b, const Level *l, MdlRange *ranges, int max_ranges);
+
+/**
+ * @brief Forgets every vertex the light bake has cached.
+ *
+ * ENGLISH
+ * -------
+ * ::level_geometry bakes each vertex's static light against the level and
+ * keeps the answer under that vertex's position and normal, so that a door
+ * moving -- which rebuilds the whole level's geometry -- does not re-trace the
+ * 80% of vertices that came back to exactly where they were. See level.c for
+ * why the key is sufficient and what the cache deliberately stops following.
+ *
+ * ::level_load calls this, which covers the game: a level becoming a different
+ * level is the only thing that invalidates a reading, and that is the one
+ * place it can happen.
+ *
+ * @note An editor that moves a LIGHT rather than a wall has to call this
+ *       itself. The cache is keyed on the vertex, not on the lamp, so nothing
+ *       about moving a lamp tells it that anything changed -- the level would
+ *       keep the lighting it had until it was reloaded. Rebuild cost is not a
+ *       concern where an author is waiting for the picture anyway.
+ * @warning Not needed for a door, a switch, or anything else that moves a
+ *          sector at runtime. Calling it there gives back exactly the
+ *          per-frame cost this exists to remove.
+ *
+ * 한국어
+ * ------
+ * @brief 라이트 베이크가 캐시한 모든 정점을 잊습니다.
+ *
+ * ::level_geometry는 각 정점의 정적 조명을 레벨에 대해 굽고 그 답을 해당 정점의 위치와
+ * 법선 아래에 보관합니다. 그래서 레벨 지오메트리 전체를 다시 만드는 문의 움직임이, 정확히
+ * 있던 자리로 되돌아온 80%의 정점을 다시 판정하지 않게 됩니다. 왜 그 키로 충분한지, 그리고
+ * 캐시가 의도적으로 무엇을 따라가지 않게 되는지는 level.c를 참조하십시오.
+ *
+ * ::level_load가 이것을 호출하며, 그것으로 게임은 충분합니다. 판정 결과를 무효로 만드는
+ * 것은 레벨이 다른 레벨이 되는 일뿐이고, 그 일이 일어날 수 있는 곳이 그곳 하나입니다.
+ *
+ * @note 벽이 아니라 *광원*을 옮기는 에디터는 이것을 직접 호출해야 합니다. 캐시의 키는
+ *       등이 아니라 정점이므로, 등을 옮긴 사실은 캐시에 아무것도 알려 주지 않습니다.
+ *       레벨은 다시 로드할 때까지 이전 조명을 유지하게 됩니다. 어차피 제작자가 화면을
+ *       기다리는 상황에서 재생성 비용은 문제가 되지 않습니다.
+ * @warning 문이나 스위치, 그 밖에 런타임에 섹터를 움직이는 것에는 필요하지 *않습니다*.
+ *          그곳에서 호출하면 이것이 없애려는 프레임별 비용을 그대로 되돌려받습니다.
+ */
+void level_light_cache_reset(void);
+
+/**
+ * @brief How many vertices the light cache is holding. For tests and tools.
+ * @brief 라이트 캐시가 보유 중인 정점의 수입니다. 테스트와 도구용입니다.
+ */
+int level_light_cache_count(void);
+
+/**
+ * @brief How many slots the cache was built with, and how many bytes of .bss
+ *        that came to.
+ *
+ * ENGLISH
+ * -------
+ * Both are compile-time constants, reported through a call so that a test can
+ * branch on the size it was actually built with rather than on a macro it
+ * would have to be given a second copy of. build.ps1 compiles a second
+ * leveltest with the slot count forced small, and the same source has to make
+ * opposite assertions in the two binaries: one that the table overflowed, one
+ * that it did not.
+ *
+ * The byte figure is the honest cost of the cache and belongs in the commit
+ * that introduces it. It is `.bss`, so the floppy budget does not count it --
+ * but the machine does.
+ *
+ * 한국어
+ * ------
+ * @brief 캐시가 몇 개의 슬롯으로 만들어졌는지, 그리고 그것이 `.bss` 몇 바이트인지입니다.
+ *
+ * 둘 다 컴파일 타임 상수이지만 호출로 보고합니다. 테스트가 매크로의 두 번째 사본을
+ * 받아야 하는 대신 *실제로 빌드된 크기*를 기준으로 분기할 수 있게 하기 위함입니다.
+ * build.ps1은 슬롯 수를 작게 강제한 두 번째 leveltest를 컴파일하며, 같은 소스가 두
+ * 바이너리에서 정반대의 단언을 해야 합니다. 하나는 테이블이 넘쳤다고, 다른 하나는 넘치지
+ * 않았다고.
+ *
+ * 바이트 수치는 이 캐시의 정직한 비용이며 그것을 도입하는 커밋에 들어가야 합니다.
+ * `.bss`이므로 플로피 예산은 세지 않지만, 기계는 셉니다.
+ */
+int level_light_cache_slots(void);
+int level_light_cache_bytes(void);
+
+/**
+ * @brief Turns the light cache off, leaving ::level_geometry to trace every
+ *        vertex the way it did before the cache existed.
+ *
+ * ENGLISH
+ * -------
+ * Exists so that the claim the cache rests on can be RUN rather than asserted
+ * in a comment: that a build with an empty cache comes out identical, vertex
+ * for vertex, to a build with no cache at all. Those are two different code
+ * paths -- one looks up and stores, the other does neither -- and nothing
+ * makes them agree except the key being sufficient. tools\leveltest.c builds
+ * both and compares them.
+ *
+ * @note Not a setting. The game never calls this, and a build that did would
+ *       pay the full bake on every frame a door moved.
+ * @warning Switching it back on does not repopulate anything. The table keeps
+ *          whatever it held when it was switched off, which is why the test
+ *          resets around it rather than relying on the toggle to clear it.
+ *
+ * 한국어
+ * ------
+ * @brief 라이트 캐시를 끄고, ::level_geometry가 캐시가 있기 전처럼 모든 정점을 판정하게
+ *        합니다.
+ *
+ * 캐시가 딛고 선 주장을 주석 속 단언이 아니라 *실행할 수 있는 것*으로 만들기 위해
+ * 존재합니다. 빈 캐시로 만든 결과가 캐시가 아예 없는 결과와 정점 하나까지 동일하다는
+ * 주장입니다. 그 둘은 서로 다른 코드 경로이며(한쪽은 찾아보고 저장하고, 다른 쪽은 둘 다 하지
+ * 않습니다) 키가 충분하다는 사실 외에는 그 둘을 일치시키는 것이 없습니다.
+ * tools\leveltest.c가 양쪽을 만들어 비교합니다.
+ *
+ * @note 설정이 아닙니다. 게임은 이것을 호출하지 않으며, 호출하는 빌드는 문이 움직이는 매
+ *       프레임마다 전체 베이크 비용을 치르게 됩니다.
+ * @warning 다시 켜도 아무것도 다시 채우지 않습니다. 껐을 때 담고 있던 것을 그대로 유지하며,
+ *          그래서 테스트는 이 토글이 비워 주기를 기대하지 않고 그 주위에서 직접
+ *          리셋합니다.
+ */
+void level_light_cache_enable(int on);
 
 /* --- Public function prototypes: queries / 공개 함수 프로토타입: 조회 --- */
 

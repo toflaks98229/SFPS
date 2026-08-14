@@ -153,6 +153,24 @@ typedef enum {
      */
     DIAG_MON_TABLE,
     DIAG_PASS_ORDER,    /**< A draw was made on the wrong side of the world/UI pass boundary. / 월드/UI 패스 경계의 잘못된 쪽에서 그리기가 수행되었습니다. */
+
+    /**
+     * @brief The baked-light cache filled up; the surplus vertices re-trace.
+     *
+     * ENGLISH: Costs frame time rather than correctness -- a vertex that
+     * cannot be cached is traced against the level exactly as it was before
+     * the cache existed, so the picture is identical and the door that moved
+     * is merely as expensive as it used to be. It is worth counting because
+     * that is a cost with no symptom: the level looks right and the frame is
+     * slow, which is the hardest pair to connect by eye.
+     *
+     * 한국어: 정확성이 아니라 프레임 시간의 문제입니다. 캐시에 넣지 못한 정점은 캐시가
+     * 없던 시절과 똑같이 레벨에 대해 판정되므로 화면은 동일하고, 움직인 문이 예전만큼
+     * 비싸질 뿐입니다. 세어 둘 가치가 있는 이유는 이것이 *증상이 없는* 비용이기
+     * 때문입니다. 레벨은 멀쩡해 보이는데 프레임만 느리며, 눈으로 이어 붙이기 가장 어려운
+     * 조합입니다.
+     */
+    DIAG_LIGHT_CACHE,
     DIAG_COUNT          /**< Number of counters. / 카운터의 개수. */
 } DiagKind;
 

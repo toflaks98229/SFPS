@@ -23,6 +23,7 @@
 #include <math.h>
 #include "player.h"
 #include "weapon.h"
+#include "hook.h"
 #include "level.h"
 #include "enemy.h"
 /* The ribbon checks at the end build real MeshBuf geometry, so this one

@@ -42,6 +42,7 @@
  *       MOMENTUM 블록을 가리키고 있습니다.
  */
 #include "weapon.h"
+#include "hook.h"
 #include "level.h"
 #include "enemy.h"
 #include "audio.h"

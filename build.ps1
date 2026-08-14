@@ -144,12 +144,49 @@ function Invoke-ToolBuild([string]$name, [string[]]$extraDefines = @(), [string]
 # -Tools sweep picks them up automatically.
 $toolVariants = @{
     'textest' = @{ Defines = @('-DMAX_CACHED=4'); Suffix = '_tinycache' }
+
+    # The baked-light cache, forced smaller than the level that fills it needs.
+    # That level is arena, not the much larger dm03: the cache only ever holds
+    # vertices a lamp reached, and dm03 has no lamps at all. arena wants 353
+    # keys, so 256 slots makes it overflow partway through and the "table full:
+    # trace anyway, store nothing, count it" path runs instead of never.
+    # leveltest asserts the opposite in each binary -- that it overflowed here,
+    # and that it did not in the normal one.
+    # 베이크 조명 캐시를, 그것을 채우는 레벨이 필요로 하는 것보다 작게 강제합니다. 그 레벨은
+    # 훨씬 큰 dm03이 아니라 arena입니다. 캐시가 담는 것은 등이 닿은 정점뿐인데 dm03에는 등이
+    # 하나도 없기 때문입니다. arena는 키 353개를 원하므로 256 슬롯이면 도중에 넘치고,
+    # "테이블이 가득 참: 그래도 판정하고, 저장하지 않고, 센다" 경로가 결코 실행되지 않는
+    # 대신 실행됩니다.
+    'leveltest' = @{ Defines = @('-DLIGHT_CACHE_SLOTS=256'); Suffix = '_tinylcache' }
 }
 
 if ($Tool) {
     Invoke-ToolBuild $Tool
+
+    # The variant is rebuilt here too, not only in the -Tools sweep. A variant
+    # that is only refreshed by the full sweep goes stale the moment somebody
+    # iterates on the source with -Tool, and a stale test binary does not
+    # announce itself -- it reports on code that is no longer there. That cost
+    # a mutation check its result once: a deliberate fault was introduced, the
+    # variant was not rebuilt, and the old binary passed.
+    # 변형 바이너리도 -Tools 스윕에서만이 아니라 이곳에서 다시 만듭니다. 전체 스윕으로만
+    # 갱신되는 변형은 누군가 -Tool로 소스를 반복 수정하는 순간 낡아 버리며, 낡은 테스트
+    # 바이너리는 스스로를 알리지 않습니다. 더 이상 존재하지 않는 코드에 대해 보고합니다.
+    # 이것이 변형 검증 하나의 결과를 망쳤습니다. 일부러 결함을 넣었는데 변형이 다시 만들어지지
+    # 않아 옛 바이너리가 통과했습니다.
+    # Held before the variant build overwrites it: what -Tool launches is the
+    # tool that was asked for, not the last thing that happened to compile.
+    # 변형 빌드가 덮어쓰기 전에 붙잡아 둡니다. -Tool이 실행하는 것은 요청받은 도구이지 마침
+    # 마지막으로 컴파일된 것이 아닙니다.
+    $wanted = $script:lastToolExe
+
+    if ($toolVariants.ContainsKey($Tool)) {
+        $v = $toolVariants[$Tool]
+        Invoke-ToolBuild $Tool $v.Defines $v.Suffix
+    }
+
     Write-Host "`nLaunching $Tool..." -ForegroundColor Cyan
-    & $script:lastToolExe
+    & $wanted
     return
 }
 
@@ -279,7 +316,15 @@ if ($Debug) {
     Write-Host ("  -> {0}  (hot reload: edits under assets\ appear live)" -f $exe) `
                -ForegroundColor Green
 } else {
-    & (Join-Path $root 'size.ps1')
+    # -UpdateReadme, so the figure quoted in README.md is the one this build
+    # just measured. Only on a release build: a -Debug binary carries symbols
+    # and is not what the budget describes, and writing its size into the
+    # README would put a number there that no shipped build ever had.
+    # -UpdateReadme를 주어 README.md에 인용된 수치가 이번 빌드가 방금 측정한 값이 되게
+    # 합니다. 릴리스 빌드에서만입니다. -Debug 바이너리는 심볼을 포함하며 예산이 설명하는
+    # 대상이 아니므로, 그 크기를 README에 쓰면 어떤 출하 빌드도 가진 적 없는 숫자를 그곳에
+    # 두게 됩니다.
+    & (Join-Path $root 'size.ps1') -UpdateReadme
 }
 
 if ($Tools) {

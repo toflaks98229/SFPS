@@ -84,8 +84,26 @@
    상한만 올려야 합니다. 초과분은 파싱되고 저장된 뒤 그리기 시점에 조용히 무시됩니다.
    제작자가 작성한 것보다 어두운 방이 되며 그 이유를 알려 주는 것은 없습니다. 이 파일이
    두 헤더를 모두 참조하므로 검사를 이곳에 둡니다. */
-_Static_assert(RD_MAX_LIGHTS >= LVL_MAX_LIGHTS,
-               "the shader must be able to evaluate every light a level can declare");
+/* The two caps used to be tied together, and this file used to assert it: the
+   shader had to be able to evaluate every light a level could declare, because
+   evaluating them was the only way they were applied.
+
+   That is no longer what happens. A level's lights are baked into the vertices
+   when it loads, so the shader never sees them, and the number of them a level
+   may declare has nothing to do with how many uniform slots exist. The two are
+   now independent on purpose -- ::LVL_MAX_LIGHTS is a .bss and load-time cost,
+   ::RD_MAX_LIGHTS is a per-fragment one -- and an assert tying them would be
+   the thing standing between a level and its sixty-fourth lamp.
+
+   두 상한은 한때 서로 묶여 있었고 이 파일이 그것을 단언했습니다. 셰이더가 레벨이 선언할 수
+   있는 모든 광원을 평가할 수 있어야 했는데, 평가가 그것을 적용하는 유일한 방법이었기
+   때문입니다.
+
+   이제는 그렇지 않습니다. 레벨의 광원은 로드될 때 정점에 구워지므로 셰이더는 그것을 결코
+   보지 않으며, 레벨이 선언할 수 있는 개수는 유니폼 슬롯이 몇 개인지와 아무 관계가 없습니다.
+   이제 둘은 의도적으로 독립입니다. ::LVL_MAX_LIGHTS는 .bss와 로드 시점의 비용이고
+   ::RD_MAX_LIGHTS는 프래그먼트마다의 비용입니다. 둘을 묶는 단언은 레벨과 그 64번째 등
+   사이를 가로막는 것이 됩니다. */
 
 /* ----------------------------------------------------------------- parser */
 
@@ -241,6 +259,18 @@ int level_load(const char *name, Level *out) {
     const char *p = data_text(DATA_LEVELS);
     int found = 0, len;
     Sector *cur = 0;
+
+    /* The baked light belongs to the level it was traced against, and a new
+       level puts different walls between the same coordinates and a lamp.
+       Cleared here rather than by the caller because this is the one place a
+       level can become a different one, and a cache nobody remembered to drop
+       would light the new map with the old map's shadows -- correct-looking
+       geometry lit by a building that is no longer there.
+       구워진 빛은 그것이 판정된 레벨에 속하며, 새 레벨은 같은 좌표와 등 사이에 다른 벽을
+       놓습니다. 호출자가 아니라 이곳에서 비우는 이유는 레벨이 다른 레벨이 될 수 있는 곳이
+       이곳뿐이기 때문입니다. 아무도 비울 것을 기억하지 못한 캐시는 새 맵을 옛 맵의 그림자로
+       밝히게 됩니다. 멀쩡해 보이는 지오메트리가 더 이상 없는 건물의 그림자를 쓰는 것입니다. */
+    level_light_cache_reset();
 
     out->n_sectors = 0;
     out->n_ents = 0;
@@ -919,6 +949,30 @@ static int subtract_tri(Piece *pieces, int n, const P2 *t,
     return n_out;
 }
 
+/* Does this sector's bounding box overlap the box [x0,x1] x [z0,z1]?
+ *
+ * File units, and inclusive on both ends: two sectors that share an edge have
+ * boxes that touch exactly, and rejecting a neighbour for touching rather than
+ * overlapping would drop the cut where every real cut is.
+ *
+ * A sector with no bounds answers YES rather than NO. It has no outline to
+ * intersect, so it costs one wasted loop; answering NO would make the reject
+ * decide something it does not know.
+ *
+ * 파일 단위이며 양 끝을 포함합니다. 모서리를 공유하는 두 섹터의 박스는 정확히 맞닿으며,
+ * 겹침이 아니라 맞닿음을 이유로 이웃을 기각하면 실제 절단점이 있는 바로 그 자리의 절단점을
+ * 버리게 됩니다.
+ *
+ * 경계값이 없는 섹터는 아니오가 아니라 *예*로 답합니다. 교차시킬 외곽선이 없으므로 헛도는
+ * 루프 한 번의 비용이 들 뿐이며, 아니오로 답하면 기각이 자신이 알지 못하는 것을 결정하게
+ * 됩니다. */
+static int sector_box_meets(const Sector *o, int x0, int z0, int x1, int z1) {
+    if (!o->has_bounds) return 1;
+    if (o->max_x < x0 || o->min_x > x1) return 0;
+    if (o->max_z < z0 || o->min_z > z1) return 0;
+    return 1;
+}
+
 /* Triangulates a sector's outline at height y. Ear clipping lives in render.c
    for the extrusion caps, so mb_polygon is borrowed rather than copied. */
 static int cap_triangles(MeshBuf *tmp, const Sector *s, float y, int up) {
@@ -936,8 +990,33 @@ static void add_cap(MeshBuf *b, MeshBuf *tmp, const Level *l, int si,
     mb_reset(tmp);
     int mine = cap_triangles(tmp, s, y, up);
     int clip_first = tmp->count;
-    for (int j = si + 1; j < l->n_sectors; j++)
+
+    /* Only the later sectors that could actually overlap this one. A sector
+       whose box does not meet this sector's box cannot remove any of its
+       floor, so triangulating it here produces clip triangles that
+       subtract_tri will reject one at a time, for every triangle of this cap.
+       Rejecting the whole sector once instead is the same answer and is what
+       keeps a large map's build from being quadratic in sectors.
+
+       Exact, not conservative: a piece of floor can only be cut away by an
+       outline that covers it, and an outline that covers it has a box that
+       meets this one.
+
+       실제로 겹칠 수 있는 뒤쪽 섹터만 처리합니다. 박스가 이 섹터의 박스와 만나지 않는
+       섹터는 이 바닥에서 아무것도 제거할 수 없으므로, 이곳에서 삼각형화하면 subtract_tri가
+       이 바닥의 삼각형마다 하나씩 기각하게 될 클리핑 삼각형만 만들어 냅니다. 섹터 전체를
+       한 번에 기각하는 것은 같은 답이면서, 큰 맵의 생성이 섹터 수에 2차가 되지 않게
+       합니다.
+
+       보수적인 것이 아니라 정확합니다. 바닥 조각은 그것을 덮는 외곽선에 의해서만 잘려
+       나가며, 그것을 덮는 외곽선의 박스는 이 박스와 만납니다. */
+    for (int j = si + 1; j < l->n_sectors; j++) {
+        if (s->has_bounds
+            && !sector_box_meets(&l->sectors[j],
+                                 s->min_x, s->min_z, s->max_x, s->max_z))
+            continue;
         cap_triangles(tmp, &l->sectors[j], y, 1);
+    }
     int clips = (tmp->count - clip_first) / 3;
 
     v3 nrm = v3f(0.0f, up ? 1.0f : -1.0f, 0.0f);
@@ -1101,18 +1180,46 @@ v3 level_edge_normal(const Level *l, int sector, int edge) {
     return edge_normal(&l->sectors[sector], edge);
 }
 
+
 /* Where every other sector's outline crosses this edge, as parameters along
-   it. These are the only places the answer to "what is beyond?" can change,
-   so they are exactly where the edge has to be cut. */
+ * it. These are the only places the answer to "what is beyond?" can change,
+ * so they are exactly where the edge has to be cut.
+ *
+ * REJECTED BY BOUNDING BOX FIRST, and that is what makes this affordable at
+ * the format's limit. Without it the loop below is every edge against every
+ * other sector's every edge -- quadratic in sectors and quadratic again in
+ * points -- which levelbench measured at 3.8ms for the converted Freedoom map,
+ * 23% of a 60fps frame, on a rebuild that also happens whenever a door moves.
+ *
+ * The test is exact rather than conservative: an intersection point lies on
+ * both segments, so it lies inside both boxes, so two boxes that do not meet
+ * cannot produce one. Nothing is traded for the speed here.
+ *
+ * 먼저 바운딩 박스로 기각하며, 그것이 형식의 상한에서 이 함수를 감당할 만하게 만드는
+ * 것입니다. 그것이 없으면 아래 루프는 모든 모서리를 다른 모든 섹터의 모든 모서리와
+ * 비교합니다. 섹터 수에 2차이고 점 수에 다시 2차이며, levelbench가 변환된 Freedoom 맵에서
+ * 3.8ms, 60fps 프레임의 23%로 측정한 값입니다. 게다가 그 재생성은 문이 움직일 때마다
+ * 일어납니다.
+ *
+ * 이 판정은 보수적인 것이 아니라 *정확합니다*. 교차점은 두 선분 위에 있으므로 두 박스
+ * 안에도 있으며, 따라서 만나지 않는 두 박스는 교차점을 만들 수 없습니다. 이곳의 속도는
+ * 무엇과도 교환하지 않았습니다. */
 static int edge_cuts(const Level *l, int si, int e, float *t, int max) {
     const Sector *s = &l->sectors[si];
     int j = (e + 1) % s->n;
     float ax = s->pts[e*2] * U, az = s->pts[e*2+1] * U;
     float dx = s->pts[j*2] * U - ax, dz = s->pts[j*2+1] * U - az;
 
+    /* The edge's own box, in the file units the sector bounds are kept in. */
+    int ex0 = s->pts[e*2],   ex1 = s->pts[j*2];
+    int ez0 = s->pts[e*2+1], ez1 = s->pts[j*2+1];
+    if (ex0 > ex1) { int tmp = ex0; ex0 = ex1; ex1 = tmp; }
+    if (ez0 > ez1) { int tmp = ez0; ez0 = ez1; ez1 = tmp; }
+
     int n = 0;
     for (int k = 0; k < l->n_sectors && n < max; k++) {
         if (k == si) continue;
+        if (!sector_box_meets(&l->sectors[k], ex0, ez0, ex1, ez1)) continue;
         const Sector *o = &l->sectors[k];
         for (int i = 0; i < o->n && n < max; i++) {
             int m = (i + 1) % o->n;
@@ -1236,9 +1343,237 @@ int level_edge_spans(const Level *l, int si, int e, EdgeSpan *out, int max) {
  * 몬스터가 보는 것과 *같은* 판정으로 그림자를 처리하므로, 벽 뒤의 등이 앞의 방을 밝히지
  * 않습니다. 그 판정이 비싼 부분이며 프레임마다가 아니라 로드 시 정점당 광원당 한 번
  * 돌아갑니다. */
+/* ------------------------------------------------ the baked-light cache
+ *
+ * ENGLISH
+ * -------
+ * A door moves sectors, the drawn geometry has to follow, and following it
+ * means running the bake above again -- over EVERY vertex, on EVERY frame the
+ * door is in motion, however far from the door they are. levelbench measures
+ * what that costs: on `arena` the bake is 0.92ms of a 0.97ms rebuild, 5.5% of
+ * a 60fps frame, paid for the whole of a door's travel.
+ *
+ * Almost all of that work computes an answer it has already computed. When a
+ * door moves, the level is re-triangulated from scratch and the triangle list
+ * comes out different -- but the VERTICES mostly do not move. tools\leveltest.c
+ * measures this too: with arena's doors at half travel, 79.9% of the vertices
+ * sit exactly where a vertex already sat.
+ *
+ * So the cache is keyed on where a vertex is and which way it faces, and on
+ * nothing else. That is the whole of what the bake reads about a vertex, which
+ * is what makes the key sufficient rather than merely convenient.
+ *
+ * WHY NOT SPLIT THE MESH INSTEAD. The obvious alternative is to build the
+ * door-owned surfaces separately and never rebuild the rest. It was tried and
+ * measured before this was written, and it is much worse HERE: ::add_cap
+ * subtracts every later-declared sector's outline from the floor it is
+ * triangulating, so a sliding door re-carves the floor of every room it passes
+ * over, and a rule that is safe has to call 76.7% of arena moving. The split
+ * reasons about which surfaces MIGHT change; this asks which vertices DID.
+ *
+ * @note An empty cache reproduces the old behaviour exactly, vertex for
+ *       vertex, which is why a level looks the same on the frame it loads as
+ *       it always did.
+ * @warning What the cache changes is that a vertex which does not move keeps
+ *          the light it was given, so an opening door no longer spills baked
+ *          light into the room beyond it. That is Quake's behaviour rather
+ *          than a regression from it -- a lightmap does not change because a
+ *          door moved -- and the per-frame relight this replaces was a side
+ *          effect of rebuilding everything, never a decision.
+ *
+ * 한국어
+ * ------
+ * 문이 섹터를 움직이면 그려지는 지오메트리가 따라가야 하고, 따라간다는 것은 위의 베이크를
+ * 다시 돌린다는 뜻입니다. 문이 움직이는 *매 프레임*, 문에서 아무리 멀리 있든 *모든* 정점에
+ * 대해서 말입니다. levelbench가 그 비용을 잽니다. `arena`에서 0.97ms짜리 재생성 중
+ * 0.92ms가 베이크이며, 60fps 프레임의 5.5%를 문이 움직이는 내내 치릅니다.
+ *
+ * 그 일의 거의 전부가 이미 계산한 답을 다시 계산합니다. 문이 움직이면 레벨은 처음부터 다시
+ * 삼각형화되고 삼각형 목록은 달라져 나오지만, *정점*은 대부분 움직이지 않습니다.
+ * tools\leveltest.c가 이것도 잽니다. arena의 문이 절반쯤 열린 상태에서 정점의 79.9%가
+ * 이미 정점이 있던 자리에 그대로 놓입니다.
+ *
+ * 그래서 캐시의 키는 정점이 어디에 있고 어느 쪽을 향하는지, 그리고 그 외에는 아무것도
+ * 아닙니다. 베이크가 한 정점에 대해 읽는 것이 그게 전부이며, 그 사실이 이 키를 편리한 것이
+ * 아니라 *충분한* 것으로 만듭니다.
+ *
+ * 왜 메시를 분할하지 않았는가. 자명한 대안은 문이 소유한 표면을 따로 만들고 나머지는 다시
+ * 만들지 않는 것입니다. 이 글을 쓰기 전에 시도하고 측정했으며, *이곳에서는* 훨씬
+ * 나쁩니다. ::add_cap은 삼각형화 중인 바닥에서 뒤에 선언된 모든 섹터의 외곽선을 빼므로,
+ * 미끄러지는 문은 지나가는 모든 방의 바닥을 다시 깎아 내고, 안전한 규칙은 arena의 76.7%를
+ * 움직인다고 불러야 합니다. 분할은 어느 표면이 바뀔 *수도 있는지*를 추론하고, 이것은 어느
+ * 정점이 실제로 바뀌었는지를 묻습니다.
+ *
+ * @note 빈 캐시는 이전 동작을 정점 하나까지 그대로 재현합니다. 레벨이 로드되는 프레임에
+ *       늘 그랬던 것과 똑같아 보이는 이유입니다.
+ * @warning 캐시가 바꾸는 것은, 움직이지 않은 정점이 받았던 빛을 그대로 유지한다는 점이며,
+ *          따라서 열리는 문이 더 이상 구워진 빛을 너머의 방으로 흘려보내지 않습니다.
+ *          이는 그로부터의 퇴보가 아니라 Quake의 동작입니다. 라이트맵은 문이 움직였다고
+ *          바뀌지 않습니다. 그리고 이것이 대체하는 프레임별 재조명은 전부를 다시 만드는
+ *          일의 부작용이었을 뿐, 결정이었던 적이 없습니다.
+ */
+
+/* Power of two, and comfortably above what a level reaches: the largest map in
+   hand builds 3,222 vertices, so this stays under half full and the linear
+   probe below stays short. Lives in .bss, which the floppy budget does not
+   count -- see the size report's "on disk?" column.
+   2의 거듭제곱이며 레벨이 도달하는 값보다 넉넉히 큽니다. 손에 든 가장 큰 맵이 정점 3,222개를
+   만들므로 절반도 차지 않고, 아래의 선형 탐사도 짧게 유지됩니다. .bss에 있으며, 플로피
+   예산은 .bss를 세지 않습니다. */
+/* Overridable from the build, so a second binary can be compiled with a table
+   too small for the level it loads. A cap that cannot be reached is a cap that
+   has never been tested, and the overflow path below -- trace anyway, store
+   nothing, count it -- is exactly the kind of code that is written once and
+   then never executed again. build.ps1 builds leveltest_tinylcache for this,
+   the same way it builds textest_tinycache.
+   빌드에서 재정의할 수 있게 하여, 로드하는 레벨에 비해 너무 작은 테이블로 두 번째
+   바이너리를 컴파일할 수 있게 합니다. 도달할 수 없는 상한은 시험된 적 없는 상한이며,
+   아래의 초과 경로(그래도 판정하고, 저장하지 않고, 센다)는 한 번 작성된 뒤 다시는
+   실행되지 않는 종류의 코드입니다. */
+#ifndef LIGHT_CACHE_SLOTS
+#define LIGHT_CACHE_SLOTS 8192
+#endif
+
+/* The probe below masks with SLOTS-1 instead of dividing, which is only the
+   same thing for a power of two. Checked here rather than trusted, because an
+   override that is not one would not fail -- it would silently visit a subset
+   of the table and look like a cache with a poor hit rate.
+   아래의 탐사는 나눗셈 대신 SLOTS-1로 마스크하며, 이는 2의 거듭제곱일 때만 같은
+   연산입니다. 신뢰하지 않고 이곳에서 검사하는 이유는, 거듭제곱이 아닌 재정의가 실패하지
+   않고 테이블의 일부만 조용히 방문하여 적중률 나쁜 캐시처럼 보이기 때문입니다. */
+_Static_assert((LIGHT_CACHE_SLOTS & (LIGHT_CACHE_SLOTS - 1)) == 0,
+               "LIGHT_CACHE_SLOTS must be a power of two");
+
+typedef struct {
+    float px, py, pz;   /**< Where the vertex was. / 정점이 있던 자리. */
+    float nx, ny, nz;   /**< Which way it faced. Zero means the slot is empty. / 향하던 방향. 0이면 빈 슬롯입니다. */
+    float lr, lg, lb;   /**< What the bake produced there. / 그곳에서 베이크가 만든 값. */
+} LightSlot;
+
+static LightSlot g_lcache[LIGHT_CACHE_SLOTS];
+static int       g_lcache_used;
+
+/* Switched off, ::bake_light is the function it was before the cache existed:
+   every vertex traced, nothing looked up, nothing kept. That is not a debug
+   convenience -- it is the only way to state the claim this whole thing rests
+   on as something a test can run. "An empty cache reproduces the old
+   behaviour, vertex for vertex" was a sentence in a comment until there was a
+   way to build BOTH and compare them.
+   꺼 두면 ::bake_light는 캐시가 있기 전의 그 함수입니다. 모든 정점을 판정하고, 아무것도
+   찾아보지 않고, 아무것도 남기지 않습니다. 이는 디버그 편의가 아니라, 이 모든 것이 딛고 선
+   주장을 테스트가 실행할 수 있는 형태로 진술하는 유일한 방법입니다. "빈 캐시는 이전 동작을
+   정점 하나까지 재현한다"는 *양쪽을 다 만들어 비교할 방법*이 생기기 전까지는 주석 속
+   문장이었습니다. */
+static int g_lcache_on = 1;
+
+/* A normal is always unit length, so all-zero cannot be a real entry and needs
+   no separate occupancy flag or clearing pass beyond zeroing the table.
+   법선은 언제나 단위 길이이므로 전부 0인 값은 실제 항목일 수 없으며, 테이블을 0으로 만드는
+   것 외에 별도의 사용 플래그도 초기화 순회도 필요하지 않습니다. */
+static int slot_empty(const LightSlot *s) {
+    return s->nx == 0.0f && s->ny == 0.0f && s->nz == 0.0f;
+}
+
+static unsigned light_hash(const Vtx *v) {
+    const float *f = &v->px;
+    unsigned h = 2166136261u;
+    for (int k = 0; k < 6; k++) {          /* px..nz -- position and normal */
+        /* Through a union rather than a cast: the compiler may assume a float
+           and an unsigned never alias, and reading one through a pointer to
+           the other is where that assumption bites.
+           캐스트가 아니라 공용체를 거칩니다. 컴파일러는 float와 unsigned가 서로
+           앨리어싱하지 않는다고 가정해도 되며, 한쪽을 다른 쪽의 포인터로 읽는 것이 바로 그
+           가정이 무는 지점입니다. */
+        union { float f; unsigned u; } cv;
+        cv.f = f[k];
+        h = (h ^ cv.u) * 16777619u;
+    }
+    return h;
+}
+
+static int light_same(const LightSlot *s, const Vtx *v) {
+    return s->px == v->px && s->py == v->py && s->pz == v->pz
+        && s->nx == v->nx && s->ny == v->ny && s->nz == v->nz;
+}
+
+void level_light_cache_reset(void) {
+    for (int i = 0; i < LIGHT_CACHE_SLOTS; i++) {
+        g_lcache[i].nx = g_lcache[i].ny = g_lcache[i].nz = 0.0f;
+    }
+    g_lcache_used = 0;
+}
+
+int level_light_cache_count(void) { return g_lcache_used; }
+int level_light_cache_slots(void) { return LIGHT_CACHE_SLOTS; }
+int level_light_cache_bytes(void) { return (int)sizeof(g_lcache); }
+
+void level_light_cache_enable(int on) {
+    g_lcache_on = on ? 1 : 0;
+}
+
+/* Finds the slot this vertex belongs in: the one holding it, or the first free
+   one after its hash. Returns -1 only when the table is full and the vertex is
+   not in it, which is the case DIAG_LIGHT_CACHE counts.
+   이 정점이 속할 슬롯을 찾습니다. 그것을 담고 있는 슬롯이거나, 해시 이후 첫 번째 빈
+   슬롯입니다. -1은 테이블이 가득 찼고 그 정점이 안에 없을 때만 반환하며, 그 경우를
+   DIAG_LIGHT_CACHE가 셉니다. */
+static int light_slot(const Vtx *v) {
+    unsigned i = light_hash(v) & (LIGHT_CACHE_SLOTS - 1);
+    for (int probe = 0; probe < LIGHT_CACHE_SLOTS; probe++) {
+        LightSlot *s = &g_lcache[i];
+        if (slot_empty(s))       return (int)i;
+        if (light_same(s, v))    return (int)i;
+        i = (i + 1) & (LIGHT_CACHE_SLOTS - 1);
+    }
+    return -1;
+}
+
 static void bake_light(MeshBuf *b, const Level *l, int first) {
+    /* A level with no lamps bakes nothing, so there is nothing to look up and
+       nothing worth remembering. Without this the cache charges such a level
+       a hash and a probe per vertex to be told what it already knew -- which
+       is most of the imported Freedoom map, and measurable: levelbench put it
+       at 0.08ms of a 3.8ms build, spent entirely on filing away zeroes.
+       등이 없는 레벨은 아무것도 굽지 않으므로 찾아볼 것도, 기억할 가치가 있는 것도 없습니다.
+       이것이 없으면 캐시는 그런 레벨에 이미 알고 있던 사실을 듣기 위해 정점마다 해시와 탐사
+       비용을 물립니다. 임포트한 Freedoom 맵 대부분이 그러하며 측정도 됩니다. levelbench는
+       3.8ms 생성 중 0.08ms로 쟀고, 전부 0을 정리해 넣는 데 쓰입니다. */
+    if (l->n_lights < 1) return;
+
     for (int vi = first; vi < b->count; vi++) {
         Vtx *v = &b->v[vi];
+
+        /* Asked before anything is traced, because a hit is the whole point:
+           the trace below is what this exists to avoid.
+           무엇을 판정하기도 전에 묻습니다. 적중이 존재 이유 전부이며, 아래의 판정이 바로
+           이것이 피하려는 대상이기 때문입니다. */
+        /* A zero normal is what marks a slot free, so a vertex carrying one
+           cannot be stored without erasing itself. It is also unlit by
+           construction -- the facing test below rejects it against every light
+           -- so there is nothing worth storing. Skipped rather than special
+           cased, and not counted as an overflow, because the table is fine.
+           빈 슬롯을 표시하는 것이 0 법선이므로, 그것을 지닌 정점은 자기 자신을 지우지 않고는
+           저장할 수 없습니다. 또한 구조적으로 빛을 받지 않습니다. 아래의 방향 검사가 모든
+           광원에 대해 기각합니다. 따라서 저장할 가치가 있는 것이 없습니다. 특수 처리가 아니라
+           건너뛰며, 테이블에는 아무 문제가 없으므로 초과로 세지도 않습니다. */
+        int no_normal = (v->nx == 0.0f && v->ny == 0.0f && v->nz == 0.0f);
+        int slot      = (!g_lcache_on || no_normal) ? -1 : light_slot(v);
+
+        if (slot >= 0 && !slot_empty(&g_lcache[slot])) {
+            v->lr = g_lcache[slot].lr;
+            v->lg = g_lcache[slot].lg;
+            v->lb = g_lcache[slot].lb;
+            continue;
+        }
+        /* Only a FULL TABLE is worth reporting. A switched-off cache and a
+           vertex with no normal both arrive here with slot < 0 and neither is
+           an overflow -- counting them would make the counter fire in the one
+           configuration that deliberately has no cache at all.
+           보고할 가치가 있는 것은 *테이블이 가득 찬* 경우뿐입니다. 꺼진 캐시와 법선이 없는
+           정점 둘 다 slot < 0으로 이곳에 도달하지만 어느 쪽도 초과가 아닙니다. 그것을 세면
+           의도적으로 캐시가 아예 없는 바로 그 구성에서 카운터가 발생하게 됩니다. */
+        if (slot < 0 && !no_normal && g_lcache_on) DIAG(DIAG_LIGHT_CACHE);
+
         v3 p = v3f(v->px, v->py, v->pz);
         v3 n = v3f(v->nx, v->ny, v->nz);
 
@@ -1274,6 +1609,33 @@ static void bake_light(MeshBuf *b, const Level *l, int first) {
             v->lr += e * (lt->r * (1.0f / 255.0f));
             v->lg += e * (lt->g * (1.0f / 255.0f));
             v->lb += e * (lt->b * (1.0f / 255.0f));
+        }
+
+        /* Kept, so the next rebuild finds it. Written after every light has
+           been summed rather than per light, because what a later frame wants
+           back is the answer, not the working.
+
+           A vertex traced while a door happened to be open keeps that reading
+           for as long as the level is loaded. That is the same rule the ones
+           traced at load follow -- what a surface was lit like when it first
+           existed -- rather than a second one, and it is what makes the
+           picture depend on the level rather than on how many times something
+           has been rebuilt since.
+
+           다음 재생성이 찾을 수 있도록 보관합니다. 광원마다가 아니라 모든 광원을 합한 뒤에
+           쓰는 이유는, 나중 프레임이 돌려받고 싶은 것이 풀이 과정이 아니라 답이기
+           때문입니다.
+
+           마침 문이 열려 있을 때 판정된 정점은 레벨이 로드되어 있는 동안 그 값을 유지합니다.
+           이는 두 번째 규칙이 아니라 로드 시 판정된 정점들이 따르는 것과 같은 규칙(어떤
+           표면이 처음 존재했을 때 어떻게 밝았는가)이며, 화면을 그동안 몇 번 다시
+           만들었는지가 아니라 레벨에 의존하게 만드는 것이 바로 이것입니다. */
+        if (slot >= 0) {
+            LightSlot *s = &g_lcache[slot];
+            if (slot_empty(s)) g_lcache_used++;
+            s->px = v->px; s->py = v->py; s->pz = v->pz;
+            s->nx = v->nx; s->ny = v->ny; s->nz = v->nz;
+            s->lr = v->lr; s->lg = v->lg; s->lb = v->lb;
         }
     }
 }

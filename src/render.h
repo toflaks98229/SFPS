@@ -38,19 +38,37 @@
  *
  * ENGLISH
  * -------
- * Must be at least ::LVL_MAX_LIGHTS. Kept as its own constant rather than
- * including level.h here, for the same reason tex.h keeps TEX_NAME_MAX: this
- * is the rendering half and level.h is the root of the simulation half. The
- * two are tied by a static assert in level.c, which sees both.
+ * These are for light that MOVES: a muzzle flash, an explosion, a projectile
+ * in flight. Nothing that can be written into a level file belongs here.
+ *
+ * It used to have to be at least ::LVL_MAX_LIGHTS, because evaluating a lamp
+ * in this loop was the only way a lamp was applied. Since the static bake it
+ * is not: a level's lamps are compiled into its vertices at load, all of them,
+ * and the two numbers now answer different questions. This one is a
+ * PER-FRAGMENT cost paid on every pixel of every frame, which is why it is
+ * small and why raising it is a rendering decision rather than an authoring
+ * one. ::LVL_MAX_LIGHTS is a load-time cost and can be many times larger.
+ *
+ * @note There is no longer a static assert tying the two, and that is the
+ *       point rather than an oversight -- see the note where the assert used
+ *       to be, in level.c.
  *
  * 한국어
  * ------
  * @brief 셰이더가 한 번의 그리기에서 계산할 수 있는 점광원 수.
  *
- * ::LVL_MAX_LIGHTS 이상이어야 합니다. tex.h가 TEX_NAME_MAX를 유지하는 것과 같은 이유로
- * level.h를 포함하지 않고 자체 상수로 둡니다. 이곳은 렌더링 영역이고 level.h는
- * 시뮬레이션 영역의 뿌리입니다. 둘은 양쪽을 모두 참조하는 level.c의 정적 검사로
- * 묶여 있습니다.
+ * *움직이는* 빛을 위한 것입니다. 총구 섬광, 폭발, 날아가는 발사체입니다. 레벨 파일에 적을 수
+ * 있는 것은 어느 것도 이곳에 속하지 않습니다.
+ *
+ * 한때는 ::LVL_MAX_LIGHTS 이상이어야 했습니다. 이 반복문에서 평가하는 것이 등이 적용되는
+ * 유일한 방법이었기 때문입니다. 정적 베이크 이후로는 아닙니다. 레벨의 등은 로드 시 정점에
+ * 전부 구워지며, 이제 두 숫자는 서로 다른 질문에 답합니다. 이 값은 매 프레임 매 픽셀마다
+ * 치르는 *프래그먼트별* 비용이며, 그래서 작고, 그래서 이 값을 올리는 것은 제작상의 결정이
+ * 아니라 렌더링상의 결정입니다. ::LVL_MAX_LIGHTS는 로드 시점의 비용이며 몇 배 더 클 수
+ * 있습니다.
+ *
+ * @note 둘을 묶는 정적 검사는 더 이상 없으며, 그것이 실수가 아니라 요점입니다. 그 검사가
+ *       있던 자리인 level.c의 주석을 참조하십시오.
  */
 #define RD_MAX_LIGHTS 8
 
@@ -995,6 +1013,29 @@ void rd_eye  (v3 eye);
  *       유지됩니다.
  */
 void rd_lights(const float *pos_radius, const float *col_power, int n);
+
+/**
+ * @brief How many dynamic lights the last ::rd_lights left in the shader.
+ *
+ * ENGLISH
+ * -------
+ * For tests. The number worth asserting is usually zero: a level's own lamps
+ * are baked into the vertices when it loads, and putting them in these slots
+ * as well applies each of them twice -- once smoothly and shadowed from the
+ * bake, once per-pixel and unshadowed from the loop. A room lit twice does not
+ * look broken. It looks bright, which is why this needs a test rather than an
+ * eye.
+ *
+ * 한국어
+ * ------
+ * @brief 마지막 ::rd_lights가 셰이더에 남긴 동적 광원의 수입니다.
+ *
+ * 테스트용입니다. 단언할 가치가 있는 값은 대개 0입니다. 레벨 자신의 등은 로드될 때 정점에
+ * 구워지며, 그것을 이 슬롯에도 넣으면 각 등이 두 번 적용됩니다. 한 번은 베이크에서 부드럽고
+ * 그림자가 진 채로, 한 번은 반복문에서 픽셀 단위로 그림자 없이. 두 번 밝혀진 방은 고장 나
+ * 보이지 않습니다. *밝아* 보이며, 그래서 이것은 눈이 아니라 테스트를 필요로 합니다.
+ */
+int rd_light_count(void);
 
 /**
  * @brief Sets the pixel grid vertices snap to, reproducing the PSX wobble.

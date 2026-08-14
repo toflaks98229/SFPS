@@ -34,6 +34,12 @@
 #include "level.h"
 #include "enemy.h"
 #include "weapon.h"
+#include "hook.h"
+#include "render.h"   /* MeshBuf, for timing what a rebuild costs. No GL call
+                         is made: mb_init/mb_reset/mb_free are CPU-side, and
+                         only mesh_upload would need a context. */
+#include "model.h"    /* MdlRange by value -- level.h only forward-declares it,
+                         the same reason scene.h includes this. */
 
 /* Caller counts per frame, from the analysis of who calls level_trace:
      - wp_hook_in_range, once from the HUD crosshair
@@ -41,6 +47,36 @@
      - the projectile collision step, once per live shot
    These are worst-case: a level with every slot full. */
 #define TRACES_HUD    1
+
+/* Advances every door by `dt` of its travel, the way door.c's apply() does.
+   Enough of a door to make the geometry change; nothing here needs the touch
+   tests, the keys or the sounds.
+   door.c의 apply()가 하는 방식으로 모든 문을 이동 구간의 `dt`만큼 진행시킵니다. 지오메트리를
+   바꾸기에 충분한 만큼의 문이며, 이곳의 어떤 것도 접촉 판정이나 열쇠나 소리를 필요로 하지
+   않습니다. */
+static void nudge_doors(Level *l, float dt) {
+    int n = l->n_doors > LVL_MAX_DOORS ? LVL_MAX_DOORS : l->n_doors;
+    for (int i = 0; i < n; i++) {
+        const DoorDef *d = &l->doors[i];
+        if (d->sector < 0 || d->sector >= l->n_sectors) continue;
+        Sector *s = &l->sectors[d->sector];
+
+        switch (d->axis) {
+        case DOOR_UP:   s->ceil  = (short)(s->ceil  + d->amount * dt); break;
+        case DOOR_DOWN: s->floor = (short)(s->floor - d->amount * dt); break;
+        case DOOR_X:
+        case DOOR_Z: {
+            int off = (d->axis == DOOR_X) ? 0 : 1;
+            for (int k = 0; k < s->n; k++)
+                s->pts[k*2 + off] = (short)(s->pts[k*2 + off] + d->amount * dt);
+            level_bounds(s);
+            break;
+        }
+        default: break;
+        }
+    }
+    level_grid_build(l);
+}
 
 static double now_ms(LARGE_INTEGER f) {
     LARGE_INTEGER t; QueryPerformanceCounter(&t);
@@ -307,6 +343,125 @@ int main(int argc, char **argv) {
     printf("\n  Note: monster sight traces stop at the player rather than\n"
            "  running the full hook range, so both columns are an upper\n"
            "  bound. Treat them as the ceiling, not the expected cost.\n");
+
+    /* --- 4. what a geometry rebuild costs -------------------------------
+       The queries above are paid per monster; this one is paid per FRAME, and
+       only while a door is moving -- but then it is paid whole. door_update
+       returning non-zero sets World::geometry_dirty, and the rebuild that
+       answers it re-triangulates every sector and re-bakes every vertex
+       against every light, whether or not the door touched them.
+
+       Split into the two halves because they scale differently and only one
+       of them is avoidable: triangulation is linear in points, while the bake
+       runs a level_blocked per vertex per light in range -- the same 8us call
+       timed above, several hundred times over.
+
+       위의 질의들은 몬스터마다 치르지만, 이것은 *프레임마다* 치릅니다. 문이 움직이는
+       동안에만이지만 그때는 통째로 치릅니다. 두 절반으로 나누어 재는 이유는 둘이 다르게
+       증가하고 그중 하나만 피할 수 있기 때문입니다. 삼각형화는 점 수에 선형인 반면,
+       라이트 베이크는 정점마다 사거리 안의 광원마다 level_blocked를 돌립니다. 위에서 잰
+       바로 그 8us짜리 호출을 수백 번입니다. */
+    printf("\n  --- geometry rebuild (what a moving door pays per frame) ---\n");
+    {
+        MeshBuf  gb;
+        MdlRange ranges[LVL_MAX_RANGES];
+        mb_init(&gb, 8192);
+
+        const int REPS = 40;
+        LARGE_INTEGER t0, t1;
+
+        /* --- the load build, with nothing remembered ---------------------
+           What a level costs the frame it appears. The cache is emptied before
+           each repetition, so this is the honest cold number and the one the
+           per-frame figures below should be read against.
+           레벨이 나타나는 프레임에 드는 비용입니다. 반복마다 캐시를 비우므로 이것이 정직한
+           차가운 수치이며, 아래의 프레임별 수치는 이것에 견주어 읽어야 합니다. */
+        QueryPerformanceCounter(&t0);
+        for (int r = 0; r < REPS; r++) {
+            level_light_cache_reset();
+            mb_reset(&gb);
+            level_geometry(&gb, &lv, ranges, LVL_MAX_RANGES);
+        }
+        QueryPerformanceCounter(&t1);
+        double cold_ms = (double)(t1.QuadPart - t0.QuadPart) * 1000.0
+                       / (double)freq.QuadPart / REPS;
+
+        int verts = gb.count;
+        int n_ranges = level_geometry(&gb, &lv, ranges, LVL_MAX_RANGES);
+        (void)n_ranges;
+        mb_reset(&gb);
+        n_ranges = level_geometry(&gb, &lv, ranges, LVL_MAX_RANGES);
+
+        /* --- the same build with no lights at all -------------------------
+           Which leaves the triangulation on its own: bake_light's inner loop
+           runs zero times per vertex. Restored afterwards.
+           삼각형화만 남습니다. 이후 복원합니다. */
+        int saved_lights = lv.n_lights;
+        lv.n_lights = 0;
+        QueryPerformanceCounter(&t0);
+        for (int r = 0; r < REPS; r++) {
+            level_light_cache_reset();
+            mb_reset(&gb);
+            level_geometry(&gb, &lv, ranges, LVL_MAX_RANGES);
+        }
+        QueryPerformanceCounter(&t1);
+        double geom_ms = (double)(t1.QuadPart - t0.QuadPart) * 1000.0
+                       / (double)freq.QuadPart / REPS;
+        lv.n_lights = saved_lights;
+
+        printf("  vertices / material runs    %6d / %d\n", verts, n_ranges);
+        printf("  lights / doors              %6d / %d\n\n",
+               lv.n_lights, lv.n_doors);
+        printf("  %-38s %9.3fms  %5.1f%% of a 60fps frame\n",
+               "triangulation only", geom_ms, geom_ms / 16.67 * 100.0);
+        printf("  %-38s %9.3fms  %5.1f%%\n",
+               "load build (cold cache, every vtx traced)", cold_ms,
+               cold_ms / 16.67 * 100.0);
+
+        /* --- a door actually in motion ------------------------------------
+           The number this whole exercise is about, and the one that is easy to
+           fake: rebuilding the SAME geometry forty times is a 100% cache hit
+           on every repetition after the first, which flatters the cache by
+           measuring a case the game never runs. So the doors are advanced a
+           fortieth of their travel per repetition, and each rebuild sees
+           geometry the previous one did not -- which is what a frame during a
+           door's swing actually is.
+
+           이 작업 전체가 다루는 수치이며, 속이기 쉬운 수치이기도 합니다. *같은* 형상을 마흔
+           번 다시 만드는 것은 첫 번째 이후 매번 100% 적중이며, 게임이 결코 실행하지 않는
+           경우를 재어 캐시를 좋게 보이게 만듭니다. 그래서 반복마다 문을 이동 구간의 1/40씩
+           진행시키고, 각 재생성은 이전 것이 보지 못한 형상을 보게 합니다. 문이 열리는 동안의
+           한 프레임이 실제로 그렇습니다. */
+        if (lv.n_doors > 0) {
+            Level *mv = &lv;
+
+            level_light_cache_reset();
+            mb_reset(&gb);
+            level_geometry(&gb, mv, ranges, LVL_MAX_RANGES);   /* the load build */
+
+            QueryPerformanceCounter(&t0);
+            for (int r = 0; r < REPS; r++) {
+                nudge_doors(mv, 1.0f / REPS);
+                mb_reset(&gb);
+                level_geometry(&gb, mv, ranges, LVL_MAX_RANGES);
+            }
+            QueryPerformanceCounter(&t1);
+            double warm_ms = (double)(t1.QuadPart - t0.QuadPart) * 1000.0
+                           / (double)freq.QuadPart / REPS;
+
+            printf("  %-38s %9.3fms  %5.1f%%\n",
+                   "DOOR IN MOTION, per frame", warm_ms,
+                   warm_ms / 16.67 * 100.0);
+            printf("\n  a moving frame costs %.2fx a load build, and the light\n"
+                   "  cache is what stands between them.\n",
+                   cold_ms > 0 ? warm_ms / cold_ms : 0.0);
+        } else {
+            printf("\n  This level has no doors, so it is built once and never\n"
+                   "  rebuilt: the per-frame figure does not apply to it.\n");
+        }
+
+        mb_free(&gb);
+    }
 
     return 0;
 }

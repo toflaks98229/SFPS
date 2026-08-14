@@ -1275,6 +1275,21 @@ static void rebuild(void) {
        수 있는 벽이 됩니다. 이 길목이 둘 모두를 정직하게 유지하는 지점입니다. */
     level_grid_build(&g_level);
 
+    /* And the baked light, which the game deliberately does NOT drop when a
+       sector moves -- that cache is what keeps a door's swing off the frame
+       time. An editor is the other case: the author moves a lamp, or moves a
+       wall that was shadowing one, and expects to see what they just did. The
+       cost of re-tracing every vertex is a fraction of a frame in a tool that
+       is already waiting for a human, so this funnel pays it every time rather
+       than trying to work out which edits changed the lighting.
+       그리고 구워진 빛입니다. 게임은 섹터가 움직여도 이것을 의도적으로 버리지 *않습니다*.
+       그 캐시가 문이 열리는 동안의 프레임 시간을 지켜 주기 때문입니다. 에디터는 반대의
+       경우입니다. 제작자가 등을 옮기거나 등을 가리던 벽을 옮기고서 방금 한 일을 보기를
+       기대합니다. 모든 정점을 다시 판정하는 비용은 어차피 사람을 기다리고 있는 도구에서
+       프레임의 일부에 불과하므로, 이 길목은 어떤 편집이 조명을 바꿨는지 알아내려 하는 대신
+       매번 그 비용을 치릅니다. */
+    level_light_cache_reset();
+
     mb_reset(&g_mesh_buf);
     g_range_count = level_geometry(&g_mesh_buf, &g_level, g_ranges, LVL_MAX_RANGES);
     mesh_upload(&g_mesh3d, &g_mesh_buf, 1);

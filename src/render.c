@@ -1408,6 +1408,17 @@ static const char *FS_MAIN =
 static GLuint g_prog;
 static GLint  g_u_mvp, g_u_eye, g_u_mode, g_u_color;
 static GLint  g_u_nlights, g_u_lpos, g_u_lcol;
+
+/* How many dynamic lights the last ::rd_lights left in the shader. Kept so a
+   test can ask, because the interesting number is usually ZERO: a level's own
+   lamps are baked into the vertices at load and must not also occupy these
+   slots, and nothing about a frame that got that wrong looks wrong -- the room
+   is simply lit twice and reads as "bright".
+   마지막 ::rd_lights가 셰이더에 남긴 동적 광원의 수입니다. 테스트가 물어볼 수 있도록
+   보관합니다. 흥미로운 값은 대개 *0*이기 때문입니다. 레벨 자신의 등은 로드 시 정점에
+   구워지므로 이 슬롯을 함께 차지해서는 안 되는데, 그것을 틀린 프레임은 어디도 틀려 보이지
+   않습니다. 방이 두 번 밝혀질 뿐이고 그것은 "밝다"로 읽힙니다. */
+static int    g_n_lights;
 static GLint  g_u_snap;
 static GLint  g_u_proc, g_u_pcol, g_u_pscale, g_u_pparam;
 static GLint  g_u_time;
@@ -1500,23 +1511,26 @@ void rd_snap(float grid_w, float grid_h) {
 void rd_lights(const float *pos_radius, const float *col_power, int n) {
     if (n < 0) n = 0;
     if (n > RD_MAX_LIGHTS) {
-        /* Clamped rather than trusted. The caller converts from the level,
-           whose own cap is asserted equal to this one, so exceeding it means
-           something upstream changed without the assert being updated --
-           reported rather than silently overrunning the uniform array.
-           신뢰하지 않고 제한합니다. 호출자는 레벨로부터 변환하는데 레벨의 상한이 이
-           값과 같음이 단언되어 있으므로, 이를 넘는다는 것은 상류에서 무언가 바뀌었는데
-           단언이 갱신되지 않았다는 뜻입니다. 유니폼 배열을 조용히 넘어서지 않고
+        /* Clamped rather than trusted. These slots are for lights that MOVE --
+           a muzzle flash, an explosion -- and a caller that has more of those
+           than the shader can hold has to lose some; overrunning the uniform
+           array is not the alternative. Reported so the loss is visible.
+           신뢰하지 않고 제한합니다. 이 슬롯들은 *움직이는* 광원(총구 섬광, 폭발)을 위한
+           것이며, 셰이더가 담을 수 있는 것보다 많이 가진 호출자는 일부를 잃을 수밖에
+           없습니다. 유니폼 배열을 넘어서는 것이 대안은 아닙니다. 손실이 보이도록
            보고합니다. */
         DIAG(DIAG_LIGHT_CAP);
         n = RD_MAX_LIGHTS;
     }
+    g_n_lights = n;
     glUniform1i(g_u_nlights, n);
     if (n) {
         glUniform4fv(g_u_lpos, n, pos_radius);
         glUniform4fv(g_u_lcol, n, col_power);
     }
 }
+
+int rd_light_count(void) { return g_n_lights; }
 
 void rd_color(float r, float g, float b, float a) {
     float c[4] = {r, g, b, a};

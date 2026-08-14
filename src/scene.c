@@ -1,31 +1,47 @@
 /**
  * @file scene.c
- * @brief Implements the per-frame draw passes lifted out of WinMain.
+ * @brief Implements the per-frame draw passes, and the order they run in.
  *
  * ENGLISH
  * -------
- * Nothing here is new behaviour. Each function is one of the blocks that used
- * to sit inline in the frame loop, moved without changing what it draws or the
- * order it draws in -- the pass order is still main.c's decision, and it is
- * still load-bearing.
+ * Each pass is one of the blocks that used to sit inline in the frame loop,
+ * moved without changing what it draws. ::scene_frame is the sequence they run
+ * in, and it moved here second, for the reason main.c's own header comment had
+ * already written down and could not act on: the order was declared
+ * load-bearing and nothing checked it, because the only way to run it was to
+ * open a window and play.
  *
- * What the move buys: the buffers are now owned and freed by one pair of
- * functions, each pass can be read without scrolling past the others, and the
+ * The split this file now holds is the same one world.c holds. A pass knows
+ * how to draw one thing; ::scene_frame knows what a frame IS. Neither knows
+ * about a window -- the caller supplies a viewport in pixels and a ::World,
+ * and gets pixels back.
+ *
+ * What the moves buy: the buffers are owned and freed by one pair of
+ * functions, each pass can be read without scrolling past the others, the
  * magic numbers that were scattered through the loop are named constants at
- * the top of this file.
+ * the top of this file, and the order is now reachable by anything that can
+ * make a GL context -- which every tool in tools\ already can.
  *
  * 한국어
  * ------
- * 이곳에 새로운 동작은 없습니다. 각 함수는 프레임 루프 안에 인라인으로 있던 블록
- * 하나이며, 무엇을 그리는지도 어떤 순서로 그리는지도 바꾸지 않고 옮긴 것입니다. 패스
- * 순서는 여전히 main.c의 결정이며, 여전히 구조적으로 중요합니다.
+ * 각 패스는 프레임 루프 안에 인라인으로 있던 블록 하나이며, 무엇을 그리는지 바꾸지 않고
+ * 옮긴 것입니다. ::scene_frame은 그것들이 실행되는 순서이며, main.c 자신의 헤더 주석이
+ * 이미 적어 두었으나 실행에 옮기지 못한 이유로 두 번째로 이곳에 옮겨 왔습니다. 그 순서는
+ * 구조적으로 중요하다고 선언되었지만 무엇도 그것을 검사하지 않았습니다. 실행하는 유일한
+ * 방법이 창을 열고 플레이하는 것이었기 때문입니다.
  *
- * 옮겨서 얻는 것: 버퍼를 한 쌍의 함수가 소유하고 해제하게 되었고, 각 패스를 다른
- * 패스를 지나쳐 스크롤하지 않고 읽을 수 있으며, 루프 곳곳에 흩어져 있던 매직 넘버가
- * 이 파일 상단의 명명된 상수가 되었습니다.
+ * 이 파일이 이제 담고 있는 분리는 world.c가 담고 있는 것과 같습니다. 패스는 한 가지를
+ * 어떻게 그리는지 알고, ::scene_frame은 한 프레임이 *무엇인지* 압니다. 어느 쪽도 창에
+ * 대해서는 알지 못합니다. 호출자가 픽셀 단위 뷰포트와 ::World를 건네면 픽셀을 돌려받습니다.
+ *
+ * 옮겨서 얻는 것: 버퍼를 한 쌍의 함수가 소유하고 해제하며, 각 패스를 다른 패스를 지나쳐
+ * 스크롤하지 않고 읽을 수 있고, 루프 곳곳에 흩어져 있던 매직 넘버가 이 파일 상단의 명명된
+ * 상수가 되었으며, 이제 그 순서에 GL 컨텍스트를 만들 수 있는 무엇이든 도달할 수 있습니다.
+ * tools\의 모든 도구가 이미 그렇게 할 수 있습니다.
  */
 
 #include "scene.h"
+#include "hook.h"
 #include "proj.h"   /* the player's grenades and bolts */
 #include "enemy.h"
 #include "pickup.h"
@@ -36,7 +52,55 @@
 #include "door.h"     /* the refusal notice, and the names of the key bits */
 #include "diag.h"
 
+/* The two passes that draw themselves rather than being drawn by a scene_*
+   function: particles and the marks a shot leaves. They own their own pools
+   and their own buffers, so ::scene_frame calls them where they belong in the
+   order rather than reproducing them here.
+   scene_* 함수가 그리는 것이 아니라 스스로 그리는 두 패스입니다. 입자, 그리고 사격이
+   남긴 자국입니다. 각자 자신의 풀과 버퍼를 소유하므로, ::scene_frame은 이곳에서 그것을
+   재현하는 대신 순서상 제자리에서 호출합니다. */
+#include "fx.h"
+#include "decal.h"
+
 /* ------------------------------------------------------------------ tuning */
+
+/**
+ * @brief How much coarser than the render buffer the vertex snap grid is.
+ *
+ * ENGLISH
+ * -------
+ * 1.0 snaps to the offscreen buffer's own pixels, which is what the hardware
+ * did and is almost invisible here: the PlayStation ran at 320x240 and this
+ * runs at 640x360, so a whole-pixel jump is half the angular size it was.
+ * Dividing the grid down makes the jumps bigger without touching the render
+ * resolution, which is the dial for how much of the artefact to actually show.
+ *
+ * @note This is the ONE number to change when tuning the wobble. Raising it
+ *       past about 4 starts tearing thin geometry apart, because two vertices
+ *       of the same triangle can land on the same grid line and the triangle
+ *       collapses.
+ * @note Here rather than in main.c, where it began, because ::scene_frame is
+ *       now its only reader. A window has no opinion about how coarse a snap
+ *       grid is.
+ *
+ * 한국어
+ * ------
+ * @brief 정점 스냅 격자가 렌더 버퍼보다 얼마나 성긴지를 나타냅니다.
+ *
+ * 1.0이면 오프스크린 버퍼의 픽셀에 그대로 맞추며, 이것이 실제 하드웨어의 동작이지만
+ * 여기서는 거의 보이지 않습니다. 플레이스테이션은 320x240이었고 이 프로젝트는
+ * 640x360이므로, 한 픽셀 도약의 각크기가 절반입니다. 격자를 나누면 렌더 해상도를
+ * 건드리지 않고 도약을 키울 수 있으며, 이것이 아티팩트를 얼마나 드러낼지 조정하는
+ * 값입니다.
+ *
+ * @note 흔들림을 조정할 때 바꿔야 할 *유일한* 값입니다. 약 4를 넘기면 얇은 지오메트리가
+ *       찢어지기 시작합니다. 같은 삼각형의 두 정점이 같은 격자선에 놓여 삼각형이 붕괴하기
+ *       때문입니다.
+ * @note 처음 있던 main.c가 아니라 이곳에 두는 이유는 이제 ::scene_frame이 이 값을 읽는
+ *       유일한 곳이기 때문입니다. 창은 스냅 격자가 얼마나 성긴지에 대해 아무 견해도 갖지
+ *       않습니다.
+ */
+#define PSX_SNAP_COARSE 2.0f
 
 /* --- monster projectiles ---
    A bolt is drawn as two groups of camera-facing quads: wide dim petals that
@@ -248,36 +312,46 @@ void scene_build_level(Scene *s, const Level *l, int dynamic) {
         s->level_tex[i] = tex_mat(s->level_ranges[i].mat);
 }
 
-void scene_draw_level(const Scene *s, mat4 vp, v3 eye, const Level *l) {
+void scene_draw_level(const Scene *s, mat4 vp, v3 eye) {
     DIAG_WANT_WORLD_PASS(post_in_world_pass());
 
-    /* Convert the level's lights into the two vec4 arrays the shader wants.
-       Done here rather than at load because the packing is a rendering detail:
-       Level stores what the author wrote, in file units, and nothing in the
-       simulation half should have to know the shader's uniform layout.
-       레벨의 광원을 셰이더가 요구하는 두 개의 vec4 배열로 변환합니다. 로드 시점이 아니라
-       이곳에서 하는 이유는 이 패킹이 렌더링의 세부 사항이기 때문입니다. Level은 제작자가
-       작성한 것을 파일 단위 그대로 저장하며, 시뮬레이션 영역의 어떤 것도 셰이더의 유니폼
-       배치를 알 필요가 없습니다. */
-    float lpos[RD_MAX_LIGHTS * 4], lcol[RD_MAX_LIGHTS * 4];
-    int nl = l ? l->n_lights : 0;
-    if (nl > RD_MAX_LIGHTS) nl = RD_MAX_LIGHTS;
-    for (int i = 0; i < nl; i++) {
-        const Light *L = &l->lights[i];
-        lpos[i*4+0] = L->x * 0.01f;
-        lpos[i*4+1] = L->y * 0.01f;
-        lpos[i*4+2] = L->z * 0.01f;
-        lpos[i*4+3] = L->radius * 0.01f;
-        lcol[i*4+0] = L->r / 255.0f;
-        lcol[i*4+1] = L->g / 255.0f;
-        lcol[i*4+2] = L->b / 255.0f;
-        lcol[i*4+3] = L->power * 0.01f;
-    }
+    /* --- the level's own lamps are NOT uploaded here ---------------------
+       They used to be, and for a while they had to be: lighting was eight
+       point lights and nothing else. Since the static bake they are compiled
+       into the vertices when the level loads -- every one of them, shadowed
+       against the walls, with no eight-at-a-time limit -- so sending them here
+       as well applied each lamp TWICE: once smoothly and shadowed from the
+       bake, once per-pixel and unshadowed from the shader's loop.
 
+       Nothing about that looks like a fault. The room is brighter than it
+       should be and reads as a lighting choice, which is why it survived the
+       commit that introduced the bake and why rd_light_count exists for
+       scenetest to assert against.
+
+       What the slots are for now is what the bake cannot do: light that MOVES.
+       A muzzle flash, an explosion, a projectile in flight -- none of which
+       exist in a level file, none of which can be baked, and eight of which is
+       plenty. Nothing feeds them yet, so the world pass runs with none.
+
+       레벨 자신의 등은 이곳에서 업로드하지 *않습니다*.
+
+       한때는 그랬고 그럴 수밖에 없었습니다. 조명이 점광원 여덟 개가 전부였기 때문입니다.
+       정적 베이크 이후로 등은 레벨이 로드될 때 정점에 구워집니다. 여덟 개 제한 없이 전부,
+       벽에 대한 그림자까지 포함해서입니다. 그러므로 이곳에서 또 보내면 각 등이 *두 번*
+       적용되었습니다. 한 번은 베이크에서 부드럽고 그림자가 진 채로, 한 번은 셰이더 반복문에서
+       픽셀 단위로 그림자 없이.
+
+       그중 어느 것도 결함처럼 보이지 않습니다. 방은 마땅한 것보다 밝고 그것은 조명 연출로
+       읽힙니다. 베이크를 도입한 커밋에서 이것이 살아남은 이유이며, scenetest가 단언할 수
+       있도록 rd_light_count가 존재하는 이유입니다.
+
+       이제 이 슬롯의 용도는 베이크가 할 수 없는 것, 즉 *움직이는* 빛입니다. 총구 섬광, 폭발,
+       날아가는 발사체입니다. 어느 것도 레벨 파일에 없고, 어느 것도 구울 수 없으며, 여덟 개면
+       충분합니다. 아직 그것을 채우는 것이 없으므로 월드 패스는 0개로 돌아갑니다. */
     rd_mode(RD_WORLD);
     rd_mvp(vp);
     rd_eye(eye);
-    rd_lights(lpos, lcol, nl);
+    rd_lights(0, 0, 0);
     glActiveTexture(GL_TEXTURE0);
     for (int i = 0; i < s->level_range_count; i++) {
         tex_use(&s->level_tex[i]);
@@ -1219,4 +1293,230 @@ void scene_draw_proj(Scene *s, mat4 vp, v3 cam_right, v3 cam_up) {
     glDisable(GL_BLEND);
     glDepthMask(GL_TRUE);
     glEnable(GL_CULL_FACE);
+}
+
+/* --------------------------------------------------------------- one frame */
+
+void scene_frame(const World *w, Scene *sc, int vw, int vh, int frozen) {
+    float aspect = (float)vw / (float)vh;
+
+    /* Bind the offscreen target, if there is one. It returns the aspect of the
+       small buffer rather than the window's, and the world must be rendered
+       with THAT -- using the window's here stretches everything, because the
+       offscreen buffer's proportions need not match exactly once its width has
+       been rounded to whole pixels.
+       오프스크린 타깃이 있으면 바인딩합니다. 창이 아닌 작은 버퍼의 종횡비를 반환하며,
+       월드는 *그 값으로* 렌더링해야 합니다. 여기서 창의 값을 쓰면 전체가 늘어나는데,
+       오프스크린 버퍼의 너비가 정수 픽셀로 반올림되고 나면 그 비율이 창과 정확히 일치하지
+       않을 수 있기 때문입니다. */
+    float post_aspect = post_begin();
+    if (post_aspect > 0.0f) aspect = post_aspect;
+    else                    glViewport(0, 0, vw, vh);
+
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    /* The clock animated materials run against. Advanced by ::world_step and
+       only read here, so a lava floor stops churning when the world stops. */
+    rd_time(w->run.world_time);
+
+    /* Vertex snapping, on for the world and off again before the UI. The grid
+       is the offscreen buffer, so the quantisation lands on the pixels the
+       image is actually rasterised into. post_size reports 0,0 when the pass is
+       off, which disables the snap -- the right answer, since with no
+       pixelisation there is no grid to snap to.
+       정점 스냅입니다. 월드에 대해 켜고 UI 이전에 다시 끕니다. 격자는 오프스크린 버퍼이므로
+       양자화가 이미지가 실제 래스터화되는 픽셀에 놓입니다. 패스가 꺼져 있으면 post_size가
+       0,0을 보고하여 스냅이 비활성화되는데, 픽셀화가 없으면 맞출 격자도 없으므로 올바른
+       동작입니다. */
+    {
+        int sw, sh;
+        post_size(&sw, &sh);
+        rd_snap((float)sw / PSX_SNAP_COARSE, (float)sh / PSX_SNAP_COARSE);
+    }
+
+    /* Recoil rides on top of the player's own pitch and springs back. */
+    float aim_pitch = w->pitch + w->weapon.recoil;
+
+    /* --- the death collapse ----------------------------------------------
+       Applied to the CAMERA rather than to the player's position, so the body
+       the simulation knows about never moves. Sinking the real position would
+       put the eye inside the floor, where level_trace reports an immediate hit
+       at zero range -- the failure mode hooktest's fixture note describes --
+       and would leave the player somewhere they could not legally stand if the
+       run were ever resumed.
+       플레이어 위치가 아니라 *카메라*에 적용하므로 시뮬레이션이 아는 몸은 움직이지
+       않습니다. 실제 위치를 내리면 눈이 바닥 안으로 들어가고, 그곳에서 level_trace는
+       거리 0에서 즉시 충돌을 보고합니다. hooktest의 픽스처 주석이 설명하는 실패 양상이며,
+       플레이가 재개된다면 플레이어가 합법적으로 설 수 없는 곳에 남게 됩니다. */
+    v3    eye_pos   = w->player.pos;
+    float cam_pitch = aim_pitch;
+    float cam_roll  = 0.0f;
+    if (w->run.dead) {
+        float k = w->run.death_time / DEATH_ANIM_TIME;
+        if (k > 1.0f) k = 1.0f;
+        /* Ease out: 1-(1-k)^2. Fast at the start, settling at the end --
+           a body falls, it does not descend.
+           감속 이징입니다. 처음에 빠르고 끝에서 안착합니다. 몸은 떨어지는 것이지
+           내려가는 것이 아닙니다. */
+        float e = 1.0f - (1.0f - k) * (1.0f - k);
+        eye_pos.y  -= DEATH_DROP * e;
+        cam_pitch  -= DEATH_PITCH * e;
+        cam_roll    = DEATH_ROLL * e;
+    }
+
+    /* One derivation, two users. The billboards below span along `cam.right`
+       and `cam.up`, and they have to be the axes the view matrix was built
+       from: this used to call mat4_fps_view_roll and then re-derive the
+       identical trigonometry by hand, roll included, a dozen lines later. The
+       drift that invites is silent and specific -- sprites keep facing where
+       the camera used to be and turn edge-on as it rolls, so the monsters
+       vanish exactly as the player dies. See ::CamBasis.
+       하나의 유도, 두 사용처입니다. 아래의 빌보드는 `cam.right`와 `cam.up`을 따라
+       펼쳐지며, 그것은 뷰 행렬이 만들어진 축이어야 합니다. 이곳은 이전에
+       mat4_fps_view_roll을 호출한 뒤 열두 줄 아래에서 롤까지 포함해 동일한 삼각함수
+       계산을 손으로 다시 유도하고 있었습니다. 그것이 부르는 어긋남은 조용하고
+       구체적입니다. 스프라이트가 카메라가 있던 곳을 계속 향하다가 롤링에 따라 옆으로
+       서 버리므로, 플레이어가 죽는 바로 그 순간에 몬스터가 사라집니다. ::CamBasis를
+       참조하십시오. */
+    CamBasis cam = cam_basis(w->yaw, cam_pitch, cam_roll);
+
+    mat4 proj = mat4_perspective(WORLD_FOV, aspect, 0.05f, 200.0f);
+    mat4 vp   = mat4_mul(proj, mat4_view_of(eye_pos, cam));
+
+    /* --- world ---
+       Lit and fogged from the camera's real position, which during the
+       collapse is the fallen eye rather than the standing one.
+       카메라의 실제 위치를 기준으로 조명과 안개를 적용합니다. 쓰러지는 동안 그것은
+       서 있던 눈이 아니라 넘어진 눈입니다. */
+    scene_draw_level(sc, vp, eye_pos);
+
+    /* --- monsters, pickups and projectiles ---
+       Sprite passes, each building its billboards on the CPU and uploading
+       once. They stay on the world side of the pass boundary so they are
+       pixelised and dithered along with everything else -- see scene.h. */
+    scene_draw_enemies(sc, vp, eye_pos, cam.right);
+    scene_draw_pickups(sc, vp, eye_pos, cam.right);
+    scene_draw_shots  (sc, vp, cam.right, cam.up);
+    scene_draw_proj   (sc, vp, cam.right, cam.up);
+    fx_draw(vp, cam.right, cam.up);
+
+    /* --- what shots left behind, and the rope, still in world space ---
+       Both are billboards with one winding, so culling comes off for the pair.
+       decal_draw goes first because that is where these two used to sit inside
+       one function, and the order they were written in is the order they blend
+       correctly in.
+       둘 다 감김 방향이 하나인 빌보드이므로 두 호출을 위해 컬링을 끕니다. decal_draw가 먼저인
+       이유는 이 둘이 원래 한 함수 안에서 그 순서로 있었고, 작성된 순서가 곧 올바르게 블렌딩되는
+       순서이기 때문입니다. */
+    glDisable(GL_CULL_FACE);
+    decal_draw(vp, eye_pos, cam.right, cam.up);
+    wp_draw_world(&w->weapon, vp, eye_pos, cam.right, cam.up);
+
+    /* --- the gun, over a cleared depth buffer ---
+       Dropped the moment the player dies. The view model is drawn in its own
+       space with its own projection, so it does not roll or fall with the
+       camera -- it would hang perfectly level in the middle of the screen while
+       the world tipped over behind it, which is a far louder tell than simply
+       not being there. A dead hand lets go.
+       플레이어가 죽는 순간 사라집니다. 뷰 모델은 자체 공간에서 자체 투영으로 그려지므로
+       카메라와 함께 기울거나 떨어지지 않습니다. 뒤에서 월드가 넘어가는 동안 화면 한가운데에
+       완벽히 수평으로 떠 있게 되는데, 그것은 그냥 없는 것보다 훨씬 요란한 표시입니다.
+       죽은 손은 놓습니다. */
+    glEnable(GL_CULL_FACE);
+    if (!w->run.dead) wp_draw_view(&w->weapon, aspect);
+
+    /* --- resolve the offscreen buffer to the window ---------------------
+       A no-op when the effect is off or unavailable, in which case the frame
+       was drawn straight to the window and this changes nothing. See the note
+       on this function for what the boundary means.
+       효과가 꺼져 있거나 사용할 수 없으면 아무 동작도 하지 않으며, 그 경우 프레임은 창에
+       직접 그려졌으므로 달라지는 것이 없습니다. 이 경계의 의미는 이 함수의 참고 사항을
+       확인하십시오. */
+    post_end(vw, vh);
+
+    /* --- crosshair ---
+       Hidden while frozen, for the same reason it is hidden on the win screen:
+       a crosshair implies you can still act.
+       정지 중에는 숨깁니다. 승리 화면에서 숨기는 것과 같은 이유이며, 조준점은 아직
+       행동할 수 있음을 암시하기 때문입니다. */
+    if (!frozen) {
+        glDisable(GL_CULL_FACE);
+        /* post_end leaves depth testing off and does not restore culling, so
+           the UI passes below set up their own state -- which they already did,
+           because the HUD never wanted depth anyway.
+           post_end는 깊이 테스트를 끈 상태로 두고 컬링도 복원하지 않으므로, 아래 UI
+           패스들이 자체적으로 상태를 설정합니다. HUD는 원래 깊이 테스트를 필요로 하지
+           않았으므로 이미 그렇게 하고 있었습니다. */
+        /* The range test traces the level, so it happens here rather than
+           inside the draw call -- see the note on wp_draw_hud.
+           사거리 판정은 레벨을 탐색하므로 그리기 호출 내부가 아니라 이곳에서
+           수행합니다. wp_draw_hud의 참고 사항을 확인하십시오. */
+        int hook_ready = wp_hook_in_range(&w->weapon, &w->level,
+                                          w->player.pos, w->yaw, w->pitch);
+        wp_draw_hud(&w->weapon, aspect, hook_ready);
+        glEnable(GL_CULL_FACE);
+    }
+
+    /* The UI is drawn at native resolution and must not wobble: text snapped to
+       a coarse grid loses whole glyph rows.
+       UI는 원해상도로 그려지며 흔들려서는 안 됩니다. 성긴 격자에 스냅된 텍스트는
+       글리프의 행 전체를 잃습니다. */
+    rd_snap(0.0f, 0.0f);
+
+    /* The HUD is skipped on the title screen: health and ammo belong to a run,
+       and showing them before one has started says the game is already in
+       progress.
+
+       Otherwise it draws unconditionally and the end screens go OVER it, dim
+       included. Making them exclusive would be the obvious simplification and
+       it is wrong: the readouts belong to the frozen frame underneath, and the
+       dimming is what pushes them back rather than removing them.
+
+       타이틀 화면에서는 HUD를 건너뜁니다. 체력과 탄약은 진행 중인 플레이에 속하며, 시작하기도
+       전에 표시하면 게임이 이미 진행 중이라고 말하는 셈입니다.
+
+       그 외에는 조건 없이 그리고, 종료 화면들이 흐리게 처리된 부분까지 포함해 그 *위에*
+       놓입니다. 둘을 배타적으로 만드는 것이 자명한 단순화처럼 보이지만 틀렸습니다. 그 수치들은
+       아래에 정지된 프레임에 속하며, 흐리게 처리하는 것은 그것들을 제거하는 것이 아니라 뒤로
+       밀어내는 일입니다. */
+    if (!w->run.title) scene_draw_hud(sc, vw, vh, &w->player, &w->weapon);
+
+    /* The three end/start screens are mutually exclusive by construction:
+       `title` is cleared before a run can begin, and a run that has been won
+       cannot also have been lost.
+       세 개의 시작·종료 화면은 구조적으로 상호 배타적입니다. `title`은 플레이가
+       시작되기 전에 해제되며, 승리한 플레이가 동시에 패배할 수는 없습니다. */
+    if (w->run.title)
+        scene_draw_title(sc, vw, vh, w->run.title_time);
+    else if (w->run.won)
+        scene_draw_win(sc, vw, vh, &w->player, &w->weapon);
+    else if (w->run.between)
+        /* Before the death screen in this chain and after the win screen,
+           which is the order the states can actually co-exist in: the world is
+           frozen during the intermission so nothing can kill the player, but a
+           terminal level sets `won` instead of `between` and both must not be
+           reachable at once.
+           이 사슬에서 사망 화면보다 앞, 승리 화면보다 뒤입니다. 상태들이 실제로 공존할 수
+           있는 순서가 그렇습니다. 인터미션 동안 월드가 정지하므로 플레이어가 죽을 수 없고,
+           종착 레벨은 `between`이 아니라 `won`을 세우므로 둘이 동시에 성립해서는
+           안 됩니다. */
+        scene_draw_between(sc, vw, vh, w->run.cleared, w->run.entering,
+                           w->run.between_time, WORLD_BETWEEN_TIME);
+    else if (w->run.dead)
+        /* The overlay's clock starts when the COLLAPSE ends, not when the
+           player dies. Fading a red wash in over the fall would hide the
+           animation behind it, and the fall is the part that says what
+           happened.
+           오버레이의 시계는 플레이어가 죽을 때가 아니라 *쓰러짐이 끝날 때* 시작합니다.
+           넘어지는 동안 붉은 막을 덮으면 그 뒤로 애니메이션이 가려지는데, 무슨 일이
+           있었는지 말해 주는 것이 바로 그 넘어짐입니다. */
+        scene_draw_death(sc, vw, vh, w->run.death_time - DEATH_ANIM_TIME,
+                         w->run.death_time > DEATH_INPUT_DELAY);
+
+    /* Last, so it sits over the HUD and the end screens both. A menu opened
+       from the win screen has to be readable too, and it is the thing the
+       player is currently operating.
+       마지막에 그려 HUD와 종료 화면 양쪽 위에 놓입니다. 승리 화면에서 연 메뉴도 읽을
+       수 있어야 하며, 그것이 플레이어가 지금 조작하고 있는 대상입니다. */
+    scene_draw_menu(sc, vw, vh);
 }

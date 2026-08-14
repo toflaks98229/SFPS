@@ -80,7 +80,8 @@ static const char *const DIAG_NAMES[DIAG_COUNT] = {
     "door",     /* DIAG_DOOR_CAP     */
     "doorstale",/* DIAG_DOOR_STALE   */
     "montable", /* DIAG_MON_TABLE    */
-    "pass"      /* DIAG_PASS_ORDER   */
+    "pass",     /* DIAG_PASS_ORDER   */
+    "lcache"    /* DIAG_LIGHT_CACHE  */
 };
 
 /* A name table shorter than the enum would read past its end the first time

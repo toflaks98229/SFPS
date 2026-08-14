@@ -118,6 +118,37 @@
 #define DEATH_ROLL       0.62f  ///< @brief Radians the horizon tilts -- about 35 degrees. / 수평선이 기울어지는 각도 (라디안). 약 35도입니다.
 #define DEATH_PITCH      0.30f  ///< @brief Radians the view falls, well short of straight down. / 시선이 떨어지는 각도 (라디안). 수직 아래에는 한참 못 미칩니다.
 
+/**
+ * @brief Seconds the death screen ignores input for.
+ *
+ * ENGLISH
+ * -------
+ * The trigger that killed you is usually still held. Without this the death
+ * screen appears and vanishes inside one frame, which reads as the game not
+ * having one.
+ *
+ * @note Beside the collapse it follows, rather than in main.c where it began.
+ *       Its two readers no longer share a file: ::wnd_proc turns a keypress
+ *       into a restart, and the death overlay -- now drawn by ::scene_frame --
+ *       tells the player the key will work. A constant read from two files is
+ *       a constant that belongs to neither, and the delay is a property of the
+ *       death sequence rather than of the window that happens to poll it.
+ *
+ * 한국어
+ * ------
+ * @brief 사망 화면이 입력을 무시하는 시간(초)입니다.
+ *
+ * 당신을 죽인 방아쇠는 대개 아직 눌린 상태입니다. 이것이 없으면 사망 화면이 한 프레임
+ * 안에 나타났다 사라지며, 게임에 사망 화면이 없는 것처럼 보입니다.
+ *
+ * @note 처음 있던 main.c가 아니라, 뒤따르는 쓰러짐 연출 곁에 둡니다. 이 값을 읽는 두 곳은
+ *       더 이상 한 파일에 있지 않습니다. ::wnd_proc은 키 입력을 재시작으로 바꾸고, 이제
+ *       ::scene_frame이 그리는 사망 오버레이는 키가 동작한다고 알립니다. 두 파일이 읽는
+ *       상수는 어느 쪽에도 속하지 않는 상수이며, 이 지연은 마침 그것을 폴링하는 창이
+ *       아니라 사망 연출의 성질입니다.
+ */
+#define DEATH_INPUT_DELAY 0.8f
+
 /* The eye must stop ABOVE the floor. A drop of PLAYER_EYE or more puts it at
    or below floor level, where open_at() reports solid and level_trace hits at
    zero range -- the camera would end the animation inside the ground.

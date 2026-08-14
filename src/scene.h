@@ -51,6 +51,7 @@
 #include "level.h"
 #include "player.h"
 #include "weapon.h"
+#include "world.h"    /* World: ::scene_frame draws one, and only reads it */
 
 /**
  * @struct Scene
@@ -172,6 +173,83 @@ void scene_free(Scene *s);
  */
 void scene_build_level(Scene *s, const Level *l, int dynamic);
 
+/* --- One frame, in one function / 한 프레임을 담은 하나의 함수 --- */
+
+/**
+ * @brief Draws one frame of a ::World, world first and UI second. The whole
+ *        per-frame draw in one function, so that its ORDER is a thing a test
+ *        can reach.
+ *
+ * ENGLISH
+ * -------
+ * The counterpart of ::world_step, and it exists for the same reason. That
+ * order used to live in the body of main.c's `frame_draw`, where main.c's own
+ * header comment declared it load-bearing -- the pass boundary the gun sits
+ * above, the culling that comes off for exactly two billboard passes, the snap
+ * that must be released before any text -- and then nothing checked any of it,
+ * because the only way to run it was to open a window and play.
+ *
+ * Every reason for the order below is written at the line it governs. A caller
+ * gets the whole sequence or none of it; there is no way to draw the world and
+ * forget the resolve, because the resolve is not the caller's to remember.
+ *
+ * @param[in]     w      The world to draw. Read only: drawing decides nothing.
+ * @param[in,out] sc     The draw passes and the buffers they build into.
+ * @param[in]     vw     Client width, pixels.
+ * @param[in]     vh     Client height, pixels. At least 1.
+ * @param[in]     frozen What ::world_step returned. NOT re-derived here -- the
+ *                       step may have set `dead` this very frame, and asking
+ *                       again would hide the crosshair one frame before the
+ *                       death screen it belongs to appears.
+ *
+ * @note ::post_end is the world/UI boundary and everything about the order here
+ *       is arranged around it. Above it the frame goes through the pixelise and
+ *       dither pass; below it, nothing does -- 5x7 glyphs magnified four times
+ *       are unreadable and dithered text is worse. The gun is deliberately
+ *       ABOVE the line: it is part of the scene's lighting, and a crisp weapon
+ *       over a pixelated world reads as a bug. diag.h's DIAG_PASS_ORDER watches
+ *       this at runtime, and now watches a sequence a test can drive.
+ * @warning Requires a current GL context. This is the one thing that keeps the
+ *          drawing side from being as headless as ::world_step: a pass order
+ *          can be tested, but only against a context something else created.
+ *
+ * 한국어
+ * ------
+ * @brief ::World의 한 프레임을 그립니다. 월드가 먼저, UI가 나중입니다. 프레임별 그리기
+ *        전체를 담은 하나의 함수이며, 그 *순서*를 테스트가 도달할 수 있는 것으로 만들기
+ *        위함입니다.
+ *
+ * ::world_step의 짝이며, 존재하는 이유도 같습니다. 그 순서는 이전에 main.c의
+ * `frame_draw` 본문 안에 있었고, main.c 자신의 헤더 주석은 그것을 구조적으로 중요하다고
+ * 선언했습니다. 총기가 그 위에 놓이는 패스 경계, 정확히 두 개의 빌보드 패스를 위해 꺼지는
+ * 컬링, 어떤 텍스트보다 먼저 해제되어야 하는 스냅. 그런데 그중 어느 것도 검사되지
+ * 않았습니다. 실행하는 유일한 방법이 창을 열고 플레이하는 것이었기 때문입니다.
+ *
+ * 아래 순서의 모든 근거는 그것이 지배하는 줄에 적혀 있습니다. 호출자는 전체 순서를 얻거나
+ * 아무것도 얻지 못합니다. 월드를 그리고 해상을 잊는 방법은 없습니다. 해상은 호출자가
+ * 기억할 몫이 아니기 때문입니다.
+ *
+ * @param[in]     w      그릴 월드. 읽기 전용입니다. 그리기는 아무것도 결정하지 않습니다.
+ * @param[in,out] sc     드로우 패스와 그것들이 사용하는 버퍼.
+ * @param[in]     vw     클라이언트 영역 너비 (픽셀).
+ * @param[in]     vh     클라이언트 영역 높이 (픽셀). 최소 1입니다.
+ * @param[in]     frozen ::world_step이 반환한 값입니다. 이곳에서 다시 유도하지 *않습니다*.
+ *                       갱신이 바로 이번 프레임에 `dead`를 설정했을 수 있으며, 다시 물으면
+ *                       그에 해당하는 사망 화면이 나타나기 한 프레임 전에 조준점이
+ *                       사라집니다.
+ *
+ * @note ::post_end가 월드와 UI의 경계이며 이곳 순서의 모든 것이 그것을 중심으로 배치되어
+ *       있습니다. 그 위쪽은 픽셀화와 디더 패스를 거치고, 아래쪽은 거치지 않습니다. 5x7
+ *       글리프를 4배 확대하면 읽을 수 없고 디더링된 텍스트는 더 나쁩니다. 총기는 의도적으로
+ *       경계 *위쪽*에 있습니다. 총기는 장면 조명의 일부이며, 픽셀화된 월드 위의 선명한
+ *       무기는 버그처럼 보입니다. diag.h의 DIAG_PASS_ORDER가 이를 런타임에 감시하며, 이제
+ *       테스트가 구동할 수 있는 순서를 감시합니다.
+ * @warning 활성 GL 컨텍스트가 필요합니다. 그리기 쪽이 ::world_step만큼 헤드리스가 되지
+ *          못하는 유일한 이유입니다. 패스 순서는 테스트할 수 있지만, 다른 무언가가 만든
+ *          컨텍스트에 대해서만 가능합니다.
+ */
+void scene_frame(const World *w, Scene *sc, int vw, int vh, int frozen);
+
 /**
  * @brief Draws the level: one textured run per material.
  *
@@ -180,7 +258,10 @@ void scene_build_level(Scene *s, const Level *l, int dynamic);
  * @param[in] s   Scene holding the built level.
  * @param[in] vp  Combined view-projection matrix.
  * @param[in] eye Camera position, for lighting and fog.
- * @param[in] l   Level supplying the point lights. May be NULL for none.
+ * @note The level is no longer a parameter. It was here to supply the point
+ *       lights, and a level's lights are baked into the geometry this draws
+ *       rather than uploaded per frame -- so the only thing this needs from a
+ *       Level is the mesh built from it, which the Scene already holds.
  *
  * 한국어
  * ------
@@ -188,9 +269,12 @@ void scene_build_level(Scene *s, const Level *l, int dynamic);
  * @param[in] s   생성된 레벨을 보유한 장면.
  * @param[in] vp  뷰-투영 결합 행렬.
  * @param[in] eye 조명과 안개 계산에 사용되는 카메라 위치.
- * @param[in] l   점광원을 제공하는 레벨. NULL이면 광원이 없습니다.
+ * @note 레벨은 더 이상 인자가 아닙니다. 점광원을 제공하기 위해 있었는데, 레벨의 광원은
+ *       프레임마다 업로드되는 것이 아니라 이 함수가 그리는 지오메트리에 구워져 있습니다.
+ *       따라서 이 함수가 Level로부터 필요로 하는 유일한 것은 그것으로 만들어진 메시이며,
+ *       그것은 Scene이 이미 보유하고 있습니다.
  */
-void scene_draw_level(const Scene *s, mat4 vp, v3 eye, const Level *l);
+void scene_draw_level(const Scene *s, mat4 vp, v3 eye);
 
 /* --- World passes: before post_end / 월드 패스: post_end 이전 --- */
 

@@ -48,6 +48,7 @@
  */
 
 #include "weapon.h"
+#include "hook.h"
 #include "tex.h"
 #include "model.h"
 #include "audio.h"

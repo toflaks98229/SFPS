@@ -19,6 +19,7 @@
    헤더에서 배제하기 위해 이 둘을 포함하지 않고 전방 선언합니다. */
 #include "render.h"
 #include "model.h"
+#include "diag.h"   /* diag_count -- the overflow report is the thing under test */
 
 static int fails;
 
@@ -35,6 +36,488 @@ static void okd(int cond, const char *what, int got, int want) {
 static void okf(int cond, const char *what, float got, float want) {
     printf("  %-52s %8.3f / %8.3f  %s\n", what, got, want, cond ? "ok" : "FAIL");
     if (!cond) fails++;
+}
+
+/* ------------------------------ vertex fingerprints, shared by the checks */
+
+/* One number for the whole contents of a vertex buffer, so that two builds can
+ * be compared without comparing them field by field at every call site.
+ *
+ * `n_floats` chooses how much of a vertex counts, and the two settings are not
+ * interchangeable. VTX_ALL includes the baked light, which is what a check for
+ * "the same build twice" wants. VTX_GEOM stops before it, which is what a
+ * check across a door's motion wants: the SHAPE has to match exactly, while
+ * the LIGHT deliberately does not follow a door, so folding both into one
+ * number would make the accepted trade look like a failure.
+ *
+ * The per-vertex hashes are SUMMED rather than chained, so the result does not
+ * depend on the order the vertices arrive in -- two builds that produce the
+ * same surfaces in a different order still agree.
+ *
+ * 정점 버퍼의 내용 전체를 하나의 숫자로 만들어, 두 생성 결과를 호출 지점마다 필드별로
+ * 비교하지 않고도 비교할 수 있게 합니다.
+ *
+ * `n_floats`는 정점의 어디까지를 셀지 고르며, 두 설정은 서로 바꿔 쓸 수 없습니다. VTX_ALL은
+ * 구워진 빛을 포함하며 "같은 생성을 두 번" 검사할 때 원하는 것입니다. VTX_GEOM은 그 앞에서
+ * 멈추며 문의 움직임을 가로지르는 검사가 원하는 것입니다. *형태*는 정확히 일치해야 하지만
+ * *빛*은 의도적으로 문을 따라가지 않으므로, 둘을 한 숫자에 접어 넣으면 받아들이기로 한
+ * 대가가 실패처럼 보이게 됩니다.
+ *
+ * 정점별 해시를 연결하지 않고 *더하므로* 결과는 정점이 도착하는 순서에 의존하지 않습니다.
+ * 같은 표면을 다른 순서로 만들어 낸 두 생성도 여전히 일치합니다. */
+#define VTX_GEOM 8                       /* px..v -- everything but the light */
+#define VTX_ALL  (int)(sizeof(Vtx) / sizeof(float))
+
+static unsigned vtx_fingerprint_n(const MeshBuf *b, int n_floats) {
+    unsigned acc = 0;
+    for (int i = 0; i < b->count; i++) {
+        const float *f = &b->v[i].px;
+        unsigned h = 2166136261u;                 /* FNV-1a over the vertex */
+        for (int k = 0; k < n_floats; k++) {
+            unsigned bits;
+            /* Through a union rather than a cast: -O2 is allowed to assume a
+               float and an unsigned never alias, and reading one through a
+               pointer to the other is where that assumption bites.
+               캐스트가 아니라 공용체를 거칩니다. -O2는 float와 unsigned가 서로 앨리어싱
+               하지 않는다고 가정해도 되며, 한쪽을 다른 쪽의 포인터로 읽는 것이 바로 그
+               가정이 무는 지점입니다. */
+            union { float f; unsigned u; } cv;
+            cv.f = f[k];
+            bits = cv.u;
+            /* -0.0 and +0.0 compare equal and hash differently. A cap built
+               alone and the same cap built with the rest must fingerprint the
+               same, so the sign of zero is normalised away.
+               -0.0과 +0.0은 같다고 비교되지만 다르게 해시됩니다. 따로 만든 바닥과 나머지와
+               함께 만든 같은 바닥은 같은 지문이어야 하므로 0의 부호를 지웁니다. */
+            if (bits == 0x80000000u) bits = 0;
+            h = (h ^ bits) * 16777619u;
+        }
+        acc += h;
+    }
+    return acc;
+}
+
+static unsigned vtx_fingerprint(const MeshBuf *b) {
+    return vtx_fingerprint_n(b, VTX_ALL);
+}
+
+/* -------------------------------------------------- the baked-light cache */
+
+/* Moves every door in `l` to `t` of its travel, exactly as door.c's apply()
+   does. The point is not to simulate a door but to reach the geometry the
+   game is actually rebuilding on the frames that cost something.
+   door.c의 apply()가 하는 것과 똑같이 `l`의 모든 문을 이동 구간의 `t` 지점으로 옮깁니다.
+   목적은 문을 흉내 내는 것이 아니라, 비용이 드는 프레임에 게임이 실제로 다시 만들고 있는
+   지오메트리에 도달하는 것입니다. */
+static void move_every_door(Level *l, float t) {
+    int n = l->n_doors > LVL_MAX_DOORS ? LVL_MAX_DOORS : l->n_doors;
+    for (int i = 0; i < n; i++) {
+        const DoorDef *d = &l->doors[i];
+        if (d->sector < 0 || d->sector >= l->n_sectors) continue;
+        Sector *s = &l->sectors[d->sector];
+
+        switch (d->axis) {
+        case DOOR_UP:   s->ceil  = (short)(s->ceil  + d->amount * t); break;
+        case DOOR_DOWN: s->floor = (short)(s->floor - d->amount * t); break;
+        case DOOR_X:
+        case DOOR_Z: {
+            int off = (d->axis == DOOR_X) ? 0 : 1;
+            for (int k = 0; k < s->n; k++)
+                s->pts[k*2 + off] = (short)(s->pts[k*2 + off] + d->amount * t);
+            level_bounds(s);
+            break;
+        }
+        default: break;
+        }
+    }
+    /* A slid door occupies different grid cells, and sector_at consults the
+       grid first -- level_edge_spans asks it who the neighbour is. */
+    level_grid_build(l);
+}
+
+/* Does this buffer hold a vertex at exactly this place, facing this way? */
+static int has_vertex_like(const MeshBuf *b, const Vtx *v) {
+    for (int i = 0; i < b->count; i++)
+        if (b->v[i].px == v->px && b->v[i].py == v->py && b->v[i].pz == v->pz
+         && b->v[i].nx == v->nx && b->v[i].ny == v->ny && b->v[i].nz == v->nz)
+            return 1;
+    return 0;
+}
+
+/* The two properties the cache has to have, and the number that says whether
+ * it was worth having.
+ *
+ *   1. IT MUST NOT CHANGE THE PICTURE ON THE FRAME A LEVEL LOADS. An empty
+ *      cache is every vertex traced, which is what the bake did before there
+ *      was a cache, so a level's first build has to come out identical to one
+ *      built with the cache disabled. This is the check that would catch a
+ *      hash collision being treated as a match.
+ *   2. IT MUST FOLLOW A VERTEX THAT MOVES. A vertex at a new position has no
+ *      cached reading and has to be traced, or a door would drag stale
+ *      lighting around with it.
+ *
+ * And the number: how many of a rebuild's vertices the cache can answer. That
+ * is the whole return on this, and it belongs in the test rather than in a
+ * commit message, because it is the thing that stops being true first.
+ *
+ * 캐시가 가져야 할 두 성질, 그리고 그것이 가질 가치가 있었는지 말해 주는 수치입니다.
+ *
+ *   1. 레벨이 로드되는 프레임의 화면을 바꾸어서는 안 됩니다. 빈 캐시는 모든 정점을 판정하는
+ *      것이고 그것이 캐시가 없던 시절 베이크가 하던 일이므로, 레벨의 첫 생성은 캐시를 끈
+ *      생성과 동일하게 나와야 합니다. 해시 충돌을 일치로 취급하는 사태를 잡을 검사입니다.
+ *   2. 움직인 정점은 따라가야 합니다. 새 위치의 정점에는 캐시된 값이 없으므로 판정되어야
+ *      하며, 그러지 않으면 문이 낡은 조명을 끌고 다니게 됩니다.
+ *
+ * 그리고 수치: 재생성의 정점 중 몇 개를 캐시가 답할 수 있는가. 이것이 이 작업의 수익 전부이며,
+ * 가장 먼저 사실이 아니게 되는 것이므로 커밋 메시지가 아니라 테스트에 있어야 합니다. */
+static void light_cache_one(const char *name) {
+    Level a, b;
+    if (!level_load(name, &a)) { printf("    (no level '%s')\n", name); return; }
+
+    MeshBuf first, again;
+    mb_init(&first, 32768);
+    mb_init(&again, 32768);
+
+    char what[96];
+
+    /* 1. level_load has just emptied the cache, so this build traces
+          everything -- the pre-cache behaviour. Building a second time from
+          the same level must then reproduce it exactly, this time entirely out
+          of the cache. Same picture, no traces. */
+    level_geometry(&first, &a, 0, 0);
+    int traced = level_light_cache_count();
+    int unique = traced;
+
+    level_geometry(&again, &a, 0, 0);
+
+    snprintf(what, sizeof(what), "%s: a cached rebuild is the build it cached", name);
+    ok(first.count == again.count
+       && vtx_fingerprint(&first) == vtx_fingerprint(&again), what);
+
+    /* 1b. THE CLAIM THE CACHE RESTS ON, run rather than asserted in a comment.
+           level.c says an empty cache reproduces the old behaviour vertex for
+           vertex -- but a filling cache and a switched-off one are two
+           different code paths through bake_light, and the only thing that
+           makes them agree is the key being everything the bake reads. If a
+           position and a normal were ever NOT enough to decide a vertex's
+           light, this is where it would show, as two builds of one level that
+           disagree about a colour.
+
+           The comparison is over VTX_ALL, light included: comparing the shape
+           would pass no matter what the cache handed back.
+
+           캐시가 딛고 선 주장을, 주석 속 단언이 아니라 실행해서 확인합니다. level.c는 빈
+           캐시가 이전 동작을 정점 하나까지 재현한다고 말하지만, 채워지는 캐시와 꺼진 캐시는
+           bake_light를 지나는 서로 다른 두 경로이며, 그 둘을 일치시키는 것은 키가 베이크가
+           읽는 전부라는 사실뿐입니다. 위치와 법선이 한 정점의 빛을 결정하기에 충분하지 않은
+           경우가 있다면, 한 레벨의 두 생성이 색에 대해 어긋나는 형태로 이곳에서 드러납니다.
+
+           비교는 빛을 포함한 VTX_ALL로 합니다. 형태만 비교하면 캐시가 무엇을 돌려주든
+           통과하기 때문입니다. */
+    MeshBuf nocache;
+    mb_init(&nocache, 32768);
+
+    level_light_cache_enable(0);
+    level_geometry(&nocache, &a, 0, 0);
+    level_light_cache_enable(1);
+
+    snprintf(what, sizeof(what), "%s: the cache changes nothing it did not trace", name);
+    ok(nocache.count == first.count
+       && vtx_fingerprint(&nocache) == vtx_fingerprint(&first), what);
+
+    mb_free(&nocache);
+
+    printf("    %-8s %5d verts, %d unique keys, %d lights, %d doors\n",
+           name, first.count, unique, a.n_lights, a.n_doors);
+
+    if (a.n_doors < 1) { mb_free(&first); mb_free(&again); return; }
+
+    /* 2. The same level with its doors half open, which is the state a frame
+          that pays for a rebuild is in. Every vertex that MOVED has to be
+          traced afresh -- checked by building the moved level from a cold
+          cache and requiring the same answer. If the cache were handing back
+          readings for vertices that are no longer where they were, the two
+          would differ. */
+    if (!level_load(name, &b)) { mb_free(&first); mb_free(&again); return; }
+    move_every_door(&b, 0.5f);
+
+    MeshBuf warm, cold;
+    mb_init(&warm, 32768);
+    mb_init(&cold, 32768);
+
+    /* Warm: the cache still holds the closed-door build, as it would in play. */
+    level_geometry(&warm, &b, 0, 0);
+
+    /* Cold: the same geometry with nothing remembered. */
+    level_light_cache_reset();
+    level_geometry(&cold, &b, 0, 0);
+
+    snprintf(what, sizeof(what), "%s: the same shape either way, warm or cold", name);
+    ok(warm.count == cold.count
+       && vtx_fingerprint_n(&warm, VTX_GEOM) == vtx_fingerprint_n(&cold, VTX_GEOM),
+       what);
+
+    /* What the cache answered, and what it therefore did not trace. Counted
+       against the cold build rather than guessed at: a vertex the warm build
+       could serve is one that already existed at that position and normal.
+       캐시가 답한 것, 따라서 판정하지 않은 것입니다. 짐작이 아니라 차가운 생성에 대해
+       셉니다. 따뜻한 생성이 답할 수 있는 정점이란 그 위치와 법선에 이미 존재했던
+       정점입니다. */
+    int reused = 0;
+    for (int i = 0; i < cold.count; i++)
+        if (has_vertex_like(&first, &cold.v[i])) reused++;
+
+    printf("      doors at half travel: %d of %d verts answered from cache"
+           " (%.1f%%)\n", reused, cold.count,
+           cold.count ? 100.0 * reused / cold.count : 0.0);
+
+    /* The light on a vertex that did not move is the light it had, which is
+       the trade this makes and the reason a door no longer relights the room
+       behind it. Reported for the same reason the hit rate is.
+       움직이지 않은 정점의 빛은 그것이 가지고 있던 빛입니다. 이것이 이 작업이 하는 거래이며,
+       문이 더 이상 뒤쪽 방을 다시 밝히지 않는 이유입니다. 적중률과 같은 이유로 보고합니다. */
+    if (a.n_lights > 0 && warm.count == cold.count) {
+        int frozen = 0;
+        for (int i = 0; i < warm.count; i++)
+            if (warm.v[i].lr != cold.v[i].lr || warm.v[i].lg != cold.v[i].lg
+             || warm.v[i].lb != cold.v[i].lb) frozen++;
+        printf("      light that no longer follows the door: %d of %d verts\n",
+               frozen, warm.count);
+    }
+
+    mb_free(&first); mb_free(&again); mb_free(&warm); mb_free(&cold);
+}
+
+/* What happens when the table is too small for the level.
+ *
+ * The overflow path -- trace anyway, store nothing, count it -- is the kind of
+ * code that is written once and never runs again, because the shipped table is
+ * comfortably larger than the shipped levels. So build.ps1 builds a second
+ * binary with LIGHT_CACHE_SLOTS forced small, and this is what that binary
+ * exists to run. In the normal build the table is big enough and the checks
+ * below assert the opposite: that nothing overflowed.
+ *
+ * Either way what is required is the same, and it is the important part: an
+ * overflowing cache must still draw the RIGHT PICTURE. It is allowed to be
+ * slow. A level that renders differently because its light cache filled up
+ * would be a fault that appears only on large maps and only sometimes.
+ *
+ * 테이블이 레벨에 비해 너무 작을 때 무슨 일이 일어나는가입니다.
+ *
+ * 초과 경로(그래도 판정하고, 저장하지 않고, 센다)는 한 번 작성된 뒤 다시 실행되지 않는
+ * 종류의 코드입니다. 출하 테이블이 출하 레벨보다 넉넉히 크기 때문입니다. 그래서 build.ps1이
+ * LIGHT_CACHE_SLOTS를 작게 강제한 두 번째 바이너리를 만들며, 이 함수가 그 바이너리가
+ * 실행하려고 존재하는 것입니다. 일반 빌드에서는 테이블이 충분히 크므로 아래 검사가 그 반대,
+ * 즉 아무것도 넘치지 않았음을 단언합니다.
+ *
+ * 어느 쪽이든 요구되는 것은 같고 그것이 중요한 부분입니다. 넘친 캐시도 여전히 *옳은 그림*을
+ * 그려야 합니다. 느려도 됩니다. 라이트 캐시가 가득 찼다는 이유로 다르게 렌더링되는 레벨은
+ * 큰 맵에서만, 그것도 가끔만 나타나는 결함입니다. */
+static void overflow_checks(void) {
+    /* arena, and not the bigger dm03, because the cache only ever holds
+       vertices a LAMP reached: bake_light returns immediately for a level with
+       no lights, so dm03's 3,222 vertices produce zero entries and could not
+       overflow a table of any size. The level that fills a cache is the lit
+       one, not the large one -- which is worth knowing before sizing the
+       table against a vertex count.
+       더 큰 dm03이 아니라 arena입니다. 캐시가 담는 것은 *등이* 닿은 정점뿐이며,
+       bake_light는 광원이 없는 레벨에서 즉시 반환하므로 dm03의 정점 3,222개는 항목을 하나도
+       만들지 않고 어떤 크기의 테이블도 넘치게 할 수 없습니다. 캐시를 채우는 레벨은 큰
+       레벨이 아니라 *밝은* 레벨이며, 정점 수를 기준으로 테이블 크기를 정하기 전에 알아 둘
+       가치가 있습니다. */
+    Level l;
+    if (!level_load("arena", &l)) { printf("    (no level 'arena')\n"); return; }
+
+    int before = diag_count(DIAG_LIGHT_CACHE);
+
+    MeshBuf cached, plain;
+    mb_init(&cached, 32768);
+    mb_init(&plain,  32768);
+
+    level_geometry(&cached, &l, 0, 0);
+    int fired = diag_count(DIAG_LIGHT_CACHE) - before;
+    int held  = level_light_cache_count();
+
+    level_light_cache_enable(0);
+    level_geometry(&plain, &l, 0, 0);
+    level_light_cache_enable(1);
+
+    int slots = level_light_cache_slots();
+    printf("    %d slots (%d bytes of .bss), level filled %d, DIAG fired %d\n",
+           slots, level_light_cache_bytes(), held, fired);
+
+    /* The two builds must agree whether or not the table ran out, which is the
+       property that lets a small table be a performance decision rather than a
+       rendering one. */
+    ok(cached.count == plain.count
+       && vtx_fingerprint(&cached) == vtx_fingerprint(&plain),
+       "an overflowing cache still draws the same picture");
+
+    if (held >= slots) {
+        /* The whole reason the small binary is built: reach the cap, and prove
+           the report fires. A cap that is never reached is a cap that has
+           never been tested. */
+        ok(fired > 0, "a table too small for the level reports the overflow");
+        ok(held == slots, "and it filled every slot it had before giving up");
+    } else {
+        ok(fired == 0, "the shipped table is big enough for the largest level");
+        ok(held < slots, "with room left over, so the probe stays short");
+    }
+
+    mb_free(&cached);
+    mb_free(&plain);
+}
+
+/* A level with more lamps than the shader has slots for.
+ *
+ * That used to be impossible by construction: LVL_MAX_LIGHTS was RD_MAX_LIGHTS
+ * and a static assert held them equal, because evaluating a lamp in the
+ * shader's loop was the only way a lamp was applied. Since the bake it is not,
+ * and the two caps answer different questions -- one is load time, the other is
+ * per-fragment. This is the check that the separation is real rather than
+ * merely written down: a lamp past the eighth has to light something.
+ *
+ * Built here rather than authored into a level file, for the reason the rest of
+ * this file builds its fixtures: a shipped level is a map somebody edits, and a
+ * check that depends on it having sixteen lamps goes red the day somebody
+ * removes one.
+ *
+ * 셰이더가 가진 슬롯보다 등이 많은 레벨입니다.
+ *
+ * 이전에는 구조적으로 불가능했습니다. LVL_MAX_LIGHTS가 RD_MAX_LIGHTS였고 정적 검사가 둘을
+ * 같게 붙들고 있었는데, 셰이더 반복문에서 평가하는 것이 등이 적용되는 유일한 방법이었기
+ * 때문입니다. 베이크 이후로는 아니며, 두 상한은 서로 다른 질문에 답합니다. 하나는 로드 시간,
+ * 다른 하나는 프래그먼트별 비용입니다. 이 검사는 그 분리가 적어 두기만 한 것이 아니라
+ * 실제임을 확인합니다. 여덟 번째를 넘어선 등도 무언가를 밝혀야 합니다.
+ *
+ * 레벨 파일에 작성하지 않고 이곳에서 만드는 이유는 이 파일의 나머지가 픽스처를 만드는 이유와
+ * 같습니다. 출하 레벨은 누군가 편집하는 맵이고, 그것이 등 열여섯 개를 가졌다는 데 의존하는
+ * 검사는 누군가 하나를 지우는 날 빨개집니다. */
+/* Twice what the shader can hold, so the eight that would not have fitted are
+   the whole point of the fixture.
+
+   The static assert is not defensive padding -- it is the check. The realistic
+   way this separation gets undone is not somebody hardcoding an 8 in the
+   parser; it is somebody tying the two caps together again, and that lands
+   here as a compile error naming the reason rather than as a test that
+   silently writes past the end of Level::lights.
+   셰이더가 담을 수 있는 것의 두 배이므로, 들어가지 못했을 여덟 개가 이 픽스처의 요점
+   전부입니다.
+
+   정적 검사는 방어적 여백이 아니라 *그 자체가 검사*입니다. 이 분리가 되돌려지는 현실적인
+   경로는 누군가 파서에 8을 하드코딩하는 것이 아니라 두 상한을 다시 묶는 것이며, 그것은
+   Level::lights의 끝을 조용히 넘어 쓰는 테스트가 아니라 이유를 말하는 컴파일 오류로
+   이곳에 도착합니다. */
+#define WANT_LAMPS 16
+_Static_assert(WANT_LAMPS > RD_MAX_LIGHTS,
+               "the fixture has to exceed the shader's slots to test anything");
+_Static_assert(WANT_LAMPS <= LVL_MAX_LIGHTS,
+               "a level may no longer declare more lamps than the shader holds"
+               " -- the two caps have been tied together again");
+
+static void many_lamp_checks(void) {
+    Level l;
+    Level zero = {0};
+    l = zero;
+
+    /* SIXTEEN SMALL ROOMS IN A ROW, one lamp each, rather than one big room
+       with sixteen lamps in it. The first attempt was the big room and it
+       failed for a reason worth keeping: light is baked at VERTICES, a flat
+       quad floor has vertices only at its corners, and a lamp in the middle of
+       a 60m room reaches none of them. Nothing was lit and the check reported a
+       cap that was working fine.
+
+       A room per lamp puts four floor corners inside every lamp's radius, so
+       "was this lamp applied" becomes a question the geometry can answer.
+
+       큰 방 하나에 등 열여섯 개가 아니라, 등이 하나씩 있는 *작은 방 열여섯 개를 줄지어*
+       놓습니다. 첫 시도가 큰 방이었고 붙잡아 둘 만한 이유로 실패했습니다. 빛은 *정점*에
+       구워지는데, 평평한 사각 바닥은 모서리에만 정점을 가지며, 60m 방 한가운데의 등은 그중
+       어디에도 닿지 않습니다. 아무것도 밝혀지지 않았고 검사는 멀쩡히 동작하는 상한을
+       문제라고 보고했습니다.
+
+       등마다 방 하나를 두면 모든 등의 반경 안에 바닥 모서리 넷이 들어오므로, "이 등이
+       적용되었는가"가 지오메트리가 답할 수 있는 질문이 됩니다. */
+    for (int i = 0; i < WANT_LAMPS; i++) {
+        short x0 = (short)(-4000 + i * 500);
+        short x1 = (short)(x0 + 400);
+
+        Sector *s = &l.sectors[l.n_sectors++];
+        short pts[8] = { x0,-200,  x1,-200,  x1,200,  x0,200 };
+        for (int k = 0; k < 8; k++) s->pts[k] = pts[k];
+        s->n = 4;
+        s->floor = 0;
+        s->ceil  = 400;
+        level_bounds(s);
+
+        Light *L = &l.lights[l.n_lights++];
+        L->x = (short)((x0 + x1) / 2);
+        L->y = 200;
+        L->z = 0;
+        L->radius = 600;          /* reaches its own room's corners, not the next */
+        L->r = L->g = L->b = 255;
+        L->power = 100;
+    }
+    level_grid_build(&l);
+
+    okd(l.n_lights == WANT_LAMPS,
+        "a level may declare more lamps than the shader holds",
+        l.n_lights, WANT_LAMPS);
+    ok(LVL_MAX_LIGHTS > RD_MAX_LIGHTS,
+       "and the two caps are no longer the same number");
+
+    int before = diag_count(DIAG_LIGHT_CAP);
+
+    MeshBuf b;
+    mb_init(&b, 32768);
+    level_light_cache_reset();
+    level_geometry(&b, &l, 0, 0);
+
+    okd(diag_count(DIAG_LIGHT_CAP) == before,
+        "none of them was dropped on the way in",
+        diag_count(DIAG_LIGHT_CAP) - before, 0);
+
+    /* The ninth lamp and beyond have to actually light something. Counted as
+       floor vertices carrying light from the half of the room only the later
+       lamps reach -- if the cap were still eight, that half would be black.
+       아홉 번째 이후의 등도 실제로 무언가를 밝혀야 합니다. 뒤쪽 등들만 닿는 방의 절반에서
+       빛을 지닌 바닥 정점을 셉니다. 상한이 여전히 8이었다면 그 절반은 검을 것입니다. */
+    int lit_far = 0, far_verts = 0;
+    for (int i = 0; i < b.count; i++) {
+        /* Room 8 -- the ninth -- starts at x = 0 in metres, so everything from
+           there on is lit by a lamp the shader could never have held.
+           아홉 번째 방인 8번 방이 미터 단위 x = 0에서 시작하므로, 그 이후는 전부 셰이더가
+           결코 담을 수 없었던 등이 밝히는 것입니다. */
+        if (b.v[i].px < 0.0f) continue;
+        far_verts++;
+        if (b.v[i].lr > 0.0f || b.v[i].lg > 0.0f || b.v[i].lb > 0.0f) lit_far++;
+    }
+
+    printf("      %d of %d vertices past the eighth lamp's reach are lit\n",
+           lit_far, far_verts);
+    ok(far_verts > 0 && lit_far > 0,
+       "a lamp past the shader's eighth still lights the floor");
+
+    mb_free(&b);
+    level_light_cache_reset();
+}
+
+static void light_cache_checks(void) {
+    /* Every shipped level: the cache is about door placement and lamp count,
+       and only the levels know either. */
+    static const char *NAMES[] = { "arena", "vault", "dm03" };
+    for (int i = 0; i < (int)(sizeof(NAMES)/sizeof(NAMES[0])); i++)
+        light_cache_one(NAMES[i]);
+
+    printf("\n  --- when the table is too small ---\n");
+    overflow_checks();
+
+    printf("\n  --- more lamps than the shader could ever hold ---\n");
+    many_lamp_checks();
+
+    /* Left empty for whatever runs next, so one test cannot lend another its
+       readings. */
+    level_light_cache_reset();
 }
 
 int main(void) {
@@ -777,6 +1260,24 @@ int main(void) {
         okd(dirty == 0,
             "no entity picked up a number the level never offered it",
             dirty, 0);
+    }
+
+    /* --- the baked-light cache ------------------------------------------
+       The cache answers most of a rebuild without tracing, which is only
+       correct while the key -- a vertex's position and normal -- really is
+       everything the bake reads. If that ever stops being true, the level
+       still builds, still draws, and is lit slightly wrong: no crash, no
+       missing geometry, nothing a code review or a playthrough would catch.
+       So it is checked here, against every shipped level.
+
+       캐시는 재생성의 대부분을 판정 없이 답하며, 이는 키(정점의 위치와 법선)가 정말로
+       베이크가 읽는 전부일 때에만 옳습니다. 언젠가 그것이 사실이 아니게 되면 레벨은 여전히
+       만들어지고 여전히 그려지며 조명만 살짝 틀립니다. 죽지도 않고, 빠진 지오메트리도 없고,
+       코드 검토도 플레이도 잡아내지 못합니다. 그래서 이곳에서 모든 출하 레벨에 대해
+       검사합니다. */
+    {
+        printf("\n  --- baked-light cache ---\n");
+        light_cache_checks();
     }
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall level checks passed\n", fails);

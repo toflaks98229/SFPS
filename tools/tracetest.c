@@ -38,6 +38,8 @@
 #include "brush.h"
 #include "data.h"
 #include "player.h"
+#include "render.h"
+#include "model.h"
 #include "txt.h"
 
 static int fails;
@@ -252,11 +254,11 @@ static void test_wall(void) {
        x = 7에서 멈추며 이는 램프의 서쪽입니다. 첫 판본은 x = 10까지 갔고 잘못된 이유로
        통과했습니다. 램프가 x = 8에서 시작하므로 벽이 동작하든 아니든 "막힘"이 참이었습니다.
        자기가 지목한 이유로 실패할 수 없는 시험은 시험이 아닙니다. */
-    const float FAR = 7.0f;
+    const float REACH = 7.0f;
 
     /* The wall's west face is at x = 4m. A box of half-width R stops with its
        side against it, so the centre stops at 4 - R. */
-    BrushTrace t = tr(v3f(0, 0.01f, 0), v3f(FAR, 0.01f, 0));
+    BrushTrace t = tr(v3f(0, 0.01f, 0), v3f(REACH, 0.01f, 0));
     check(t.hit, "a forward trace into it hits");
     checkf(t.end.x, 4.0f - R, 0.02f, "stopping a box-width short of the face");
     checkf(t.normal.x, -1.0f, 0.001f, "with the face's outward normal");
@@ -267,16 +269,16 @@ static void test_wall(void) {
        through the corner, which is the bug five sampled points existed to
        paper over -- and papering was all they did, because a circle sampled at
        five points still has gaps between them. */
-    t = tr(v3f(0, 0.01f, 4.2f), v3f(FAR, 0.01f, 4.2f));
+    t = tr(v3f(0, 0.01f, 4.2f), v3f(REACH, 0.01f, 4.2f));
     check(t.hit, "a box whose centre misses the corner is still blocked");
     checkf(t.end.x, 4.0f - R, 0.02f, "at the same face, by its corner");
 
-    t = tr(v3f(0, 0.01f, 4.5f), v3f(FAR, 0.01f, 4.5f));
+    t = tr(v3f(0, 0.01f, 4.5f), v3f(REACH, 0.01f, 4.5f));
     check(!t.hit, "and one that clears it by a box-width is not");
-    checkf(t.end.x, FAR, 0.001f, "completing the whole sweep");
+    checkf(t.end.x, REACH, 0.001f, "completing the whole sweep");
 
     /* Above the wall there is nothing to hit. */
-    t = tr(v3f(0, 7.0f, 0), v3f(FAR, 7.0f, 0));
+    t = tr(v3f(0, 7.0f, 0), v3f(REACH, 7.0f, 0));
     check(!t.hit, "over the top of it, the sweep is clear");
 }
 
@@ -777,6 +779,49 @@ static void test_level_on_map(void) {
     check(!sunk,    "3000 random frames: never sank through a floor");
     check(highest > 1.0f + PLAYER_EYE,
           "and got up onto the ramp or the balcony at some point");
+
+    /* --- the lamps, baked into the vertices ---------------------------------
+       Quake's `light` entities became Level::lights, and level_geometry ran the
+       SAME bake the sector path runs -- ::bake_light reads Level::lights and
+       shadows with ::level_blocked, and both already answered for either model.
+       So this asserts two things at once: that the entities were read, and that
+       the shared bake reached brush geometry.
+       Quake의 `light` 엔티티가 Level::lights가 되었고, level_geometry는 섹터 경로가 돌리는
+       것과 *같은* 베이크를 돌렸습니다. ::bake_light는 Level::lights를 읽고
+       ::level_blocked로 그림자를 지우며, 그 둘은 이미 어느 모델에 대해서든 답했습니다.
+       따라서 이것은 두 가지를 한 번에 단언합니다. 엔티티가 읽혔다는 것과, 공유된 베이크가
+       브러시 지오메트리에 닿았다는 것입니다. */
+    check(LV.n_lights == 3, "the map's three light entities were read");
+    check(LV.lights[0].radius > 1000 && LV.lights[0].radius < 1300,
+          "with `light 400` read as reach in centimetres");
+    check(LV.lights[0].r == 255 && LV.lights[0].g < 255 && LV.lights[0].b < LV.lights[0].g,
+          "and a 0..1 _color scaled to bytes, warm as written");
+
+    static MeshBuf LB;
+    static MdlRange LR[LVL_MAX_RANGES];
+    mb_init(&LB, 200000);
+    level_light_cache_reset();
+    int nr = level_geometry(&LB, &LV, LR, LVL_MAX_RANGES);
+    check(nr > 0 && LB.count > 0, "level_geometry builds the brush level");
+
+    int lit = 0;
+    float brightest = 0.0f;
+    for (int i = 0; i < LB.count; i++) {
+        float s = LB.v[i].lr + LB.v[i].lg + LB.v[i].lb;
+        if (s > 0.001f) lit++;
+        if (s > brightest) brightest = s;
+    }
+    check(lit > 0, "and the bake reached its vertices");
+    check(brightest > 0.1f, "with somewhere actually bright");
+
+    /* NOT EVERYTHING, which is the half that says the shadows work. A bake that
+       ignored ::level_blocked would light every vertex it could reach, including
+       the ones facing away from every lamp and the ones behind a wall.
+       전부는 아니며, 그 절반이 그림자가 동작한다고 말합니다. ::level_blocked를 무시한
+       베이크는 닿을 수 있는 모든 정점을 밝히며, 그중에는 모든 등을 등지고 있는 정점과 벽
+       뒤의 정점도 포함됩니다. */
+    check(lit < LB.count, "and did not light every vertex in the level");
+    mb_free(&LB);
 }
 
 int main(void) {

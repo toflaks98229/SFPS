@@ -649,16 +649,30 @@ static void test_atrium(void) {
     check(data_map("no_such_level", &len) == 0, "and reports an unknown name");
     if (!text) return;
 
-    checki(brush_parse(text, len, &M2), 3, "three entities: world, start, door");
+    /* By CLASSNAME, not by index. The first version asserted "entity 2 is the
+       door" and broke the moment atrium gained lights, which is a level doing
+       the ordinary thing rather than a fault -- a test that fails when the
+       fixture grows teaches you to stop reading it.
+       인덱스가 아니라 classname으로 찾습니다. 첫 판본은 "엔티티 2가 문"이라고 단언했고
+       atrium이 광원을 얻는 순간 깨졌습니다. 그것은 결함이 아니라 레벨이 평범한 일을 한
+       것입니다. 픽스처가 자랄 때 실패하는 시험은 그것을 읽지 않도록 가르칩니다. */
+    check(brush_parse(text, len, &M2) >= 3, "the level's entities parse");
     checki(M2.n_brushes, 11, "eleven brushes");
 
     const char *cn = brush_ent_value(&M2.ents[0], "classname");
     check(cn && txt_is(cn, 10, "worldspawn"), "entity 0 is worldspawn");
     checki(M2.ents[0].n_brushes, 10, "worldspawn owns the room");
 
-    cn = brush_ent_value(&M2.ents[2], "classname");
-    check(cn && txt_is(cn, 9, "func_door"), "entity 2 is a func_door");
-    checki(M2.ents[2].n_brushes, 1, "and owns the leaf");
+    int door = -1, lights = 0;
+    for (int i = 0; i < M2.n_ents; i++) {
+        const char *k = brush_ent_value(&M2.ents[i], "classname");
+        if (!k) continue;
+        if (txt_is(k, 9, "func_door")) door = i;
+        if (txt_is(k, 5, "light")) lights++;
+    }
+    check(door >= 0, "there is a func_door");
+    checki(door >= 0 ? M2.ents[door].n_brushes : -1, 1, "and it owns the leaf");
+    check(lights == 3, "and three light entities beside it");
 
     v3 o;
     check(brush_ent_point(&M2.ents[1], "origin", &o), "the player start has an origin");

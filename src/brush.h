@@ -1146,6 +1146,35 @@ const char *brush_ent_value(const BrushEnt *e, const char *key);
 int brush_ent_point(const BrushEnt *e, const char *key, v3 *out);
 
 /**
+ * @brief Reads a three-number key exactly as written, converting nothing.
+ *
+ * ENGLISH
+ * -------
+ * @param[in]  e   The entity.
+ * @param[in]  key Key name, e.g. "_color".
+ * @param[out] out Receives the three numbers in the order the file wrote them.
+ * @return 1 when the key was present and held three numbers, 0 otherwise.
+ *
+ * THE COMPANION ::brush_ent_point WARNS ABOUT. A colour is three channels, not
+ * a place: running it through the axis change would send green to blue and
+ * negate it, and scaling by ::BRUSH_UNIT would divide a brightness by 32. The
+ * two functions exist separately so that choosing wrongly is a choice somebody
+ * made rather than a default they inherited.
+ *
+ * 한국어
+ * ------
+ * @brief 세 숫자로 된 키를 기록된 그대로 읽으며 아무것도 변환하지 않습니다.
+ * @param[out] out 파일이 쓴 순서 그대로 세 숫자를 받습니다.
+ * @return 키가 존재하고 숫자 세 개를 담고 있으면 1, 그렇지 않으면 0.
+ *
+ * ::brush_ent_point가 경고하던 짝입니다. 색상은 장소가 아니라 세 채널입니다. 축 변경을
+ * 통과시키면 초록이 파랑으로 가고 부호까지 뒤집히며, ::BRUSH_UNIT으로 나누면 밝기를 32로
+ * 나누게 됩니다. 두 함수가 따로 존재하는 이유는, 잘못 고르는 일이 물려받은 기본값이 아니라
+ * 누군가 내린 선택이 되도록 하기 위함입니다.
+ */
+int brush_ent_triple(const BrushEnt *e, const char *key, float out[3]);
+
+/**
  * @brief Reads a numeric key, with a fallback for absent or malformed values.
  *
  * @param[in] e   The entity.

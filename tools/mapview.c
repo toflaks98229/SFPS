@@ -42,6 +42,8 @@
 #include "data.h"
 #include "diag.h"
 #include "gl.h"
+#include "level.h"
+#include "player.h"
 #include "render.h"
 #include "model.h"
 #include "tex.h"
@@ -83,7 +85,7 @@ static LRESULT CALLBACK wnd_proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
 /* --- the map ------------------------------------------------------------- */
 
 /**
- * Two maps and a pointer, so a reload that fails leaves the last good one on
+ * Two levels and a pointer, so a reload that fails leaves the last good one on
  * screen.
  *
  * A save in progress is a file that is briefly empty or half written -- data.c's
@@ -101,32 +103,35 @@ static LRESULT CALLBACK wnd_proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
  * 되돌려 주지 않기 때문입니다. 예비 사본은 도구에서 .bss 수백 킬로바이트이며 그것은 아무것도
  * 아니고, 대신 타이핑하는 동안 결코 어두워지지 않는 뷰어를 얻습니다.
  */
-static BrushMap  g_maps[2];
-static BrushMap *g_map = &g_maps[0];
+static Level     g_levels[2];
+static Level    *g_lv = &g_levels[0];
 static MeshBuf   g_buf;
 static Mesh      g_mesh;
-static MdlRange  g_ranges[BR_MAX_RANGES];
-static Mat       g_range_tex[BR_MAX_RANGES];
+static MdlRange  g_ranges[LVL_MAX_RANGES];
+static Mat       g_range_tex[LVL_MAX_RANGES];
 static int       g_range_count;
-static int       g_ents, g_verts;
+static int       g_verts;
 
 /* Parses and builds. Everything derived is rebuilt together, because a map
    reloaded halfway is a mesh drawn against another map's ranges. */
+/* THROUGH level_load AND level_geometry, not brush_parse and brush_geometry.
+   Those two would draw the brushes and nothing else -- no lamps, because the
+   static bake reads Level::lights and runs from level_geometry. Going the long
+   way round is what makes this show the picture the game shows rather than a
+   subset of it, which is the claim in this file's own header.
+   brush_parse와 brush_geometry가 아니라 level_load와 level_geometry를 통과합니다. 그 둘은
+   브러시만 그리고 그 이상은 그리지 않습니다. 등이 없습니다. 정적 베이크는 Level::lights를
+   읽고 level_geometry에서 실행되기 때문입니다. 먼 길로 도는 것이 이것을 부분집합이 아니라
+   게임이 보여 주는 그림을 보여 주게 만들며, 그것이 이 파일 머리말 자신의 주장입니다. */
 static int load_map(const char *name) {
-    int len = 0;
-    const char *text = data_map(name, &len);
-    if (!text) return 0;
+    Level *next = (g_lv == &g_levels[0]) ? &g_levels[1] : &g_levels[0];
+    if (!level_load(name, next)) return 0;   /* the live level is untouched */
+    if (!next->brushes) return 0;            /* a sector level is not ours to show */
 
-    BrushMap *next = (g_map == &g_maps[0]) ? &g_maps[1] : &g_maps[0];
-    int ents = brush_parse(text, len, next);
-    if (!ents) return 0;          /* the live map and its mesh are untouched */
-
-    g_map  = next;
-    g_ents = ents;
+    g_lv = next;
 
     mb_reset(&g_buf);
-    g_range_count = brush_geometry(&g_buf, g_map, 0, g_map->n_brushes,
-                                   g_ranges, BR_MAX_RANGES);
+    g_range_count = level_geometry(&g_buf, g_lv, g_ranges, LVL_MAX_RANGES);
     g_verts = g_buf.count;
     mesh_upload(&g_mesh, &g_buf, 1);
 
@@ -138,61 +143,21 @@ static int load_map(const char *name) {
     return 1;
 }
 
-/* Puts the camera at the map's info_player_start, so the first thing seen is
-   what the author framed. Falls back to the middle of the world's bounding box,
-   because a map being built may not have a start yet and refusing to show it
-   would be the least useful moment to refuse. */
+/* Puts the camera where the level says the player begins, at eye height, so the
+   first thing seen is what the author framed.
+   ::Level::start and ::Level::start_h rather than the entity, because level.c
+   has already done that reading and done the angle conversion with it. Doing it
+   again here would be a second place for "where does the player start" to be
+   decided, and the two would drift the moment either changed.
+   엔티티가 아니라 ::Level::start와 ::Level::start_h를 씁니다. level.c가 이미 그것을 읽었고
+   각도 변환도 함께 마쳤기 때문입니다. 이곳에서 다시 하면 "플레이어는 어디서 시작하는가"를
+   결정하는 두 번째 자리가 생기고, 어느 한쪽이 바뀌는 순간 둘은 어긋납니다. */
 static void place_camera(void) {
-    for (int i = 0; i < g_map->n_ents; i++) {
-        const char *cn = brush_ent_value(&g_map->ents[i], "classname");
-        if (!cn || !txt_is(cn, 17, "info_player_start")) continue;
-
-        v3 o;
-        if (!brush_ent_point(&g_map->ents[i], "origin", &o)) continue;
-        g_eye = o;
-
-        /* A CONVERSION, not a copy, and the 90 is the whole of it.
-           Quake's `angle` is degrees counted from +x toward +y, so 0 is east
-           and 90 is north. The engine's yaw runs about a different axis: at
-           yaw 0, cam_basis's forward is (0,0,-1), and engine -z is map +y --
-           which is north. So the two agree only after
-               engine_yaw = map_angle - 90
-           Worked from the definitions rather than by trying values, because
-           being 90 degrees out puts the camera against a wall on the first
-           frame and looks exactly like a map authored facing the wrong way.
-           변환이며 복사가 아닙니다. 90이 그 전부입니다. Quake의 `angle`은 +x에서 +y 쪽으로
-           센 각도이므로 0이 동쪽이고 90이 북쪽입니다. 엔진의 yaw는 다른 축을 중심으로
-           돕니다. yaw 0에서 cam_basis의 전방은 (0,0,-1)이고 엔진의 -z는 맵의 +y, 즉
-           북쪽입니다. 따라서 둘은 위 식을 거쳐야만 일치합니다. 값을 넣어 보는 대신 정의에서
-           유도했습니다. 90도가 어긋나면 첫 프레임부터 카메라가 벽을 향하는데, 그것은 맵이
-           잘못된 방향으로 제작된 것과 똑같아 보이기 때문입니다. */
-        float ang = brush_ent_num(&g_map->ents[i], "angle", 90.0f);
-        /* Quake reserves -1 for "up" and -2 for "down". Neither is a heading,
-           and a player start should not carry one -- but a mapper who pasted
-           one from a door would otherwise get a camera pointed at the floor
-           with no hint why. North is the same fallback an absent key gets.
-           Quake는 -1을 "위", -2를 "아래"로 예약합니다. 어느 쪽도 방위가 아니며 플레이어
-           시작 지점이 그것을 지녀서는 안 됩니다. 그러나 문에서 복사해 붙인 제작자는
-           그러지 않으면 이유를 알 수 없이 바닥을 향한 카메라를 얻게 됩니다. 북쪽은 키가
-           없을 때의 대체값과 같습니다. */
-        if (ang < 0.0f) ang = 90.0f;
-        g_yaw = (ang - 90.0f) * (M_PI_F / 180.0f);
-        g_pitch = 0.0f;
-        return;
-    }
-
-    v3 lo = v3f(1e9f, 1e9f, 1e9f), hi = v3f(-1e9f, -1e9f, -1e9f);
-    for (int i = 0; i < g_map->n_brushes; i++) {
-        const Brush *b = &g_map->brushes[i];
-        if (b->min.x > b->max.x) continue;
-        if (b->min.x < lo.x) lo.x = b->min.x;
-        if (b->min.y < lo.y) lo.y = b->min.y;
-        if (b->min.z < lo.z) lo.z = b->min.z;
-        if (b->max.x > hi.x) hi.x = b->max.x;
-        if (b->max.y > hi.y) hi.y = b->max.y;
-        if (b->max.z > hi.z) hi.z = b->max.z;
-    }
-    if (lo.x <= hi.x) g_eye = v3scale(v3add(lo, hi), 0.5f);
+    g_eye = v3f(g_lv->start[0] * 0.01f,
+                g_lv->start_h  * 0.01f + PLAYER_EYE,
+                g_lv->start[1] * 0.01f);
+    g_yaw = g_lv->start[2] * 0.0000174533f;   /* millidegrees -> radians */
+    g_pitch = 0.0f;
 }
 
 static const char *map_name_of(const char *cmd, char *buf, int cap) {
@@ -251,7 +216,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
     place_camera();
 
     printf("mapview [%s]  %d entities, %d brushes, %d faces, %d verts, %d runs\n",
-           name, g_ents, g_map->n_brushes, g_map->n_faces, g_verts, g_range_count);
+           name, g_lv->brushes->n_ents, g_lv->brushes->n_brushes,
+           g_lv->brushes->n_faces, g_verts, g_range_count);
     for (int i = 0; i < g_range_count; i++)
         printf("  %-16s %6d verts\n", g_ranges[i].mat, g_ranges[i].count);
     fflush(stdout);
@@ -343,7 +309,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
             char t[320];
             wsprintfA(t, "mapview [%s] %d brushes %d faces %d verts %d runs | "
                          "pos %d %d %d | %s%s%s",
-                      name, g_map->n_brushes, g_map->n_faces, g_verts,
+                      name, g_lv->brushes->n_brushes, g_lv->brushes->n_faces, g_verts,
                       g_range_count,
                       (int)(g_eye.x * 100), (int)(g_eye.y * 100),
                       (int)(g_eye.z * 100),

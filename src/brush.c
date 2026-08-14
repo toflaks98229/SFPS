@@ -814,6 +814,17 @@ int brush_ent_point(const BrushEnt *e, const char *key, v3 *out) {
     return 1;
 }
 
+int brush_ent_triple(const BrushEnt *e, const char *key, float out[3]) {
+    const char *s = brush_ent_value(e, key);
+    if (!s || !out) return 0;
+
+    Lex L;
+    lex_init(&L, s, -1);
+    for (int i = 0; i < 3; i++)
+        if (!lex_num(&L, &out[i])) return 0;
+    return 1;
+}
+
 float brush_ent_num(const BrushEnt *e, const char *key, float def) {
     const char *s = brush_ent_value(e, key);
     if (!s) return def;

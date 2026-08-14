@@ -137,6 +137,37 @@
 "origin" "0 -160 32"
 "angle" "90"
 }
+// Lights. `light` is Quake's brightness and this engine reads it as reach, so
+// 400 units is 12.5m -- enough to cross most of a 16m room. `_color` is given
+// in 0..1 floats, which is the spelling the compilers use; 0..255 is read too.
+// Baked into the vertices when the level loads, shadowed against these brushes.
+//
+// 광원입니다. `light`는 Quake의 밝기이고 이 엔진은 그것을 도달 거리로 읽으므로, 400유닛은
+// 12.5m이며 16m 방의 대부분을 가로지르기에 충분합니다. `_color`는 0..1 실수로 주었고 이는
+// 컴파일러들이 쓰는 표기입니다. 0..255도 읽습니다. 레벨이 로드될 때 정점에 구워지며 이
+// 브러시들에 대해 그림자가 집니다.
+{
+"classname" "light"
+"origin" "-128 -128 160"
+"light" "400"
+"_color" "1 0.92 0.78"
+}
+{
+"classname" "light"
+"origin" "128 128 160"
+"light" "400"
+"_color" "0.78 0.86 1"
+}
+// Under the balcony, which the two above cannot reach through it. A brush level
+// makes that a real place rather than a shading artefact.
+// 발코니 아래이며, 위의 둘은 발코니를 통과해 그곳에 닿을 수 없습니다. 브러시 레벨은 그것을
+// 음영 처리의 부산물이 아니라 실제 장소로 만듭니다.
+{
+"classname" "light"
+"origin" "-160 160 48"
+"light" "220"
+"_color" "1 0.7 0.45"
+}
 // entity 2 -- the door leaf. Its own brush, which is the whole of "a door is a
 // group of brushes that moves".
 {

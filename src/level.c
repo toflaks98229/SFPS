@@ -899,6 +899,84 @@ static void brush_start_of(Level *out, const BrushMap *bm) {
     }
 }
 
+/**
+ * Quake's `light` entities, turned into the lamps ::bake_light already knows.
+ *
+ * ENGLISH
+ * -------
+ * WHAT QUAKE WRITES, because that is what an author placing a light in
+ * TrenchBroom gets:
+ *
+ *   light    brightness, defaulting to 300. Read as REACH here, because this
+ *            engine separates reach from brightness and Quake does not -- its
+ *            single number is a radius under a linear falloff, which is the
+ *            same shape ::Light::radius has. A brighter Quake light is a light
+ *            that carries further, and keeping that is what makes a value
+ *            copied from a Quake tutorial land where the author expected.
+ *   _color   the colour. Accepted in both spellings the tools use: 0..1 floats
+ *            and 0..255 bytes, told apart by whether anything exceeds 1. That
+ *            is ericw-tools' own rule, and guessing wrong turns a white lamp
+ *            into one at 1/255 brightness, which reads as no lamp at all.
+ *
+ * ::Light::power stays at the reference 100. Quake has no second brightness
+ * number to take it from, and inventing a key the editor does not offer would
+ * be a control nobody can reach.
+ *
+ * 한국어
+ * ------
+ * Quake의 `light` 엔티티를 ::bake_light가 이미 아는 등으로 바꿉니다.
+ *
+ * Quake가 쓰는 것을 읽습니다. TrenchBroom에서 광원을 놓는 제작자가 얻는 것이 그것이기
+ * 때문입니다.
+ *
+ *   light    밝기이며 기본값 300입니다. 이곳에서는 *도달 거리*로 읽습니다. 이 엔진은 도달
+ *            거리와 밝기를 분리하지만 Quake는 그러지 않으며, 그 하나의 숫자는 선형 감쇠
+ *            아래의 반경으로 ::Light::radius와 같은 형태입니다. 더 밝은 Quake 광원은 더 멀리
+ *            닿는 광원이고, 그것을 지키는 것이 Quake 강좌에서 복사한 값이 제작자가 기대한
+ *            자리에 떨어지게 합니다.
+ *   _color   색상입니다. 도구들이 쓰는 두 표기를 모두 받습니다. 0..1 실수와 0..255 바이트이며,
+ *            1을 넘는 값이 있는지로 구별합니다. ericw-tools 자신의 규칙이고, 잘못 추측하면
+ *            흰 등이 1/255 밝기가 되어 등이 없는 것처럼 보입니다.
+ *
+ * ::Light::power는 기준값 100으로 둡니다. Quake에는 그것을 가져올 두 번째 밝기 숫자가 없고,
+ * 에디터가 제공하지 않는 키를 만들어 내는 것은 아무도 닿을 수 없는 조절 장치입니다.
+ */
+static void brush_lights_of(Level *out, const BrushMap *bm) {
+    for (int i = 0; i < bm->n_ents; i++) {
+        const BrushEnt *e = &bm->ents[i];
+        const char *cn = brush_ent_value(e, "classname");
+        if (!cn || !txt_is(cn, 5, "light")) continue;
+
+        v3 o;
+        if (!brush_ent_point(e, "origin", &o)) continue;
+
+        if (out->n_lights >= LVL_MAX_LIGHTS) { DIAG(DIAG_LIGHT_CAP); continue; }
+        Light *L = &out->lights[out->n_lights++];
+
+        L->x = (short)(o.x * 100.0f);
+        L->y = (short)(o.y * 100.0f);
+        L->z = (short)(o.z * 100.0f);
+
+        /* Map units to centimetres: the reach is authored in the file's own
+           units and stored in the level's. */
+        float reach = brush_ent_num(e, "light", 300.0f) * BRUSH_UNIT * 100.0f;
+        if (reach < 1.0f)     reach = 1.0f;
+        if (reach > 32000.0f) reach = 32000.0f;   /* Light::radius is a short */
+        L->radius = (short)reach;
+
+        float c[3] = { 1.0f, 1.0f, 1.0f };
+        if (!brush_ent_triple(e, "_color", c)) c[0] = c[1] = c[2] = 1.0f;
+        /* Told apart by magnitude, which is what the tools do. A colour of
+           "1 1 1" is white either way; "255 255 255" can only be bytes. */
+        float s = (c[0] > 1.0f || c[1] > 1.0f || c[2] > 1.0f) ? 1.0f : 255.0f;
+        L->r = (short)clampf(c[0] * s, 0.0f, 255.0f);
+        L->g = (short)clampf(c[1] * s, 0.0f, 255.0f);
+        L->b = (short)clampf(c[2] * s, 0.0f, 255.0f);
+
+        L->power = 100;
+    }
+}
+
 static int load_brush_level(const char *name, Level *out) {
     int len = 0;
     const char *text = data_map(name, &len);
@@ -910,6 +988,7 @@ static int load_brush_level(const char *name, Level *out) {
     out->brushes = bm;
     copy_name(out->name, sizeof(out->name), name, -1);
     brush_start_of(out, bm);
+    brush_lights_of(out, bm);
     return 1;
 }
 
@@ -2036,17 +2115,27 @@ static void bake_light(MeshBuf *b, const Level *l, int first) {
 int level_geometry(MeshBuf *b, const Level *l, MdlRange *ranges, int max_ranges) {
     /* Brushes bring their own builder, and it needs none of the machinery
        below: a brush face is convex by construction, so there is no ear-clip,
-       no wall extrusion and no edge-span cutting. What it does not yet bring is
-       the static light bake -- the vertices come out unlit and the shader's
-       ambient is all there is. That is the one thing the sector path still does
-       better, and it is the next piece rather than a decision.
+       no wall extrusion and no edge-span cutting.
+       THE BAKE IS SHARED, though, and that is the point of doing it here rather
+       than inside brush_geometry. ::bake_light reads ::Level::lights and traces
+       with ::level_blocked, and both of those already answer for either model
+       -- so the lamps a .map placed are shadowed against the brushes it placed
+       them among, through the same function and the same cache the sector path
+       uses. A second bake would be a second set of rules about what a shadow
+       is.
        브러시는 자기 생성기를 가지고 오며, 그것에는 아래의 장치가 하나도 필요 없습니다. 브러시
-       면은 구성상 볼록하므로 ear-clip도, 벽 압출도, 모서리 구간 절단도 없습니다. 아직 가지고
-       오지 못한 것은 정적광 베이크입니다. 정점이 조명 없이 나오고 셰이더의 환경광이 전부입니다.
-       그것이 섹터 경로가 아직 더 잘하는 유일한 것이며, 결정이 아니라 다음에 할 일입니다. */
-    if (l->brushes)
-        return brush_geometry(b, l->brushes, 0, l->brushes->n_brushes,
-                              ranges, max_ranges);
+       면은 구성상 볼록하므로 ear-clip도, 벽 압출도, 모서리 구간 절단도 없습니다.
+       다만 *베이크는 공유합니다*. 그것이 brush_geometry 안이 아니라 이곳에서 하는 이유입니다.
+       ::bake_light는 ::Level::lights를 읽고 ::level_blocked로 판정하는데, 그 둘은 이미 어느
+       모델에 대해서든 답합니다. 따라서 .map이 놓은 등은 그것이 놓인 브러시들에 대해, 섹터
+       경로가 쓰는 것과 같은 함수와 같은 캐시를 통해 그림자가 집니다. 두 번째 베이크는 그림자가
+       무엇인가에 대한 두 번째 규칙 집합이 됩니다. */
+    if (l->brushes) {
+        int n = brush_geometry(b, l->brushes, 0, l->brushes->n_brushes,
+                               ranges, max_ranges);
+        bake_light(b, l, 0);
+        return n;
+    }
 
     int n_ranges = 0;
 

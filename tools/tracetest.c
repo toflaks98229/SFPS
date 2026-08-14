@@ -37,6 +37,7 @@
 #include <math.h>
 #include "brush.h"
 #include "data.h"
+#include "door.h"
 #include "player.h"
 #include "render.h"
 #include "model.h"
@@ -824,6 +825,81 @@ static void test_level_on_map(void) {
     mb_free(&LB);
 }
 
+/* --- a door is a group of brushes that moves -----------------------------
+ *
+ * The sector door moved a Sector, and collision saw it without knowing what a
+ * door was because collision already asked sectors where their floors were.
+ * The brush door has to keep that property: nothing in brush_trace learns what
+ * a door is, and the leaf blocks the doorway when it is there and does not when
+ * it is not, because it IS somewhere else.
+ *
+ * 섹터 문은 Sector를 움직였고, 충돌 판정은 이미 섹터에게 바닥이 어디인지 묻고 있었으므로 문의
+ * 정체를 모른 채 그 변화를 보았습니다. 브러시 문도 그 성질을 지켜야 합니다. brush_trace의
+ * 무엇도 문이 무엇인지 배우지 않으며, 문짝은 그곳에 있을 때 출입구를 막고 없을 때 막지
+ * 않습니다. 실제로 다른 곳에 가 있기 때문입니다. */
+static void test_door(void) {
+    printf("\na door, which is a group of brushes that moves\n");
+
+    if (!level_load("atrium", &LV) || !LV.brushes) {
+        printf("  no atrium.map\n"); fails++; return;
+    }
+    check(LV.n_doors == 1, "the func_door became a door definition");
+    if (LV.n_doors != 1) return;
+
+    const DoorDef *d = &LV.doors[0];
+    check(d->sector < 0, "which names brushes rather than a sector");
+    check(d->n_brushes == 1, "one brush: the leaf");
+    check(d->axis == DOOR_UP, "`angle -1` reads as opening upward");
+    check(d->amount > 300 && d->amount < 400,
+          "travelling its own height less the lip, in centimetres");
+    check(d->speed > 0, "at the speed the entity asked for");
+
+    door_reset(&LV);
+    checkf(door_openness(0), 0.0f, 0.001f, "and it starts closed");
+
+    /* The doorway is at engine x 0, z -8.25. Closed, the leaf fills it. */
+    const v3 THROUGH_FROM = { 0.0f, 1.0f, -6.0f };
+    const v3 THROUGH_TO   = { 0.0f, 1.0f, -11.0f };
+    v3 dir = v3norm(v3sub(THROUGH_TO, THROUGH_FROM));
+    float t; v3 n;
+    check(level_trace(&LV, THROUGH_FROM, dir, 6.0f, &t, &n),
+          "closed, a shot into the doorway is stopped");
+
+    /* Standing in front of it opens it. The player position is what
+       door_update takes; no key, no switch -- atrium's door is a plain one. */
+    v3 at_door = v3f(0.0f, 0.0f, -7.0f);
+    float y_closed = LV.brushes->brushes[d->first_brush].min.y;
+    for (int i = 0; i < 300 && door_openness(0) < 0.999f; i++)
+        door_update(&LV, at_door, KEY_NONE, DT);
+
+    checkf(door_openness(0), 1.0f, 0.001f, "standing at it, the door opens");
+
+    float y_open = LV.brushes->brushes[d->first_brush].min.y;
+    check(y_open > y_closed + 3.0f, "and the leaf's brush actually moved up");
+
+    check(!level_trace(&LV, THROUGH_FROM, dir, 6.0f, &t, &n),
+          "open, the same shot goes through");
+
+    /* And the player can now walk the doorway they could not before. */
+    BrushMove mv = mover(v3f(0.0f, BRUSH_SKIN, -6.0f), v3f(0, 0, -5.0f), PLAYER_STEP);
+    brush_slide_move(LV.brushes, 0, LV.brushes->n_brushes, &mv, 0.6f);
+    check(mv.pos.z < -8.6f, "and walks through the opening");
+
+    /* Closing again puts it back where the file drew it. A door that drifted
+       by a fraction each cycle would seal a doorway after enough of them.
+       다시 닫히면 파일이 그린 자리로 돌아갑니다. 주기마다 조금씩 밀리는 문은 충분히 많은
+       주기 뒤에 출입구를 막아 버립니다. */
+    v3 far_away = v3f(0.0f, 0.0f, 6.0f);
+    for (int i = 0; i < 900 && door_openness(0) > 0.001f; i++)
+        door_update(&LV, far_away, KEY_NONE, DT);
+    checkf(door_openness(0), 0.0f, 0.001f, "walking away closes it");
+    checkf(LV.brushes->brushes[d->first_brush].min.y, y_closed, 0.01f,
+           "and the leaf is back where the .map drew it");
+
+    check(level_trace(&LV, THROUGH_FROM, dir, 6.0f, &t, &n),
+          "so the doorway is solid again");
+}
+
 int main(void) {
     printf("tracetest\n");
     build();
@@ -845,6 +921,7 @@ int main(void) {
     test_settling();
     test_atrium();
     test_level_on_map();
+    test_door();
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall trace checks passed\n", fails);
     return fails != 0;

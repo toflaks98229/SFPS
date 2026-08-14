@@ -263,7 +263,36 @@ enum {
  *       되며, 둘이 저장 공간을 공유하지 않으면 그럴 수 없습니다.
  */
 typedef struct {
-    short sector;   /**< Index into ::Level::sectors. / ::Level::sectors의 인덱스. */
+    /**
+     * @brief Index into ::Level::sectors, or -1 when this door moves brushes.
+     *
+     * The two models both fit here because a door is the same idea in each: a
+     * solid that is somewhere else when it is open. Which one this is decides
+     * what ::door_update translates -- a Sector's heights and outline, or a run
+     * of brushes -- and nothing past that has to care.
+     *
+     * ::Level::sectors의 인덱스. 이 문이 브러시를 움직이면 -1입니다.
+     * @note 두 모델이 모두 이곳에 들어맞는 이유는, 문이 어느 쪽에서나 같은 개념이기
+     *       때문입니다. 열려 있을 때 다른 곳에 있는 고체입니다. 어느 쪽인지가
+     *       ::door_update가 무엇을 옮길지 결정하며(Sector의 높이와 외곽선인지, 브러시
+     *       구간인지) 그 너머의 무엇도 신경 쓸 필요가 없습니다.
+     */
+    short sector;
+
+    /**
+     * @brief The brushes this door moves, when `sector` is -1.
+     *
+     * Copied from the ::BrushEnt that owned them, which already recorded them
+     * as a run -- so `func_door`'s leaf needs no list and no second table.
+     * Meaningless on a sector door, where both are 0.
+     *
+     * `sector`가 -1일 때 이 문이 움직이는 브러시입니다.
+     * @note 그것들을 소유한 ::BrushEnt에서 복사합니다. 그쪽이 이미 연속 구간으로 기록해
+     *       두었으므로 `func_door`의 문짝에는 목록도, 두 번째 표도 필요 없습니다. 섹터 문에서는
+     *       의미가 없으며 둘 다 0입니다.
+     */
+    short first_brush, n_brushes;
+
     short axis;     /**< One of the DOOR_* directions. / DOOR_* 방향 중 하나. */
     short amount;   /**< Travel in file units; signed for x and z. / 이동 거리(파일 단위). x와 z는 부호가 있습니다. */
     short speed;    /**< File units per second. / 초당 파일 단위. */
@@ -901,9 +930,15 @@ typedef struct {
      *       fixture that builds a Level field by field therefore stays a sector
      *       level without knowing this field exists -- the same contract
      *       ::Sector::has_bounds and ::SectorGrid::built already keep.
-     * @warning Not owned. Copying a Level copies the pointer, so two Levels
-     *          share one map; that is safe because nothing here writes through
-     *          it, and it is why the type is const.
+     * @warning Not owned, and WRITTEN THROUGH by exactly one thing: a moving
+     *          door. ::brush_translate slides the brushes a `func_door` owns,
+     *          which is what makes the leaf solid where it is and not where it
+     *          was. Everything else that touches this pointer only reads.
+     * @warning Copying a Level copies the pointer, so two Levels share one map.
+     *          That is safe for reading and is what the level-chain scan in
+     *          world.c does; it is NOT safe to run doors on both, because they
+     *          would each translate the same brushes. Nothing does, and nothing
+     *          should start.
      *
      * 한국어
      * ------
@@ -927,11 +962,16 @@ typedef struct {
      * @note 0이면 섹터이며, `Level l = {0}`이 주는 값입니다. 따라서 필드를 하나씩 채워 Level을
      *       만드는 모든 픽스처는 이 필드의 존재를 모른 채 섹터 레벨로 남습니다.
      *       ::Sector::has_bounds와 ::SectorGrid::built가 이미 지키는 것과 같은 계약입니다.
-     * @warning 소유하지 않습니다. Level을 복사하면 포인터가 복사되어 두 Level이 하나의 맵을
-     *          공유합니다. 이곳의 무엇도 그것을 통해 쓰지 않으므로 안전하며, 타입이 const인
-     *          이유입니다.
+     * @warning 소유하지 않으며, 이것을 통해 *쓰는* 것은 정확히 하나입니다. 움직이는 문입니다.
+     *          ::brush_translate가 `func_door`가 소유한 브러시를 미끄러뜨리며, 그것이 문짝을
+     *          지금 있는 곳에서 고체이고 있던 곳에서 아니게 만듭니다. 이 포인터에 닿는 그 밖의
+     *          모든 것은 읽기만 합니다.
+     * @warning Level을 복사하면 포인터가 복사되어 두 Level이 하나의 맵을 공유합니다. 읽기에는
+     *          안전하며 world.c의 레벨 사슬 스캔이 그렇게 합니다. 그러나 양쪽에서 문을 돌리는
+     *          것은 안전하지 *않습니다*. 각자 같은 브러시를 옮기게 됩니다. 그렇게 하는 것은
+     *          없으며, 시작해서도 안 됩니다.
      */
-    const BrushMap *brushes;
+    BrushMap *brushes;
 } Level;
 
 /**

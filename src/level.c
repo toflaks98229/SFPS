@@ -977,6 +977,95 @@ static void brush_lights_of(Level *out, const BrushMap *bm) {
     }
 }
 
+/**
+ * Quake's `func_door` entities, turned into the doors door.c already drives.
+ *
+ * ENGLISH
+ * -------
+ * HOW FAR IT TRAVELS IS NOT AUTHORED, and that is Quake's rule rather than a
+ * shortcut: a door slides its own size along the direction it opens, less a
+ * `lip` that stays behind so the leaf never vanishes completely. An author who
+ * resizes a door gets the right travel without editing a second number, and
+ * the second number is exactly the kind that goes stale.
+ *
+ *   angle    -1 up, -2 down, otherwise a heading in degrees. The headings are
+ *            Quake's -- 0 east, 90 north -- and become this engine's axes the
+ *            same way ::brush_start_of converts a facing.
+ *   speed    units per second, default 100, converted to the centimetres per
+ *            second ::DoorDef speaks.
+ *   lip      units left behind, default 8, which is Quake's.
+ *
+ * 한국어
+ * ------
+ * Quake의 `func_door` 엔티티를 door.c가 이미 구동하는 문으로 바꿉니다.
+ *
+ * 얼마나 움직이는지는 제작된 값이 아니며, 이는 편법이 아니라 Quake의 규칙입니다. 문은 열리는
+ * 방향으로 자기 크기만큼 미끄러지되, 문짝이 완전히 사라지지 않도록 `lip`만큼은 남깁니다.
+ * 문의 크기를 바꾼 제작자는 두 번째 숫자를 고치지 않고도 옳은 이동 거리를 얻으며, 그 두 번째
+ * 숫자야말로 낡아 버리는 종류의 숫자입니다.
+ */
+static void brush_doors_of(Level *out, const BrushMap *bm) {
+    for (int i = 0; i < bm->n_ents; i++) {
+        const BrushEnt *e = &bm->ents[i];
+        const char *cn = brush_ent_value(e, "classname");
+        if (!cn || !txt_is(cn, 9, "func_door")) continue;
+        if (e->n_brushes < 1) continue;          /* a door with no leaf */
+
+        if (out->n_doors >= LVL_MAX_DOORS) { DIAG(DIAG_DOOR_CAP); continue; }
+
+        /* The group's own extent, which is what the travel is measured from. */
+        v3 lo = v3f(1e30f, 1e30f, 1e30f), hi = v3f(-1e30f, -1e30f, -1e30f);
+        int any = 0;
+        for (int k = 0; k < e->n_brushes; k++) {
+            const Brush *b = &bm->brushes[e->first_brush + k];
+            if (b->min.x > b->max.x) continue;
+            if (b->min.x < lo.x) lo.x = b->min.x;
+            if (b->min.y < lo.y) lo.y = b->min.y;
+            if (b->min.z < lo.z) lo.z = b->min.z;
+            if (b->max.x > hi.x) hi.x = b->max.x;
+            if (b->max.y > hi.y) hi.y = b->max.y;
+            if (b->max.z > hi.z) hi.z = b->max.z;
+            any = 1;
+        }
+        if (!any) continue;                      /* nothing bounded, nothing to move */
+
+        DoorDef *d = &out->doors[out->n_doors++];
+        d->sector      = -1;
+        d->first_brush = (short)e->first_brush;
+        d->n_brushes   = (short)e->n_brushes;
+        d->tag         = 0;                      /* triggers are entities, step 4 */
+        d->key         = KEY_NONE;
+
+        float ang  = brush_ent_num(e, "angle", -1.0f);
+        float span;
+        if (ang <= -1.5f)      { d->axis = DOOR_DOWN; span = hi.y - lo.y; }
+        else if (ang < 0.0f)   { d->axis = DOOR_UP;   span = hi.y - lo.y; }
+        else {
+            /* Quake's headings against this engine's axes: east is +x, north
+               is -z. A door opening south or west travels the other way, which
+               ::DoorDef::amount carries as a sign. */
+            int quarter = ((int)(ang + 0.5f) / 90) & 3;
+            if (quarter == 0 || quarter == 2) { d->axis = DOOR_X; span = hi.x - lo.x; }
+            else                              { d->axis = DOOR_Z; span = hi.z - lo.z; }
+            (void)quarter;
+        }
+
+        float lip   = brush_ent_num(e, "lip", 8.0f) * BRUSH_UNIT;
+        float travel = span - lip;
+        if (travel < 0.0f) travel = 0.0f;
+
+        /* Signed for the horizontal axes, because DOOR_X and DOOR_Z name a
+           line and not a direction along it. */
+        if (d->axis == DOOR_X && (int)(ang + 0.5f) >= 180) travel = -travel;
+        if (d->axis == DOOR_Z && (int)(ang + 0.5f) <  180) travel = -travel;
+
+        d->amount = (short)clampf(travel * 100.0f, -32000.0f, 32000.0f);
+
+        float sp = brush_ent_num(e, "speed", 100.0f) * BRUSH_UNIT * 100.0f;
+        d->speed = (short)clampf(sp, 1.0f, 32000.0f);
+    }
+}
+
 static int load_brush_level(const char *name, Level *out) {
     int len = 0;
     const char *text = data_map(name, &len);
@@ -989,6 +1078,7 @@ static int load_brush_level(const char *name, Level *out) {
     copy_name(out->name, sizeof(out->name), name, -1);
     brush_start_of(out, bm);
     brush_lights_of(out, bm);
+    brush_doors_of(out, bm);
     return 1;
 }
 

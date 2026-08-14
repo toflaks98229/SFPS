@@ -5,6 +5,7 @@
 
 #include "door.h"
 #include "audio.h"
+#include "brush.h"  /* brush_translate -- what a door moves when it is brushes */
 #include "diag.h"   /* DIAG_DOOR_STALE -- state that outlived the level it described */
 #include <math.h>
 
@@ -32,6 +33,60 @@ typedef struct {
     short floor0, ceil0;            /**< Closed heights. / 닫힌 상태의 높이. */
     short pts0[LVL_MAX_PTS * 2];    /**< Closed outline. / 닫힌 상태의 외곽선. */
     int   n0;                       /**< Points in `pts0`. / `pts0`의 점 개수. */
+
+    /**
+     * @brief How far a BRUSH door has already been translated, in metres.
+     *
+     * ENGLISH
+     * -------
+     * The sector door needs nothing like this: `pts0` and `floor0` are the
+     * closed shape, and ::apply writes the target absolutely from them every
+     * frame, so where it currently is never has to be remembered.
+     *
+     * Brush planes carry no such snapshot -- ::brush_translate is relative and
+     * there are up to ::BR_MAX_FACES of them per brush -- so what is stored is
+     * the one number that makes the move reversible: how much has been applied.
+     * The next frame asks for the difference.
+     *
+     * @warning Zero means the brushes are where the .map drew them, which is
+     *          true immediately after ::level_load and is why ::door_reset must
+     *          follow one. A reset against a level whose doors are part way
+     *          open would call that position closed and the leaf would never
+     *          return to the doorway.
+     *
+     * 한국어
+     * ------
+     * @brief *브러시* 문이 이미 평행이동된 거리이며 미터 단위입니다.
+     *
+     * 섹터 문에는 이런 것이 필요 없습니다. `pts0`와 `floor0`가 닫힌 형상이고 ::apply가 매
+     * 프레임 그것으로부터 목표를 절대적으로 기록하므로, 지금 어디에 있는지는 기억할 필요가
+     * 없습니다.
+     *
+     * 브러시 평면에는 그런 스냅숏이 없습니다. ::brush_translate는 상대적이고 브러시마다
+     * 최대 ::BR_MAX_FACES개가 있습니다. 그래서 저장하는 것은 이동을 되돌릴 수 있게 만드는 단
+     * 하나의 숫자, 즉 얼마나 적용했는가입니다. 다음 프레임은 그 차이를 요청합니다.
+     *
+     * @warning 0은 브러시가 .map이 그린 자리에 있다는 뜻이며, ::level_load 직후에 참입니다.
+     *          ::door_reset이 그 뒤를 따라야 하는 이유입니다. 문이 반쯤 열린 레벨에 대해
+     *          리셋하면 그 위치를 닫힘이라 부르게 되고 문짝은 결코 출입구로 돌아오지
+     *          않습니다.
+     */
+    float applied;
+
+    /**
+     * @brief A brush door's CLOSED extent, in world units.
+     *
+     * The counterpart of `pts0` for the other model, and it exists for the same
+     * reason: the touch test and the sound both measure against where the door
+     * is when shut, so that a door already sliding does not walk away from the
+     * player who opened it and stall halfway across.
+     *
+     * 브러시 문의 *닫힌* 크기이며 월드 단위입니다.
+     * @note 다른 모델에서의 `pts0`에 해당하며 이유도 같습니다. 접촉 판정과 소리는 모두 문이
+     *       닫혀 있을 때의 자리를 기준으로 재며, 그래야 이미 미끄러지고 있는 문이 그것을 연
+     *       플레이어에게서 멀어져 중간에 멈추지 않습니다.
+     */
+    v3 lo0, hi0;
     /**
      * @brief Which sector the shape above was copied from, or -1.
      *
@@ -126,9 +181,44 @@ void door_reset(const Level *l) {
         st->t = 0.0f;
         st->wait = 0.0f;
         st->opening = 0;
+        st->applied = 0.0f;
 
         int si = l->doors[i].sector;
-        if (si < 0 || si >= l->n_sectors) { st->n0 = 0; st->sector = -1; continue; }
+
+        /* A BRUSH DOOR HAS NO OUTLINE TO SNAPSHOT. Its closed position is where
+           the .map drew it, which is where it is: level_load has just parsed
+           the text. So `applied` at zero is the whole of the record, and `n0`
+           is set to one only so the stale-state guard below and in
+           ::door_step_one treats the slot as live rather than as a door that
+           was never captured.
+           브러시 문에는 스냅숏할 외곽선이 없습니다. 닫힌 위치는 .map이 그린 자리이고 그곳이
+           바로 지금 있는 자리입니다. level_load가 방금 텍스트를 파싱했기 때문입니다. 따라서
+           `applied`가 0인 것이 기록의 전부이며, `n0`를 1로 두는 이유는 오직 아래와
+           ::door_step_one의 낡은 상태 검사가 이 슬롯을 포착된 적 없는 문이 아니라 살아 있는
+           것으로 취급하게 하기 위함입니다. */
+        if (si < 0) {
+            st->sector = -1;
+            st->n0 = 0;
+            if (l->doors[i].n_brushes <= 0 || !l->brushes) continue;
+
+            v3 lo = v3f(1e30f, 1e30f, 1e30f), hi = v3f(-1e30f, -1e30f, -1e30f);
+            for (int k = 0; k < l->doors[i].n_brushes; k++) {
+                const Brush *b = &l->brushes->brushes[l->doors[i].first_brush + k];
+                if (b->min.x > b->max.x) continue;
+                if (b->min.x < lo.x) lo.x = b->min.x;
+                if (b->min.y < lo.y) lo.y = b->min.y;
+                if (b->min.z < lo.z) lo.z = b->min.z;
+                if (b->max.x > hi.x) hi.x = b->max.x;
+                if (b->max.y > hi.y) hi.y = b->max.y;
+                if (b->max.z > hi.z) hi.z = b->max.z;
+                st->n0 = 1;      /* live: something was captured */
+            }
+            st->lo0 = lo;
+            st->hi0 = hi;
+            continue;
+        }
+
+        if (si >= l->n_sectors) { st->n0 = 0; st->sector = -1; continue; }
 
         /* Recorded with the shape, not before it: the two are one fact, and a
            slot that carried a sector index but no outline would claim a
@@ -205,6 +295,7 @@ float door_notice_left(void) { return g_notice_t > 0.0f ? g_notice_t : 0.0f; }
 static v3 door_centre(const DoorState *st) {
     float sx = 0.0f, sz = 0.0f;
     if (st->n0 <= 0) return v3f(0.0f, 0.0f, 0.0f);
+    if (st->sector < 0) return v3scale(v3add(st->lo0, st->hi0), 0.5f);
     for (int i = 0; i < st->n0; i++) {
         sx += st->pts0[i * 2 + 0];
         sz += st->pts0[i * 2 + 1];
@@ -214,6 +305,23 @@ static v3 door_centre(const DoorState *st) {
 }
 
 static float dist_to_outline(const DoorState *st, float x, float z) {
+    /* A brush door's footprint is its closed box in plan, so the nearest point
+       on it is the point clamped into that rectangle. The polygon walk below
+       is the same measurement for an outline that is not a rectangle.
+       Tested BEFORE the `n0 < 2` guard below, which counts OUTLINE POINTS: a
+       brush door has none and carries n0 as a liveness flag, so reaching that
+       guard sent every one of them home with 1e9 and no door ever opened.
+       브러시 문의 발자국은 평면상의 닫힌 박스이므로, 그 위의 가장 가까운 점은 그 사각형
+       안으로 제한한 점입니다. 아래의 다각형 순회는 사각형이 아닌 외곽선에 대한 같은
+       측정입니다. 아래의 `n0 < 2` 검사보다 *먼저* 판정합니다. 그 검사가 세는 것은 *외곽선
+       점*인데 브러시 문에는 그것이 없고 n0를 생존 플래그로 쓰므로, 그곳에 도달하면 모든
+       브러시 문이 1e9를 받고 돌아갔고 어떤 문도 열리지 않았습니다. */
+    if (st->sector < 0 && st->n0 > 0) {
+        float dx = x < st->lo0.x ? st->lo0.x - x : (x > st->hi0.x ? x - st->hi0.x : 0.0f);
+        float dz = z < st->lo0.z ? st->lo0.z - z : (z > st->hi0.z ? z - st->hi0.z : 0.0f);
+        return sqrtf(dx*dx + dz*dz);
+    }
+
     if (st->n0 < 2) return 1e9f;
     float best = 1e9f;
 
@@ -236,6 +344,10 @@ static float dist_to_outline(const DoorState *st, float x, float z) {
    will not close on somebody who is in it -- see door.h.
    플레이어가 문의 닫힌 발자국 안에 서 있는지 여부입니다. */
 static int inside_outline(const DoorState *st, float x, float z) {
+    if (st->sector < 0)
+        return st->n0 > 0 &&
+               x >= st->lo0.x && x <= st->hi0.x &&
+               z >= st->lo0.z && z <= st->hi0.z;
     if (st->n0 < 3) return 0;
     int in = 0;
     for (int i = 0, j = st->n0 - 1; i < st->n0; j = i++) {
@@ -251,8 +363,60 @@ static int inside_outline(const DoorState *st, float x, float z) {
    mechanism: everything that collides reads these fields.
    문의 현재 이동량을 섹터에 되씁니다. 이것이 기구의 전부입니다. 충돌하는 모든 것이 이
    필드들을 읽습니다. */
-static void apply(Level *l, const DoorDef *d, const DoorState *st) {
-    if (d->sector < 0 || d->sector >= l->n_sectors) return;
+/**
+ * The brush half of ::apply: the leaf is somewhere else, so it moves there.
+ *
+ * ENGLISH
+ * -------
+ * RELATIVE, because ::brush_translate is. The planes carry no memory of where
+ * they started, so the state carries how far it has already been moved and this
+ * asks for the difference. Translating by the absolute amount every frame would
+ * walk the door out of the level at `speed` per frame.
+ *
+ * All four DOOR_* directions are plain translations here, which is not quite
+ * what they mean for a sector: DOOR_UP raises a sector's CEILING and leaves its
+ * floor, because a sector is a floor plan and cannot move as a body. A brush
+ * can, and a Quake `func_door` does -- the whole leaf slides. That is the
+ * behaviour a mapper placing a func_door expects, and it is the one the
+ * geometry can express.
+ *
+ * 한국어
+ * ------
+ * ::apply의 브러시 쪽 절반입니다. 문짝은 다른 곳에 있으므로 그곳으로 옮깁니다.
+ *
+ * ::brush_translate가 상대적이므로 이것도 상대적입니다. 평면은 자기가 어디서 시작했는지
+ * 기억하지 않으므로, 상태가 이미 옮겨진 거리를 지니고 이 함수는 그 차이를 요청합니다. 매
+ * 프레임 절대량만큼 옮기면 문이 프레임당 `speed`씩 레벨 밖으로 걸어 나갑니다.
+ *
+ * 이곳에서 네 DOOR_* 방향은 모두 단순한 평행이동이며, 섹터에서의 의미와는 조금 다릅니다.
+ * DOOR_UP은 섹터의 *천장*을 올리고 바닥은 그대로 둡니다. 섹터는 평면도이고 하나의 몸으로
+ * 움직일 수 없기 때문입니다. 브러시는 할 수 있고 Quake의 `func_door`가 그렇게 합니다. 문짝
+ * 전체가 미끄러집니다. func_door를 놓는 제작자가 기대하는 동작이며, 지오메트리가 표현할 수
+ * 있는 동작입니다.
+ */
+static void apply_brush(Level *l, const DoorDef *d, DoorState *st) {
+    if (!l->brushes) return;
+
+    static const v3 DIR[DOOR_AXES] = {
+        { 0.0f,  1.0f, 0.0f },   /* DOOR_UP   */
+        { 0.0f, -1.0f, 0.0f },   /* DOOR_DOWN */
+        { 1.0f,  0.0f, 0.0f },   /* DOOR_X    */
+        { 0.0f,  0.0f, 1.0f }    /* DOOR_Z    */
+    };
+    if (d->axis < 0 || d->axis >= DOOR_AXES) return;
+
+    float want  = d->amount * 0.01f * st->t;    /* file units -> metres */
+    float delta = want - st->applied;
+    if (delta == 0.0f) return;
+
+    brush_translate(l->brushes, d->first_brush, d->n_brushes,
+                    v3scale(DIR[d->axis], delta));
+    st->applied = want;
+}
+
+static void apply(Level *l, const DoorDef *d, DoorState *st) {
+    if (d->sector < 0) { apply_brush(l, d, st); return; }
+    if (d->sector >= l->n_sectors) return;
     Sector *s = &l->sectors[d->sector];
 
     float moved = d->amount * st->t;

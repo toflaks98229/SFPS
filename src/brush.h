@@ -988,6 +988,64 @@ typedef struct {
 void brush_slide_move(const BrushMap *m, int first, int count,
                       BrushMove *mv, float dt);
 
+/* --- Moving the world itself / 월드 자체를 움직이기 ------------------------ */
+
+/**
+ * @brief Slides a run of brushes, planes and boxes together.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] m     The map, which is written through.
+ * @param[in]     first First brush to move.
+ * @param[in]     count How many brushes from there.
+ * @param[in]     delta How far to move them, in world units.
+ *
+ * THIS IS WHAT A DOOR IS. ::BrushEnt already records the brushes an entity owns
+ * as a run, so a `func_door` moving is this call on that run -- and nothing in
+ * ::brush_trace or ::brush_geometry learns that a door exists. They ask the
+ * planes where the solid is, and the planes moved. The sector model had the
+ * same property for the same reason, and door.h's opening line is about
+ * keeping it.
+ *
+ * THE PLANES ARE WHAT MOVES, not stored vertices: a plane translated by `delta`
+ * has its distance shifted by the component of `delta` along its normal, and
+ * that is the whole operation. Face polygons are derived on demand, so they
+ * follow without being touched.
+ *
+ * @note The bounding boxes move with them. They are what ::brush_trace rejects
+ *       against, so a brush whose planes slid and whose box stayed would be
+ *       solid where it no longer is and passable where it now stands -- the
+ *       identical trap ::level_bounds exists to stop for a sliding sector.
+ * @warning Relative, and there is no record of where the brushes started. The
+ *          caller owns that: ::DoorState keeps how far it has already applied
+ *          and asks for the difference. A caller that lost track would walk a
+ *          door out of the level one frame at a time.
+ *
+ * 한국어
+ * ------
+ * @brief 브러시 구간을 평면과 박스까지 함께 옮깁니다.
+ * @param[in,out] m     기록 대상이 되는 맵.
+ * @param[in]     delta 옮길 거리 (월드 단위).
+ *
+ * 이것이 곧 문입니다. ::BrushEnt는 이미 엔티티가 소유한 브러시를 연속 구간으로 기록하므로,
+ * `func_door`가 움직인다는 것은 그 구간에 대한 이 호출입니다. 그리고 ::brush_trace나
+ * ::brush_geometry의 무엇도 문이 존재한다는 것을 배우지 않습니다. 그들은 평면에게 고체가
+ * 어디인지 묻고, 평면이 움직였습니다. 섹터 모델도 같은 이유로 같은 성질을 지녔고, door.h의
+ * 첫 문단이 그것을 지키는 일에 관한 것입니다.
+ *
+ * 저장된 정점이 아니라 *평면*이 움직입니다. `delta`만큼 평행이동한 평면은 법선 방향 성분만큼
+ * 거리가 옮겨지며 그것이 연산의 전부입니다. 면 폴리곤은 필요할 때 유도되므로 건드리지 않아도
+ * 따라옵니다.
+ *
+ * @note 바운딩 박스도 함께 움직입니다. ::brush_trace가 그것으로 기각하므로, 평면은 미끄러지고
+ *       박스는 제자리에 남은 브러시는 더 이상 있지 않은 곳에서 막고 지금 서 있는 곳에서
+ *       통과시킵니다. 미끄러지는 섹터에 대해 ::level_bounds가 막아 주는 것과 동일한 함정입니다.
+ * @warning 상대적이며, 브러시가 어디서 시작했는지에 대한 기록이 없습니다. 그것은 호출자의
+ *          몫입니다. ::DoorState가 이미 적용한 거리를 보관하고 그 차이를 요청합니다. 이를
+ *          놓친 호출자는 문을 한 프레임씩 레벨 밖으로 걸어 나가게 합니다.
+ */
+void brush_translate(BrushMap *m, int first, int count, v3 delta);
+
 /**
  * @brief The polygon one face bounds, in world units.
  *

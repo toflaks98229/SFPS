@@ -1313,6 +1313,34 @@ void brush_slide_move(const BrushMap *m, int first, int count,
     probe_ground(m, first, count, mv);
 }
 
+void brush_translate(BrushMap *m, int first, int count, v3 delta) {
+    if (!m) return;
+    if (first < 0) first = 0;
+    if (first + count > m->n_brushes) count = m->n_brushes - first;
+
+    for (int i = first; i < first + count; i++) {
+        Brush *b = &m->brushes[i];
+
+        for (int f = 0; f < b->n_faces; f++) {
+            BrushFace *fc = &m->faces[b->first_face + f];
+            /* The plane, moved. A point p on the old plane satisfies
+               dot(n,p) == dist; the same point moved by delta satisfies
+               dot(n, p+delta) == dist + dot(n,delta).
+               평면을 옮깁니다. 옛 평면 위의 점 p는 dot(n,p) == dist를 만족하고, delta만큼
+               옮겨진 같은 점은 dot(n, p+delta) == dist + dot(n,delta)를 만족합니다. */
+            fc->dist += v3dot(fc->normal, delta);
+        }
+
+        /* Invalid boxes are left alone: an unclosed brush has no box to move
+           and giving it one here would invent a volume nothing bounds.
+           유효하지 않은 박스는 그대로 둡니다. 닫히지 않은 브러시에는 옮길 박스가 없으며,
+           이곳에서 하나를 주는 것은 아무것도 한정하지 않는 부피를 만들어 내는 일입니다. */
+        if (b->min.x > b->max.x) continue;
+        b->min = v3add(b->min, delta);
+        b->max = v3add(b->max, delta);
+    }
+}
+
 /* ------------------------------------------------------------- geometry */
 
 /**

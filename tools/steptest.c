@@ -26,7 +26,7 @@
 #include "world.h"
 #include "hook.h"
 #include "enemy.h"    /* enemy_reset -- the monster pool is global, and shared */
-#include "pickup.h"   /* pickup_spawn_level, for the same reason */
+#include "pickup.h"   /* pickup_spawn_level -- also takes the World's pool now */
 #include "proj.h"     /* proj_reset -- now takes the World's own pool */
 #include "door.h"     /* door_reset, and the DOOR_* axes */
 #include "diag.h"     /* diag_count -- a stale door is counted, not printed */
@@ -83,9 +83,9 @@ static void box(Level *l, short x0, short z0, short x1, short z1,
  * world_init은 플레이를 타이틀 화면 상태로 두며 그것은 모든 것을 정지시킵니다. 게임에는
  * 옳고 테스트에는 쓸모없으므로 픽스처가 해제합니다.
  *
- * 풀도 이곳에서 초기화하며, 그 목록은 점점 짧아지고 있습니다. 발사체는 이제 World::pools에
- * 있고 소유하는 것만으로 비워집니다. 반면 몬스터·아이템·문은 여전히 각자 모듈 안의 파일
- * 스코프 배열이라 손으로 비워야 하며, 그러지 않으면 이전 사례의 내용물이 이번 사례에 그대로
+ * 풀도 이곳에서 초기화하며, 그 목록은 점점 짧아지고 있습니다. 발사체와 아이템은 이제
+ * World::pools에 있고 소유하는 것만으로 비워집니다. 반면 몬스터와 문은 여전히 각자 모듈 안의
+ * 파일 스코프 배열이라 손으로 비워야 하며, 그러지 않으면 이전 사례의 내용물이 이번 사례에 그대로
  * 서 있게 됩니다. pools.h를 참조하십시오. */
 static void fixture(World *w, short hurt) {
     world_init(w);
@@ -100,7 +100,7 @@ static void fixture(World *w, short hurt) {
 
     enemy_reset();
     proj_reset(&w->pools);
-    pickup_spawn_level(&w->level);
+    pickup_spawn_level(&w->pools, &w->level);
     door_reset(&w->level);
 }
 

@@ -715,7 +715,7 @@ int world_load_level(World *w, const char *name, WorldEnter how) {
 
     /* Monsters and pickups are placed from the level's own entities. */
     enemy_spawn_level(&w->level);
-    pickup_spawn_level(&w->level);
+    pickup_spawn_level(&w->pools, &w->level);
 
     /* After the sectors exist and before the first door_update: door.c copies
        each door's CLOSED shape here, and it can only do that while the level
@@ -960,7 +960,7 @@ int world_step(World *w, const Input *in, float aspect, float dt) {
        is passed whole rather than one ammo pointer, because a box says which
        belt it fills and a weapon pickup fills none of them. */
     if (!frozen)
-        pickup_update(w->player.pos, &w->player.health, PLAYER_MAX_HP,
+        pickup_update(&w->pools, w->player.pos, &w->player.health, PLAYER_MAX_HP,
                       &w->weapon, &w->player.keys, dt);
 
     /* Before the exit, because a pad and an exit on the same tile is a level

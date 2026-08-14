@@ -8,11 +8,20 @@
 #include <stdio.h>
 #include <math.h>
 #include "pickup.h"
+#include "pools.h"
 #include "player.h"
 #include "level.h"
 #include "weapon.h"       /* WEAPON_MAX_AMMO */
 
 #define DT (1.0f / 60.0f)
+
+/* The pools this file drives. Owned here the way a ::World owns its own --
+   these were file-scope arrays inside pickup.c, so a case inherited whatever
+   the previous one left standing. See pools.h.
+   이 파일이 구동하는 풀입니다. ::World가 자기 것을 소유하듯 이곳에서 소유합니다. 이것들은
+   pickup.c 안의 파일 스코프 배열이었으므로, 한 사례가 이전 사례가 남긴 것을 그대로
+   물려받았습니다. pools.h를 참조하십시오. */
+static Pools g_pools;
 
 static int fails;
 static Level L;
@@ -74,58 +83,58 @@ int main(void) {
     printf("pickuptest\n\n");
     build();
 
-    pickup_spawn_level(&L);
-    ok(pickup_count() == 2, "two pickups spawned (the imp is not one)");
+    pickup_spawn_level(&g_pools, &L);
+    ok(pickup_count(&g_pools) == 2, "two pickups spawned (the imp is not one)");
 
     /* --- standing away from anything collects nothing --- */
     {
         int hp = 50, keys = KEY_NONE; Weapon w = armed(5);
-        pickup_update(eye_at(50.0f, 50.0f), &hp, PLAYER_MAX_HP, &w, &keys, DT);
+        pickup_update(&g_pools, eye_at(50.0f, 50.0f), &hp, PLAYER_MAX_HP, &w, &keys, DT);
         ok(hp == 50 && w.ammo[WP_SHOTGUN] == 5, "far from every pickup, nothing is taken");
-        ok(pickup_count() == 2, "and none are consumed");
+        ok(pickup_count(&g_pools) == 2, "and none are consumed");
     }
 
     /* --- walking onto the ammo box adds shells and consumes it --- */
     {
         int hp = 50, keys = KEY_NONE; Weapon w = armed(5);
-        pickup_update(eye_at(0.0f, 0.0f), &hp, PLAYER_MAX_HP, &w, &keys, DT);
+        pickup_update(&g_pools, eye_at(0.0f, 0.0f), &hp, PLAYER_MAX_HP, &w, &keys, DT);
         okf(w.ammo[WP_SHOTGUN] == 5 + wp_stats(WP_SHOTGUN)->pickup_ammo,
             "ammo box gives shells", (float)w.ammo[WP_SHOTGUN],
             (float)(5 + wp_stats(WP_SHOTGUN)->pickup_ammo));
         ok(hp == 50, "and does not touch health");
         /* Standing on the now-empty spot gives nothing more. */
         int a2 = w.ammo[WP_SHOTGUN];
-        pickup_update(eye_at(0.0f, 0.0f), &hp, PLAYER_MAX_HP, &w, &keys, DT);
+        pickup_update(&g_pools, eye_at(0.0f, 0.0f), &hp, PLAYER_MAX_HP, &w, &keys, DT);
         ok(w.ammo[WP_SHOTGUN] == a2, "the collected box gives nothing the second time");
     }
 
     /* --- the medkit heals, and is left behind at full health --- */
     {
-        pickup_spawn_level(&L);            /* fresh */
+        pickup_spawn_level(&g_pools, &L);            /* fresh */
         int hp = PLAYER_MAX_HP, keys = KEY_NONE; Weapon w = armed(5);
 
         /* At full health, the medkit must be ignored and remain. */
-        pickup_update(eye_at(5.0f, 0.0f), &hp, PLAYER_MAX_HP, &w, &keys, DT);
+        pickup_update(&g_pools, eye_at(5.0f, 0.0f), &hp, PLAYER_MAX_HP, &w, &keys, DT);
         ok(hp == PLAYER_MAX_HP, "a medkit at full health heals nothing");
-        int live = 0; for (int i = 0; i < pickup_count(); i++)
-            if (pickup_at(i)->active) live++;
+        int live = 0; for (int i = 0; i < pickup_count(&g_pools); i++)
+            if (pickup_at(&g_pools, i)->active) live++;
         ok(live == 2, "and is left on the floor to come back for");
 
         /* Hurt, then walk over it: it heals, capped at max. */
         hp = PLAYER_MAX_HP - 10;
-        pickup_update(eye_at(5.0f, 0.0f), &hp, PLAYER_MAX_HP, &w, &keys, DT);
+        pickup_update(&g_pools, eye_at(5.0f, 0.0f), &hp, PLAYER_MAX_HP, &w, &keys, DT);
         ok(hp == PLAYER_MAX_HP, "hurt, the medkit heals but does not overfill");
     }
 
     /* --- ammo is capped too --- */
     {
-        pickup_spawn_level(&L);
+        pickup_spawn_level(&g_pools, &L);
         int hp = 50, keys = KEY_NONE; Weapon w = armed(wp_stats(WP_SHOTGUN)->max_ammo);
-        pickup_update(eye_at(0.0f, 0.0f), &hp, PLAYER_MAX_HP, &w, &keys, DT);
+        pickup_update(&g_pools, eye_at(0.0f, 0.0f), &hp, PLAYER_MAX_HP, &w, &keys, DT);
         ok(w.ammo[WP_SHOTGUN] == wp_stats(WP_SHOTGUN)->max_ammo,
            "a full belt ignores the ammo box");
-        int live = 0; for (int i = 0; i < pickup_count(); i++)
-            if (pickup_at(i)->active) live++;
+        int live = 0; for (int i = 0; i < pickup_count(&g_pools); i++)
+            if (pickup_at(&g_pools, i)->active) live++;
         ok(live == 2, "and leaves it on the floor");
     }
 

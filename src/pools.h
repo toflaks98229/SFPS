@@ -68,6 +68,7 @@
 #define POOLS_H
 
 #include "proj.h"
+#include "pickup.h"
 
 /**
  * @struct Pools
@@ -82,7 +83,8 @@
  *       필요 없습니다. ::World는 ::world_init이 자신을 비우면서 이것을 공짜로 얻습니다.
  */
 struct Pools {
-    ProjPool proj;   /**< Grenades and bolts in flight. / 비행 중인 유탄과 볼트. */
+    ProjPool   proj;     /**< Grenades and bolts in flight. / 비행 중인 유탄과 볼트. */
+    PickupPool pickup;   /**< Items the level laid out, and which are left. / 레벨이 배치한 아이템과 남아 있는 것들. */
 };
 
 #endif

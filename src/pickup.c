@@ -16,6 +16,7 @@
  */
 
 #include "pickup.h"
+#include "pools.h"
 #include "player.h"       /* PLAYER_EYE, to turn an eye position into feet */
 #include "audio.h"
 #include "fx.h"
@@ -25,9 +26,7 @@
 /* --- Static variable definitions / 정적 변수 정의 --- */
 
 /** @brief All pickups for the current level, active and collected alike. / 현재 레벨의 모든 아이템. 활성 상태와 획득된 것을 모두 포함합니다. */
-static Pickup g_pickups[PICKUP_MAX];
-/** @brief How many entries of ::g_pickups the current level filled. / 현재 레벨이 채운 ::g_pickups 항목의 개수. */
-static int    g_count;
+/** @brief How many entries of ::pl->pickup.p the current level filled. / 현재 레벨이 채운 ::pl->pickup.p 항목의 개수. */
 
 /* --- Static function prototypes / 정적 함수 프로토타입 --- */
 
@@ -35,17 +34,17 @@ static int pickup_kind_for(const char *k);
 
 /* --- Public function definitions / 공개 함수 정의 --- */
 
-void pickup_reset(void) {
+void pickup_reset(Pools *pl) {
     /* Clearing `active` is enough; the remaining fields are overwritten
        wholesale on the next spawn.
        `active`만 해제하면 충분합니다. 나머지 필드는 다음 생성 시 통째로
        덮어쓰기 때문입니다. */
-    for (int i = 0; i < PICKUP_MAX; i++) g_pickups[i].active = 0;
-    g_count = 0;
+    for (int i = 0; i < PICKUP_MAX; i++) pl->pickup.p[i].active = 0;
+    pl->pickup.count = 0;
 }
 
-void pickup_spawn_level(const Level *l) {
-    pickup_reset();
+void pickup_spawn_level(Pools *pl, const Level *l) {
+    pickup_reset(pl);
     /* Iterates every entity even once full -- see the matching note in
        enemy_spawn_level for why the cap is checked here rather than in the
        loop condition.
@@ -69,30 +68,30 @@ void pickup_spawn_level(const Level *l) {
            바깥에 있는 것이므로, 공중에 남겨 두지 않고 건너뜁니다. */
         if (!level_ground(l, x, z, 1000.0f, 0.0f, &f, &c)) continue;
 
-        if (g_count >= PICKUP_MAX) { DIAG(DIAG_PICKUP_CAP); continue; }
+        if (pl->pickup.count >= PICKUP_MAX) { DIAG(DIAG_PICKUP_CAP); continue; }
 
-        Pickup *p = &g_pickups[g_count++];
+        Pickup *p = &pl->pickup.p[pl->pickup.count++];
         p->kind   = kind;
         p->pos    = v3f(x, f, z);
-        p->anim   = (float)(g_count) * 1.3f;   /* desync the bobbing */
+        p->anim   = (float)(pl->pickup.count) * 1.3f;   /* desync the bobbing */
         p->active = 1;
     }
 }
 
-int pickup_count(void) { return g_count; }
+int pickup_count(const Pools *pl) { return pl->pickup.count; }
 
-const Pickup *pickup_at(int i) {
-    return (i >= 0 && i < g_count) ? &g_pickups[i] : 0;
+const Pickup *pickup_at(const Pools *pl, int i) {
+    return (i >= 0 && i < pl->pickup.count) ? &pl->pickup.p[i] : 0;
 }
 
-void pickup_update(v3 player_eye, int *health, int health_max,
+void pickup_update(Pools *pl, v3 player_eye, int *health, int health_max,
                    Weapon *w, int *keys, float dt) {
     /* The player's feet, so a pickup at floor level is compared like with
        like rather than against the eye 1.7 m up. */
     float feet_y = player_eye.y - PLAYER_EYE;
 
-    for (int i = 0; i < g_count; i++) {
-        Pickup *p = &g_pickups[i];
+    for (int i = 0; i < pl->pickup.count; i++) {
+        Pickup *p = &pl->pickup.p[i];
         if (!p->active) continue;
         /* The animation clock advances before the range test, so a pickup
            the player never reaches still bobs.

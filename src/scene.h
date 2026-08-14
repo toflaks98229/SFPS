@@ -331,7 +331,7 @@ void scene_draw_enemies(Scene *s, mat4 vp, v3 eye, v3 cam_right);
  * @note 몬스터와 달리 그리기 호출이 한 번입니다. 아이템은 색조를 공유하므로 나눌
  *       이유가 없습니다.
  */
-void scene_draw_pickups(Scene *s, mat4 vp, v3 eye, v3 cam_right);
+void scene_draw_pickups(Scene *s, const Pools *pl, mat4 vp, v3 eye, v3 cam_right);
 
 /**
  * @brief Draws monster projectiles as additive, untextured billboard rosettes.
@@ -380,7 +380,7 @@ void scene_draw_shots(Scene *s, mat4 vp, v3 cam_right, v3 cam_up);
  * @note 유탄은 도화선이 타면서 붉어집니다. 발밑의 유탄이 곧 터진다는 것에 대해 플레이어가
  *       받는 유일한 경고입니다.
  */
-void scene_draw_proj(Scene *s, const Pools *w, mat4 vp, v3 cam_right, v3 cam_up);
+void scene_draw_proj(Scene *s, const Pools *pl, mat4 vp, v3 cam_right, v3 cam_up);
 
 /* --- UI passes: after post_end / UI 패스: post_end 이후 --- */
 

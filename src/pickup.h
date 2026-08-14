@@ -135,6 +135,32 @@ typedef struct {
     int   active;      /**< 0 once collected. / 획득되면 0이 됩니다. */
 } Pickup;
 
+/**
+ * @struct PickupPool
+ * @brief Every item standing in the level, owned by the caller.
+ *
+ * `count` rather than an `active` scan for the extent, because items are laid
+ * out once when the level loads and only ever cleared after that -- the array
+ * is packed to `count` and stays that way. A consumed item clears its own
+ * `active` and leaves the hole, so that ::pickup_at keeps handing back the
+ * same index for the same item and the drawer's tint does not jump when
+ * something is picked up.
+ *
+ * 레벨에 서 있는 모든 아이템이며 호출자가 소유합니다. 범위를 `active` 순회가 아니라
+ * `count`로 두는 이유는, 아이템이 레벨 로드 시 한 번 배치되고 그 뒤로는 지워지기만 하기
+ * 때문입니다. 배열은 `count`까지 채워진 채로 유지됩니다. 획득된 아이템은 자기 `active`만
+ * 지우고 자리를 남기므로, ::pickup_at이 같은 아이템에 같은 인덱스를 계속 돌려주고 무언가를
+ * 주웠을 때 그리는 쪽의 색조가 튀지 않습니다.
+ */
+typedef struct {
+    Pickup p[PICKUP_MAX];   /**< Slots, packed to `count`. / `count`까지 채워진 슬롯. */
+    int    count;           /**< How many the level laid out. / 레벨이 배치한 개수. */
+} PickupPool;
+
+/* The bundle that holds this pool. See proj.h for why the calls take it.
+   이 풀을 담는 묶음입니다. 호출들이 그것을 받는 이유는 proj.h를 참조하십시오. */
+typedef struct Pools Pools;
+
 /* --- Public function prototypes / 공개 함수 프로토타입 --- */
 
 /**
@@ -152,7 +178,7 @@ typedef struct {
  * @note ::pickup_spawn_level이 자동으로 호출하므로, 레벨을 로드하는 호출자가
  *       따로 실행할 필요는 없습니다.
  */
-void pickup_reset(void);
+void pickup_reset(Pools *pl);
 
 /**
  * @brief Spawns pickups from a level's entity list.
@@ -176,7 +202,7 @@ void pickup_reset(void);
  * @note ::PICKUP_MAX에 도달하면 조용히 중단됩니다. 그보다 많은 아이템 엔티티를
  *       가진 레벨에서는 나머지가 생성되지 않습니다.
  */
-void pickup_spawn_level(const Level *l);
+void pickup_spawn_level(Pools *pl, const Level *l);
 
 /**
  * @brief Returns how many pickups the current level spawned.
@@ -195,7 +221,7 @@ void pickup_spawn_level(const Level *l);
  * @note 획득된 아이템은 `active`가 해제된 채로 목록에 남으므로, 플레이어가
  *       아이템을 주워도 이 값은 줄어들지 않습니다.
  */
-int pickup_count(void);
+int pickup_count(const Pools *pl);
 
 /**
  * @brief Borrows a pointer to one pickup by index.
@@ -216,7 +242,7 @@ int pickup_count(void);
  * @warning 이 포인터는 모듈이 소유한 저장 공간을 가리키므로 해제해서는 안 됩니다.
  *          ::pickup_reset과 ::pickup_spawn_level 호출 시 무효화됩니다.
  */
-const Pickup *pickup_at(int i);
+const Pickup *pickup_at(const Pools *pl, int i);
 
 /**
  * @brief Advances the bob animation and collects any pickup the player overlaps.
@@ -253,7 +279,7 @@ const Pickup *pickup_at(int i);
  *       함께 사용하므로, 층이 겹친 섹터에서 다른 층의 아이템을 천장 너머로
  *       획득하지 않습니다.
  */
-void pickup_update(v3 player_eye, int *health, int health_max,
+void pickup_update(Pools *pl, v3 player_eye, int *health, int health_max,
                    Weapon *w, int *keys, float dt);
 
 /**

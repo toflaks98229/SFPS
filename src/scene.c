@@ -424,14 +424,14 @@ void scene_draw_enemies(Scene *s, mat4 vp, v3 eye, v3 cam_right) {
     glEnable(GL_CULL_FACE);
 }
 
-void scene_draw_pickups(Scene *s, mat4 vp, v3 eye, v3 cam_right) {
+void scene_draw_pickups(Scene *s, const Pools *pl, mat4 vp, v3 eye, v3 cam_right) {
     DIAG_WANT_WORLD_PASS(post_in_world_pass());
 
-    int pn = pickup_count();
+    int pn = pickup_count(pl);
     mb_reset(&s->pickup_buf);
 
     for (int i = 0; i < pn; i++) {
-        const Pickup *p = pickup_at(i);
+        const Pickup *p = pickup_at(pl, i);
         if (!p->active) continue;
         float u0, v0, u1, v1;
         pickup_uv(p->kind, &u0, &v0, &u1, &v1);
@@ -1230,14 +1230,14 @@ void scene_draw_menu(Scene *s, int vw, int vh) {
     ui_end();
 }
 
-void scene_draw_proj(Scene *s, const Pools *w, mat4 vp, v3 cam_right, v3 cam_up) {
+void scene_draw_proj(Scene *s, const Pools *pl, mat4 vp, v3 cam_right, v3 cam_up) {
     DIAG_WANT_WORLD_PASS(post_in_world_pass());
 
-    int n = proj_count(w), live = 0;
+    int n = proj_count(pl), live = 0;
 
     mb_reset(&s->shot_buf);
     for (int i = 0; i < n; i++) {
-        const Proj *p = proj_at(w, i);
+        const Proj *p = proj_at(pl, i);
         if (!p || !p->active) continue;
 
         /* A grenade tumbles and a bolt does not, which is the same distinction
@@ -1274,7 +1274,7 @@ void scene_draw_proj(Scene *s, const Pools *w, mat4 vp, v3 cam_right, v3 cam_up)
        물체가 아니며, 도화선이 플레이어가 받는 유일한 경고입니다. */
     int k = 0;
     for (int i = 0; i < n; i++) {
-        const Proj *p = proj_at(w, i);
+        const Proj *p = proj_at(pl, i);
         if (!p || !p->active) continue;
 
         if (p->gravity > 0.0f) {
@@ -1395,7 +1395,7 @@ void scene_frame(const World *w, Scene *sc, int vw, int vh, int frozen) {
        once. They stay on the world side of the pass boundary so they are
        pixelised and dithered along with everything else -- see scene.h. */
     scene_draw_enemies(sc, vp, eye_pos, cam.right);
-    scene_draw_pickups(sc, vp, eye_pos, cam.right);
+    scene_draw_pickups(sc, &w->pools, vp, eye_pos, cam.right);
     scene_draw_shots  (sc, vp, cam.right, cam.up);
     scene_draw_proj   (sc, &w->pools, vp, cam.right, cam.up);
     fx_draw(vp, cam.right, cam.up);

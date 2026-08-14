@@ -133,7 +133,7 @@ typedef struct Pools Pools;
 /* --- Lifecycle / 수명 주기 --- */
 
 /** @brief Clears every projectile. Called on a level load. / 모든 발사체를 제거합니다. */
-void proj_reset(Pools *w);
+void proj_reset(Pools *pl);
 
 /**
  * @brief Launches one projectile.
@@ -150,7 +150,7 @@ void proj_reset(Pools *w);
  * @brief 발사체 하나를 발사합니다.
  * @return 빈 슬롯이 있었으면 0이 아닌 값.
  */
-int proj_fire(Pools *w, v3 from, v3 dir, float speed, float gravity,
+int proj_fire(Pools *pl, v3 from, v3 dir, float speed, float gravity,
               int damage, float blast, float fuse);
 
 /**
@@ -167,18 +167,18 @@ int proj_fire(Pools *w, v3 from, v3 dir, float speed, float gravity,
  * @note 순간이동이 아니라 훑습니다. 70m/s의 탄은 한 프레임에 1미터 이상 이동하므로,
  *       도착 지점만 검사하면 그 사이에 서 있는 몬스터를 통과해 버립니다.
  */
-void proj_update(Pools *w, const Level *l, float dt);
+void proj_update(Pools *pl, const Level *l, float dt);
 
 /* --- Read-back, for the renderer and for tests / 렌더러와 테스트를 위한 조회 --- */
 
 /** @brief How many slots exist; walk them and skip the inactive. / 슬롯의 개수. 순회하며 비활성은 건너뛰십시오. */
-int proj_count(const Pools *w);
+int proj_count(const Pools *pl);
 
 /** @brief Borrowed pointer to slot `i`, or NULL. / 슬롯 `i`에 대한 참조 포인터. 없으면 NULL. */
-const Proj *proj_at(const Pools *w, int i);
+const Proj *proj_at(const Pools *pl, int i);
 
 /** @brief How many are in flight right now. / 지금 비행 중인 개수. */
-int proj_live(const Pools *w);
+int proj_live(const Pools *pl);
 
 /**
  * @brief Damages every monster within `radius` of `at`, falling off with distance.
@@ -196,6 +196,6 @@ int proj_live(const Pools *w);
  * @note 공개된 이유는 도끼의 착지 내려찍기가 유탄 폭발과 동일한 연산이기 때문입니다.
  *       감쇠 곡선의 사본이 둘이면 조정할 곡선이 둘이 됩니다.
  */
-int proj_blast(Pools *w, v3 at, float radius, int damage);
+int proj_blast(Pools *pl, v3 at, float radius, int damage);
 
 #endif

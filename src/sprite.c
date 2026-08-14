@@ -650,11 +650,39 @@ GLuint pickup_atlas(void) {
     glGenTextures(1, &g_pickup_atlas);
     glBindTexture(GL_TEXTURE_2D, g_pickup_atlas);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, W, H, 0, GL_RGBA, GL_UNSIGNED_BYTE, buf);
-    glGenerateMipmap(GL_TEXTURE_2D);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    /* NEAREST ON BOTH, and this is the atlas the comment at the bottom of this
+       file was already claiming: "the monsters take the same treatment for the
+       same reason". They did not. These two atlases were the last GL_LINEAR
+       left on hand-drawn art, and linear magnification is what was mixing the
+       palette -- a drawing quantised to sixteen colours, shown through a filter
+       that averages neighbouring texels, puts colours on screen that are in no
+       palette and smears every edge the artist drew. The clumping read as a
+       quantisation problem and was a filtering one.
+
+       Mipmapping goes with it. This is an ATLAS: every level above zero
+       averages across cell borders, so a distant monster picks up the sprite
+       stored next to it. That is a second way the same artwork loses its
+       colours, and it cannot be fixed by choosing better mip filters.
+       Minification aliasing is what mipmaps would have bought, and the
+       pixelise pass already resolves the whole world to a small buffer -- the
+       sprite is a handful of texels there either way.
+
+       양쪽 모두 NEAREST이며, 이 파일 하단의 주석이 이미 주장하고 있던 바입니다. "몬스터도
+       같은 이유로 같은 처리를 받는다." 실제로는 아니었습니다. 이 두 아틀라스가 손으로 그린
+       아트에 남아 있던 마지막 GL_LINEAR였고, 선형 확대가 팔레트를 섞고 있었습니다. 16색으로
+       양자화된 그림을 이웃 텍셀을 평균 내는 필터로 보여 주면, 어느 팔레트에도 없는 색이
+       화면에 나타나고 아티스트가 그린 모든 가장자리가 뭉개집니다. 색 뭉침은 양자화 문제로
+       보였지만 필터링 문제였습니다.
+
+       밉맵도 함께 없앱니다. 이것은 *아틀라스*입니다. 0보다 높은 모든 레벨이 셀 경계를 가로질러
+       평균을 내므로, 멀리 있는 몬스터가 옆에 저장된 스프라이트의 색을 끌어옵니다. 같은 그림이
+       색을 잃는 두 번째 경로이며, 밉 필터를 잘 고른다고 해결되지 않습니다. 밉맵이 사 주는 것은
+       축소 시의 에일리어싱인데, 픽셀화 패스가 이미 월드 전체를 작은 버퍼로 리졸브하므로
+       스프라이트는 그곳에서 어차피 몇 개의 텍셀입니다. */
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
     HeapFree(GetProcessHeap(), 0, buf);
     return g_pickup_atlas;
@@ -1434,11 +1462,39 @@ GLuint sprite_atlas(void) {
     glGenTextures(1, &g_atlas);
     glBindTexture(GL_TEXTURE_2D, g_atlas);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, W, H, 0, GL_RGBA, GL_UNSIGNED_BYTE, buf);
-    glGenerateMipmap(GL_TEXTURE_2D);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    /* NEAREST ON BOTH, and this is the atlas the comment at the bottom of this
+       file was already claiming: "the monsters take the same treatment for the
+       same reason". They did not. These two atlases were the last GL_LINEAR
+       left on hand-drawn art, and linear magnification is what was mixing the
+       palette -- a drawing quantised to sixteen colours, shown through a filter
+       that averages neighbouring texels, puts colours on screen that are in no
+       palette and smears every edge the artist drew. The clumping read as a
+       quantisation problem and was a filtering one.
+
+       Mipmapping goes with it. This is an ATLAS: every level above zero
+       averages across cell borders, so a distant monster picks up the sprite
+       stored next to it. That is a second way the same artwork loses its
+       colours, and it cannot be fixed by choosing better mip filters.
+       Minification aliasing is what mipmaps would have bought, and the
+       pixelise pass already resolves the whole world to a small buffer -- the
+       sprite is a handful of texels there either way.
+
+       양쪽 모두 NEAREST이며, 이 파일 하단의 주석이 이미 주장하고 있던 바입니다. "몬스터도
+       같은 이유로 같은 처리를 받는다." 실제로는 아니었습니다. 이 두 아틀라스가 손으로 그린
+       아트에 남아 있던 마지막 GL_LINEAR였고, 선형 확대가 팔레트를 섞고 있었습니다. 16색으로
+       양자화된 그림을 이웃 텍셀을 평균 내는 필터로 보여 주면, 어느 팔레트에도 없는 색이
+       화면에 나타나고 아티스트가 그린 모든 가장자리가 뭉개집니다. 색 뭉침은 양자화 문제로
+       보였지만 필터링 문제였습니다.
+
+       밉맵도 함께 없앱니다. 이것은 *아틀라스*입니다. 0보다 높은 모든 레벨이 셀 경계를 가로질러
+       평균을 내므로, 멀리 있는 몬스터가 옆에 저장된 스프라이트의 색을 끌어옵니다. 같은 그림이
+       색을 잃는 두 번째 경로이며, 밉 필터를 잘 고른다고 해결되지 않습니다. 밉맵이 사 주는 것은
+       축소 시의 에일리어싱인데, 픽셀화 패스가 이미 월드 전체를 작은 버퍼로 리졸브하므로
+       스프라이트는 그곳에서 어차피 몇 개의 텍셀입니다. */
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
     HeapFree(GetProcessHeap(), 0, buf);
     return g_atlas;

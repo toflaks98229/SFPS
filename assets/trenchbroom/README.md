@@ -15,22 +15,67 @@ New-Item -ItemType Directory -Force $dst | Out-Null
 Copy-Item -Recurse -Force .\assets\trenchbroom\SFPS $dst
 ```
 
-Then in TrenchBroom: **New Map…** → pick **SFPS** → set its **game path** to
-this repository's `assets` directory (`E:\GamePJ\144MB\assets`) → format
-**Valve**.
+Then set the **game path** for SFPS to this repository's `assets` directory.
+TrenchBroom stores it in `%APPDATA%\TrenchBroom\Preferences.json` as
 
-`File → Open…` on `assets\maps\atrium.map` from there.
+```json
+"Games/SFPS/Path": "E:/GamePJ/144MB/assets"
+```
+
+which you can also set through **Preferences → Games → SFPS**. Without it the
+console reports `Could not reload material collections: Path sprites does not
+denote a directory` and every face draws untextured.
+
+After that, opening `assets\maps\atrium.map` needs no dialog at all: the file
+begins with
+
+```text
+// Game: SFPS
+// Format: Valve
+```
+
+and TrenchBroom reads those to pick the game and the format itself. If you get
+a **Select Game** dialog instead, the profile did not load — see below.
 
 Copying rather than symlinking, because TrenchBroom overwrites everything under
 its own install folder on update and a link into a working tree is a file the
 editor can rewrite without anyone meaning it to. The cost is remembering to copy
 again after editing the config, which is what this README is for.
 
+## If SFPS is not in the game list
+
+A game configuration TrenchBroom cannot parse is **dropped in silence**. There
+is no error, no log line and no entry in the list — the game simply is not
+there, which looks exactly like installing it in the wrong folder.
+
+Two things were wrong with the first version of this profile, and both are worth
+knowing because neither announces itself:
+
+**Two tags may not share a name.** `tags.brush` and `tags.brushface` are
+separate lists but one namespace. This profile had a brush tag `Trigger`
+matching `trigger*` classnames and a face tag `Trigger` matching the `trigger`
+material, and the collision threw the whole config away. Quake's own builtin has
+brush tags Detail/Trigger/Func and face tags Clip/Skip/Hint/Liquid — no
+repeats, and that is not a coincidence. The face tag here is called
+`Trigger surface`.
+
+**Keep it ASCII, and start at the brace.** The first version opened with a
+block of `//` commentary before the root `{` and carried a few thousand bytes of
+non-ASCII in its comments. Every builtin config starts with `{` and every one is
+pure ASCII. Comments *inside* the object are fine — Quake's has one — but the
+prose belongs here, in a file nobody else has to parse.
+
+To find which of these it is, copy a builtin config from
+`<TrenchBroom>\games\Generic\` into `%APPDATA%\TrenchBroom\games\Probe\`, change
+its `name` to `"Probe"`, and see whether **Probe** appears. If it does, the
+mechanism works and the fault is in this profile's content; bisect by deleting
+blocks from it until it appears.
+
 ## Seeing your edits
 
 Build the tools once (`.\build.ps1 -Tools`), then:
 
-```
+```text
 .\build\mapview.exe atrium
 ```
 
@@ -43,8 +88,8 @@ than blanking it.
 
 ## What works today, and what does not
 
-| | |
-|---|---|
+| Capability | State |
+| --- | --- |
 | Brushes, planes, face polygons | yes |
 | Valve 220 per-face UV axes | yes — this is the reason for the whole format change |
 | Standard-format faces | read correctly, but the config will not let you save them |

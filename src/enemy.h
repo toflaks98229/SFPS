@@ -450,11 +450,74 @@ typedef struct {
  * RNG가 함께 옮겨 온 이유는 fx의 것과 같습니다. 몬스터가 어느 쪽으로 피할지를 정하므로,
  * 공유하면 한 World의 전투가 다른 World가 몇 번을 돌렸는지에 의존하게 됩니다.
  */
+/**
+ * @brief How many spawners one level may run.
+ *
+ * Each is a marker the level laid out, so this is a count of authored things
+ * rather than of things in flight. Eight because a level that wants more than
+ * eight places monsters keep arriving from is a level that wants a different
+ * mechanism -- and because every one of them is a monster every few seconds
+ * into a pool of ::ENEMY_MAX.
+ *
+ * @brief 한 레벨이 돌릴 수 있는 스포너의 수입니다.
+ * @note 각각은 레벨이 배치한 표식이므로, 이것은 비행 중인 것이 아니라 *제작된* 것의
+ *       개수입니다. 8인 이유는, 몬스터가 계속 도착하는 자리가 여덟 곳보다 많기를 바라는
+ *       레벨은 다른 장치를 바라는 레벨이기 때문이며, 그 하나하나가 몇 초마다 몬스터 하나를
+ *       ::ENEMY_MAX 크기의 풀에 넣기 때문입니다.
+ */
+#define ENEMY_MAX_SPAWNERS 8
+
+/**
+ * @struct Spawner
+ * @brief A marker that keeps making monsters, rather than being one.
+ *
+ * ENGLISH
+ * -------
+ * The level lays monsters out once, at load, and that is the whole of what a
+ * level could say about them: a room has the monsters it was drawn with, and
+ * once they are dead it is empty. A spawner is the other thing a level might
+ * want to say -- that they keep coming -- and it needs somewhere to count from,
+ * which is why it is state in the pool rather than a second reading of the
+ * entity every frame.
+ *
+ * WHAT LIMITS IT, and it needs limiting: `left` is how many more it will ever
+ * make, and `max_alive` is a ceiling on the monsters in the level while it
+ * runs. Without the second one an unlimited spawner fills ::ENEMY_MAX in a
+ * minute and then raises ::DIAG_ENEMY_CAP every few seconds forever, which is a
+ * counter reporting a decision somebody made rather than a fault.
+ *
+ * 한국어
+ * ------
+ * @brief 몬스터가 되는 대신 몬스터를 계속 만들어 내는 표식입니다.
+ *
+ * 레벨은 로드 시점에 몬스터를 한 번 배치하며, 그것이 레벨이 몬스터에 대해 말할 수 있는
+ * 전부였습니다. 방에는 그려질 때 함께 그려진 몬스터가 있고, 그들이 죽으면 비어 있습니다.
+ * 스포너는 레벨이 말하고 싶어 할 법한 다른 것, 즉 "계속 온다"이며, 세어 나갈 자리가
+ * 필요합니다. 매 프레임 엔티티를 다시 읽는 대신 풀 안의 상태인 이유입니다.
+ *
+ * 무엇이 그것을 제한하는가, 그리고 제한이 필요합니다. `left`는 앞으로 몇 개나 더 만들지이고,
+ * `max_alive`는 그것이 돌아가는 동안 레벨에 있을 수 있는 몬스터의 상한입니다. 두 번째가 없으면
+ * 무제한 스포너가 1분 만에 ::ENEMY_MAX를 채우고 그 뒤로 몇 초마다 영원히 ::DIAG_ENEMY_CAP을
+ * 올립니다. 그것은 결함이 아니라 누군가 내린 결정을 보고하는 카운터입니다.
+ */
+typedef struct {
+    v3    pos;        /**< Where the monsters appear, feet on the floor. / 몬스터가 나타나는 자리. 발이 바닥에 닿습니다. */
+    short type;       /**< Which MON_* it makes. / 어떤 MON_*를 만드는지. */
+    short left;       /**< How many more it will make; -1 is unlimited. / 앞으로 만들 개수. -1이면 무제한. */
+    short max_alive;  /**< Ceiling on monsters in the level; 0 is none. / 레벨 내 몬스터 상한. 0이면 없음. */
+    float interval;   /**< Seconds between one and the next. / 하나와 다음 사이의 초. */
+    float timer;      /**< Seconds until the next. / 다음까지 남은 초. */
+    int   active;     /**< Non-zero while this slot is a spawner. / 이 슬롯이 스포너이면 0이 아닙니다. */
+} Spawner;
+
 typedef struct {
     Enemy    m[ENEMY_MAX];             /**< Monsters, packed to `count`. / `count`까지 채워진 몬스터. */
     int      count;                    /**< How many the level laid out. / 레벨이 배치한 수. */
     Shot     shots[ENEMY_MAX_SHOTS];   /**< Their projectiles, a ring. / 그들의 발사체이며 링입니다. */
     unsigned rng;                      /**< Fight randomness. 0 means "seed me". / 전투 난수. 0이면 "씨앗을 채워라". */
+
+    Spawner spawner[ENEMY_MAX_SPAWNERS]; /**< Markers that keep making monsters. / 몬스터를 계속 만들어 내는 표식. */
+    int     n_spawners;                  /**< How many are in use. / 사용 중인 개수. */
 } EnemyPool;
 
 /* The bundle that holds this pool. See proj.h for why the calls take it. */

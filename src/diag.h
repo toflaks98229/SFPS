@@ -265,6 +265,22 @@ typedef enum {
      */
     DIAG_LEVEL_SLOTS,
 
+    /**
+     * @brief A level declared more entity markers than ::LVL_MAX_ENTS holds.
+     *
+     * ENGLISH: The surplus is dropped, and what that looks like is a room the
+     * author populated and the player walks through empty. Distinct from
+     * ::DIAG_ENEMY_CAP and ::DIAG_PICKUP_CAP, which fire when the MARKERS were
+     * all read and the pools they spawn into ran out -- same symptom, different
+     * number to raise.
+     *
+     * 한국어: 초과분은 버려지며, 그 모습은 제작자가 채워 넣은 방을 플레이어가 텅 빈 채로
+     * 지나가는 것입니다. ::DIAG_ENEMY_CAP, ::DIAG_PICKUP_CAP과 구별됩니다. 그 둘은 표식은
+     * 모두 읽혔고 그것이 생성해 넣는 풀이 고갈되었을 때 발생합니다. 증상은 같고 올려야 할
+     * 숫자가 다릅니다.
+     */
+    DIAG_ENT_CAP,
+
     DIAG_COUNT          /**< Number of counters. / 카운터의 개수. */
 } DiagKind;
 

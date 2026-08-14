@@ -19,9 +19,10 @@
     angle(integer) : "Facing" : 90
 ]
 
-// A door is a group of brushes that moves. Parsed and drawn; it does not move
-// yet -- that is step 3.
-@SolidClass color(0 128 220) = func_door : "Brushes that move when opened. Not simulated yet."
+// A door is a group of brushes that moves. How far it travels is not authored:
+// it slides its own size along the direction it opens, less the lip. Resize the
+// door and the travel follows.
+@SolidClass color(0 128 220) = func_door : "Brushes that move when opened."
 [
     angle(choices) : "Opens toward" : -1 =
     [
@@ -33,4 +34,71 @@
         270 : "south"
     ]
     speed(integer) : "Units per second" : 100
+    lip(integer) : "Units left behind" : 8
 ]
+
+// A point light. `light` is Quake's brightness and this engine reads it as
+// reach, because it separates reach from brightness and Quake does not.
+// Baked into the vertices when the level loads, shadowed against the brushes.
+@PointClass size(-8 -8 -8, 8 8 8) color(255 255 128) = light : "A static light, baked at load."
+[
+    light(integer) : "Reach in units" : 300
+    _color(color255) : "Colour" : "255 255 255"
+]
+
+// --- Monsters ------------------------------------------------------------
+//
+// The classname's suffix IS the kind enemy.c claims: level.c strips `monster_`
+// and hands the rest through unchanged. A new monster is a row in enemy.c's
+// table and a line here.
+
+@baseclass size(-16 -16 -32, 16 16 32) color(220 60 60) = Monster []
+
+@PointClass base(Monster) = monster_imp : "Imp. The baseline: quick enough, dies to one close shotgun." []
+@PointClass base(Monster) = monster_brute : "Brute. A wall with health; slow, and hits hard." []
+@PointClass base(Monster) = monster_hound : "Hound. Fast and weak. Punishes standing still." []
+@PointClass base(Monster) = monster_caster : "Caster. Keeps its distance and throws bolts." []
+
+// --- Spawners ------------------------------------------------------------
+//
+// One class per monster because the NAME carries which one, the same way a
+// sprite name carries its frame number. That costs a line here and saves a
+// second field on every entity in the level.
+//
+// `count` 0 means it never stops. `maxalive` is a ceiling on the monsters in
+// the whole level while it runs, and leaving it 0 on an endless spawner will
+// fill the monster pool and keep raising the capacity counter.
+
+@baseclass size(-16 -16 -32, 16 16 32) color(255 140 0) = Spawner
+[
+    wait(integer) : "Seconds between spawns" : 5
+    count(integer) : "How many in total (0 = endless)" : 0
+    maxalive(integer) : "Monsters alive in the level (0 = no ceiling)" : 0
+]
+
+@PointClass base(Spawner) = monster_spawner_imp : "Keeps making imps." []
+@PointClass base(Spawner) = monster_spawner_brute : "Keeps making brutes." []
+@PointClass base(Spawner) = monster_spawner_hound : "Keeps making hounds." []
+@PointClass base(Spawner) = monster_spawner_caster : "Keeps making casters." []
+
+// --- Items ---------------------------------------------------------------
+//
+// Same rule as the monsters: `item_` is stripped and pickup.c claims the rest.
+// Weapon ammo is `<weapon>ammo`, which is how pickup.c reads it.
+
+@baseclass size(-12 -12 -12, 12 12 12) color(60 200 255) = Item []
+
+@PointClass base(Item) = item_health : "Health." []
+@PointClass base(Item) = item_ammo : "Ammo for whatever is held." []
+@PointClass base(Item) = item_shotgun : "The shotgun." []
+@PointClass base(Item) = item_shotgunammo : "Shells." []
+@PointClass base(Item) = item_rapid : "The rapid gun." []
+@PointClass base(Item) = item_rapidammo : "Rapid ammunition." []
+@PointClass base(Item) = item_grenade : "The grenade launcher." []
+@PointClass base(Item) = item_grenadeammo : "Grenades." []
+@PointClass base(Item) = item_axe : "The axe." []
+@PointClass base(Item) = item_axeammo : "Axe charges." []
+
+@PointClass base(Item) color(220 40 40) = item_redkey : "Red keycard." []
+@PointClass base(Item) color(40 80 220) = item_bluekey : "Blue keycard." []
+@PointClass base(Item) color(220 200 40) = item_yellowkey : "Yellow keycard." []

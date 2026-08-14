@@ -643,6 +643,15 @@ void enemy_reset(Pools *pl)
     for (int i = 0; i < ENEMY_MAX_SHOTS; i++)
         pl->enemy.shots[i].active = 0;
     pl->enemy.count = 0;
+
+    /* The spawners go with the monsters, because they are the reason there
+       would be more of them: a reset that left them running would have the
+       previous level still delivering into the new one.
+       스포너는 몬스터와 함께 사라집니다. 몬스터가 더 생길 이유가 바로 그것이기 때문입니다.
+       그것을 돌려 둔 채로 초기화하면 이전 레벨이 새 레벨로 계속 배달하게 됩니다. */
+    for (int i = 0; i < ENEMY_MAX_SPAWNERS; i++)
+        pl->enemy.spawner[i].active = 0;
+    pl->enemy.n_spawners = 0;
 }
 
 int enemy_count(const Pools *pl) { return pl->enemy.count; }
@@ -659,6 +668,140 @@ int enemy_alive(const Pools *pl)
 const Enemy *enemy_at(const Pools *pl, int i)
 {
     return (i >= 0 && i < pl->enemy.count) ? &pl->enemy.m[i] : 0;
+}
+
+/**
+ * @brief Puts one monster into the pool, on the floor under a point.
+ *
+ * ENGLISH
+ * -------
+ * Lifted out of ::enemy_spawn_level so a ::Spawner can make monsters the same
+ * way the level does. Two paths that built a monster would drift the moment
+ * either gained a field -- an animation offset, a starting state -- and the
+ * difference would read as "the ones the spawner makes behave oddly".
+ *
+ * @return Non-zero when a monster was created.
+ *
+ * 한국어
+ * ------
+ * @brief 몬스터 하나를 어떤 점 아래의 바닥 위에 풀에 넣습니다.
+ * @note ::Spawner가 레벨과 같은 방식으로 몬스터를 만들 수 있도록 ::enemy_spawn_level에서
+ *       뽑아냈습니다. 몬스터를 만드는 경로가 둘이면 어느 한쪽이 필드를 얻는 순간 어긋나고
+ *       (애니메이션 오프셋, 시작 상태) 그 차이는 "스포너가 만든 것들이 이상하게 군다"로
+ *       읽힙니다.
+ */
+static int make_monster(Pools *pl, const Level *l, int type,
+                        float x, float from_y, float z)
+{
+    if (type < 0 || type >= MON_TYPES) return 0;
+
+    float f, c;
+    if (!level_ground(l, x, z, from_y, 1e9f, &f, &c)) return 0;
+
+    if (pl->enemy.count >= ENEMY_MAX) { DIAG(DIAG_ENEMY_CAP); return 0; }
+
+    const MonType *S = &TYPES[type];
+    Enemy *m = &pl->enemy.m[pl->enemy.count++];
+    Enemy zero = {0};
+    *m = zero;
+    m->type   = (short)type;
+    m->pos    = v3f(x, f, z);
+    m->health = S->hp;
+    m->state  = E_IDLE;
+    m->active = 1;
+    m->anim   = frand(&pl->enemy) * 6.28f;
+    m->sight_age = (short)((pl->enemy.count - 1) % SIGHT_PERIOD);
+    return 1;
+}
+
+/**
+ * @brief Reads the level's `spawner_*` markers into the pool.
+ *
+ * ENGLISH
+ * -------
+ * The kind carries the monster: `spawner_imp` makes imps. That is the idiom
+ * this project already uses where a name has to say two things -- sprite.c
+ * reads a frame number off the end of a sprite name, and door.c reads a tag off
+ * the end of `switch<n>` -- and it costs no second field on ::Entity and no
+ * table anywhere.
+ *
+ * 한국어
+ * ------
+ * @brief 레벨의 `spawner_*` 표식을 풀로 읽어들입니다.
+ * @note 종류가 몬스터를 나릅니다. `spawner_imp`는 임프를 만듭니다. 이름이 두 가지를 말해야 할
+ *       때 이 프로젝트가 이미 쓰는 어법입니다. sprite.c는 스프라이트 이름 끝에서 프레임 번호를
+ *       읽고 door.c는 `switch<n>` 끝에서 태그를 읽습니다. ::Entity에 두 번째 필드도, 어디에도
+ *       표 하나도 들지 않습니다.
+ */
+static void spawners_of(Pools *pl, const Level *l)
+{
+    pl->enemy.n_spawners = 0;
+
+    for (int i = 0; i < l->n_ents; i++) {
+        const Entity *e = &l->ents[i];
+
+        /* "spawner_" then a monster name. */
+        static const char PRE[] = "spawner_";
+        int n = 0;
+        while (PRE[n] && e->kind[n] == PRE[n]) n++;
+        if (PRE[n] || !e->kind[n]) continue;
+
+        int type = mon_type_for(e->kind + n);
+        if (type < 0) continue;
+
+        if (pl->enemy.n_spawners >= ENEMY_MAX_SPAWNERS) { DIAG(DIAG_ENEMY_CAP); continue; }
+        Spawner *s = &pl->enemy.spawner[pl->enemy.n_spawners++];
+
+        s->pos       = v3f(e->x * 0.01f, e->y * 0.01f, e->z * 0.01f);
+        s->type      = (short)type;
+        s->left      = e->p[1] > 0 ? e->p[1] : -1;      /* 0 authored means unlimited */
+        s->max_alive = e->p[2];
+        s->interval  = e->p[0] > 0 ? e->p[0] * 0.1f : 5.0f;
+        /* The first one is due after a full interval, not on the frame the
+           level loads: a monster that materialises while the screen is still
+           fading in is one the player never saw arrive.
+           첫 번째는 레벨이 로드되는 프레임이 아니라 온전한 한 주기 뒤에 나옵니다. 화면이 아직
+           밝아지는 중에 나타나는 몬스터는 플레이어가 도착을 보지 못한 몬스터입니다. */
+        s->timer     = s->interval;
+        s->active    = 1;
+    }
+}
+
+/**
+ * @brief Advances every spawner by one frame.
+ * @return Non-zero when at least one monster was made.
+ *
+ * @brief 모든 스포너를 한 프레임 진행시킵니다.
+ * @return 몬스터가 하나라도 만들어졌으면 0이 아닙니다.
+ */
+static int spawners_update(Pools *pl, const Level *l, float dt)
+{
+    int made = 0;
+
+    for (int i = 0; i < pl->enemy.n_spawners; i++) {
+        Spawner *s = &pl->enemy.spawner[i];
+        if (!s->active) continue;
+        if (s->left == 0) { s->active = 0; continue; }
+
+        s->timer -= dt;
+        if (s->timer > 0.0f) continue;
+
+        /* The ceiling is checked HERE and not by skipping the tick, so a
+           spawner held back by a crowded level makes its next monster as soon
+           as there is room rather than waiting out another full interval. It
+           is a queue, not a metronome that misses beats.
+           상한은 틱을 건너뛰는 대신 *이곳에서* 검사합니다. 붐비는 레벨에 막힌 스포너가 또
+           한 주기를 온전히 기다리는 대신 자리가 나는 즉시 다음 몬스터를 만들게 하기
+           위함입니다. 박자를 놓치는 메트로놈이 아니라 대기열입니다. */
+        if (s->max_alive > 0 && enemy_alive(pl) >= s->max_alive) continue;
+
+        s->timer = s->interval;
+        if (!make_monster(pl, l, s->type, s->pos.x, s->pos.y, s->pos.z)) continue;
+
+        made = 1;
+        if (s->left > 0) s->left--;
+    }
+    return made;
 }
 
 void enemy_spawn_level(Pools *pl, const Level *l)
@@ -688,8 +831,20 @@ void enemy_spawn_level(Pools *pl, const Level *l)
 
         float x = e->x * 0.01f, z = e->z * 0.01f;
         float f, c;
-        if (!level_ground(l, x, z, 1000.0f, S->height, &f, &c))
+        /* From the marker's own height, with no step limit. The 1000 that used
+           to sit in the first argument meant "no limit" by being absurd, which
+           worked while a plan point had one floor. A brush level has storeys and
+           a search beginning a kilometre up finds the outside of the roof, so
+           the height comes from ::Entity::y -- zero on a sector level, where
+           nothing changes.
+           표식 자신의 높이에서, 단차 제한 없이 찾습니다. 첫 인자에 있던 1000은 터무니없는
+           값이 됨으로써 "제한 없음"을 뜻했고, 평면상의 한 점에 바닥이 하나인 동안에는
+           통했습니다. 브러시 레벨에는 층이 있고 1킬로미터 위에서 시작한 탐색은 지붕의
+           바깥면을 찾으므로, 높이는 ::Entity::y에서 옵니다. 섹터 레벨에서는 0이고 아무것도
+           달라지지 않습니다. */
+        if (!level_ground(l, x, z, e->y * 0.01f, 1e9f, &f, &c))
             continue;
+        (void)S;
 
         if (pl->enemy.count >= ENEMY_MAX)
         {
@@ -718,6 +873,13 @@ void enemy_spawn_level(Pools *pl, const Level *l)
            갱신되는지가 그 앞에 몇 마리가 생성되었는지에 좌우됩니다. */
         m->sight_age = (short)((pl->enemy.count - 1) % SIGHT_PERIOD);
     }
+
+    /* After the monsters the level drew, because a spawner's ceiling counts
+       them: reading the markers first would let a spawner fire on its first
+       tick into a level it thought was empty.
+       레벨이 그린 몬스터 다음입니다. 스포너의 상한이 그들을 세기 때문입니다. 표식을 먼저
+       읽으면 스포너가 비어 있다고 여긴 레벨에 첫 틱부터 발사하게 됩니다. */
+    spawners_of(pl, l);
 }
 
 /* ------------------------------------------------------------- archetypes */
@@ -925,6 +1087,12 @@ static void release_bolt(Pools *pl, const Level *l, const MonType *S, Enemy *m, 
 int enemy_update(Pools *pl, const Level *l, v3 player_eye, float dt)
 {
     int player_damage = shots_update(pl, l, player_eye, dt);
+
+    /* Before the monsters are stepped, so one made this frame gets its first
+       frame this frame rather than standing still for one.
+       몬스터를 진행시키기 전입니다. 이번 프레임에 만들어진 몬스터가 한 프레임을 가만히 서
+       있는 대신 이번 프레임에 첫 프레임을 얻도록 합니다. */
+    spawners_update(pl, l, dt);
 
     for (int i = 0; i < pl->enemy.count; i++)
     {

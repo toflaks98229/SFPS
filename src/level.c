@@ -1066,6 +1066,84 @@ static void brush_doors_of(Level *out, const BrushMap *bm) {
     }
 }
 
+/**
+ * Point entities, turned into the markers pickup.c and enemy.c already claim.
+ *
+ * ENGLISH
+ * -------
+ * A PREFIX IS STRIPPED AND NOTHING ELSE IS TRANSLATED. `monster_imp` becomes
+ * the kind `imp`, `item_health` becomes `health`, and level.c never learns what
+ * either of them is -- ::Entity's own note says the kind is interpreted by
+ * whichever module owns it, and that stays true. Adding a monster is a row in
+ * enemy.c's table and a line in the FGD; this function does not change.
+ *
+ * The prefixes exist because TrenchBroom's entity browser sorts by classname
+ * and an FGD groups by it. `monster_*` and `item_*` are Quake's, so a mapper
+ * finds the monsters together and the items together, which is most of what
+ * makes a long entity list usable.
+ *
+ * @note Classnames this file handles itself -- info_player_start, light,
+ *       func_door -- are skipped here. They became ::Level::start, ::Light and
+ *       ::DoorDef in the passes above, and turning them into markers as well
+ *       would place a pickup where the player spawns.
+ *
+ * 한국어
+ * ------
+ * 지점 엔티티를 pickup.c와 enemy.c가 이미 차지한 표식으로 바꿉니다.
+ *
+ * 접두사를 떼어 낼 뿐 그 밖의 무엇도 번역하지 않습니다. `monster_imp`는 종류 `imp`가 되고
+ * `item_health`는 `health`가 되며, level.c는 둘 중 무엇이 무엇인지 끝내 배우지 않습니다.
+ * ::Entity 자신의 설명이 종류는 그것을 소유한 모듈이 해석한다고 말하며, 그것은 계속
+ * 참입니다. 몬스터를 추가하는 일은 enemy.c 표의 행 하나와 FGD의 줄 하나이고, 이 함수는 바뀌지
+ * 않습니다.
+ *
+ * 접두사가 있는 이유는 TrenchBroom의 엔티티 목록이 classname으로 정렬하고 FGD가 그것으로
+ * 묶기 때문입니다. `monster_*`와 `item_*`는 Quake의 것이므로 제작자는 몬스터를 한데서, 아이템을
+ * 한데서 찾습니다. 긴 엔티티 목록을 쓸 만하게 만드는 것의 대부분이 그것입니다.
+ *
+ * @note 이 파일이 스스로 처리하는 classname(info_player_start, light, func_door)은 이곳에서
+ *       건너뜁니다. 위의 단계들에서 ::Level::start, ::Light, ::DoorDef가 되었으며, 그것을 표식
+ *       으로도 만들면 플레이어가 스폰하는 자리에 아이템을 놓게 됩니다.
+ */
+static void brush_ents_of(Level *out, const BrushMap *bm) {
+    static const char *const PREFIX[] = { "monster_", "item_" };
+
+    for (int i = 0; i < bm->n_ents; i++) {
+        const BrushEnt *e = &bm->ents[i];
+        const char *cn = brush_ent_value(e, "classname");
+        if (!cn) continue;
+
+        const char *kind = 0;
+        for (int p = 0; p < (int)(sizeof(PREFIX) / sizeof(PREFIX[0])); p++) {
+            int n = 0;
+            while (PREFIX[p][n] && cn[n] == PREFIX[p][n]) n++;
+            if (!PREFIX[p][n] && cn[n]) { kind = cn + n; break; }
+        }
+        if (!kind) continue;
+
+        v3 o;
+        if (!brush_ent_point(e, "origin", &o)) continue;
+
+        if (out->n_ents >= LVL_MAX_ENTS) { DIAG(DIAG_ENT_CAP); continue; }
+        Entity *en = &out->ents[out->n_ents++];
+
+        copy_name(en->kind, LVL_MAT, kind, -1);
+        en->x = (short)(o.x * 100.0f);
+        en->z = (short)(o.z * 100.0f);
+        en->y = (short)(o.y * 100.0f);
+
+        /* The numbers whichever module owns this kind interprets. A monster
+           reads none of them; a spawner reads all three. Named after the keys
+           Quake uses for the same jobs so the FGD does not invent vocabulary.
+           이 종류를 소유한 모듈이 해석하는 수치입니다. 몬스터는 하나도 읽지 않고 스포너는
+           셋 다 읽습니다. FGD가 어휘를 새로 만들지 않도록, Quake가 같은 일에 쓰는 키 이름을
+           따랐습니다. */
+        en->p[0] = (short)clampf(brush_ent_num(e, "wait",     0.0f) * 10.0f, 0.0f, 32000.0f);
+        en->p[1] = (short)clampf(brush_ent_num(e, "count",    0.0f),         0.0f, 32000.0f);
+        en->p[2] = (short)clampf(brush_ent_num(e, "maxalive", 0.0f),         0.0f, 32000.0f);
+    }
+}
+
 static int load_brush_level(const char *name, Level *out) {
     int len = 0;
     const char *text = data_map(name, &len);
@@ -1079,6 +1157,7 @@ static int load_brush_level(const char *name, Level *out) {
     brush_start_of(out, bm);
     brush_lights_of(out, bm);
     brush_doors_of(out, bm);
+    brush_ents_of(out, bm);
     return 1;
 }
 

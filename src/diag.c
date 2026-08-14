@@ -97,7 +97,8 @@ static const char *const DIAG_NAMES[DIAG_COUNT] = {
     "brush",    /* DIAG_BRUSH_CAP    */
     "mapent",   /* DIAG_MAPENT_CAP   */
     "unclosed", /* DIAG_BRUSH_OPEN   */
-    "lvlslot"   /* DIAG_LEVEL_SLOTS  */
+    "lvlslot",  /* DIAG_LEVEL_SLOTS  */
+    "ent"       /* DIAG_ENT_CAP      */
 };
 
 /* A name table shorter than the enum would read past its end the first time

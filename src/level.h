@@ -750,6 +750,41 @@ typedef struct {
     short x, z;                   /**< Position in 1/100 units. / 위치 (1/100 단위). */
 
     /**
+     * @brief Where to start looking DOWN from for the floor. File units.
+     *
+     * ENGLISH
+     * -------
+     * Not where the entity is -- where the search for its footing begins.
+     * Everything placed by an entity settles onto the floor beneath the marker,
+     * so what the marker needs to supply is which floor that is.
+     *
+     * A sector level has one per point on the plan, so this stays 0 and the
+     * consumers pass it with an unlimited step, which is the same answer they
+     * got when they passed 1000 to mean "no limit". A brush level has storeys,
+     * and a search that begins above the roof finds the outside of the roof --
+     * so for those it carries the height the `origin` had, which is a thing the
+     * .map always knew.
+     *
+     * @note Zero for a sector level, where it changes nothing.
+     *
+     * 한국어
+     * ------
+     * @brief 바닥을 찾기 위해 *아래로* 훑기 시작할 높이입니다. 파일 단위.
+     *
+     * 엔티티가 있는 곳이 아니라, 그것이 딛고 설 자리를 찾는 탐색이 시작되는 곳입니다. 엔티티가
+     * 배치하는 모든 것은 표식 아래의 바닥에 안착하므로, 표식이 제공해야 하는 것은 *그 바닥이
+     * 어느 것인가*입니다.
+     *
+     * 섹터 레벨은 평면상의 한 점에 바닥이 하나이므로 이 값은 0으로 남고, 소비자는 제한 없는
+     * 단차와 함께 그것을 넘깁니다. "제한 없음"을 뜻하려고 1000을 넘겼을 때와 같은 답입니다.
+     * 브러시 레벨에는 층이 있고, 지붕 위에서 시작한 탐색은 지붕의 바깥면을 찾습니다. 그래서
+     * 그쪽에서는 `origin`이 지녔던 높이를 나릅니다. .map이 언제나 알고 있던 값입니다.
+     *
+     * @note 섹터 레벨에서는 0이며 아무것도 바꾸지 않습니다.
+     */
+    short y;
+
+    /**
      * @brief Optional numbers the entity's own module interprets.
      *
      * ENGLISH

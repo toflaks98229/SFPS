@@ -66,7 +66,13 @@ void pickup_spawn_level(Pools *pl, const Level *l) {
            단차 제한 없이 높은 곳에서부터 탐색하여, 표식 아래에 있는 바닥 위에
            아이템이 안착하도록 합니다. 바닥이 전혀 없다면 해당 엔티티는 맵
            바깥에 있는 것이므로, 공중에 남겨 두지 않고 건너뜁니다. */
-        if (!level_ground(l, x, z, 1000.0f, 0.0f, &f, &c)) continue;
+        /* From the marker's own height rather than from a kilometre up. See
+           the matching note in enemy.c: the absurd value meant "no limit" and
+           a brush level answers it with the outside of its roof.
+           1킬로미터 위가 아니라 표식 자신의 높이에서 찾습니다. enemy.c의 같은 설명을
+           참조하십시오. 터무니없는 값이 "제한 없음"을 뜻했고, 브러시 레벨은 그것에 지붕의
+           바깥면으로 답합니다. */
+        if (!level_ground(l, x, z, e->y * 0.01f, 1e9f, &f, &c)) continue;
 
         if (pl->pickup.count >= PICKUP_MAX) { DIAG(DIAG_PICKUP_CAP); continue; }
 

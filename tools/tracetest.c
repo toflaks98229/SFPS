@@ -39,6 +39,7 @@
 #include "data.h"
 #include "door.h"
 #include "player.h"
+#include "pools.h"
 #include "render.h"
 #include "model.h"
 #include "txt.h"
@@ -900,6 +901,135 @@ static void test_door(void) {
           "so the doorway is solid again");
 }
 
+/* --- markers, and the thing that keeps making monsters --------------------
+ *
+ * level.c strips `monster_` and `item_` and hands the rest through, so what
+ * enemy.c and pickup.c see is the names they already claimed. The point of
+ * asserting it here rather than in maptest is that the whole chain has to hold:
+ * the .map's classname, the kind level.c wrote, the type enemy.c looked up, and
+ * the floor the monster ended up standing on -- which is the storey its origin
+ * was over and not the outside of the roof.
+ *
+ * level.c는 `monster_`와 `item_`을 떼어 내고 나머지를 그대로 넘기므로, enemy.c와 pickup.c가
+ * 보는 것은 그들이 이미 차지한 이름입니다. 이것을 maptest가 아니라 이곳에서 단언하는 이유는
+ * 사슬 전체가 성립해야 하기 때문입니다. .map의 classname, level.c가 쓴 종류, enemy.c가 찾은
+ * 타입, 그리고 몬스터가 결국 딛고 선 바닥입니다. 그 바닥은 origin이 있던 층이지 지붕의
+ * 바깥면이 아닙니다.
+ */
+static Pools PL;
+
+static void test_entities(void) {
+    printf("\nmonsters, items, and a spawner that keeps making them\n");
+
+    if (!level_load("atrium", &LV) || !LV.brushes) {
+        printf("  no atrium.map\n"); fails++; return;
+    }
+
+    int imps = 0, heals = 0, spawners = 0;
+    for (int i = 0; i < LV.n_ents; i++) {
+        if (txt_is(LV.ents[i].kind, 3, "imp"))    imps++;
+        if (txt_is(LV.ents[i].kind, 6, "health")) heals++;
+        if (txt_is(LV.ents[i].kind, 12, "spawner_hound")) spawners++;
+    }
+    check(imps == 1,     "`monster_imp` became the kind `imp`");
+    check(heals == 1,    "`item_health` became the kind `health`");
+    check(LV.n_ents >= 4, "and the markers are all there");
+
+    /* The prefix is stripped, not the name mangled: spawner_hound keeps its
+       own suffix because enemy.c is what reads it. */
+    int found_spawner = 0;
+    for (int i = 0; i < LV.n_ents; i++) {
+        const char *k = LV.ents[i].kind;
+        if (k[0]=='s' && k[1]=='p' && k[2]=='a' && k[3]=='w') { found_spawner = 1;
+            check(LV.ents[i].p[0] == 80, "the spawner's `wait 8` arrived as tenths");
+            check(LV.ents[i].p[1] == 6,  "and its `count 6`");
+            check(LV.ents[i].p[2] == 4,  "and its `maxalive 4`");
+        }
+    }
+    check(found_spawner, "`monster_spawner_hound` came through as a kind");
+    (void)spawners;
+
+    /* --- and the modules that own those names pick them up ---------------- */
+    Pools zero = {0};
+    PL = zero;
+    enemy_reset(&PL);
+    pickup_reset(&PL);
+    enemy_spawn_level(&PL, &LV);
+    pickup_spawn_level(&PL, &LV);
+
+    check(enemy_count(&PL) == 1, "enemy.c made the one monster the level drew");
+    check(pickup_count(&PL) >= 2, "and pickup.c laid out the items");
+
+    /* ON THE FLOOR, not on the roof. The marker sits at 24 units -- under a
+       metre -- and the room's floor is at zero; a search that began a kilometre
+       up would have settled it on the outside of the ceiling at six metres.
+       지붕이 아니라 *바닥* 위입니다. 표식은 24유닛, 1미터도 안 되는 높이에 있고 방의 바닥은
+       0입니다. 1킬로미터 위에서 시작한 탐색이었다면 6미터의 천장 바깥면에 안착시켰을
+       것입니다. */
+    const Enemy *m = enemy_at(&PL, 0);
+    checkf(m->pos.y, 0.0f, 0.05f, "and it is standing on the floor, not the roof");
+
+    /* --- the spawner ------------------------------------------------------ */
+    check(PL.enemy.n_spawners == 1, "the spawner was read into the pool");
+    if (PL.enemy.n_spawners != 1) return;
+
+    check(PL.enemy.spawner[0].left == 6, "with six left to make");
+    checkf(PL.enemy.spawner[0].interval, 8.0f, 0.01f, "every eight seconds");
+
+    /* Nothing on the first frame: the first is due after a full interval. */
+    int before = enemy_count(&PL);
+    enemy_update(&PL, &LV, v3f(0, 1.7f, 5.0f), DT);
+    check(enemy_count(&PL) == before, "and it makes nothing on the first frame");
+
+    /* Eight seconds later, one. */
+    for (int i = 0; i < 8 * 60; i++) enemy_update(&PL, &LV, v3f(0, 1.7f, 5.0f), DT);
+    check(enemy_count(&PL) == before + 1, "one interval later, one monster");
+    check(PL.enemy.spawner[0].left == 5, "and one fewer left to make");
+
+    const Enemy *made = enemy_at(&PL, before);
+    checkf(made->pos.y, 3.0f, 0.05f,
+           "made on the balcony its origin was over, not on the floor below it");
+
+    /* THE CEILING HOLDS IT, and nothing here is dying: the level drew one imp
+       and `maxalive 4` allows three more, after which the spawner has nowhere
+       to put anything. Run it far past six intervals and it is still holding.
+       This is the assertion that says the ceiling is a ceiling rather than a
+       suggestion -- without it an endless spawner fills the pool and raises
+       DIAG_ENEMY_CAP every few seconds forever.
+       천장이 그것을 붙잡고 있으며 이곳에서는 아무것도 죽지 않습니다. 레벨이 임프 하나를
+       그렸고 `maxalive 4`가 셋을 더 허용하며, 그 뒤로 스포너는 아무것도 놓을 자리가
+       없습니다. 여섯 주기를 한참 넘겨 돌려도 여전히 붙잡혀 있습니다. 천장이 권고가 아니라
+       천장이라고 말하는 단언입니다. 이것이 없으면 무제한 스포너가 풀을 채우고 몇 초마다
+       영원히 DIAG_ENEMY_CAP을 올립니다. */
+    int peak = 0;
+    for (int i = 0; i < 120 * 60; i++) {
+        enemy_update(&PL, &LV, v3f(0, 1.7f, 5.0f), DT);
+        if (enemy_alive(&PL) > peak) peak = enemy_alive(&PL);
+    }
+    check(peak <= 4, "never exceeding the ceiling the map set");
+    check(enemy_alive(&PL) == 4, "and it is still holding at it");
+    check(PL.enemy.spawner[0].left > 0, "with some still owed");
+
+    /* Clear the room and it resumes, which is the other half: the ceiling is a
+       queue and not a cancellation. Then it runs out and stops for good.
+       방을 비우면 재개되며 그것이 나머지 절반입니다. 천장은 취소가 아니라 대기열입니다.
+       그러고 나서 다 소진하고 완전히 멈춥니다. */
+    for (int i = 0; i < enemy_count(&PL); i++) enemy_hurt(&PL, i, 9999, v3f(0, 1, 0));
+    check(enemy_alive(&PL) == 0, "the room is cleared");
+
+    int owed = PL.enemy.spawner[0].left;
+    for (int i = 0; i < 300 * 60 && PL.enemy.spawner[0].left > 0; i++)
+        enemy_update(&PL, &LV, v3f(0, 1.7f, 5.0f), DT);
+    check(owed > 0 && PL.enemy.spawner[0].left == 0,
+          "it resumes and makes the rest");
+    check(!PL.enemy.spawner[0].active || PL.enemy.spawner[0].left == 0,
+          "and then it is done");
+
+    int settled = enemy_count(&PL);
+    for (int i = 0; i < 60 * 60; i++) enemy_update(&PL, &LV, v3f(0, 1.7f, 5.0f), DT);
+    check(enemy_count(&PL) == settled, "a minute later it has made nothing more");
+}
+
 int main(void) {
     printf("tracetest\n");
     build();
@@ -922,6 +1052,7 @@ int main(void) {
     test_atrium();
     test_level_on_map();
     test_door();
+    test_entities();
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall trace checks passed\n", fails);
     return fails != 0;

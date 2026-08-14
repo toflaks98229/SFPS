@@ -1001,37 +1001,21 @@ void scene_draw_title(Scene *s, int vw, int vh, float t) {
     ui_end();
 }
 
-void scene_draw_menu(Scene *s, int vw, int vh) {
-    DIAG_WANT_UI_PASS(post_in_world_pass());
-
-    if (!menu_is_open()) return;
-
-    ui_begin(vw, vh);
-
-    /* The world stays visible underneath -- paused, not gone. */
-    full_screen_wash(s, vw, vh, 0.0f, 0.0f, 0.0f, MENU_DIM);
-
-    rd_mode(RD_TEXT);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, font_texture());
-
-    int rows = menu_row_count();
-    int cur  = menu_cursor();
-    float cx = vw * 0.5f;
-
-    /* Every position comes from menu_row_bounds rather than being recomputed
-       here. The mouse hit test reads the same function, so what the eye sees
-       and what the click selects cannot disagree -- see the note in menu.h.
-       모든 위치를 이곳에서 다시 계산하지 않고 menu_row_bounds에서 가져옵니다. 마우스
-       히트 판정이 같은 함수를 읽으므로, 눈에 보이는 것과 클릭이 선택하는 것이 어긋날 수
-       없습니다. menu.h의 참고 사항을 확인하십시오. */
-    const char *title = (menu_screen() == MENU_SETTINGS) ? "SETTINGS"
-                      : (menu_screen() == MENU_CREDITS)  ? "CREDITS"
-                      : "PAUSED";
-    float tw = font_width(MENU_TITLE_SIZE, title);
-    text_run(s, cx - tw * 0.5f, menu_title_y(vw, vh), MENU_TITLE_SIZE, title,
-             1.0f, 0.85f, 0.30f, 1.0f);
-
+/**
+ * @brief Draws the credits screen's licence notices.
+ *
+ * ENGLISH: The one menu screen whose body is prose rather than rows, and the
+ * only reason ::scene_draw_menu was three times the size of any other draw
+ * function here. A licence has to be shown in full, so it does not shrink --
+ * which is exactly the argument for giving it its own function rather than
+ * letting it dominate the one that draws every screen.
+ *
+ * 한국어: 본문이 행이 아니라 산문인 유일한 메뉴 화면이며, ::scene_draw_menu가 이곳의 다른
+ * 어떤 그리기 함수보다 세 배 컸던 이유 전부입니다. 라이선스는 온전히 보여야 하므로 줄어들지
+ * 않습니다. 그것이 바로 모든 화면을 그리는 함수를 지배하게 두는 대신 자기 함수를 주어야
+ * 한다는 논거입니다.
+ */
+static void draw_menu_notices(Scene *s, int vw, int vh, float cx, int rows) {
     /* --- the notices ----------------------------------------------------
      *
      * ENGLISH
@@ -1162,7 +1146,13 @@ void scene_draw_menu(Scene *s, int vw, int vh) {
             text_run(s, x, y, 1.0f, NOTICE[i], t, t * 0.98f, t * 0.92f, 1.0f);
         }
     }
+}
 
+/**
+ * @brief Draws the menu's rows, with the highlighted one filled.
+ * / 메뉴의 행들을 그리며, 선택된 행은 채워진 막대를 함께 그립니다.
+ */
+static void draw_menu_rows(Scene *s, int vw, int vh, float cx, int rows, int cur) {
     for (int i = 0; i < rows; i++) {
         const char *value;
         const char *label = menu_row_text(i, &value);
@@ -1215,7 +1205,19 @@ void scene_draw_menu(Scene *s, int vw, int vh) {
         if (value[0])
             text_run(s, cx + MENU_VALUE_X, y, MENU_ROW_SIZE, value, r, g, b, 1.0f);
     }
+}
 
+/**
+ * @brief Draws the control hint under the rows.
+ *
+ * ENGLISH: Names the mouse first, because that is what a player reaches for
+ * once the cursor appears. The credits screen gets none -- its hint would be
+ * drawn where the notice text already is.
+ *
+ * 한국어: 마우스를 먼저 적습니다. 커서가 나타나면 플레이어가 손을 뻗는 것이 그것이기
+ * 때문입니다. 크레딧 화면에는 없습니다. 그 힌트는 이미 고지 문구가 있는 자리에 그려집니다.
+ */
+static void draw_menu_hint(Scene *s, int vw, int vh, float cx) {
     /* Names the mouse first, because that is what a player reaches for when a
        cursor appears. The keys stay listed -- both drive the same menu.
        커서가 나타나면 플레이어가 먼저 잡는 것이 마우스이므로 마우스를 먼저 적습니다.
@@ -1235,6 +1237,45 @@ void scene_draw_menu(Scene *s, int vw, int vh) {
         text_run(s, cx - hw * 0.5f, menu_hint_y(vw, vh), MENU_HINT_SIZE, hint,
                  0.52f, 0.52f, 0.56f, 1.0f);
     }
+}
+
+void scene_draw_menu(Scene *s, int vw, int vh) {
+    DIAG_WANT_UI_PASS(post_in_world_pass());
+
+    if (!menu_is_open()) return;
+
+    ui_begin(vw, vh);
+
+    /* The world stays visible underneath -- paused, not gone. */
+    full_screen_wash(s, vw, vh, 0.0f, 0.0f, 0.0f, MENU_DIM);
+
+    rd_mode(RD_TEXT);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, font_texture());
+
+    int rows = menu_row_count();
+    int cur  = menu_cursor();
+    float cx = vw * 0.5f;
+
+    /* Every position comes from menu_row_bounds rather than being recomputed
+       here. The mouse hit test reads the same function, so what the eye sees
+       and what the click selects cannot disagree -- see the note in menu.h.
+       모든 위치를 이곳에서 다시 계산하지 않고 menu_row_bounds에서 가져옵니다. 마우스
+       히트 판정이 같은 함수를 읽으므로, 눈에 보이는 것과 클릭이 선택하는 것이 어긋날 수
+       없습니다. menu.h의 참고 사항을 확인하십시오. */
+    const char *title = (menu_screen() == MENU_SETTINGS) ? "SETTINGS"
+                      : (menu_screen() == MENU_CREDITS)  ? "CREDITS"
+                      : "PAUSED";
+    float tw = font_width(MENU_TITLE_SIZE, title);
+    text_run(s, cx - tw * 0.5f, menu_title_y(vw, vh), MENU_TITLE_SIZE, title,
+             1.0f, 0.85f, 0.30f, 1.0f);
+
+    /* Prose rather than rows, and long enough to have its own function. */
+    if (menu_screen() == MENU_CREDITS) draw_menu_notices(s, vw, vh, cx, rows);
+
+    draw_menu_rows(s, vw, vh, cx, rows, cur);
+
+    if (menu_screen() != MENU_CREDITS) draw_menu_hint(s, vw, vh, cx);
 
     ui_end();
 }

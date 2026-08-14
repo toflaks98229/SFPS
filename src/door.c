@@ -281,6 +281,160 @@ static void apply(Level *l, const DoorDef *d, const DoorState *st) {
     }
 }
 
+/**
+ * @brief Advances one door: its trigger, its travel, and the sector it moves.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] l          Level whose sector this door drives.
+ * @param[in]     i          Door index, into both `l->doors` and ::g_door.
+ * @param[in]     player_pos Where the player is, for the proximity trigger.
+ * @param[in]     keys       Keycards held, for a locked door.
+ * @param[in]     tagged     Non-zero when a switch fired this door's tag.
+ * @param[in]     dt         Frame time.
+ * @return Non-zero when the sector actually moved this frame.
+ *
+ * @note THE SECTOR IS WHAT MOVES, not a door object: everything that collides
+ *       sees the change without knowing what a door is. The caller rebuilds
+ *       the lookup grid once for the frame rather than once per door.
+ * @note Split out of ::door_update, which was a hundred-line loop body wrapped
+ *       in fourteen lines of bookkeeping. Whether a door opens is a question
+ *       about ONE door; how many doors there are, and which switches were
+ *       pressed, are questions about the level.
+ *
+ * 한국어
+ * ------
+ * @brief 문 하나를 진행시킵니다. 작동 조건, 이동, 그리고 그것이 움직이는 섹터입니다.
+ * @param[in,out] l          이 문이 구동하는 섹터를 지닌 레벨.
+ * @param[in]     i          문 인덱스. `l->doors`와 ::g_door 양쪽에 대한 것입니다.
+ * @param[in]     player_pos 근접 작동을 위한 플레이어 위치.
+ * @param[in]     keys       잠긴 문을 위해 보유한 키카드.
+ * @param[in]     tagged     스위치가 이 문의 태그를 작동시켰으면 0이 아닙니다.
+ * @param[in]     dt         프레임 시간.
+ * @return 이번 프레임에 섹터가 실제로 움직였으면 0이 아닙니다.
+ *
+ * @note *움직이는 것은 섹터*이지 문 객체가 아닙니다. 충돌하는 모든 것이 문의 정체를 모른 채
+ *       그 변화를 봅니다. 조회 격자는 호출자가 문마다가 아니라 프레임당 한 번 다시
+ *       만듭니다.
+ * @note ::door_update에서 분리했습니다. 그 함수는 열네 줄의 기록 처리로 감싼 백 줄짜리 루프
+ *       본문이었습니다. 문이 열리는지는 *문 하나*에 대한 질문이고, 문이 몇 개인지와 어떤
+ *       스위치가 눌렸는지는 레벨에 대한 질문입니다.
+ */
+static int door_step_one(Level *l, int i, v3 player_pos, int keys,
+                         int tagged, float dt) {
+    int moved = 0;
+    const DoorDef *d = &l->doors[i];
+    DoorState *st = &g_door[i];
+    if (st->n0 <= 0) return 0;          /* was `continue`: skip this door */
+
+    /* --- is this state still about this door? --------------------------
+       The two arrays are matched by index and by nothing else. door_reset
+       is what agrees them, and a level stepped without one -- a second Level
+       in play, an editor that rewrote the doors, a load path that forgot --
+       lands here holding somebody else's closed shape. apply() would write
+       it into d->sector: a wall in the wrong place, moving, and looking for
+       all the world like a door that works.
+
+       Skipped rather than guessed at, and counted so it is not silent. A
+       stale door that does nothing is a bug you can find; a stale door that
+       moves the wrong geometry is one you chase through the renderer.
+
+       두 배열은 인덱스로만 대응하며 다른 무엇으로도 대응하지 않습니다. 둘을 일치시키는
+       것은 door_reset이고, 그것 없이 진행된 레벨은(진행 중인 두 번째 Level, 문을 다시
+       쓴 에디터, 잊어버린 로드 경로) 남의 닫힌 형상을 든 채로 이곳에 도달합니다.
+       apply()는 그것을 d->sector에 씁니다. 엉뚱한 자리에서 움직이는 벽이며, 어느 모로
+       보나 정상 동작하는 문처럼 보입니다.
+
+       추측하지 않고 건너뛰며, 조용하지 않도록 셉니다. 아무것도 하지 않는 낡은 문은
+       찾을 수 있는 버그이고, 엉뚱한 지오메트리를 움직이는 낡은 문은 렌더러를 헤매며
+       쫓아야 하는 버그입니다. */
+    if (st->sector != d->sector) { DIAG(DIAG_DOOR_STALE); return 0; }
+
+    /* --- what wants this door open right now --------------------------
+       An untagged door opens to a touch on itself; a tagged one opens only
+       to its switch. Both are "somebody asked", and the difference is only
+       where they had to stand to ask.
+       태그가 없는 문은 자신을 건드리면 열리고, 태그가 있는 문은 자신의 스위치에만
+       반응합니다. 둘 다 "누군가 요청했다"이며, 차이는 요청하려면 어디에 서야 하는가
+       뿐입니다. */
+    int asked;
+    if (d->tag > 0) asked = tagged;
+    else            asked = dist_to_outline(st, player_pos.x, player_pos.z)
+                            <= DOOR_TOUCH_DIST;
+
+    if (asked && d->key != KEY_NONE && !(keys & d->key)) {
+        /* Refused. Reported once per frame so the HUD can say which key,
+           and the door does not budge.
+           거절되었습니다. HUD가 어떤 열쇠인지 말할 수 있도록 프레임당 한 번
+           보고하며, 문은 움직이지 않습니다. */
+        g_refused = d->key;
+
+        /* Re-armed to the full time on every touch rather than only when
+           it has run out, so leaning on a locked door keeps the message up
+           instead of letting it blink.
+           이미 떠 있든 아니든 닿을 때마다 시간을 가득 채웁니다. 잠긴 문에 계속 붙어
+           있으면 메시지가 깜빡이지 않고 유지됩니다. */
+        g_notice_key = d->key;
+        g_notice_t   = DOOR_NOTICE_TIME;
+        asked = 0;
+    }
+
+    if (asked && !st->opening && st->t < 1.0f) {
+        st->opening = 1;
+        /* Its own sound now. This was the shotgun's rack, because that was
+           the nearest thing the synthesised library had and a door has to
+           make SOME noise -- a stand-in that stopped being one the moment
+           there was a door sound to play.
+           이제 자기 사운드를 갖습니다. 이전에는 샷건의 장전음이었는데, 합성
+           라이브러리에 있던 것 중 가장 가까웠고 문은 *어떤* 소리든 내야 했기
+           때문입니다. 문 사운드가 생긴 순간 그것은 대역이기를 멈췄습니다. */
+        /* A tagged door was opened by a switch, so the clack comes
+           with it. Played on the door's opening EDGE rather than at the
+           switch, because the switch handler runs every frame the player
+           stands on it and would machine-gun the sound; this fires once
+           per activation and already knows which case it is.
+           태그가 있는 문은 스위치가 연 것이므로 그 소리가 함께 납니다. 스위치가
+           아니라 문이 *열리기 시작하는 경계*에서 재생하는 이유는, 스위치 처리기가
+           플레이어가 밟고 있는 매 프레임 실행되어 소리를 연발하기 때문입니다. */
+        if (d->tag > 0) audio_play_at("switch", 80, door_centre(st));
+        audio_play_at("door", 75, door_centre(st));
+    }
+    if (asked) st->wait = DOOR_OPEN_TIME;
+
+    float step = (d->speed * 0.01f) * dt;
+    float span = fabsf(d->amount * 0.01f);
+    float rate = span > 1e-4f ? step / span : 1.0f;
+
+    if (st->opening) {
+        if (st->t < 1.0f) {
+            st->t += rate;
+            if (st->t >= 1.0f) { st->t = 1.0f; st->wait = DOOR_OPEN_TIME; }
+            moved = 1;
+        } else {
+            st->wait -= dt;
+            /* Held open by anything standing in the doorway. A door that
+               closed on the player would be a death with no lesson in it.
+               문간에 서 있는 것이 문을 열린 채로 붙잡습니다. 플레이어 위에서 닫히는
+               문은 아무 교훈도 없는 죽음입니다. */
+            if (inside_outline(st, player_pos.x, player_pos.z))
+                st->wait = DOOR_OPEN_TIME;
+            if (st->wait <= 0.0f) st->opening = 0;
+        }
+    } else if (st->t > 0.0f) {
+        if (inside_outline(st, player_pos.x, player_pos.z)) {
+            st->wait = DOOR_OPEN_TIME;
+            st->opening = 1;
+        } else {
+            st->t -= rate;
+            if (st->t <= 0.0f) st->t = 0.0f;
+            moved = 1;
+        }
+    }
+
+    apply(l, d, st);
+    return moved;
+}
+
 int door_update(Level *l, v3 player_pos, int keys, float dt) {
     int moved = 0;
     g_refused = KEY_NONE;
@@ -339,117 +493,9 @@ int door_update(Level *l, v3 player_pos, int keys, float dt) {
             if (l->doors[i].tag == tag) touched_tag[i] = 1;
     }
 
-    for (int i = 0; i < n; i++) {
-        const DoorDef *d = &l->doors[i];
-        DoorState *st = &g_door[i];
-        if (st->n0 <= 0) continue;
-
-        /* --- is this state still about this door? --------------------------
-           The two arrays are matched by index and by nothing else. door_reset
-           is what agrees them, and a level stepped without one -- a second Level
-           in play, an editor that rewrote the doors, a load path that forgot --
-           lands here holding somebody else's closed shape. apply() would write
-           it into d->sector: a wall in the wrong place, moving, and looking for
-           all the world like a door that works.
-
-           Skipped rather than guessed at, and counted so it is not silent. A
-           stale door that does nothing is a bug you can find; a stale door that
-           moves the wrong geometry is one you chase through the renderer.
-
-           두 배열은 인덱스로만 대응하며 다른 무엇으로도 대응하지 않습니다. 둘을 일치시키는
-           것은 door_reset이고, 그것 없이 진행된 레벨은(진행 중인 두 번째 Level, 문을 다시
-           쓴 에디터, 잊어버린 로드 경로) 남의 닫힌 형상을 든 채로 이곳에 도달합니다.
-           apply()는 그것을 d->sector에 씁니다. 엉뚱한 자리에서 움직이는 벽이며, 어느 모로
-           보나 정상 동작하는 문처럼 보입니다.
-
-           추측하지 않고 건너뛰며, 조용하지 않도록 셉니다. 아무것도 하지 않는 낡은 문은
-           찾을 수 있는 버그이고, 엉뚱한 지오메트리를 움직이는 낡은 문은 렌더러를 헤매며
-           쫓아야 하는 버그입니다. */
-        if (st->sector != d->sector) { DIAG(DIAG_DOOR_STALE); continue; }
-
-        /* --- what wants this door open right now --------------------------
-           An untagged door opens to a touch on itself; a tagged one opens only
-           to its switch. Both are "somebody asked", and the difference is only
-           where they had to stand to ask.
-           태그가 없는 문은 자신을 건드리면 열리고, 태그가 있는 문은 자신의 스위치에만
-           반응합니다. 둘 다 "누군가 요청했다"이며, 차이는 요청하려면 어디에 서야 하는가
-           뿐입니다. */
-        int asked;
-        if (d->tag > 0) asked = touched_tag[i];
-        else            asked = dist_to_outline(st, player_pos.x, player_pos.z)
-                                <= DOOR_TOUCH_DIST;
-
-        if (asked && d->key != KEY_NONE && !(keys & d->key)) {
-            /* Refused. Reported once per frame so the HUD can say which key,
-               and the door does not budge.
-               거절되었습니다. HUD가 어떤 열쇠인지 말할 수 있도록 프레임당 한 번
-               보고하며, 문은 움직이지 않습니다. */
-            g_refused = d->key;
-
-            /* Re-armed to the full time on every touch rather than only when
-               it has run out, so leaning on a locked door keeps the message up
-               instead of letting it blink.
-               이미 떠 있든 아니든 닿을 때마다 시간을 가득 채웁니다. 잠긴 문에 계속 붙어
-               있으면 메시지가 깜빡이지 않고 유지됩니다. */
-            g_notice_key = d->key;
-            g_notice_t   = DOOR_NOTICE_TIME;
-            asked = 0;
-        }
-
-        if (asked && !st->opening && st->t < 1.0f) {
-            st->opening = 1;
-            /* Its own sound now. This was the shotgun's rack, because that was
-               the nearest thing the synthesised library had and a door has to
-               make SOME noise -- a stand-in that stopped being one the moment
-               there was a door sound to play.
-               이제 자기 사운드를 갖습니다. 이전에는 샷건의 장전음이었는데, 합성
-               라이브러리에 있던 것 중 가장 가까웠고 문은 *어떤* 소리든 내야 했기
-               때문입니다. 문 사운드가 생긴 순간 그것은 대역이기를 멈췄습니다. */
-            /* A tagged door was opened by a switch, so the clack comes
-               with it. Played on the door's opening EDGE rather than at the
-               switch, because the switch handler runs every frame the player
-               stands on it and would machine-gun the sound; this fires once
-               per activation and already knows which case it is.
-               태그가 있는 문은 스위치가 연 것이므로 그 소리가 함께 납니다. 스위치가
-               아니라 문이 *열리기 시작하는 경계*에서 재생하는 이유는, 스위치 처리기가
-               플레이어가 밟고 있는 매 프레임 실행되어 소리를 연발하기 때문입니다. */
-            if (d->tag > 0) audio_play_at("switch", 80, door_centre(st));
-            audio_play_at("door", 75, door_centre(st));
-        }
-        if (asked) st->wait = DOOR_OPEN_TIME;
-
-        float step = (d->speed * 0.01f) * dt;
-        float span = fabsf(d->amount * 0.01f);
-        float rate = span > 1e-4f ? step / span : 1.0f;
-
-        if (st->opening) {
-            if (st->t < 1.0f) {
-                st->t += rate;
-                if (st->t >= 1.0f) { st->t = 1.0f; st->wait = DOOR_OPEN_TIME; }
-                moved = 1;
-            } else {
-                st->wait -= dt;
-                /* Held open by anything standing in the doorway. A door that
-                   closed on the player would be a death with no lesson in it.
-                   문간에 서 있는 것이 문을 열린 채로 붙잡습니다. 플레이어 위에서 닫히는
-                   문은 아무 교훈도 없는 죽음입니다. */
-                if (inside_outline(st, player_pos.x, player_pos.z))
-                    st->wait = DOOR_OPEN_TIME;
-                if (st->wait <= 0.0f) st->opening = 0;
-            }
-        } else if (st->t > 0.0f) {
-            if (inside_outline(st, player_pos.x, player_pos.z)) {
-                st->wait = DOOR_OPEN_TIME;
-                st->opening = 1;
-            } else {
-                st->t -= rate;
-                if (st->t <= 0.0f) st->t = 0.0f;
-                moved = 1;
-            }
-        }
-
-        apply(l, d, st);
-    }
+    for (int i = 0; i < n; i++)
+        if (door_step_one(l, i, player_pos, keys, touched_tag[i], dt))
+            moved = 1;
 
     /* A slid door changes which grid cells it occupies, and the grid is what
        sector_at consults first. Rebuilt once for the whole frame rather than

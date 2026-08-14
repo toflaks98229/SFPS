@@ -331,6 +331,7 @@ static int hook_fly(Weapon *w, Pools *pl, const Level *l, float dt) {
     return 1;
 }
 
+
 /**
  * @brief Applies the launch impulse that ends a completed hook. Beat 4.
  *
@@ -440,39 +441,51 @@ static void hook_launch(v3 travel, float speed, v3 to_anchor, v3 *vel) {
     *vel = out;
 }
 
-int wp_hook_update(Weapon *w, Pools *pl, const Level *l, v3 *pos, v3 *vel, float dt) {
-    if (w->hook_state == HOOK_IDLE) return 0;
-
-    w->hook_timer += dt;
-
-    /* --- beat 1: the claw is still travelling ---------------------------- */
-    if (w->hook_state == HOOK_FLYING)
-        return hook_fly(w, pl, l, dt);
-
-    /* --- the target may have moved --------------------------------------- */
-    if (w->hook_enemy >= 0) {
-        const Enemy *e = enemy_at(pl, w->hook_enemy);
-        /* A dead or despawned target ends the hook without a launch: there is
-           nothing left to bounce off. Tracking by index rather than position
-           is what makes this detectable at all.
-           죽었거나 사라진 대상은 도약 없이 훅을 종료시킵니다. 튕겨 나올 대상이 남아
-           있지 않기 때문입니다. 위치가 아닌 인덱스로 추적하기에 이를 감지할 수
-           있습니다. */
-        if (!e || !e->active || e->state == E_DEAD) { hook_end(w); return 0; }
-        /* Aim at the centre of mass rather than the feet, or the pull drags
-           the player into the floor. Height comes from the type table, since
-           Enemy stores only what varies per instance.
-           발이 아닌 몸통 중심을 겨냥합니다. 그렇지 않으면 견인이 플레이어를 바닥으로
-           끌고 들어갑니다. Enemy는 개체마다 달라지는 값만 보관하므로 신장은 종류
-           테이블에서 가져옵니다. */
-        const MonType *S = mon_stats(e->type);
-        float mid = S ? S->height * 0.5f : 0.8f;
-        w->hook_target = v3f(e->pos.x, e->pos.y + mid, e->pos.z);
-    }
-
-    v3 to = v3sub(w->hook_target, *pos);
-    float dist = v3len(to);
-
+/**
+ * @brief Beats 3 and 4: decides whether the pull has ended, and ends it.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] w    Weapon carrying the hook's live state.
+ * @param[in,out] pl   Pools, for the arrival burst and the damage.
+ * @param[in,out] vel  Player velocity; the launch writes it.
+ * @param[in]     to   Player-to-target vector.
+ * @param[in]     dist Its length.
+ * @return Non-zero when the hook has arrived and released -- the caller then
+ *         reports the hook as finished. Zero to carry on reeling.
+ *
+ * @note THREE WAYS TO ARRIVE, and the two beyond proximity are not optional:
+ *       a fast pull can pass the anchor between frames, and a pull that stops
+ *       closing has stalled against geometry. Proximity alone leaves the
+ *       player winched to a point they already flew past.
+ * @note TAKES NO LEVEL AND NO POSITION, which the split is what revealed:
+ *       arriving is decided entirely from the hook's own state and the vector
+ *       to its anchor. The launch that follows writes velocity and lets the
+ *       player's own collision resolve it -- see ::hook_launch.
+ * @note Split from ::wp_hook_update because the beats were already named in
+ *       its comments and only the names were missing. What decides the hook is
+ *       over is a separate question from what the winch does each frame, and
+ *       tools\hooktest.c tests them as separate questions too.
+ *
+ * 한국어
+ * ------
+ * @brief 3·4번째 박자입니다. 견인이 끝났는지 판단하고 끝냅니다.
+ * @param[in,out] w    훅의 실시간 상태를 지닌 무기.
+ * @param[in,out] pl   도달 시의 파열과 피해를 위한 풀.
+ * @param[in,out] vel  플레이어 속도. 도약이 이 값을 기록합니다.
+ * @param[in]     to   플레이어에서 목표로 향하는 벡터.
+ * @param[in]     dist 그 길이.
+ * @return 훅이 도달해 해제되었으면 0이 아닙니다. 호출자는 훅이 끝났다고 보고합니다. 계속
+ *         감아야 하면 0입니다.
+ *
+ * @note *도달하는 방법은 셋*이며, 근접 외의 둘은 선택 사항이 아닙니다. 빠른 견인은 프레임
+ *       사이에 고정점을 지나칠 수 있고, 더 이상 가까워지지 않는 견인은 지형에 걸린
+ *       것입니다. 근접만으로는 이미 지나쳐 날아간 지점으로 플레이어가 계속 감기게 됩니다.
+ * @note ::wp_hook_update에서 분리했습니다. 박자들은 이미 그 함수의 주석에 이름이 붙어
+ *       있었고 함수만 없었습니다. 훅이 끝났는지는 매 프레임 윈치가 무엇을 하는지와 별개의
+ *       질문이며, tools\hooktest.c도 그 둘을 별개의 질문으로 검사합니다.
+ */
+static int hook_try_arrive(Weapon *w, Pools *pl, v3 *vel, v3 to, float dist, float dt) {
     /* --- beats 3 and 4: arrival, damage, launch ---------------------------
        Two ways to arrive, and the second is not optional. A proximity test
        alone misses whenever one frame's travel exceeds the arrival radius:
@@ -611,9 +624,41 @@ int wp_hook_update(Weapon *w, Pools *pl, const Level *l, v3 *pos, v3 *vel, float
         hook_launch(travel, speed, to, vel);
 
         hook_end(w);
-        return 0;
+        return 1;
     }
 
+    return 0;
+}
+
+/**
+ * @brief Beat 2: one frame of the winch.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] w    Weapon carrying the hook's live state.
+ * @param[in,out] pos  Player position, read for the pull direction.
+ * @param[in,out] vel  Player velocity, which the pull adds to.
+ * @param[in]     to   Player-to-target vector.
+ * @param[in]     dist Its length.
+ * @param[in]     dt   Frame time.
+ *
+ * @note Reached only when ::hook_try_arrive said the hook is still running, so
+ *       every early exit that used to guard this is now the caller's business.
+ *
+ * 한국어
+ * ------
+ * @brief 2번째 박자입니다. 윈치의 한 프레임입니다.
+ * @param[in,out] w    훅의 실시간 상태를 지닌 무기.
+ * @param[in,out] pos  플레이어 위치. 견인 방향을 위해 읽습니다.
+ * @param[in,out] vel  플레이어 속도. 견인이 여기에 더합니다.
+ * @param[in]     to   플레이어에서 목표로 향하는 벡터.
+ * @param[in]     dist 그 길이.
+ * @param[in]     dt   프레임 시간.
+ *
+ * @note ::hook_try_arrive가 훅이 아직 진행 중이라고 답했을 때만 도달합니다. 따라서 이곳을
+ *       지키던 조기 탈출은 전부 호출자의 소관이 되었습니다.
+ */
+static void hook_pull(Weapon *w, v3 *pos, v3 *vel, v3 to, float dist, float dt) {
     /* --- beat 2: the pull ------------------------------------------------- */
 
     /* The winch, restarted on a timer rather than played once. A pull lasts
@@ -637,9 +682,9 @@ int wp_hook_update(Weapon *w, Pools *pl, const Level *l, v3 *pos, v3 *vel, float
            도달할 수 없었습니다. 대상이 도망치고 있거나 플레이어가 따라갈 수 없는 곳에
            있습니다. 실패이므로 도약도 없습니다. */
         hook_end(w);
-        return 0;
+        return;
     }
-    if (dist < 1e-4f) return 1;                  /* degenerate; nothing sane to do */
+    if (dist < 1e-4f) return;                  /* degenerate; nothing sane to do */
 
     v3 dir = v3scale(to, 1.0f / dist);           /* player -> target, unit */
 
@@ -704,5 +749,47 @@ int wp_hook_update(Weapon *w, Pools *pl, const Level *l, v3 *pos, v3 *vel, float
 
     (void)pos;   /* read through `to` above; never written -- the pull works
                     through velocity so it collides like any other movement */
+}
+
+int wp_hook_update(Weapon *w, Pools *pl, const Level *l, v3 *pos, v3 *vel, float dt) {
+    if (w->hook_state == HOOK_IDLE) return 0;
+
+    w->hook_timer += dt;
+
+    /* --- beat 1: the claw is still travelling ---------------------------- */
+    if (w->hook_state == HOOK_FLYING)
+        return hook_fly(w, pl, l, dt);
+
+    /* --- the target may have moved --------------------------------------- */
+    if (w->hook_enemy >= 0) {
+        const Enemy *e = enemy_at(pl, w->hook_enemy);
+        /* A dead or despawned target ends the hook without a launch: there is
+           nothing left to bounce off. Tracking by index rather than position
+           is what makes this detectable at all.
+           죽었거나 사라진 대상은 도약 없이 훅을 종료시킵니다. 튕겨 나올 대상이 남아
+           있지 않기 때문입니다. 위치가 아닌 인덱스로 추적하기에 이를 감지할 수
+           있습니다. */
+        if (!e || !e->active || e->state == E_DEAD) { hook_end(w); return 0; }
+        /* Aim at the centre of mass rather than the feet, or the pull drags
+           the player into the floor. Height comes from the type table, since
+           Enemy stores only what varies per instance.
+           발이 아닌 몸통 중심을 겨냥합니다. 그렇지 않으면 견인이 플레이어를 바닥으로
+           끌고 들어갑니다. Enemy는 개체마다 달라지는 값만 보관하므로 신장은 종류
+           테이블에서 가져옵니다. */
+        const MonType *S = mon_stats(e->type);
+        float mid = S ? S->height * 0.5f : 0.8f;
+        w->hook_target = v3f(e->pos.x, e->pos.y + mid, e->pos.z);
+    }
+
+    v3 to = v3sub(w->hook_target, *pos);
+    float dist = v3len(to);
+
+    /* Beats 3 and 4. Returns non-zero once the hook has arrived and let
+       go, which is also the end of this function.
+       3·4번째 박자입니다. 훅이 도달해 놓아 버리면 0이 아닌 값을 돌려주며, 그것이
+       이 함수의 끝이기도 합니다. */
+    if (hook_try_arrive(w, pl, vel, to, dist, dt)) return 0;
+
+    hook_pull(w, pos, vel, to, dist, dt);
     return 1;
 }

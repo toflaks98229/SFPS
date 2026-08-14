@@ -12,35 +12,34 @@
  */
 
 #include "proj.h"
+#include "pools.h"   /* the bundle the calls below are handed */
 #include "enemy.h"
 #include "audio.h"
 #include "fx.h"
 #include "diag.h"
 #include <math.h>
 
-static Proj g_proj[PROJ_MAX];
-
-void proj_reset(void) {
-    for (int i = 0; i < PROJ_MAX; i++) g_proj[i].active = 0;
+void proj_reset(Pools *w) {
+    for (int i = 0; i < PROJ_MAX; i++) w->proj.p[i].active = 0;
 }
 
-int proj_count(void) { return PROJ_MAX; }
+int proj_count(const Pools *w) { (void)w; return PROJ_MAX; }
 
-const Proj *proj_at(int i) {
-    return (i >= 0 && i < PROJ_MAX) ? &g_proj[i] : 0;
+const Proj *proj_at(const Pools *w, int i) {
+    return (i >= 0 && i < PROJ_MAX) ? &w->proj.p[i] : 0;
 }
 
-int proj_live(void) {
+int proj_live(const Pools *w) {
     int n = 0;
-    for (int i = 0; i < PROJ_MAX; i++) if (g_proj[i].active) n++;
+    for (int i = 0; i < PROJ_MAX; i++) if (w->proj.p[i].active) n++;
     return n;
 }
 
-int proj_fire(v3 from, v3 dir, float speed, float gravity,
+int proj_fire(Pools *w, v3 from, v3 dir, float speed, float gravity,
               int damage, float blast, float fuse) {
     Proj *p = 0;
     for (int i = 0; i < PROJ_MAX; i++)
-        if (!g_proj[i].active) { p = &g_proj[i]; break; }
+        if (!w->proj.p[i].active) { p = &w->proj.p[i]; break; }
 
     /* Every other pool here reports when it turns something away, and a shot
        that produced no projectile is indistinguishable from one that missed --
@@ -66,7 +65,8 @@ int proj_fire(v3 from, v3 dir, float speed, float gravity,
     return 1;
 }
 
-int proj_blast(v3 at, float radius, int damage) {
+int proj_blast(Pools *w, v3 at, float radius, int damage) {
+    (void)w;   /* the monsters it damages are still a module global -- D4e */
     if (radius <= 0.0f) return 0;
     int hits = 0;
 
@@ -112,9 +112,9 @@ int proj_blast(v3 at, float radius, int damage) {
    that the caller has already applied.
    발사체의 최후입니다. 폭발 반경이 있으면 폭발이고, 없으면 호출자가 이미 적용한 단일
    대상 피격입니다. */
-static void detonate(Proj *p, v3 at, v3 normal) {
+static void detonate(Pools *w, Proj *p, v3 at, v3 normal) {
     if (p->blast > 0.0f) {
-        proj_blast(at, p->blast, p->damage);
+        proj_blast(w, at, p->blast, p->damage);
 
         /* THE DOME IS SCALED BY THE RADIUS IT IS DRAWING. Its speed is
            authored so speed x life reaches one metre, so passing the blast
@@ -154,9 +154,9 @@ static void detonate(Proj *p, v3 at, v3 normal) {
     p->active = 0;
 }
 
-void proj_update(const Level *l, float dt) {
+void proj_update(Pools *w, const Level *l, float dt) {
     for (int i = 0; i < PROJ_MAX; i++) {
-        Proj *p = &g_proj[i];
+        Proj *p = &w->proj.p[i];
         if (!p->active) continue;
 
         p->spin += dt;
@@ -169,7 +169,7 @@ void proj_update(const Level *l, float dt) {
            위협이 되는 이유입니다. */
         if (p->fuse > 0.0f) {
             p->fuse -= dt;
-            if (p->fuse <= 0.0f) { detonate(p, p->pos, v3f(0, 1, 0)); continue; }
+            if (p->fuse <= 0.0f) { detonate(w, p, p->pos, v3f(0, 1, 0)); continue; }
         }
 
         if (p->gravity > 0.0f) p->vel.y -= p->gravity * dt;
@@ -189,7 +189,7 @@ void proj_update(const Level *l, float dt) {
         if (enemy_hitscan(p->pos, dir, dist + PROJ_RADIUS, &et, &eidx)) {
             v3 at = v3add(p->pos, v3scale(dir, et));
             if (p->blast <= 0.0f) enemy_hurt(eidx, p->damage, dir);
-            detonate(p, at, v3scale(dir, -1.0f));
+            detonate(w, p, at, v3scale(dir, -1.0f));
             continue;
         }
 
@@ -201,7 +201,7 @@ void proj_update(const Level *l, float dt) {
             /* A bolt stops at the wall; a grenade bounces off it. `gravity` is
                what tells them apart -- see Proj.
                탄은 벽에서 멈추고 유탄은 튕깁니다. 둘을 가르는 것은 `gravity`입니다. */
-            if (p->gravity <= 0.0f) { detonate(p, at, n); continue; }
+            if (p->gravity <= 0.0f) { detonate(w, p, at, n); continue; }
 
             /* Reflect, damped. Backed off along the normal so the grenade does
                not begin the next step inside the surface it just left, which

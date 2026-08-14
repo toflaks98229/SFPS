@@ -21,10 +21,19 @@
 #include <stdio.h>
 #include <math.h>
 #include "weapon.h"
+#include "pools.h"
 #include "sprite.h"   /* WPN_* -- the poses the viewmodel cycles through */
 #include "proj.h"
 #include "enemy.h"
 #include "player.h"
+
+/* The pools a run spawns into. A test owns one the same way a ::World does --
+   these used to be file-scope arrays inside their own modules, so a fixture
+   inherited whatever the previous case left in them. See pools.h.
+   플레이가 생성해 넣는 풀들입니다. ::World가 그러하듯 테스트도 자기 것을 소유합니다.
+   이것들은 각자의 모듈 안 파일 스코프 배열이었으므로, 픽스처는 이전 사례가 남긴 것을
+   그대로 물려받았습니다. pools.h를 참조하십시오. */
+static Pools g_pools;
 
 static int fails;
 
@@ -138,18 +147,18 @@ int main(void) {
        No gravity means the height it was fired at is the height it arrives at.
        A bolt that sagged would make the crosshair a lie at range. */
     {
-        proj_reset();
+        proj_reset(&g_pools);
         enemy_reset();
         const WeaponType *S = wp_stats(WP_RAPID);
         v3 from = v3f(0, 5.0f, 0);
-        proj_fire(from, v3f(0, 0, -1), S->proj_speed, S->proj_gravity,
+        proj_fire(&g_pools, from, v3f(0, 0, -1), S->proj_speed, S->proj_gravity,
                   S->damage, 0.0f, 0.0f);
 
-        for (int i = 0; i < 10; i++) proj_update(&L, 1.0f / 60.0f);
+        for (int i = 0; i < 10; i++) proj_update(&g_pools, &L, 1.0f / 60.0f);
 
         const Proj *p = 0;
-        for (int i = 0; i < proj_count(); i++)
-            if (proj_at(i)->active) { p = proj_at(i); break; }
+        for (int i = 0; i < proj_count(&g_pools); i++)
+            if (proj_at(&g_pools, i)->active) { p = proj_at(&g_pools, i); break; }
         ok(p != 0, "a bolt is still in flight after ten frames");
         if (p) {
             okf(fabsf(p->pos.y - 5.0f) < 0.001f, "and has not dropped at all",
@@ -162,17 +171,17 @@ int main(void) {
        Gravity means a grenade thrown level ends up lower than it started, and
        that fall is what lets it be lobbed over things. */
     {
-        proj_reset();
+        proj_reset(&g_pools);
         enemy_reset();
         const WeaponType *S = wp_stats(WP_GRENADE);
-        proj_fire(v3f(0, 5.0f, 0), v3f(0, 0, -1), S->proj_speed, S->proj_gravity,
+        proj_fire(&g_pools, v3f(0, 5.0f, 0), v3f(0, 0, -1), S->proj_speed, S->proj_gravity,
                   S->damage, PROJ_BLAST_RADIUS, PROJ_FUSE);
 
-        for (int i = 0; i < 12; i++) proj_update(&L, 1.0f / 60.0f);
+        for (int i = 0; i < 12; i++) proj_update(&g_pools, &L, 1.0f / 60.0f);
 
         const Proj *p = 0;
-        for (int i = 0; i < proj_count(); i++)
-            if (proj_at(i)->active) { p = proj_at(i); break; }
+        for (int i = 0; i < proj_count(&g_pools); i++)
+            if (proj_at(&g_pools, i)->active) { p = proj_at(&g_pools, i); break; }
         ok(p != 0, "a grenade is still in flight");
         if (p) ok(p->pos.y < 5.0f, "and has fallen below where it was thrown");
     }
@@ -181,24 +190,24 @@ int main(void) {
        The property that makes one at your feet a threat rather than scenery:
        the fuse burns whether or not it is moving. */
     {
-        proj_reset();
+        proj_reset(&g_pools);
         enemy_reset();
         const WeaponType *S = wp_stats(WP_GRENADE);
-        proj_fire(v3f(0, 1.0f, 0), v3f(0, 0, -1), S->proj_speed, S->proj_gravity,
+        proj_fire(&g_pools, v3f(0, 1.0f, 0), v3f(0, 0, -1), S->proj_speed, S->proj_gravity,
                   S->damage, PROJ_BLAST_RADIUS, PROJ_FUSE);
-        ok(proj_live() == 1, "the grenade launched");
+        ok(proj_live(&g_pools) == 1, "the grenade launched");
 
         /* Well past the fuse. */
         for (int i = 0; i < (int)((PROJ_FUSE + 0.5f) * 60.0f); i++)
-            proj_update(&L, 1.0f / 60.0f);
-        okd(proj_live() == 0, "and is gone once its fuse has burned",
-            proj_live(), 0);
+            proj_update(&g_pools, &L, 1.0f / 60.0f);
+        okd(proj_live(&g_pools) == 0, "and is gone once its fuse has burned",
+            proj_live(&g_pools), 0);
     }
 
     /* --- the blast reaches a group, and falls off with distance ----------
        A grenade that hurt exactly one monster would be a slow shotgun. */
     {
-        proj_reset();
+        proj_reset(&g_pools);
         enemy_reset();
 
         /* Three imps: one at the centre, one near the rim, one outside. */
@@ -216,7 +225,7 @@ int main(void) {
         int before[3];
         for (int i = 0; i < 3; i++) before[i] = enemy_at(i)->health;
 
-        int hit = proj_blast(v3f(0, 0.85f, 0), PROJ_BLAST_RADIUS, 55);
+        int hit = proj_blast(&g_pools, v3f(0, 0.85f, 0), PROJ_BLAST_RADIUS, 55);
         okd(hit == 2, "the blast reaches the two inside its radius", hit, 2);
 
         int d0 = before[0] - enemy_at(0)->health;
@@ -230,7 +239,7 @@ int main(void) {
        Swept, not teleported: at 70 m/s a bolt crosses more than a metre a
        frame, and a monster between this frame and the next must still be hit. */
     {
-        proj_reset();
+        proj_reset(&g_pools);
         enemy_reset();
         Level E = L;
         E.n_ents = 0;
@@ -241,25 +250,25 @@ int main(void) {
 
         int before = enemy_at(0)->health;
         const WeaponType *S = wp_stats(WP_RAPID);
-        proj_fire(v3f(0, 0.9f, 0), v3f(0, 0, -1), S->proj_speed, 0.0f,
+        proj_fire(&g_pools, v3f(0, 0.9f, 0), v3f(0, 0, -1), S->proj_speed, 0.0f,
                   S->damage, 0.0f, 0.0f);
 
-        for (int i = 0; i < 30 && proj_live(); i++) proj_update(&L, 1.0f / 60.0f);
+        for (int i = 0; i < 30 && proj_live(&g_pools); i++) proj_update(&g_pools, &L, 1.0f / 60.0f);
 
         ok(enemy_at(0)->health < before, "a bolt damages the monster it reaches");
-        okd(proj_live() == 0, "and is consumed by the hit", proj_live(), 0);
+        okd(proj_live(&g_pools) == 0, "and is consumed by the hit", proj_live(&g_pools), 0);
     }
 
     /* --- the pool refuses rather than overruns ---------------------------- */
     {
-        proj_reset();
+        proj_reset(&g_pools);
         int made = 0;
         for (int i = 0; i < PROJ_MAX + 12; i++)
-            made += proj_fire(v3f(0, 1, 0), v3f(0, 0, -1), 30.0f, 0.0f, 5, 0.0f, 0.0f);
+            made += proj_fire(&g_pools, v3f(0, 1, 0), v3f(0, 0, -1), 30.0f, 0.0f, 5, 0.0f, 0.0f);
         okd(made == PROJ_MAX, "the pool fills to its cap and then refuses",
             made, PROJ_MAX);
-        okd(proj_live() == PROJ_MAX, "and holds exactly that many",
-            proj_live(), PROJ_MAX);
+        okd(proj_live(&g_pools) == PROJ_MAX, "and holds exactly that many",
+            proj_live(&g_pools), PROJ_MAX);
     }
 
     /* --- every weapon's cycle, against Doom's own state table -------------

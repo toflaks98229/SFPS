@@ -32,6 +32,19 @@
 #ifndef WEAPON_H
 #define WEAPON_H
 
+/* The run's pools, by name only. Firing reaches them -- a projectile weapon
+   puts something in the projectile pool, and the axe's slam damages monsters
+   through it -- but nothing about what a Weapon IS depends on their contents,
+   so this header takes the name and pools.h keeps the definition. Repeating
+   the typedef in proj.h is legal C11 and is what lets either header be
+   included first.
+   플레이의 풀들이며 이름으로만 참조합니다. 사격이 그것에 닿습니다. 발사체 무기는 발사체
+   풀에 무언가를 넣고, 도끼의 내려찍기는 그것을 통해 몬스터에 피해를 줍니다. 그러나 Weapon이
+   *무엇인가*는 그 내용물에 의존하지 않으므로, 이 헤더는 이름만 받고 정의는 pools.h가
+   유지합니다. proj.h에서 같은 typedef를 반복하는 것은 적법한 C11이며, 두 헤더 중 어느
+   쪽이 먼저 포함되어도 되게 만드는 것이 그것입니다. */
+typedef struct Pools Pools;
+
 #include "level.h"
 
 /* --- Ammunition constants / 탄약 상수 --- */
@@ -624,7 +637,7 @@ int wp_axe_leap(Weapon *w, float yaw, float pitch, v3 *player_vel);
  *       진행시켜야 하며, 착지했다고 판단될 때만 호출하는 호출자는 착지의 정의를 두 번째
  *       장소에서 내리게 됩니다.
  */
-int wp_axe_land(Weapon *w, v3 feet, int grounded, float dt);
+int wp_axe_land(Weapon *w, Pools *pl, v3 feet, int grounded, float dt);
 
 /** @brief Non-zero while an axe leap is in the air. / 도끼 도약이 공중에 있는 동안 0이 아닙니다. */
 int wp_axe_leaping(const Weapon *w);
@@ -744,7 +757,7 @@ void wp_start_belt(Weapon *w);
  * @note 월드 카메라의 시야각과 종횡비는 다른 투영 아래에 존재하는, 화면에 그려진
  *       총구 위치에 예광탄의 시작점을 맞추는 데 필요합니다.
  */
-void wp_update(Weapon *w, float dt, int firing, v3 eye, float yaw, float pitch,
+void wp_update(Weapon *w, Pools *pl, float dt, int firing, v3 eye, float yaw, float pitch,
                float move_speed, float mouse_dx, float mouse_dy,
                float world_fov, float aspect, v3 *player_vel, int player_grounded);
 

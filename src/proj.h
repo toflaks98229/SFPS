@@ -52,6 +52,8 @@
  */
 #define PROJ_MAX 48
 
+
+
 /** @brief Metres a grenade's blast reaches. / 유탄 폭발이 도달하는 거리 (미터). */
 #define PROJ_BLAST_RADIUS 4.2f
 
@@ -101,10 +103,37 @@ typedef struct {
     int   active;     /**< 0 when the slot is free. / 0이면 빈 슬롯입니다. */
 } Proj;
 
+/**
+ * @struct ProjPool
+ * @brief Every projectile in flight, owned by the caller rather than by proj.c.
+ *
+ * A plain array in a struct, so that a ::World holds its own and two of them do
+ * not share one. It was a file-scope `static Proj g_proj[PROJ_MAX]`, which is
+ * why tools\steptest.c had to call ::proj_reset by hand between fixtures: the
+ * previous case's grenades were still in the air.
+ *
+ * 호출자가 소유하는, 비행 중인 모든 발사체입니다. 구조체 안의 평범한 배열이므로 ::World가
+ * 자기 것을 가지며 두 개가 하나를 공유하지 않습니다. 이것은 파일 스코프
+ * `static Proj g_proj[PROJ_MAX]`였고, 그래서 tools\steptest.c가 픽스처 사이에 ::proj_reset을
+ * 손으로 불러야 했습니다. 이전 사례의 유탄이 아직 공중에 있었기 때문입니다.
+ */
+typedef struct {
+    Proj p[PROJ_MAX];   /**< Slots. `active` says which are in use. / 슬롯. `active`가 사용 중인 것을 말합니다. */
+} ProjPool;
+
+/* The bundle that holds this pool and its neighbours, by name only: the calls
+   below take it because a projectile's detonation reaches monsters and
+   particles, not only other projectiles. pools.h defines it, and includes this
+   file to do so -- so this end of the pair can only forward-declare.
+   이 풀과 그 이웃들을 담는 묶음이며 이름으로만 참조합니다. 아래의 호출들이 그것을 받는
+   이유는, 발사체의 폭발이 다른 발사체가 아니라 몬스터와 입자에 닿기 때문입니다. pools.h가
+   그것을 정의하며 그러기 위해 이 파일을 포함하므로, 이 쪽 끝은 전방 선언만 할 수 있습니다. */
+typedef struct Pools Pools;
+
 /* --- Lifecycle / 수명 주기 --- */
 
 /** @brief Clears every projectile. Called on a level load. / 모든 발사체를 제거합니다. */
-void proj_reset(void);
+void proj_reset(Pools *w);
 
 /**
  * @brief Launches one projectile.
@@ -121,7 +150,7 @@ void proj_reset(void);
  * @brief 발사체 하나를 발사합니다.
  * @return 빈 슬롯이 있었으면 0이 아닌 값.
  */
-int proj_fire(v3 from, v3 dir, float speed, float gravity,
+int proj_fire(Pools *w, v3 from, v3 dir, float speed, float gravity,
               int damage, float blast, float fuse);
 
 /**
@@ -138,18 +167,18 @@ int proj_fire(v3 from, v3 dir, float speed, float gravity,
  * @note 순간이동이 아니라 훑습니다. 70m/s의 탄은 한 프레임에 1미터 이상 이동하므로,
  *       도착 지점만 검사하면 그 사이에 서 있는 몬스터를 통과해 버립니다.
  */
-void proj_update(const Level *l, float dt);
+void proj_update(Pools *w, const Level *l, float dt);
 
 /* --- Read-back, for the renderer and for tests / 렌더러와 테스트를 위한 조회 --- */
 
 /** @brief How many slots exist; walk them and skip the inactive. / 슬롯의 개수. 순회하며 비활성은 건너뛰십시오. */
-int proj_count(void);
+int proj_count(const Pools *w);
 
 /** @brief Borrowed pointer to slot `i`, or NULL. / 슬롯 `i`에 대한 참조 포인터. 없으면 NULL. */
-const Proj *proj_at(int i);
+const Proj *proj_at(const Pools *w, int i);
 
 /** @brief How many are in flight right now. / 지금 비행 중인 개수. */
-int proj_live(void);
+int proj_live(const Pools *w);
 
 /**
  * @brief Damages every monster within `radius` of `at`, falling off with distance.
@@ -167,6 +196,6 @@ int proj_live(void);
  * @note 공개된 이유는 도끼의 착지 내려찍기가 유탄 폭발과 동일한 연산이기 때문입니다.
  *       감쇠 곡선의 사본이 둘이면 조정할 곡선이 둘이 됩니다.
  */
-int proj_blast(v3 at, float radius, int damage);
+int proj_blast(Pools *w, v3 at, float radius, int damage);
 
 #endif

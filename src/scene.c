@@ -1230,14 +1230,14 @@ void scene_draw_menu(Scene *s, int vw, int vh) {
     ui_end();
 }
 
-void scene_draw_proj(Scene *s, mat4 vp, v3 cam_right, v3 cam_up) {
+void scene_draw_proj(Scene *s, const Pools *w, mat4 vp, v3 cam_right, v3 cam_up) {
     DIAG_WANT_WORLD_PASS(post_in_world_pass());
 
-    int n = proj_count(), live = 0;
+    int n = proj_count(w), live = 0;
 
     mb_reset(&s->shot_buf);
     for (int i = 0; i < n; i++) {
-        const Proj *p = proj_at(i);
+        const Proj *p = proj_at(w, i);
         if (!p || !p->active) continue;
 
         /* A grenade tumbles and a bolt does not, which is the same distinction
@@ -1274,7 +1274,7 @@ void scene_draw_proj(Scene *s, mat4 vp, v3 cam_right, v3 cam_up) {
        물체가 아니며, 도화선이 플레이어가 받는 유일한 경고입니다. */
     int k = 0;
     for (int i = 0; i < n; i++) {
-        const Proj *p = proj_at(i);
+        const Proj *p = proj_at(w, i);
         if (!p || !p->active) continue;
 
         if (p->gravity > 0.0f) {
@@ -1397,7 +1397,7 @@ void scene_frame(const World *w, Scene *sc, int vw, int vh, int frozen) {
     scene_draw_enemies(sc, vp, eye_pos, cam.right);
     scene_draw_pickups(sc, vp, eye_pos, cam.right);
     scene_draw_shots  (sc, vp, cam.right, cam.up);
-    scene_draw_proj   (sc, vp, cam.right, cam.up);
+    scene_draw_proj   (sc, &w->pools, vp, cam.right, cam.up);
     fx_draw(vp, cam.right, cam.up);
 
     /* --- what shots left behind, and the rope, still in world space ---

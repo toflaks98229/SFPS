@@ -86,6 +86,7 @@
 #include "player.h"
 #include "weapon.h"
 #include "run.h"
+#include "pools.h"   /* Pools: what a run spawns, owned here rather than by the modules */
 
 /* ------------------------------------------------------------------ config */
 
@@ -356,6 +357,21 @@ typedef struct {
     Player   player;  /**< Position, momentum, health, keycards. / 위치, 운동량, 체력, 열쇠. */
     Weapon   weapon;  /**< The belt, the gun in hand and the grapple. / 탄약, 손에 든 총기, 그래플. */
     RunState run;     /**< The current run. Reset through ::run_reset, never field by field. / 현재 플레이. 필드를 하나씩이 아니라 ::run_reset을 통해 초기화합니다. */
+
+    /**
+     * @brief The pools this run spawns into: projectiles, and in time the rest.
+     *
+     * Here for the reason the four above are: a caller cannot hold half a game.
+     * These used to be file-scope arrays inside their own modules, which meant
+     * a second World shared the first one's contents and this struct's whole
+     * premise was untrue for everything it did not name. See pools.h.
+     *
+     * 위의 넷이 이곳에 있는 것과 같은 이유로 이곳에 있습니다. 호출자는 게임의 절반만 들고
+     * 있을 수 없습니다. 이것들은 각자의 모듈 안 파일 스코프 배열이었고, 그 말은 두 번째
+     * World가 첫 번째의 내용물을 공유한다는 뜻이며, 이 구조체가 이름 붙이지 않은 모든 것에
+     * 대해 그 전제가 참이 아니었다는 뜻입니다. pools.h를 참조하십시오.
+     */
+    Pools    pools;
 
     /**
      * @brief Look angles in radians. Pitch is clamped short of vertical.

@@ -27,7 +27,7 @@
 #include "hook.h"
 #include "enemy.h"    /* enemy_reset -- the monster pool is global, and shared */
 #include "pickup.h"   /* pickup_spawn_level, for the same reason */
-#include "proj.h"     /* proj_reset, likewise */
+#include "proj.h"     /* proj_reset -- now takes the World's own pool */
 #include "door.h"     /* door_reset, and the DOOR_* axes */
 #include "diag.h"     /* diag_count -- a stale door is counted, not printed */
 #include "txt.h"      /* txt_copy -- walking the level chain by name */
@@ -72,9 +72,21 @@ static void box(Level *l, short x0, short z0, short x1, short z1,
 /* A world mid-run, standing in the middle of one flat 40m room.
  *
  * world_init leaves the run on the title screen, which freezes everything --
- * correct for the game and useless for a test, so the fixture clears it. The
- * entity pools are file-scope globals shared between tests, so they are reset
- * here rather than left holding whatever the previous case put in them. */
+ * correct for the game and useless for a test, so the fixture clears it.
+ *
+ * The pools are reset here too, and the list is getting shorter: the
+ * projectiles now live in World::pools and are cleared by owning them, while
+ * the monsters, the items and the doors are still file-scope arrays inside
+ * their own modules and have to be emptied by hand or the previous case's
+ * contents are still standing in this one. See pools.h.
+ *
+ * world_init은 플레이를 타이틀 화면 상태로 두며 그것은 모든 것을 정지시킵니다. 게임에는
+ * 옳고 테스트에는 쓸모없으므로 픽스처가 해제합니다.
+ *
+ * 풀도 이곳에서 초기화하며, 그 목록은 점점 짧아지고 있습니다. 발사체는 이제 World::pools에
+ * 있고 소유하는 것만으로 비워집니다. 반면 몬스터·아이템·문은 여전히 각자 모듈 안의 파일
+ * 스코프 배열이라 손으로 비워야 하며, 그러지 않으면 이전 사례의 내용물이 이번 사례에 그대로
+ * 서 있게 됩니다. pools.h를 참조하십시오. */
 static void fixture(World *w, short hurt) {
     world_init(w);
     w->run.title = 0;
@@ -87,7 +99,7 @@ static void fixture(World *w, short hurt) {
     w->player.health   = PLAYER_MAX_HP;
 
     enemy_reset();
-    proj_reset();
+    proj_reset(&w->pools);
     pickup_spawn_level(&w->level);
     door_reset(&w->level);
 }

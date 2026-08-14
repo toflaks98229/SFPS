@@ -31,6 +31,16 @@
    transitively -- it forward-declares MeshBuf so the simulation headers stay
    free of the GL stack -- so the dependency is stated here instead. */
 #include "render.h"
+#include "pools.h"
+
+
+/* The pools a run spawns into. A test owns one the same way a ::World does --
+   these used to be file-scope arrays inside their own modules, so a fixture
+   inherited whatever the previous case left in them. See pools.h.
+   플레이가 생성해 넣는 풀들입니다. ::World가 그러하듯 테스트도 자기 것을 소유합니다.
+   이것들은 각자의 모듈 안 파일 스코프 배열이었으므로, 픽스처는 이전 사례가 남긴 것을
+   그대로 물려받았습니다. pools.h를 참조하십시오. */
+static Pools g_pools;
 
 #define DT (1.0f / 60.0f)
 
@@ -854,10 +864,10 @@ int main(void) {
         /* Facing -z (yaw 0, pitch 0): the kick should push +z (backward). */
         v3 vel_ground = v3f(0,0,0), vel_air = v3f(0,0,0);
 
-        wp_update(&w, DT, 1, eye, 0.0f, 0.0f, 0.0f, 0, 0, 1.4f, 1.6f,
+        wp_update(&w, &g_pools, DT, 1, eye, 0.0f, 0.0f, 0.0f, 0, 0, 1.4f, 1.6f,
                  &vel_ground, 1);
         Weapon w2 = {0}; w2.ammo[WP_SHOTGUN] = 5;
-        wp_update(&w2, DT, 1, eye, 0.0f, 0.0f, 0.0f, 0, 0, 1.4f, 1.6f,
+        wp_update(&w2, &g_pools, DT, 1, eye, 0.0f, 0.0f, 0.0f, 0, 0, 1.4f, 1.6f,
                  &vel_air, 0);
 
         ok(vel_ground.z > 0.01f, "a grounded shot still kicks you back a little");
@@ -874,7 +884,7 @@ int main(void) {
         v3 eye = v3f(0, PLAYER_EYE, 0);
         v3 vel = v3f(0,0,0);
         float look_down = -0.8f;   /* radians; negative is down in this engine */
-        wp_update(&w, DT, 1, eye, 0.0f, look_down, 0.0f, 0, 0, 1.4f, 1.6f,
+        wp_update(&w, &g_pools, DT, 1, eye, 0.0f, look_down, 0.0f, 0, 0, 1.4f, 1.6f,
                  &vel, 0);
         ok(vel.y > 0.0f, "shooting while aiming down launches you upward");
     }

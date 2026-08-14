@@ -48,6 +48,7 @@
  */
 
 #include "weapon.h"
+#include "pools.h"   /* firing reaches the projectile pool, and the blast the monsters */
 #include "hook.h"
 #include "tex.h"
 #include "model.h"
@@ -777,7 +778,7 @@ static void attack_feedback(Weapon *w, const WeaponType *S) {
  *       플레이어가 보는 지점의 아래·오른쪽에서 호를 그리게 되고, 짧은 투척이 뚜렷한 이유
  *       없이 아래로 빗나갑니다.
  */
-static void fire_projectile(Weapon *w, const WeaponType *S,
+static void fire_projectile(Weapon *w, Pools *pl, const WeaponType *S,
                             v3 eye, float yaw, float pitch) {
     float cy = cosf(yaw), sy = sinf(yaw);
     float cp = cosf(pitch), sp = sinf(pitch);
@@ -796,7 +797,7 @@ static void fire_projectile(Weapon *w, const WeaponType *S,
        유탄은 도화선과 폭발 반경을 가지고, 탄은 둘 다 없이 닿은 것만 정확히 상하게
        합니다. 표의 한 행이 차이의 전부입니다. */
     int arcs = S->proj_gravity > 0.0f;
-    proj_fire(eye, dir, S->proj_speed, S->proj_gravity, S->damage,
+    proj_fire(pl, eye, dir, S->proj_speed, S->proj_gravity, S->damage,
               arcs ? PROJ_BLAST_RADIUS : 0.0f,
               arcs ? PROJ_FUSE : 0.0f);
 
@@ -911,19 +912,19 @@ static void fire_melee(Weapon *w, const WeaponType *S,
  * @note 표의 행마다 `pellets`, `proj_speed`, `melee_range` 중 정확히 하나만 0이 아니므로
  *       검사 순서는 중요하지 않습니다. tools/weapontest.c가 그것이 유지되도록 단언합니다.
  */
-static void attack(Weapon *w, v3 eye, float yaw, float pitch,
+static void attack(Weapon *w, Pools *pl, v3 eye, float yaw, float pitch,
                    v3 *player_vel, int player_grounded) {
     const WeaponType *S = wp_stats(w->cur);
 
     if (S->pellets > 0)          fire_hitscan(w, eye, yaw, pitch, player_vel, player_grounded);
-    else if (S->proj_speed > 0)  fire_projectile(w, S, eye, yaw, pitch);
+    else if (S->proj_speed > 0)  fire_projectile(w, pl, S, eye, yaw, pitch);
     else if (S->melee_range > 0) fire_melee(w, S, eye, yaw, pitch, player_vel);
 
     attack_feedback(w, S);
 }
 
 
-void wp_update(Weapon *w, float dt, int firing, v3 eye, float yaw, float pitch,
+void wp_update(Weapon *w, Pools *pl, float dt, int firing, v3 eye, float yaw, float pitch,
                float move_speed, float mouse_dx, float mouse_dy,
                float world_fov, float aspect, v3 *player_vel, int player_grounded) {
     g_world_fov = world_fov;
@@ -952,7 +953,7 @@ void wp_update(Weapon *w, float dt, int firing, v3 eye, float yaw, float pitch,
     if (firing && w->cooldown <= 0.0f) {
         if (w->ammo[w->cur] > 0) {
             w->ammo[w->cur]--;
-            attack(w, eye, yaw, pitch + w->recoil, player_vel, player_grounded);
+            attack(w, pl, eye, yaw, pitch + w->recoil, player_vel, player_grounded);
         } else if (w->dry_timer <= 0.0f) {
             /* Empty: a click, and a short lockout so holding the trigger does
                not machine-gun the click sound. No cooldown is spent, so the
@@ -1674,7 +1675,7 @@ int wp_axe_leap(Weapon *w, float yaw, float pitch, v3 *player_vel) {
     return 1;
 }
 
-int wp_axe_land(Weapon *w, v3 feet, int grounded, float dt) {
+int wp_axe_land(Weapon *w, Pools *pl, v3 feet, int grounded, float dt) {
     if (!w->leaping) return 0;
 
     w->leap_timer += dt;
@@ -1692,7 +1693,7 @@ int wp_axe_land(Weapon *w, v3 feet, int grounded, float dt) {
        behind.
        눈이 아니라 발을 중심으로 합니다. 도끼는 바닥으로 내려오며, 1.7m 위를 중심으로 한
        폭발은 플레이어가 뒤에 서 있는 낮은 벽을 넘어갑니다. */
-    proj_blast(feet, AXE_SLAM_RADIUS, AXE_SLAM_DAMAGE);
+    proj_blast(pl, feet, AXE_SLAM_RADIUS, AXE_SLAM_DAMAGE);
     fx_spawn("boltburst", feet, v3f(0, 1, 0));
     fx_spawn("spark", feet, v3f(0, 1, 0));
     audio_play_at("impact", 100, feet);

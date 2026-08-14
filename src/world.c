@@ -194,10 +194,10 @@ static void step_look_move(World *w, const Input *in, float aspect, float dt) {
        도약은 player_move 이후에 처리되므로, 내려찍기가 한 프레임 뒤가 아니라 플레이어가
        실제로 도달한 지점에서 터집니다. 훅의 구속이 이동 전에 실행되고 이것이 이후에
        실행되는 것과 같은 이유입니다. */
-    wp_axe_land(&w->weapon, w->player.pos, w->player.grounded, dt);
+    wp_axe_land(&w->weapon, &w->pools, w->player.pos, w->player.grounded, dt);
 
     /* Last, so its timers see the movement that actually happened. */
-    wp_update(&w->weapon, dt, in->fire,
+    wp_update(&w->weapon, &w->pools, dt, in->fire,
               w->player.pos, w->yaw, w->pitch, move_speed,
               in->look_dx, in->look_dy,
               WORLD_FOV, aspect, &w->player.vel, w->player.grounded);
@@ -723,7 +723,7 @@ int world_load_level(World *w, const char *name, WorldEnter how) {
        섹터가 존재한 뒤, 첫 door_update 이전입니다. door.c가 각 문의 *닫힌* 형상을 이곳에서
        복사하며, 레벨이 아직 그것을 담고 있는 동안에만 가능합니다. */
     door_reset(&w->level);
-    proj_reset();
+    proj_reset(&w->pools);
 
     /* A bullet hole belongs to the wall it was shot into, and that wall is
        gone. These outlived a level change before -- six seconds of the last
@@ -948,7 +948,7 @@ int world_step(World *w, const Input *in, float aspect, float dt) {
     /* Grenades and bolts advance with the world. Frozen with it too: a grenade
        hanging in mid-air behind a pause menu says the game is still running
        when it is not. */
-    if (!frozen) proj_update(&w->level, dt);
+    if (!frozen) proj_update(&w->pools, &w->level, dt);
 
     /* Particles advance even on the win screen: freezing the world mid-air
        would strand whatever was in flight when the exit was reached.

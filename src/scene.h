@@ -380,7 +380,7 @@ void scene_draw_shots(Scene *s, mat4 vp, v3 cam_right, v3 cam_up);
  * @note 유탄은 도화선이 타면서 붉어집니다. 발밑의 유탄이 곧 터진다는 것에 대해 플레이어가
  *       받는 유일한 경고입니다.
  */
-void scene_draw_proj(Scene *s, mat4 vp, v3 cam_right, v3 cam_up);
+void scene_draw_proj(Scene *s, const Pools *w, mat4 vp, v3 cam_right, v3 cam_up);
 
 /* --- UI passes: after post_end / UI 패스: post_end 이후 --- */
 

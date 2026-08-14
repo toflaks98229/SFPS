@@ -115,6 +115,7 @@ typedef enum {
     DIAG_SHOT_CAP,      /**< A monster wanted to fire with ENEMY_MAX_SHOTS already in flight. / ENEMY_MAX_SHOTS가 이미 비행 중인 상태에서 몬스터가 발사를 시도했습니다. */
     DIAG_SOUND_CAP,     /**< Recipe text exceeded MAX_SOUNDS or MAX_LAYERS. / 레시피 텍스트가 MAX_SOUNDS 또는 MAX_LAYERS를 초과했습니다. */
     DIAG_DOOR_CAP,      /**< Level declared more doors than LVL_MAX_DOORS. / 레벨이 LVL_MAX_DOORS보다 많은 문을 선언했습니다. */
+    DIAG_ASSET_INFLATE, /**< A baked asset did not expand to its recorded length. / 구워 넣은 에셋이 기록된 길이로 펼쳐지지 않았습니다. */
     /**
      * @brief A door's saved shape belongs to a sector its definition no longer
      *        names -- ::door_reset was not called for the level being stepped.

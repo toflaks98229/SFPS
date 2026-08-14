@@ -1,4 +1,4 @@
-# SFPS - asset baking
+﻿# SFPS - asset baking
 #
 # assets/*.txt are the single source of truth. This turns them into C string
 # literals in src/gen_assets.h, which the release build embeds so the shipped
@@ -1114,9 +1114,64 @@ if ($escSpr.Length -eq 0) {
 
 [void]$sb.AppendLine('#endif')
 
+# --- deflate every asset array -----------------------------------------
+#
+# The arrays above are the readable form: C string literals a diff can show.
+# They are also 304KB of mostly-base64 text, and 69% of the shipped exe was
+# that .rdata -- ASSET_SPRITES uses 66 distinct characters and ASSET_SOUNDS
+# 65, so every character carried under six bits in a byte that holds eight.
+#
+# Compressing HERE rather than at each emission site keeps this to one place
+# and leaves every array above written the way it reads best. The C side
+# expands them once at startup; see data.c and inflate.h.
+#
+# DeflateStream is .NET's, already present in the PowerShell running this
+# build, so nothing is added to the toolchain and the whole set costs ~23ms.
+#
+# 위의 배열들은 읽기 좋은 형태입니다. diff가 보여 줄 수 있는 C 문자열 리터럴입니다. 동시에
+# 대부분이 base64인 304KB의 텍스트이며, 배포되는 exe의 69%가 그 .rdata였습니다.
+# ASSET_SPRITES는 66개, ASSET_SOUNDS는 65개의 문자만 쓰므로 8비트가 담기는 자리에 6비트
+# 미만을 실었습니다. 배출 지점마다가 아니라 *이곳*에서 압축하면 변경점이 한 곳으로 모이고,
+# 위의 모든 배열은 가장 읽기 좋은 형태로 남습니다. C 쪽은 시작 시 한 번 펼칩니다.
+function Compress-AssetArrays([string]$text) {
+    $rx = [regex]'(?s)static const char (ASSET_\w+)\[\] =\s*(.*?)\s*;'
+    $out = $text
+    $total_raw = 0; $total_lz = 0
+    foreach ($m in $rx.Matches($text)) {
+        $name = $m.Groups[1].Value
+        # Undo the C escaping to recover the bytes the compiler would store.
+        $lits = [regex]::Matches($m.Groups[2].Value, '"((?:[^"\\]|\\.)*)"')
+        $sbp  = New-Object Text.StringBuilder
+        foreach ($l in $lits) { [void]$sbp.Append($l.Groups[1].Value) }
+        $payload = $sbp.ToString().Replace('\"','"').Replace('\','')
+        $bytes = [Text.Encoding]::ASCII.GetBytes($payload)
+
+        $ms = New-Object IO.MemoryStream
+        $ds = New-Object IO.Compression.DeflateStream($ms, [IO.Compression.CompressionLevel]::Optimal)
+        $ds.Write($bytes, 0, $bytes.Length); $ds.Dispose()
+        $lz = $ms.ToArray()
+
+        $total_raw += $bytes.Length; $total_lz += $lz.Length
+
+        $b = New-Object Text.StringBuilder
+        [void]$b.AppendLine("/* ${name}: $($bytes.Length) bytes of text, deflated to $($lz.Length). */")
+        [void]$b.AppendLine("#define ${name}_RAW $($bytes.Length)")
+        [void]$b.AppendLine("static const unsigned char ${name}_LZ[] = {")
+        for ($i = 0; $i -lt $lz.Length; $i += 20) {
+            $n = [Math]::Min(20, $lz.Length - $i)
+            $row = ($lz[$i..($i + $n - 1)] | ForEach-Object { '0x{0:x2}' -f $_ }) -join ','
+            [void]$b.AppendLine("    $row,")
+        }
+        [void]$b.AppendLine('};')
+        $out = $out.Replace($m.Value, $b.ToString().TrimEnd())
+    }
+    Write-Host ("  deflated: {0:N0} -> {1:N0} bytes ({2:N0} saved)" -f $total_raw, $total_lz, ($total_raw - $total_lz)) -ForegroundColor DarkGray
+    return $out
+}
+
 # Only rewrite when the content actually changed, so an unchanged bake does
 # not touch the mtime and force a needless recompile.
-$new = $sb.ToString()
+$new = Compress-AssetArrays $sb.ToString()
 $old = if (Test-Path $outFile) { Get-Content $outFile -Raw } else { '' }
 if ($new -ne $old) {
     Set-Content -Path $outFile -Value $new -Encoding utf8 -NoNewline

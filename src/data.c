@@ -1,5 +1,8 @@
 #include "data.h"
 #include "txt.h"          /* txt_copy -- 핫 리로드 경로 조립 */
+#include "inflate.h"      /* the baked arrays are deflated; see bake.ps1 */
+#include "diag.h"
+#include <windows.h>     /* HeapAlloc for the expanded text */
 #include "gen_assets.h"   /* bake.ps1에 의해 에셋 디렉토리에서 생성됨 */
 
 /**
@@ -7,14 +10,67 @@
  * @param which 가져올 데이터 에셋의 종류.
  * @return 빌드에 포함된 데이터 텍스트를 담고 있는 const char 포인터.
  */
+/**
+ * @struct Baked
+ * @brief One baked asset: its deflated bytes, its expanded length, and the
+ *        buffer it was expanded into.
+ *
+ * ENGLISH: The arrays in gen_assets.h are compressed -- see bake.ps1's
+ * Compress-AssetArrays and inflate.h for why. Expanded lazily and kept, so an
+ * asset nobody asks for costs only its compressed bytes and one asked for
+ * twice is expanded once.
+ *
+ * 한국어: gen_assets.h의 배열들은 압축되어 있습니다. 이유는 bake.ps1의
+ * Compress-AssetArrays와 inflate.h를 참조하십시오. 필요할 때 펼쳐 보관하므로, 아무도 찾지
+ * 않는 에셋은 압축된 바이트만큼만 비용이 들고 두 번 요청된 것은 한 번만 펼쳐집니다.
+ */
+typedef struct {
+    const unsigned char *lz;   /**< Deflated bytes. / 압축된 바이트. */
+    int lz_len;                /**< How many. / 그 길이. */
+    int raw_len;               /**< What it expands to, terminator excluded. / 펼쳐지는 길이. 종료 문자 제외. */
+    char *text;                /**< The expansion, null until first asked for. / 펼친 결과. 요청 전에는 널. */
+} Baked;
+
+#define BAKED(n) { n##_LZ, (int)sizeof(n##_LZ), n##_RAW, 0 }
+
+/* Indexed by ::DataAsset, so a row added to that enum is a row added here.
+   ::DataAsset로 인덱싱되므로 그 열거형에 행이 추가되면 이곳에도 추가됩니다. */
+static Baked g_baked[DATA_COUNT] = {
+    BAKED(ASSET_MODELS), BAKED(ASSET_RECIPES), BAKED(ASSET_SOUNDS),
+    BAKED(ASSET_MESHES), BAKED(ASSET_LEVELS),  BAKED(ASSET_SPRITES),
+    BAKED(ASSET_EFFECTS),
+};
+
 const char *data_baked(int which) {
-    if (which == DATA_MODELS)  return ASSET_MODELS;
-    if (which == DATA_RECIPES) return ASSET_RECIPES;
-    if (which == DATA_SOUNDS)  return ASSET_SOUNDS;
-    if (which == DATA_MESHES)  return ASSET_MESHES;
-    if (which == DATA_SPRITES) return ASSET_SPRITES;
-    if (which == DATA_EFFECTS) return ASSET_EFFECTS;
-    return ASSET_LEVELS;
+    if ((unsigned)which >= (unsigned)DATA_COUNT) which = DATA_LEVELS;
+    Baked *b = &g_baked[which];
+    if (b->text) return b->text;
+
+    /* One byte past the payload for the terminator every parser assumes:
+       txt.h walks a null-terminated string and the compressed form carries no
+       terminator of its own.
+       모든 파서가 가정하는 종료 문자를 위해 페이로드보다 1바이트 큽니다. txt.h는 널로 끝나는
+       문자열을 훑으며, 압축된 형태에는 종료 문자가 없습니다. */
+    char *buf = HeapAlloc(GetProcessHeap(), 0, (SIZE_T)b->raw_len + 1);
+    if (!buf) return "";
+
+    int n = inflate_raw((unsigned char *)buf, b->raw_len, b->lz, b->lz_len);
+    if (n != b->raw_len) {
+        /* The header and the binary disagree about this asset, which means
+           they were built from different assets. An empty string is a level
+           that will not load and a sheet that draws nothing -- loud, and far
+           better than parsing a half-written buffer as if it were whole.
+           헤더와 바이너리가 이 에셋에 대해 서로 다른 말을 하고 있으며, 둘이 서로 다른
+           에셋으로 만들어졌다는 뜻입니다. 빈 문자열은 로드되지 않는 레벨이자 아무것도 그리지
+           않는 시트입니다. 눈에 띄며, 절반만 기록된 버퍼를 온전한 것처럼 파싱하는 것보다
+           훨씬 낫습니다. */
+        HeapFree(GetProcessHeap(), 0, buf);
+        DIAG(DIAG_ASSET_INFLATE);
+        return "";
+    }
+    buf[b->raw_len] = 0;
+    b->text = buf;
+    return buf;
 }
 
 #ifndef HOT_RELOAD

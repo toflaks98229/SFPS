@@ -31,6 +31,17 @@
 
 #ifdef DIAG_ENABLED
 
+/* Included INSIDE the guard so the release translation unit still pulls in
+   nothing at all -- the property build/game.map is checked against. txt.h is a
+   leaf of static inline routines and would emit no code either way, but the
+   file's contract is "release contains nothing from here" and that is easier
+   to keep true than to re-verify.
+   릴리스 번역 단위가 여전히 아무것도 끌어오지 않도록 가드 *안쪽*에 포함합니다.
+   build/game.map으로 확인하는 그 성질입니다. txt.h는 static inline 루틴만 있는 리프이므로
+   어느 쪽이든 코드를 생성하지 않지만, 이 파일의 계약은 "릴리스에는 이곳의 것이 아무것도
+   남지 않는다"이며 그것은 매번 다시 확인하는 것보다 참으로 유지하는 편이 쉽습니다. */
+#include "txt.h"
+
 /* --- Static variable definitions / 정적 변수 정의 --- */
 
 /**
@@ -93,10 +104,13 @@ static const char *const DIAG_NAMES[DIAG_COUNT] = {
 _Static_assert(sizeof(DIAG_NAMES) / sizeof(DIAG_NAMES[0]) == DIAG_COUNT,
                "DIAG_NAMES must have exactly one entry per DiagKind");
 
-/* --- Static function prototypes / 정적 함수 프로토타입 --- */
-
-static int append_str(char *out, int cap, int pos, const char *s);
-static int append_int(char *out, int cap, int pos, int value);
+/* The two append helpers this file used to define now live in txt.h, where
+   ::txt_copy already was. They were lifted rather than copied when a second
+   caller wanted them; the behaviour is unchanged for every value this file
+   produces, since counters are non-negative and ::diag_summary skips zeros.
+   이 파일이 정의하던 두 덧붙이기 헬퍼는 이제 ::txt_copy가 이미 있던 txt.h에 있습니다.
+   두 번째 사용처가 생겼을 때 복사하지 않고 옮겼습니다. 이 파일이 만들어 내는 모든 값에
+   대해 동작은 동일합니다. 카운터는 음수가 아니며 ::diag_summary는 0을 건너뜁니다. */
 
 /* --- Public function definitions / 공개 함수 정의 --- */
 
@@ -141,10 +155,10 @@ int diag_summary(char *out, int cap) {
            this straight onto an existing string.
            항목 사이에만 구분자를 넣으므로, 호출자가 이 결과를 기존 문자열에 그대로
            덧붙일 수 있습니다. */
-        if (any) pos = append_str(out, cap, pos, " ");
-        pos = append_str(out, cap, pos, DIAG_NAMES[i]);
-        pos = append_str(out, cap, pos, "=");
-        pos = append_int(out, cap, pos, g_counts[i]);
+        if (any) pos = txt_append_str(out, cap, pos, " ");
+        pos = txt_append_str(out, cap, pos, DIAG_NAMES[i]);
+        pos = txt_append_str(out, cap, pos, "=");
+        pos = txt_append_int(out, cap, pos, g_counts[i]);
         any = 1;
     }
 
@@ -152,80 +166,6 @@ int diag_summary(char *out, int cap) {
        보고할 내용이 없는 경우를 포함하여 항상 널로 종료합니다. */
     out[pos < cap ? pos : cap - 1] = 0;
     return any;
-}
-
-/* --- Static helper function definitions / 정적 헬퍼 함수 정의 --- */
-
-/**
- * @brief Appends a string, stopping at the buffer's capacity.
- *
- * ENGLISH
- * -------
- * @param[out] out Destination buffer.
- * @param[in]  cap Capacity in bytes.
- * @param[in]  pos Current write offset.
- * @param[in]  s   Null-terminated string to append.
- * @return The new write offset, never exceeding `cap - 1`.
- * @note Reserves the final byte for the terminator the caller writes, so the
- *       result is always terminable without a further bounds check.
- *
- * 한국어
- * ------
- * @brief 버퍼 용량에 도달하면 멈추면서 문자열을 덧붙입니다.
- * @param[out] out 대상 버퍼.
- * @param[in]  cap 용량 (바이트).
- * @param[in]  pos 현재 쓰기 위치.
- * @param[in]  s   덧붙일 널 종료 문자열.
- * @return 새로운 쓰기 위치. 절대 `cap - 1`을 넘지 않습니다.
- * @note 호출자가 기록할 종료 문자를 위해 마지막 바이트를 남겨 두므로, 추가적인 범위
- *       검사 없이 항상 널 종료가 가능합니다.
- */
-static int append_str(char *out, int cap, int pos, const char *s) {
-    while (*s && pos < cap - 1) out[pos++] = *s++;
-    return pos;
-}
-
-/**
- * @brief Appends a non-negative integer in decimal.
- *
- * ENGLISH
- * -------
- * @param[out] out   Destination buffer.
- * @param[in]  cap   Capacity in bytes.
- * @param[in]  pos   Current write offset.
- * @param[in]  value Value to render; negatives are clamped to 0.
- * @return The new write offset.
- * @note Hand-rolled rather than using a formatter: this file must not drag
- *       stdio into the tools that link it.
- *
- * 한국어
- * ------
- * @brief 음이 아닌 정수를 10진수로 덧붙입니다.
- * @param[out] out   대상 버퍼.
- * @param[in]  cap   용량 (바이트).
- * @param[in]  pos   현재 쓰기 위치.
- * @param[in]  value 변환할 값. 음수는 0으로 제한됩니다.
- * @return 새로운 쓰기 위치.
- * @note 포매터를 쓰지 않고 직접 구현했습니다. 이 파일이 자신을 링크하는 도구들에
- *       stdio를 끌어들여서는 안 되기 때문입니다.
- */
-static int append_int(char *out, int cap, int pos, int value) {
-    if (value <= 0) {
-        if (pos < cap - 1) out[pos++] = '0';
-        return pos;
-    }
-
-    /* Reverse into a scratch buffer, then copy back. 10 digits covers INT_MAX.
-       임시 버퍼에 역순으로 만든 뒤 되돌려 복사합니다. 자릿수 10개면 INT_MAX를
-       충분히 담습니다. */
-    char tmp[12];
-    int n = 0;
-    while (value > 0 && n < (int)sizeof(tmp)) {
-        tmp[n++] = (char)('0' + value % 10);
-        value /= 10;
-    }
-    while (n > 0 && pos < cap - 1) out[pos++] = tmp[--n];
-    return pos;
 }
 
 #else

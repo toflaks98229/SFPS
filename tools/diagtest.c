@@ -145,6 +145,48 @@ int main(void) {
         mb_free(&b);
     }
 
+    /* --- a buffer that could not be allocated is FULL, not lying -----------
+       mb_init used to record the requested capacity whatever HeapAlloc
+       returned, so a failed allocation produced cap=N over a null pointer.
+       mb_vtx's only guard is `count >= cap`, so that combination passed the
+       guard and wrote through null on the first vertex -- a crash waiting on
+       an out-of-memory condition, which is exactly the condition nobody
+       reproduces by hand.
+
+       A capacity no allocator can satisfy is how that is reached on purpose.
+       The buffer must then behave as one that is already full: every vertex
+       dropped, every drop counted, and no dereference. Failing this test is a
+       hard crash rather than a wrong number, so it is worth its cost.
+
+       할당하지 못한 버퍼는 용량을 속이는 것이 아니라 *가득 찬* 것입니다. mb_init은 이전에
+       HeapAlloc의 반환값과 무관하게 요청 용량을 기록했으므로, 실패한 할당은 널 포인터 위에
+       cap=N을 만들어 냈습니다. mb_vtx의 유일한 방어선은 `count >= cap`이므로 그 조합은
+       검사를 통과해 첫 정점에서 널에 기록했습니다. 메모리 부족 상황을 기다리는 크래시이며,
+       그것은 아무도 손으로 재현하지 않는 조건입니다. 어떤 할당자도 만족시킬 수 없는 용량이
+       그 상황에 의도적으로 도달하는 방법입니다. */
+    {
+        MeshBuf b;
+        mb_init(&b, 0x7fffffff);   /* ~94 GB of Vtx: this cannot succeed */
+
+        okd(b.cap == 0, "an allocation that failed leaves a capacity of zero",
+            b.cap, 0);
+
+        int before = diag_count(DIAG_VERTEX_BUF);
+        v3 p = v3f(0, 0, 0), n = v3f(0, 1, 0);
+
+        /* The line that used to dereference null. */
+        for (int i = 0; i < 3; i++) mb_vtx(&b, p, n, 0.0f, 0.0f);
+
+        okd(b.count == 0, "and drops every vertex instead of writing through null",
+            b.count, 0);
+        okd(diag_count(DIAG_VERTEX_BUF) == before + 3,
+            "and counts the drops, so the failure is visible rather than silent",
+            diag_count(DIAG_VERTEX_BUF) - before, 3);
+
+        mb_free(&b);   /* must tolerate a buffer that never owned anything */
+        ok(b.v == 0 && b.cap == 0, "and frees cleanly having owned nothing");
+    }
+
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall diagnostics checks passed\n", fails);
     return fails != 0;
 }

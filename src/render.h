@@ -98,10 +98,16 @@ typedef struct {
 
 /**
  * @struct Vtx
- * @brief One vertex: position, normal and UV -- 32 bytes.
+ * @brief One vertex: position, normal, UV and baked static light -- 44 bytes.
  *
  * ENGLISH
  * -------
+ * @note The size is stated because it is the number every batching decision
+ *       gets argued from -- see the per-instance draw calls in fx.c, which
+ *       trade a colour attribute against exactly this figure. It read 32 for
+ *       as long as the format was position, normal and UV; `lr/lg/lb` made it
+ *       44 and the sentence was not carried forward. The authority is
+ *       ::mesh_upload's attribute offsets, where light sits at 32.
  * @note The UV costs nothing on disk: meshes are generated at startup from
  *       the Box and silhouette tables, so only those tables are stored and
  *       the vertices are built in RAM. The earlier no-UV format saved ~6KB of
@@ -110,7 +116,12 @@ typedef struct {
  *
  * 한국어
  * ------
- * 정점 하나입니다. 위치, 법선, UV로 구성되며 32바이트입니다.
+ * 정점 하나입니다. 위치, 법선, UV, 그리고 구워 넣은 정적 조명으로 구성되며 44바이트입니다.
+ * @note 크기를 명시하는 이유는 이것이 모든 배칭 판단의 근거가 되는 숫자이기 때문입니다.
+ *       fx.c의 인스턴스별 그리기 호출을 참조하십시오. 그곳은 색상 속성을 바로 이 수치와
+ *       견주어 판단합니다. 형식이 위치·법선·UV이던 동안에는 32였고, `lr/lg/lb`가 44로
+ *       만들었지만 그 문장이 따라오지 않았습니다. 기준은 ::mesh_upload의 속성 오프셋이며,
+ *       그곳에서 조명은 32에 놓입니다.
  * @note UV는 디스크 용량을 전혀 소모하지 않습니다. 메시는 시작 시점에 Box와 실루엣
  *       테이블로부터 생성되므로 해당 테이블만 저장되고 정점은 RAM에서 만들어집니다.
  *       이전의 UV 없는 형식은 1.4MB의 여유 중 약 6KB의 RAM을 절약하면서 매핑 제어
@@ -164,15 +175,36 @@ typedef struct {
 
 /**
  * @struct MeshBuf
- * @brief A growable CPU-side vertex buffer.
+ * @brief A FIXED-CAPACITY CPU-side vertex buffer. Allocated once, never grown.
  *
  * ENGLISH
  * -------
+ * Said plainly because it was documented as "growable" and is not: ::mb_vtx
+ * drops the vertex and raises ::DIAG_VERTEX_BUF when the buffer is full, and
+ * nothing in this project reallocates one. A caller who believed the old word
+ * would size a cap optimistically and lose geometry for it -- silently in
+ * release, which is the exact failure diag.h was written to end.
+ *
+ * The behaviour is correct for a size-bound game; only the description was
+ * wrong. Callers size for the worst case up front, the way fx.c sizes for
+ * every particle alive at once.
+ *
  * @warning Owns heap memory: pair every ::mb_init with an ::mb_free.
  *
  * 한국어
  * ------
- * 크기가 늘어날 수 있는 CPU 측 정점 버퍼입니다.
+ * 고정 용량의 CPU 측 정점 버퍼입니다. 한 번 할당되며 절대 확장되지 않습니다.
+ *
+ * 분명히 적는 이유는 "확장 가능"으로 문서화되어 있었으나 사실이 아니기 때문입니다.
+ * ::mb_vtx는 버퍼가 가득 차면 정점을 버리고 ::DIAG_VERTEX_BUF를 올리며, 이 프로젝트의
+ * 어디에서도 재할당하지 않습니다. 기존 표현을 믿은 호출자는 용량을 낙관적으로 잡고 그
+ * 대가로 지오메트리를 잃게 됩니다. 릴리스에서는 조용히 잃으며, 그것이 바로 diag.h가
+ * 끝내려고 만들어진 실패 양상입니다.
+ *
+ * 동작 자체는 크기가 제한된 게임에 올바르며, 틀린 것은 설명뿐이었습니다. 호출자는
+ * fx.c가 모든 입자가 동시에 살아 있는 경우를 기준으로 잡듯이, 처음부터 최악의 경우에
+ * 맞춰 크기를 정합니다.
+ *
  * @warning 힙 메모리를 소유합니다. 모든 ::mb_init은 ::mb_free와 짝을 이루어야 합니다.
  * @note The `struct MeshBuf` tag is deliberate, not decoration: it is what
  *       lets level.h forward-declare this type instead of including render.h,
@@ -396,15 +428,31 @@ enum {
  * ENGLISH
  * -------
  * @param[out] b   Buffer to initialise.
- * @param[in]  cap Initial capacity in vertices; the buffer grows as needed.
+ * @param[in]  cap Capacity in vertices, for the buffer's whole life. Size it
+ *                 for the worst case: it is never grown.
  * @warning Allocates heap memory the caller owns; pair with ::mb_free.
+ *
+ * @note ON ALLOCATION FAILURE the buffer comes up with a capacity of ZERO
+ *       rather than the requested one, so it behaves as a buffer that is
+ *       already full: ::mb_vtx drops every vertex and raises
+ *       ::DIAG_VERTEX_BUF. Callers therefore do not need to test for failure
+ *       -- the one path that handles a full buffer handles this too. Recording
+ *       the requested capacity over a null pointer, as this once did, made the
+ *       `count >= cap` guard pass and dereference null on the first vertex.
  *
  * 한국어
  * ------
- * @brief 초기 용량을 지정하여 정점 버퍼를 할당합니다.
+ * @brief 정점 버퍼를 할당합니다.
  * @param[out] b   초기화할 버퍼.
- * @param[in]  cap 정점 단위의 초기 용량. 버퍼는 필요에 따라 확장됩니다.
+ * @param[in]  cap 버퍼의 전 생애에 걸친 정점 단위 용량. 확장되지 않으므로 최악의 경우에
+ *                 맞춰 정하십시오.
  * @warning 호출자가 소유하는 힙 메모리를 할당합니다. ::mb_free와 짝을 이루어야 합니다.
+ *
+ * @note 할당에 실패하면 요청한 용량이 아니라 용량 *0*으로 준비되므로, 이미 가득 찬 버퍼처럼
+ *       동작합니다. ::mb_vtx가 모든 정점을 버리고 ::DIAG_VERTEX_BUF를 올립니다. 따라서
+ *       호출자는 실패를 검사할 필요가 없습니다. 가득 찬 버퍼를 처리하는 그 하나의 경로가
+ *       이 경우도 함께 처리합니다. 이전처럼 널 포인터 위에 요청 용량을 기록하면
+ *       `count >= cap` 검사가 통과되어 첫 정점에서 널을 역참조하게 됩니다.
  */
 void mb_init (MeshBuf *b, int cap);
 

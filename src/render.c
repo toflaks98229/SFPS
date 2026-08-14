@@ -43,7 +43,31 @@
 
 void mb_init(MeshBuf *b, int cap) {
     b->v = HeapAlloc(GetProcessHeap(), 0, (SIZE_T)cap * sizeof(Vtx));
-    b->cap = cap;
+
+    /* A FAILED ALLOCATION IS A BUFFER THAT IS ALWAYS FULL, not one that lies
+       about its capacity. Recording `cap` here regardless of the result was a
+       null dereference waiting on an out-of-memory condition: mb_vtx's only
+       guard is `count >= cap`, so a cap of 500 over a null `v` passes the
+       guard and writes through the null pointer on the very first vertex.
+
+       Zero instead sends the failure down the path this module already has for
+       running out of room -- every vertex dropped, DIAG_VERTEX_BUF raised, the
+       world drawn with a hole in it. That is the right outcome twice over: it
+       cannot corrupt memory, and the dev build says out loud that geometry went
+       missing rather than leaving a silent gap. mesh.c handles its own partial
+       allocation the same way, and this is what brings the two into line.
+
+       할당 실패는 용량을 속이는 버퍼가 아니라 *언제나 가득 찬* 버퍼입니다. 결과와 무관하게
+       `cap`을 기록하던 이전 방식은 메모리 부족 상황을 기다리는 널 역참조였습니다. mb_vtx의
+       유일한 방어선은 `count >= cap`이므로, 널인 `v` 위에 용량 500이 얹히면 그 검사를
+       통과해 첫 정점부터 널 포인터에 기록합니다.
+
+       0을 넣으면 이 모듈이 이미 갖추고 있는 "자리가 없을 때"의 경로로 실패가 흘러갑니다.
+       모든 정점이 버려지고, DIAG_VERTEX_BUF가 올라가며, 월드는 구멍이 뚫린 채 그려집니다.
+       이것이 두 가지 이유로 옳은 결과입니다. 메모리를 손상시킬 수 없고, 개발 빌드가 조용한
+       공백을 남기는 대신 지오메트리가 사라졌다고 소리 내어 말합니다. mesh.c는 자신의 부분
+       할당을 같은 방식으로 처리하며, 이 변경이 둘을 일치시킵니다. */
+    b->cap = b->v ? cap : 0;
     b->count = 0;
 }
 

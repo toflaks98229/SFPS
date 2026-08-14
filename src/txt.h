@@ -236,6 +236,151 @@ static inline int txt_copy(char *dst, int cap, const char *src, int len) {
     return i;
 }
 
+/* --- Building a line / 한 줄 만들기 --------------------------------------
+ *
+ * ENGLISH
+ * -------
+ * ::txt_copy answers "put this string in that buffer". These two answer "build
+ * a line out of several pieces", which is the other half of the same job and
+ * was being done by wsprintfA -- the one formatter in this project that takes
+ * no destination capacity. Its every current call site is safe, because each
+ * one formats integers and fixed string constants into a buffer sized for
+ * them; the hazard is the next one, where a level name or a material name
+ * read from an asset file reaches a format string and nothing in the
+ * signature makes anyone check.
+ *
+ * Deliberately NOT a printf-style formatter. A varargs formatter needs a
+ * format string parser, and its safety would then depend on the format string
+ * agreeing with its arguments -- which is the property that fails silently and
+ * is exactly what is being escaped. Appending is checked by the compiler
+ * instead: the wrong type is a diagnostic, not a corrupted line.
+ *
+ * These are the two helpers diag.c wrote for itself, lifted here now that a
+ * second caller wants them. See diag.c's note on why no formatting library is
+ * used: pulling in snprintf for this would drag stdio into every tool that
+ * links these parsers, and pulling in wsprintfA would drag windows.h into the
+ * eight files that include txt.h and manage without it today.
+ *
+ * 한국어
+ * ------
+ * ::txt_copy는 "이 문자열을 저 버퍼에 넣어라"에 답합니다. 아래 둘은 "여러 조각으로 한 줄을
+ * 만들어라"에 답하며, 이는 같은 일의 나머지 절반으로서 그동안 wsprintfA가 맡고 있었습니다.
+ * 이 프로젝트에서 대상 용량을 받지 않는 유일한 포매터입니다. 현재의 모든 호출 지점은
+ * 안전합니다. 각각 정수와 고정 문자열 상수를 그에 맞게 크기를 정한 버퍼에 넣기 때문입니다.
+ * 위험한 것은 그다음입니다. 에셋 파일에서 읽은 레벨 이름이나 재질 이름이 형식 문자열에
+ * 닿는 순간이며, 그때 서명에는 누구에게도 검사를 요구하는 것이 없습니다.
+ *
+ * printf 형식의 포매터가 아닌 것은 의도적입니다. 가변 인자 포매터는 형식 문자열 파서를
+ * 필요로 하고, 그러면 안전성이 "형식 문자열이 인자와 일치하는가"에 의존하게 됩니다. 그것이
+ * 바로 조용히 실패하는 성질이며 여기서 벗어나려는 대상입니다. 덧붙이기 방식은 대신
+ * 컴파일러가 검사합니다. 타입이 틀리면 손상된 줄이 아니라 진단 메시지가 나옵니다.
+ *
+ * 이 둘은 diag.c가 스스로 작성했던 헬퍼이며, 두 번째 사용처가 생긴 지금 이곳으로
+ * 옮겼습니다. 어떤 포매팅 라이브러리도 쓰지 않는 이유는 diag.c의 설명을 참조하십시오.
+ * 이를 위해 snprintf를 끌어들이면 이 파서들을 링크하는 모든 도구에 stdio가 딸려 오고,
+ * wsprintfA를 끌어들이면 txt.h를 포함하면서 오늘날 windows.h 없이 지내는 여덟 개 파일에
+ * windows.h가 딸려 옵니다.
+ */
+
+/**
+ * @brief Appends a string, truncating at the buffer's capacity.
+ *
+ * ENGLISH
+ * -------
+ * @param[out] dst Destination buffer.
+ * @param[in]  cap Capacity of `dst` in bytes, INCLUDING the terminator.
+ * @param[in]  pos Current write offset, as returned by the previous append.
+ * @param[in]  s   Null-terminated string to append.
+ * @return The new write offset, never more than `cap - 1`.
+ *
+ * @note Null-terminates after every call, so the buffer is a valid string at
+ *       each step of the build rather than only at the end. That costs one
+ *       store and removes the failure where an early return leaves a line
+ *       unterminated.
+ * @note Clamps `pos` into range rather than trusting it, so a misused offset
+ *       truncates instead of writing outside the buffer.
+ *
+ * 한국어
+ * ------
+ * @brief 버퍼 용량에서 잘라 내며 문자열을 덧붙입니다.
+ * @param[out] dst 대상 버퍼.
+ * @param[in]  cap `dst`의 용량 (바이트). 종료 문자를 *포함*합니다.
+ * @param[in]  pos 현재 쓰기 위치. 직전 덧붙이기의 반환값입니다.
+ * @param[in]  s   덧붙일 널 종료 문자열.
+ * @return 새로운 쓰기 위치. 절대 `cap - 1`을 넘지 않습니다.
+ *
+ * @note 호출할 때마다 널로 종료하므로, 버퍼는 마지막에만이 아니라 생성 과정의 매 단계에서
+ *       유효한 문자열입니다. 저장 한 번의 비용으로, 중간에 반환되어 줄이 종료되지 않는
+ *       실패를 없앱니다.
+ * @note `pos`를 신뢰하지 않고 범위 안으로 제한하므로, 잘못 쓰인 위치는 버퍼 바깥에
+ *       기록하지 않고 잘립니다.
+ */
+static inline int txt_append_str(char *dst, int cap, int pos, const char *s) {
+    if (cap < 1) return pos;
+    if (pos < 0) pos = 0;
+    if (pos > cap - 1) pos = cap - 1;
+    while (*s && pos < cap - 1) dst[pos++] = *s++;
+    dst[pos] = 0;
+    return pos;
+}
+
+/**
+ * @brief Appends a signed integer in decimal.
+ *
+ * ENGLISH
+ * -------
+ * @param[out] dst   Destination buffer.
+ * @param[in]  cap   Capacity of `dst` in bytes, INCLUDING the terminator.
+ * @param[in]  pos   Current write offset.
+ * @param[in]  value Value to render. Negatives get a leading '-'.
+ * @return The new write offset, never more than `cap - 1`.
+ *
+ * @note Handles the whole `int` range. The magnitude is taken in UNSIGNED
+ *       arithmetic because negating `INT_MIN` as a signed int is undefined --
+ *       the one input a hand-rolled integer renderer reliably gets wrong.
+ * @note Renders "0" for zero, which a digit loop written as `while (value)`
+ *       would print as nothing at all.
+ *
+ * 한국어
+ * ------
+ * @brief 부호 있는 정수를 10진수로 덧붙입니다.
+ * @param[out] dst   대상 버퍼.
+ * @param[in]  cap   `dst`의 용량 (바이트). 종료 문자를 *포함*합니다.
+ * @param[in]  pos   현재 쓰기 위치.
+ * @param[in]  value 변환할 값. 음수에는 앞에 '-'가 붙습니다.
+ * @return 새로운 쓰기 위치. 절대 `cap - 1`을 넘지 않습니다.
+ *
+ * @note `int` 전 범위를 처리합니다. 절댓값을 *부호 없는* 연산으로 구하는 이유는 `INT_MIN`을
+ *       부호 있는 정수로 부호 반전하는 것이 정의되지 않은 동작이기 때문입니다. 손으로 만든
+ *       정수 변환기가 어김없이 틀리는 바로 그 입력입니다.
+ * @note 0에 대해 "0"을 출력합니다. `while (value)`로 쓴 자릿수 루프라면 아무것도 출력하지
+ *       않았을 값입니다.
+ */
+static inline int txt_append_int(char *dst, int cap, int pos, int value) {
+    if (cap < 1) return pos;
+    if (pos < 0) pos = 0;
+    if (pos > cap - 1) pos = cap - 1;
+
+    /* Magnitude first, in unsigned. `0u - (unsigned)INT_MIN` is INT_MIN's
+       magnitude exactly, where `-value` would be undefined.
+       절댓값을 부호 없는 연산으로 먼저 구합니다. `0u - (unsigned)INT_MIN`은 INT_MIN의
+       절댓값을 정확히 내며, `-value`는 정의되지 않은 동작입니다. */
+    unsigned u = value < 0 ? 0u - (unsigned)value : (unsigned)value;
+
+    /* Reverse into scratch, then unwind. 10 digits covers every unsigned 32-bit
+       value; 12 leaves room without thinking about it.
+       임시 버퍼에 역순으로 만든 뒤 되감습니다. 자릿수 10개면 32비트 부호 없는 모든 값을
+       담으며, 12는 따져 볼 필요 없이 여유를 둡니다. */
+    char tmp[12];
+    int  n = 0;
+    do { tmp[n++] = (char)('0' + (int)(u % 10u)); u /= 10u; } while (u);
+
+    if (value < 0 && pos < cap - 1) dst[pos++] = '-';
+    while (n > 0 && pos < cap - 1) dst[pos++] = tmp[--n];
+    dst[pos] = 0;
+    return pos;
+}
+
 /* --- Conversion / 변환 --- */
 
 /**

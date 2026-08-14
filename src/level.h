@@ -88,6 +88,7 @@
    바로 이 목적을 위해 struct 태그를 가지고 있습니다. */
 typedef struct MeshBuf  MeshBuf;
 typedef struct MdlRange MdlRange;
+typedef struct BrushMap BrushMap;
 
 /* --- Capacity limits / 용량 제한 --- */
 
@@ -825,6 +826,40 @@ typedef struct {
     short   start[3];                     /**< x, z, and yaw in millidegrees. / x, z 좌표와 밀리도 단위의 yaw. */
 
     /**
+     * @brief The spawn's HEIGHT, in file units. Meaningful only for a brush level.
+     *
+     * ENGLISH
+     * -------
+     * ::start has no y because a sector level does not need one: a plan point
+     * has exactly one floor, so the marker's own height is irrelevant and
+     * ::player_spawn says so by asking for ground from 1e9 with no step limit.
+     *
+     * A brush level has storeys. The floor under a point depends on which one
+     * you are standing on, and a search that begins above the roof finds the
+     * outside of the roof. So the spawn carries the height its `origin` had --
+     * which is a thing the .map always knew and the sector format had no way to
+     * write down.
+     *
+     * @note 0 for a sector level, where nothing reads it.
+     *
+     * 한국어
+     * ------
+     * @brief 스폰 지점의 *높이*이며 파일 단위입니다. 브러시 레벨에서만 의미가 있습니다.
+     *
+     * ::start에 y가 없는 이유는 섹터 레벨에 그것이 필요 없기 때문입니다. 평면상의 한 점에
+     * 바닥이 정확히 하나이므로 표식 자신의 높이는 무의미하며, ::player_spawn은 단차 제한 없이
+     * 1e9에서 지면을 물어 그 사실을 말합니다.
+     *
+     * 브러시 레벨에는 층이 있습니다. 한 점 아래의 바닥은 어느 층에 서 있는지에 달려 있고,
+     * 지붕 위에서 시작한 탐색은 지붕의 바깥면을 찾습니다. 그래서 스폰은 자기 `origin`이 지녔던
+     * 높이를 함께 지닙니다. .map은 언제나 알고 있었고 섹터 형식에는 적어 둘 방법이 없던
+     * 값입니다.
+     *
+     * @note 섹터 레벨에서는 0이며 아무도 읽지 않습니다.
+     */
+    short   start_h;
+
+    /**
      * @brief Sector lookup acceleration. Derived, not authored.
      *
      * Filled by ::level_load and refreshed by ::level_grid_build. Zeroed means
@@ -837,6 +872,66 @@ typedef struct {
      * 조립하는 쪽은 이 필드를 완전히 무시해도 됩니다. ::SectorGrid를 참조하십시오.
      */
     SectorGrid grid;
+
+    /**
+     * @brief The brushes this level is made of, or NULL when it is sectors.
+     *
+     * ENGLISH
+     * -------
+     * THE ONE FIELD THAT DECIDES WHICH MODEL ANSWERS. ::level_ground,
+     * ::level_trace, ::level_blocked and ::level_geometry all branch on it:
+     * non-NULL and they ask the brushes, NULL and they walk the sectors exactly
+     * as they always did.
+     *
+     * That is what lets a .map be used without a converter AND without
+     * rewriting the eight modules that hold a `const Level *` -- player, enemy,
+     * pickup, proj, weapon, hook, world and scene. None of them can tell, and
+     * none of them had to change. The sector levels in assets/levels.txt go on
+     * working, and so does every test built on them, which matters because
+     * those tests are the only safety net the brush path has until it grows its
+     * own.
+     *
+     * A POINTER, and it has to be. ::BrushMap is 420KB against this struct's
+     * 24KB, and Levels are stack locals all over the test suite -- world.c
+     * keeps one to walk the level chain, steptest.c has twenty. Embedding it
+     * overflows the stack before anything runs. The storage is a small pool in
+     * level.c; running out of it is reported through ::DIAG_LEVEL_SLOTS.
+     *
+     * @note ZERO MEANS SECTORS, which is what `Level l = {0}` gives. Every
+     *       fixture that builds a Level field by field therefore stays a sector
+     *       level without knowing this field exists -- the same contract
+     *       ::Sector::has_bounds and ::SectorGrid::built already keep.
+     * @warning Not owned. Copying a Level copies the pointer, so two Levels
+     *          share one map; that is safe because nothing here writes through
+     *          it, and it is why the type is const.
+     *
+     * 한국어
+     * ------
+     * @brief 이 레벨을 이루는 브러시이며, 섹터 레벨이면 NULL입니다.
+     *
+     * 어느 모델이 답할지를 결정하는 단 하나의 필드입니다. ::level_ground, ::level_trace,
+     * ::level_blocked, ::level_geometry가 모두 이것으로 분기합니다. NULL이 아니면 브러시에
+     * 묻고, NULL이면 늘 그랬듯 섹터를 순회합니다.
+     *
+     * 이것이 변환기 없이, 그리고 `const Level *`를 들고 있는 여덟 모듈(player, enemy, pickup,
+     * proj, weapon, hook, world, scene)을 다시 쓰지 않고도 .map을 쓸 수 있게 하는 장치입니다.
+     * 그들 중 누구도 구별할 수 없고, 누구도 바뀌지 않았습니다. assets/levels.txt의 섹터 레벨은
+     * 계속 동작하며 그 위에 세워진 모든 테스트도 그렇습니다. 그 테스트들이 브러시 경로가 자기
+     * 그물을 갖출 때까지 가진 유일한 안전망이므로 중요합니다.
+     *
+     * 포인터이며 그럴 수밖에 없습니다. ::BrushMap은 이 구조체의 24KB에 대해 420KB이고, Level은
+     * 테스트 묶음 곳곳에서 스택 지역 변수입니다. world.c는 레벨 사슬을 걷기 위해 하나를 두고,
+     * steptest.c에는 스무 개가 있습니다. 값으로 넣으면 무엇이 실행되기도 전에 스택이 넘칩니다.
+     * 저장 공간은 level.c의 작은 풀이며, 고갈은 ::DIAG_LEVEL_SLOTS로 보고됩니다.
+     *
+     * @note 0이면 섹터이며, `Level l = {0}`이 주는 값입니다. 따라서 필드를 하나씩 채워 Level을
+     *       만드는 모든 픽스처는 이 필드의 존재를 모른 채 섹터 레벨로 남습니다.
+     *       ::Sector::has_bounds와 ::SectorGrid::built가 이미 지키는 것과 같은 계약입니다.
+     * @warning 소유하지 않습니다. Level을 복사하면 포인터가 복사되어 두 Level이 하나의 맵을
+     *          공유합니다. 이곳의 무엇도 그것을 통해 쓰지 않으므로 안전하며, 타입이 const인
+     *          이유입니다.
+     */
+    const BrushMap *brushes;
 } Level;
 
 /**

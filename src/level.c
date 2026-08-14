@@ -35,6 +35,7 @@
 #include "render.h"
 #include "model.h"
 #include "data.h"
+#include "brush.h"
 #include "txt.h"
 #include "diag.h"
 
@@ -781,6 +782,216 @@ static int level_parse_text(const char *name, Level *out) {
     return found;
 }
 
+/* ======================================================= brush-backed levels
+ *
+ * ENGLISH
+ * -------
+ * A level made of brushes answers the same questions a level made of sectors
+ * does, through the same functions, so that using a .map without a converter
+ * did not also mean rewriting the eight modules that hold a `const Level *`.
+ * ::Level::brushes is the whole of the switch; everything below is the four
+ * answers it selects.
+ *
+ * 한국어
+ * ------
+ * 브러시로 만든 레벨은 섹터로 만든 레벨과 같은 질문에 같은 함수를 통해 답합니다. 변환기 없이
+ * .map을 쓰는 일이 `const Level *`를 들고 있는 여덟 모듈을 다시 쓰는 일까지 뜻하지 않도록
+ * 하기 위함입니다. ::Level::brushes가 전환의 전부이고, 아래는 그것이 고르는 네 가지 답입니다.
+ */
+
+/* The far edge of what a .map may describe, in world units. Traces that stand
+   in for an unbounded query are clamped to it: ::player_spawn asks for ground
+   with a step of 1e9, and a sweep to a billion metres has no float precision
+   left by the time it arrives.
+   .map이 기술할 수 있는 세계의 끝이며 월드 단위입니다. 무한한 질의를 대신하는 트레이스는
+   여기에 맞춰 제한됩니다. ::player_spawn은 단차 1e9로 지면을 묻는데, 10억 미터까지의 스윕은
+   도착할 무렵 남은 float 정밀도가 없습니다. */
+#define BRUSH_EDGE (BRUSH_MAX_COORD * BRUSH_UNIT)
+
+/* Far enough above a floor that the upward probe does not re-hit it through
+   the skin the downward one left.
+   하강 탐침이 남긴 스킨을 통과해 상승 탐침이 같은 바닥에 다시 닿지 않을 만큼의 간격입니다. */
+#define CEIL_PROBE (BRUSH_SKIN * 4.0f)
+
+/* level_ground and level_trace are POINT queries -- player.c samples five of
+   them around its own radius, and a shot is a ray. So the box is a point, and
+   the swept-box trace collapses to exactly the sweep they want.
+   level_ground와 level_trace는 *점* 질의입니다. player.c는 자기 반경 둘레로 다섯 개를
+   표본하고, 사격은 광선입니다. 따라서 상자는 점이며, 스윕 상자 트레이스는 그들이 원하는 바로
+   그 스윕으로 축약됩니다. */
+static const v3 POINT_BOX = { 0.0f, 0.0f, 0.0f };
+
+/**
+ * @brief Storage for the brush maps that loaded levels point at.
+ *
+ * ENGLISH
+ * -------
+ * TWO, because two is how many levels are live at once: the one being played
+ * and the scratch ::Level world.c walks the level chain with. A third would be
+ * something new, and ::DIAG_LEVEL_SLOTS is there to say so rather than let it
+ * pass.
+ *
+ * A pool rather than a field on ::Level because a ::BrushMap is 420KB against
+ * Level's 24KB and Levels are stack locals throughout the test suite -- see the
+ * note on ::Level::brushes. A pool rather than the heap because nothing here
+ * has a destructor to free one, and a level that is loaded and abandoned is the
+ * normal case rather than the exception.
+ *
+ * 한국어
+ * ------
+ * @brief 로드된 레벨들이 가리키는 브러시 맵의 저장 공간입니다.
+ *
+ * 둘인 이유는 동시에 살아 있는 레벨이 둘이기 때문입니다. 플레이 중인 것과, world.c가 레벨
+ * 사슬을 걸을 때 쓰는 임시 ::Level입니다. 셋째는 새로운 무언가일 것이고, 그것을 그냥 지나가게
+ * 두는 대신 ::DIAG_LEVEL_SLOTS가 말해 줍니다.
+ *
+ * ::Level의 필드가 아니라 풀인 이유는 ::BrushMap이 Level의 24KB에 대해 420KB이고 Level이 테스트
+ * 묶음 전반에서 스택 지역 변수이기 때문입니다. ::Level::brushes의 설명을 참조하십시오. 힙이
+ * 아니라 풀인 이유는 이곳의 무엇도 그것을 해제할 소멸자를 갖고 있지 않고, 로드된 뒤 버려지는
+ * 레벨이 예외가 아니라 평범한 경우이기 때문입니다.
+ */
+#define LVL_BRUSH_SLOTS 2
+static BrushMap g_brush_pool[LVL_BRUSH_SLOTS];
+static Level   *g_brush_owner[LVL_BRUSH_SLOTS];
+
+static BrushMap *brush_slot_for(Level *out) {
+    /* The slot this Level already had, so reloading the running level reuses
+       its own storage rather than taking the scan's.
+       이 Level이 이미 가지고 있던 슬롯입니다. 실행 중인 레벨을 다시 로드할 때 스캔의 것을
+       빼앗지 않고 자기 저장 공간을 재사용합니다. */
+    for (int i = 0; i < LVL_BRUSH_SLOTS; i++)
+        if (g_brush_owner[i] == out) return &g_brush_pool[i];
+
+    for (int i = 0; i < LVL_BRUSH_SLOTS; i++)
+        if (!g_brush_owner[i]) { g_brush_owner[i] = out; return &g_brush_pool[i]; }
+
+    /* Full. The oldest is evicted and, crucially, TOLD: its pointer is cleared
+       so it becomes a level with no geometry rather than a level reading
+       somebody else's. Both are broken; only one of them is quiet.
+       가득 찼습니다. 가장 오래된 것을 축출하되 결정적으로 그 사실을 *알립니다*. 포인터를
+       비워 다른 레벨의 것을 읽는 레벨이 아니라 지오메트리가 없는 레벨이 되게 합니다. 둘 다
+       망가진 상태이지만 조용한 쪽은 하나뿐입니다. */
+    DIAG(DIAG_LEVEL_SLOTS);
+    if (g_brush_owner[0]) g_brush_owner[0]->brushes = 0;
+    g_brush_owner[0] = out;
+    return &g_brush_pool[0];
+}
+
+/* The player start, in the units ::Level already speaks: centimetres and
+   millidegrees. The 90 is Quake's angle convention meeting this engine's yaw --
+   tools/mapview.c derives it and says why it is a conversion and not a copy. */
+static void brush_start_of(Level *out, const BrushMap *bm) {
+    for (int i = 0; i < bm->n_ents; i++) {
+        const BrushEnt *e = &bm->ents[i];
+        const char *cn = brush_ent_value(e, "classname");
+        if (!cn || !txt_is(cn, 17, "info_player_start")) continue;
+
+        v3 o;
+        if (!brush_ent_point(e, "origin", &o)) continue;
+        out->start[0] = (short)(o.x * 100.0f);
+        out->start[1] = (short)(o.z * 100.0f);
+        out->start_h  = (short)(o.y * 100.0f);
+
+        float ang = brush_ent_num(e, "angle", 90.0f);
+        if (ang < 0.0f) ang = 90.0f;         /* -1 and -2 are up and down */
+        out->start[2] = (short)((ang - 90.0f) * 1000.0f);
+        return;
+    }
+}
+
+static int load_brush_level(const char *name, Level *out) {
+    int len = 0;
+    const char *text = data_map(name, &len);
+    if (!text) return 0;                     /* no .map of that name */
+
+    BrushMap *bm = brush_slot_for(out);
+    if (!brush_parse(text, len, bm)) return 0;
+
+    out->brushes = bm;
+    copy_name(out->name, sizeof(out->name), name, -1);
+    brush_start_of(out, bm);
+    return 1;
+}
+
+/* The floor and ceiling at a point, as a pair of traces rather than a lookup.
+   This is where the slope arrives: a 2D query has one answer per x,z and a
+   downward sweep has the answer for wherever the surface actually is. */
+static int brush_ground(const Level *l, float x, float z, float feet,
+                        float step, float *out_floor, float *out_ceil) {
+    const BrushMap *bm = l->brushes;
+
+    /* HOW FAR ABOVE THE FEET THE SEARCH STARTS, which is not the same number as
+       the step limit and this is where the two models genuinely differ.
+       ::sector_at ignores height entirely -- a plan point has one floor -- so
+       ::level_ground could take `step` as 1e9 to mean "no limit" and lose
+       nothing. Starting a downward sweep 1e9 above the room finds the OUTSIDE
+       of its roof, because with brushes there is something up there.
+       So the sentinel is split back into the two things it was standing for:
+       this bounds where to look, and the caller's `step` still decides what
+       counts, applied to the answer exactly as the sector path applies it.
+       Two metres because it must clear PLAYER_STEP -- a step you can climb has
+       to be found -- while staying under the headroom of the tightest space
+       anyone builds, so the probe does not begin in the storey above.
+       발보다 얼마나 위에서 탐색을 시작하는지이며, 단차 상한과는 다른 숫자입니다. 두 모델이
+       진짜로 갈라지는 지점입니다. ::sector_at은 높이를 완전히 무시합니다. 평면상의 한 점에
+       바닥이 하나이므로 ::level_ground는 `step`을 1e9로 받아 "제한 없음"을 뜻해도 잃는 것이
+       없었습니다. 방보다 1e9 위에서 하강 스윕을 시작하면 그 지붕의 *바깥면*을 찾게 됩니다.
+       브러시에서는 그 위에 무언가가 있기 때문입니다. 그래서 그 특별값이 대신하던 두 가지를
+       다시 나눕니다. 이 값은 어디를 볼지를 한정하고, 호출자의 `step`은 여전히 무엇이
+       인정되는지를 결정하며 섹터 경로가 적용하는 것과 똑같이 답에 적용됩니다. 2미터인 이유는
+       PLAYER_STEP을 넘어야 하고(오를 수 있는 단차는 찾아야 합니다) 동시에 누구든 만드는 가장
+       비좁은 공간의 머리 위 여유보다는 낮아야 하기 때문입니다. 탐침이 위층에서 시작하지
+       않도록 말입니다. */
+    #define GROUND_LOOK_UP 2.0f
+
+    float look = (step < GROUND_LOOK_UP) ? step : GROUND_LOOK_UP;
+    if (look < 0.0f) look = 0.0f;
+
+    BrushTrace down;
+    brush_trace(bm, 0, bm->n_brushes, v3f(x, feet + look, z),
+                v3f(x, -BRUSH_EDGE, z), POINT_BOX, POINT_BOX, &down);
+
+    /* The probe began inside something -- a ceiling lower than the look-ahead.
+       Retried from the feet, which are in open space by definition if the
+       caller is standing anywhere at all.
+       탐침이 무언가의 안에서 시작했습니다. 미리보기 높이보다 낮은 천장입니다. 발 위치에서
+       다시 시도합니다. 호출자가 어디엔가 서 있기라도 하다면 발은 정의상 빈 공간에 있습니다. */
+    if (down.start_solid)
+        brush_trace(bm, 0, bm->n_brushes, v3f(x, feet, z),
+                    v3f(x, -BRUSH_EDGE, z), POINT_BOX, POINT_BOX, &down);
+
+    /* Starting inside a solid is the brush answer to "outside the map": there
+       is no floor to stand on here. ::level_ground's callers already treat 0
+       that way.
+       고체 안에서 시작하는 것이 "맵 바깥"에 대한 브러시 쪽 답입니다. 이곳에는 딛고 설 바닥이
+       없습니다. ::level_ground의 호출자들은 이미 0을 그렇게 취급합니다. */
+    if (down.start_solid || !down.hit) return 0;
+
+    /* The step limit, applied to the answer -- the same test, in the same
+       place, that the sector path makes. */
+    if (down.end.y > feet + step) return 0;
+
+    *out_floor = down.end.y;
+
+    BrushTrace up;
+    brush_trace(bm, 0, bm->n_brushes,
+                v3f(x, down.end.y + CEIL_PROBE, z), v3f(x, BRUSH_EDGE, z),
+                POINT_BOX, POINT_BOX, &up);
+    *out_ceil = up.hit ? up.end.y : BRUSH_EDGE;
+    return 1;
+}
+
+/* Shared by the trace and the visibility test, so the two cannot disagree about
+   whether a wall is solid -- level.h's note on ::level_blocked makes that a
+   requirement, and one function is how it is kept. */
+static int brush_ray(const Level *l, v3 origin, v3 dir, float max_dist,
+                     BrushTrace *out) {
+    const BrushMap *bm = l->brushes;
+    v3 end = v3add(origin, v3scale(dir, max_dist));
+    brush_trace(bm, 0, bm->n_brushes, origin, end, POINT_BOX, POINT_BOX, out);
+    return out->start_solid || out->hit;
+}
+
 int level_load(const char *name, Level *out) {
     /* The baked light belongs to the level it was traced against, and a new
        level puts different walls between the same coordinates and a lamp.
@@ -791,6 +1002,20 @@ int level_load(const char *name, Level *out) {
        이곳뿐이기 때문입니다. */
     level_light_cache_reset();
     level_clear(out);
+
+    /* A .map first, and the name is the filename. Preferred rather than merely
+       supported: the whole direction of this work is that the editor's output
+       IS the level, so a level that exists in both forms is one somebody is
+       midway through moving and the .map is the one they are editing.
+       Falling through to levels.txt is what keeps arena, vault and the imported
+       Doom maps working while that move happens.
+       .map을 먼저 보며 이름은 곧 파일명입니다. 단지 지원하는 것이 아니라 *우선*합니다. 이
+       작업의 방향 전체가 에디터의 출력이 곧 레벨이라는 것이므로, 두 형태로 모두 존재하는
+       레벨은 누군가 옮기는 중인 레벨이고 .map이 그 사람이 편집하고 있는 쪽입니다. levels.txt로
+       내려가는 경로는 그 이동이 진행되는 동안 arena와 vault, 그리고 가져온 Doom 맵들이 계속
+       동작하게 합니다. */
+    out->brushes = 0;
+    if (load_brush_level(name, out)) return 1;
 
     int found = level_parse_text(name, out);
 
@@ -1809,6 +2034,20 @@ static void bake_light(MeshBuf *b, const Level *l, int first) {
 }
 
 int level_geometry(MeshBuf *b, const Level *l, MdlRange *ranges, int max_ranges) {
+    /* Brushes bring their own builder, and it needs none of the machinery
+       below: a brush face is convex by construction, so there is no ear-clip,
+       no wall extrusion and no edge-span cutting. What it does not yet bring is
+       the static light bake -- the vertices come out unlit and the shader's
+       ambient is all there is. That is the one thing the sector path still does
+       better, and it is the next piece rather than a decision.
+       브러시는 자기 생성기를 가지고 오며, 그것에는 아래의 장치가 하나도 필요 없습니다. 브러시
+       면은 구성상 볼록하므로 ear-clip도, 벽 압출도, 모서리 구간 절단도 없습니다. 아직 가지고
+       오지 못한 것은 정적광 베이크입니다. 정점이 조명 없이 나오고 셰이더의 환경광이 전부입니다.
+       그것이 섹터 경로가 아직 더 잘하는 유일한 것이며, 결정이 아니라 다음에 할 일입니다. */
+    if (l->brushes)
+        return brush_geometry(b, l->brushes, 0, l->brushes->n_brushes,
+                              ranges, max_ranges);
+
     int n_ranges = 0;
 
     /* Scratch for cap triangulation. One allocation per build rather than a
@@ -1859,6 +2098,8 @@ int level_geometry(MeshBuf *b, const Level *l, MdlRange *ranges, int max_ranges)
 
 int level_ground(const Level *l, float x, float z, float feet, float step,
                  float *out_floor, float *out_ceil) {
+    if (l->brushes) return brush_ground(l, x, z, feet, step, out_floor, out_ceil);
+
     const Sector *s = sector_at(l, x, z);
     if (!s) return 0;                        /* outside the map */
 
@@ -1955,6 +2196,11 @@ static int march(const Level *l, v3 origin, v3 dir, float max_dist,
 }
 
 int level_blocked(const Level *l, v3 origin, v3 dir, float max_dist) {
+    if (l->brushes) {
+        BrushTrace t;
+        return brush_ray(l, origin, dir, max_dist, &t);
+    }
+
     /* An origin outside the map is solid, so nothing can be seen from it --
        the same answer level_trace gives by reporting a hit at distance zero.
        맵 바깥의 시작점은 막힌 것이므로 그곳에서는 아무것도 볼 수 없습니다. 거리 0에서
@@ -1967,6 +2213,25 @@ int level_blocked(const Level *l, v3 origin, v3 dir, float max_dist) {
 
 int level_trace(const Level *l, v3 origin, v3 dir, float max_dist,
                 float *out_t, v3 *out_normal) {
+    if (l->brushes) {
+        BrushTrace t;
+        if (!brush_ray(l, origin, dir, max_dist, &t)) return 0;
+
+        /* An origin inside a solid hits at once, which is what the sector path
+           reports too -- level.h warns about it, because a fixture placed above
+           a ceiling then sees nothing and it reads as a physics bug.
+           고체 안의 시작점은 즉시 충돌하며 섹터 경로도 그렇게 보고합니다. level.h가 그것을
+           경고하는데, 천장 위에 놓인 픽스처가 아무것도 보지 못하게 되고 그것이 물리 버그처럼
+           읽히기 때문입니다. */
+        if (t.start_solid) { *out_t = 0.0f; *out_normal = v3f(0, 1, 0); return 1; }
+
+        /* A DISTANCE, not the fraction. The sector path bisects its way to one
+           and every caller measures metres with it. */
+        *out_t = t.t * max_dist;
+        *out_normal = t.normal;
+        return 1;
+    }
+
     const float STEP = TRACE_STEP;
 
     if (!open_at(l, origin)) { *out_t = 0.0f; *out_normal = v3f(0,1,0); return 1; }

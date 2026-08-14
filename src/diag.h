@@ -240,6 +240,31 @@ typedef enum {
      */
     DIAG_BRUSH_OPEN,
 
+    /**
+     * @brief More brush-backed levels were loaded at once than ::Level has
+     *        storage for; the oldest lost its geometry.
+     *
+     * ENGLISH: A ::BrushMap is seventeen times the size of a ::Level and cannot
+     * live inside one -- ::World and a dozen tools put Levels on the stack, and
+     * embedding it there overflows before anything runs. So level.c keeps a
+     * small pool and a Level points into it, which means the pool can run out.
+     *
+     * The evicted Level is left pointing at nothing, which reads as a level
+     * with no geometry: you fall through the floor of a level that loaded
+     * without complaint. Worth counting because the cause is three levels being
+     * live at once, somewhere else entirely, and nothing on screen says so.
+     *
+     * 한국어: ::BrushMap은 ::Level의 열일곱 배이고 그 안에 들어갈 수 없습니다. ::World와 도구
+     * 여남은 개가 Level을 스택에 올리며, 그곳에 넣으면 무엇이 실행되기도 전에 넘칩니다. 그래서
+     * level.c가 작은 풀을 두고 Level이 그곳을 가리키며, 이는 풀이 고갈될 수 있다는 뜻입니다.
+     *
+     * 축출된 Level은 아무것도 가리키지 않게 되고, 그것은 지오메트리가 없는 레벨로 나타납니다.
+     * 불평 없이 로드된 레벨의 바닥을 통과해 떨어집니다. 세어 둘 가치가 있는 이유는 원인이 전혀
+     * 다른 곳에서 레벨 셋이 동시에 살아 있는 것이고, 화면의 무엇도 그것을 말하지 않기
+     * 때문입니다.
+     */
+    DIAG_LEVEL_SLOTS,
+
     DIAG_COUNT          /**< Number of counters. / 카운터의 개수. */
 } DiagKind;
 

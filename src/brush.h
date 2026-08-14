@@ -520,7 +520,13 @@ typedef struct {
  * @warning 수백 킬로바이트에 이르는 큰 구조체이며, ::Level과 마찬가지로 스택 지역 변수여서는
  *          안 됩니다. .bss이므로 파일 정적 변수로 두면 디스크 비용이 없습니다.
  */
-typedef struct {
+/* The `struct BrushMap` tag is deliberate, not decoration: it is what lets
+   level.h name this type in a forward declaration without including this
+   header, which is the same reason ::MeshBuf and ::MdlRange carry theirs.
+   `struct BrushMap` 태그는 장식이 아니라 의도적입니다. level.h가 이 헤더를 포함하지 않고
+   전방 선언으로 이 타입을 지목할 수 있게 하는 것이며, ::MeshBuf와 ::MdlRange가 태그를 지닌
+   것과 같은 이유입니다. */
+typedef struct BrushMap {
     BrushFace faces[BR_MAX_TOTAL_FACES];  /**< Shared face pool. / 공유 면 풀. */
     int       n_faces;                    /**< Faces in use. / 사용 중인 면의 수. */
     Brush     brushes[BR_MAX_BRUSHES];    /**< Brushes, in file order. / 파일 순서대로의 브러시. */

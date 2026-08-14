@@ -693,6 +693,92 @@ static void test_atrium(void) {
     checkf(t.end.y + PLAYER_EYE, 2.5f, 0.02f, "which is its underside, not the room's ceiling");
 }
 
+/* --- the point of all of it -----------------------------------------------
+ *
+ * A .map used as-is, by the game's own code, with no converter anywhere. Not
+ * brush_trace and not brush_slide_move -- level_load, level_ground and
+ * player_move, the functions the running game calls, given a level that came
+ * out of TrenchBroom.
+ *
+ * Nothing in player.c changed to make this work. It holds a `const Level *`,
+ * asks level_ground where the floor is, and cannot tell that the answer came
+ * from a plane sweep instead of a sector lookup. That is what Level::brushes
+ * bought and it is the whole reason for the branch rather than a rewrite.
+ *
+ * 변환기 없이, 게임 자신의 코드로, .map을 그대로 쓰는 것입니다. brush_trace도
+ * brush_slide_move도 아니라 level_load, level_ground, player_move입니다. 실행 중인 게임이
+ * 호출하는 함수들에게 TrenchBroom에서 나온 레벨을 건네는 것입니다.
+ *
+ * 이것을 위해 player.c는 아무것도 바뀌지 않았습니다. `const Level *`를 들고, level_ground에
+ * 바닥이 어디인지 묻고, 그 답이 섹터 조회가 아니라 평면 스윕에서 왔다는 것을 구별할 수
+ * 없습니다. Level::brushes가 사 온 것이 그것이며, 다시 쓰는 대신 분기한 이유 전부입니다.
+ */
+static Level LV;
+
+static void test_level_on_map(void) {
+    printf("\na .map used as-is, by the game's own player\n");
+
+    check(level_load("atrium", &LV) != 0, "level_load finds atrium");
+    check(LV.brushes != 0, "and it comes back brush-backed");
+    check(LV.n_sectors == 0, "with no sectors at all");
+
+    /* arena is still sectors, through the same call, on the same build. The
+       branch is per level and not per build, which is what lets the two models
+       coexist while levels are moved over one at a time. */
+    static Level SEC;
+    if (level_load("arena", &SEC)) {
+        check(SEC.brushes == 0, "arena still loads as sectors");
+        check(SEC.n_sectors > 0, "and still has them");
+    }
+
+    /* info_player_start became Level::start, in the centimetres and
+       millidegrees Level already speaks. */
+    checkf(LV.start[0] * 0.01f, 0.0f, 0.05f, "start x came from the entity");
+    checkf(LV.start[1] * 0.01f, 5.0f, 0.05f, "start z came from the entity");
+
+    /* level_ground -- the 2D query -- answered by a pair of sweeps. */
+    float f = 0, c = 0;
+    check(level_ground(&LV, 0.0f, 5.0f, 1.0f, 1e9f, &f, &c),
+          "level_ground answers on a brush level");
+    checkf(f, 0.0f, 0.03f, "floor at zero");
+    checkf(c, 6.0f, 0.05f, "ceiling at six metres");
+
+    /* And on the ramp, where the sector version had no answer to give: the
+       floor at one point on the plan is not the floor at the next. */
+    check(level_ground(&LV, -4.0f, 1.0f, 4.0f, 1e9f, &f, &c), "and over the ramp");
+    checkf(f, 1.5f, 0.05f, "where the floor is half way up it");
+    check(level_ground(&LV, -4.0f, 3.0f, 4.0f, 1e9f, &f, &c), "and further down it");
+    checkf(f, 0.5f, 0.05f, "where the floor is lower");
+
+    /* --- player.c, unchanged, on brushes ------------------------------------
+       The same smoke test movetest runs against arena, asking only what must be
+       true of any level: you start on the floor, and however you thrash you
+       neither leave the map nor sink through it. */
+    Player p = {0};
+    player_spawn(&p, &LV);
+    checkf(p.pos.y, PLAYER_EYE, 0.05f, "player_spawn stands on the floor");
+
+    unsigned rng = 987654321u;
+    int escaped = 0, sunk = 0;
+    float highest = p.pos.y;
+    for (int i = 0; i < 3000; i++) {
+        rng = rng * 1664525u + 1013904223u;
+        float a = (rng >> 8) * (6.2831853f / 16777216.0f);
+        player_move(&p, &LV, v3f(cosf(a), 0, sinf(a)), PLAYER_WALK,
+                    (rng & 0x400000) != 0, DT);
+
+        if (p.pos.y > highest) highest = p.pos.y;
+        if (!level_ground(&LV, p.pos.x, p.pos.z, p.pos.y - PLAYER_EYE, 1e9f, &f, &c))
+            escaped = 1;
+        else if (p.pos.y - PLAYER_EYE < f - 0.05f)
+            sunk = 1;
+    }
+    check(!escaped, "3000 random frames: never left the map");
+    check(!sunk,    "3000 random frames: never sank through a floor");
+    check(highest > 1.0f + PLAYER_EYE,
+          "and got up onto the ramp or the balcony at some point");
+}
+
 int main(void) {
     printf("tracetest\n");
     build();
@@ -713,6 +799,7 @@ int main(void) {
     test_walking_slopes();
     test_settling();
     test_atrium();
+    test_level_on_map();
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall trace checks passed\n", fails);
     return fails != 0;

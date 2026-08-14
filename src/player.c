@@ -60,12 +60,26 @@ float player_spawn(Player *p, const Level *l) {
     p->health = PLAYER_MAX_HP;
     p->hurt = 0.0f;
 
-    /* Unlimited search distance and step height: the start marker's own
-       height is irrelevant, only the floor beneath it matters.
-       탐색 거리와 단차 높이를 무제한으로 둡니다. 시작 표식 자체의 높이는 중요하지
-       않고, 그 아래의 바닥만이 의미를 갖기 때문입니다. */
+    /* WHERE TO START LOOKING DOWN FROM, which is the one thing a spawn cannot
+       borrow from the other model.
+       On a sector level the marker's own height is irrelevant -- a plan point
+       has exactly one floor -- so 1e9 says "unlimited" and loses nothing.
+       A brush level has storeys, and a search that begins above the roof finds
+       the outside of the roof. So it starts from the height the .map's
+       `info_player_start` actually had, which ::Level::start_h carries.
+       The step limit stays unlimited either way: whatever is under the marker
+       is where the player belongs, however far down it turns out to be.
+       어디서부터 아래를 볼지이며, 스폰이 다른 모델에서 빌려 올 수 없는 유일한 값입니다.
+       섹터 레벨에서는 표식 자신의 높이가 무의미하므로(평면상의 한 점에 바닥이 정확히
+       하나입니다) 1e9가 "무제한"을 뜻하고 잃는 것이 없습니다. 브러시 레벨에는 층이 있고,
+       지붕 위에서 시작한 탐색은 지붕의 바깥면을 찾습니다. 그래서 .map의
+       `info_player_start`가 실제로 지녔던 높이에서 시작하며, 그 값을 ::Level::start_h가
+       나릅니다. 단차 제한은 어느 쪽이든 무제한으로 둡니다. 표식 아래에 있는 것이, 그것이
+       아무리 아래에 있더라도, 플레이어가 있어야 할 곳입니다. */
+    float from = l->brushes ? l->start_h * 0.01f : 1e9f;
+
     float f, c;
-    if (level_ground(l, p->pos.x, p->pos.z, 1e9f, 1e9f, &f, &c))
+    if (level_ground(l, p->pos.x, p->pos.z, from, 1e9f, &f, &c))
         p->pos.y = f + PLAYER_EYE + SKIN;
 
     return l->start[2] * 0.0000174533f;   /* millidegrees -> radians */

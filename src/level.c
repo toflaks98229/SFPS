@@ -255,30 +255,338 @@ void level_grid_build(Level *l) {
     g->built = 1;
 }
 
-int level_load(const char *name, Level *out) {
+/* ---------------------------------------- level_load, in its four stages */
+
+/**
+ * @brief Empties a ::Level so a parse starts from a known state.
+ *
+ * ENGLISH: Split out of ::level_load because a reset that is missing a field
+ * is invisible: the new level simply inherits the old one's lights, or its
+ * exit, and looks like a level authored that way. The struct is cleared field
+ * by field rather than wholesale because ::Level carries the sector arrays,
+ * and zeroing sixty-four sectors to then overwrite the used ones is work no
+ * frame needs.
+ *
+ * 한국어: ::level_load에서 분리했습니다. 필드가 빠진 초기화는 눈에 보이지 않기 때문입니다.
+ * 새 레벨이 옛 레벨의 광원이나 출구를 그대로 물려받고, 원래 그렇게 작성된 레벨처럼
+ * 보입니다. 구조체를 통째로 0으로 만들지 않고 필드별로 비우는 이유는 ::Level이 섹터 배열을
+ * 담고 있으며, 예순네 개의 섹터를 0으로 채운 뒤 쓰이는 것만 덮어쓰는 일은 어떤 프레임도
+ * 필요로 하지 않기 때문입니다.
+ */
+static void level_clear(Level *out) {
+    out->n_sectors = 0;
+    out->n_ents    = 0;
+    out->n_lights  = 0;
+    out->n_doors   = 0;
+    out->name[0]   = 0;
+    out->next[0]   = 0;
+    out->start[0]  = out->start[1] = out->start[2] = 0;
+}
+
+/**
+ * @brief Drops sectors too small to triangulate, compacting the rest.
+ *
+ * ENGLISH: Must run before ::level_cache_bounds and ::level_grid_build, both
+ * of which walk `n_sectors` -- doing it after would compute a box and a grid
+ * cell for geometry that is about to be discarded, and leave the grid holding
+ * indices past the compacted end.
+ *
+ * 한국어: ::level_cache_bounds와 ::level_grid_build보다 먼저 실행되어야 합니다. 둘 다
+ * `n_sectors`를 순회하므로, 나중에 하면 곧 버려질 지오메트리에 대해 박스와 격자 셀을
+ * 계산하게 되고 격자에는 압축된 끝을 넘어선 인덱스가 남습니다.
+ */
+static void level_drop_degenerate(Level *out) {
+    /* A sector with fewer than three points cannot be triangulated; drop it
+       rather than letting it produce degenerate geometry later. */
+    int w = 0;
+    for (int i = 0; i < out->n_sectors; i++)
+        if (out->sectors[i].n >= 3) out->sectors[w++] = out->sectors[i];
+    out->n_sectors = w;
+}
+
+/**
+ * @brief Caches every surviving sector's bounding box.
+ * / 살아남은 모든 섹터의 바운딩 박스를 캐시합니다.
+ */
+static void level_cache_bounds(Level *out) {
+    /* Cache each surviving sector's bounding box. After the compaction above,
+       so the dropped sectors are not walked, and before anything can query the
+       level -- point_in_sector rejects against these, so a level whose bounds
+       were never computed would collide as if every sector were empty.
+       살아남은 각 섹터의 바운딩 박스를 캐시합니다. 위의 압축 이후에 수행하여 버려진
+       섹터를 순회하지 않으며, 레벨에 대한 질의가 가능해지기 전에 수행합니다.
+       point_in_sector가 이 값으로 기각하므로, 경계값이 계산되지 않은 레벨은 모든 섹터가
+       비어 있는 것처럼 충돌 판정됩니다. */
+    for (int i = 0; i < out->n_sectors; i++)
+        level_bounds(&out->sectors[i]);
+}
+
+/**
+ * @brief Gives a locked door the material of the key it wants.
+ * / 잠긴 문에 그것이 요구하는 열쇠의 재질을 부여합니다.
+ */
+static void level_apply_door_materials(Level *out) {
+    /* --- a locked door wears its key -------------------------------------
+     *
+     * ENGLISH
+     * -------
+     * DERIVED, NOT AUTHORED. The key a door needs is already written in the
+     * level text; making the author also write the matching material is asking
+     * them to state the same fact twice, and the failure mode is a red door
+     * that opens with the blue card -- a level that lies to the player about
+     * its own rules, and lies convincingly, because the picture is exactly the
+     * kind of thing a player trusts without checking.
+     *
+     * Only the generic `wall_door` is replaced. A door the author gave some
+     * other surface keeps it, so this is a default rather than an override:
+     * the moment it takes a decision away from whoever wrote the level, it
+     * stops being a convenience and becomes an obstacle.
+     *
+     * This pairs with the HUD keycard row. The row says which cards you hold;
+     * this says which card the door in front of you wants. Neither is much use
+     * without the other -- knowing you have the blue card does not help at a
+     * door whose colour you cannot see.
+     *
+     * 한국어
+     * ------
+     * 작성된 것이 아니라 *파생된* 것입니다. 문이 요구하는 열쇠는 이미 레벨 텍스트에 적혀
+     * 있습니다. 작성자에게 대응하는 재질까지 쓰게 하는 것은 같은 사실을 두 번 말하라는
+     * 것이고, 실패 형태는 파란 카드로 열리는 빨간 문입니다. 레벨이 자기 규칙에 대해
+     * 플레이어에게 거짓말을 하는 것이며, 설득력 있게 합니다. 그림은 플레이어가 확인 없이
+     * 믿는 바로 그런 것이기 때문입니다.
+     *
+     * 일반 `wall_door`만 교체합니다. 작성자가 다른 표면을 준 문은 그대로 유지되므로,
+     * 이것은 덮어쓰기가 아니라 기본값입니다. 레벨을 쓴 사람에게서 결정을 빼앗는 순간
+     * 편의가 아니라 방해가 됩니다.
+     *
+     * HUD의 키카드 행과 짝을 이룹니다. 그 행은 어떤 카드를 가졌는지 말하고, 이것은 앞에
+     * 있는 문이 어떤 카드를 원하는지 말합니다. 한쪽만으로는 쓸모가 적습니다. 파란 카드를
+     * 가졌다는 것을 알아도 색을 볼 수 없는 문 앞에서는 도움이 되지 않습니다. */
+    for (int i = 0; i < out->n_doors; i++) {
+        const DoorDef *d = &out->doors[i];
+        if (d->key == KEY_NONE) continue;
+        if (d->sector < 0 || d->sector >= out->n_sectors) continue;
+
+        Sector *s = &out->sectors[d->sector];
+        int wl = 0;
+        while (wl < LVL_MAT && s->mat_wall[wl]) wl++;
+        if (!txt_is(s->mat_wall, wl, "wall_door")) continue;
+
+        /* Lowest set bit wins, the same rule door_key_name uses, so a door
+           needing two cards shows the first of them rather than nothing.
+           door_key_name과 같이 가장 낮은 비트가 이깁니다. 두 카드를 요구하는 문이
+           아무것도 아닌 것이 아니라 그중 첫 번째를 보여 줍니다. */
+        const char *m = (d->key & KEY_RED)    ? "door_red"
+                      : (d->key & KEY_BLUE)   ? "door_blue"
+                      : (d->key & KEY_YELLOW) ? "door_yellow" : 0;
+        if (m) {
+            int ml = 0;
+            while (m[ml]) ml++;
+            copy_name(s->mat_wall, LVL_MAT, m, ml);
+        }
+    }
+
+}
+
+/**
+ * @brief Reads one `door` opcode: axis, distance, speed, tag and key.
+ *
+ * ENGLISH
+ * -------
+ * @param[in]     p   Cursor just past the opcode word.
+ * @param[in,out] out Level receiving the door.
+ * @param[in]     cur Sector the door moves, or null when this opcode is
+ *                    outside the level being loaded -- which is also how a
+ *                    door in some OTHER level is skipped, since `cur` is only
+ *                    set while the wanted level is being read.
+ * @return The cursor advanced past everything this opcode consumed.
+ *
+ * @note Sixty-five lines, and the second-largest thing the old ::level_load
+ *       did. Out here it can be read on its own; inside, it was one of eleven
+ *       branches and the only one with a nested tokenizer loop of its own.
+ *
+ * 한국어
+ * ------
+ * @brief `door` opcode 하나를 읽습니다. 축, 거리, 속도, 태그, 열쇠입니다.
+ * @param[in]     p   opcode 단어 바로 뒤의 커서.
+ * @param[in,out] out 문을 받을 레벨.
+ * @param[in]     cur 문이 움직이는 섹터이며, 이 opcode가 로드 중인 레벨 바깥이면 널입니다.
+ *                    `cur`는 원하는 레벨을 읽는 동안에만 설정되므로, *다른* 레벨의 문이
+ *                    건너뛰어지는 방식이기도 합니다.
+ * @return 이 opcode가 소비한 만큼 진행된 커서.
+ *
+ * @note 예순다섯 줄이며, 기존 ::level_load가 하던 일 중 두 번째로 큰 것이었습니다. 밖으로
+ *       나오면 그 자체로 읽을 수 있습니다. 안에서는 열한 개 분기 중 하나였고, 자체 중첩
+ *       토크나이저 루프를 가진 유일한 분기였습니다.
+ */
+static const char *parse_door(const char *p, Level *out, const Sector *cur) {
+    int len;
+    const char *ax = txt_token(p, &len);
+    if (!ax) return p;
+    p = ax + len;
+
+    int axis = -1;
+    if      (txt_is(ax, len, "up"))   axis = DOOR_UP;
+    else if (txt_is(ax, len, "down")) axis = DOOR_DOWN;
+    else if (txt_is(ax, len, "x"))    axis = DOOR_X;
+    else if (txt_is(ax, len, "z"))    axis = DOOR_Z;
+    if (axis < 0) return p;
+
+    int amount, ok = 1;
+    p = txt_read_int(p, &amount, &ok);
+    if (!ok) return p;
+
+    /* Defaults chosen so `door up 300` alone is a complete, sensible
+       door: it opens on touch, needs no key, and travels at a speed
+       that reads as a door rather than as a lift.
+       `door up 300`만으로도 완결된 문이 되도록 기본값을 정했습니다. 접촉 시
+       열리고, 열쇠가 필요 없으며, 승강기가 아니라 문으로 읽히는 속도로
+       움직입니다. */
+    int speed = 300, tag = 0, key = KEY_NONE;
+
+    /* The door's own sub-opcodes, in any order and all optional. This inner
+       loop keeps its OWN continue/break: `continue` takes the next sub-opcode,
+       `break` hands the token back to the caller's loop. They are not the
+       function's exits and must not become returns -- doing exactly that is
+       how the first cut of this extraction silently parsed every door as
+       keyless, which leveltest caught by finding no locked door in the arena.
+       문 자신의 하위 opcode이며, 순서는 자유롭고 전부 선택적입니다. 이 내부 루프는 자기만의
+       continue/break를 유지합니다. `continue`는 다음 하위 opcode로 넘어가고 `break`는 토큰을
+       호출자의 루프에 돌려줍니다. 이것들은 함수의 탈출구가 *아니며* return이 되어서는 안
+       됩니다. 이 추출의 첫 시도가 바로 그렇게 해서 모든 문을 조용히 열쇠 없는 문으로
+       파싱했고, leveltest가 아레나에 잠긴 문이 없다는 것으로 그것을 잡아냈습니다. */
+    for (;;) {
+        const char *o = txt_token(p, &len);
+        if (!o) break;
+
+        if (txt_is(o, len, "speed")) {
+            p = o + len;
+            int v; p = txt_read_int(p, &v, &ok);
+            if (ok && v > 0) speed = v;
+            continue;
+        }
+        if (txt_is(o, len, "tag")) {
+            p = o + len;
+            int v; p = txt_read_int(p, &v, &ok);
+            if (ok) tag = v;
+            continue;
+        }
+        if (txt_is(o, len, "key")) {
+            p = o + len;
+            const char *c = txt_token(p, &len);
+            if (!c) break;
+            p = c + len;
+            if      (txt_is(c, len, "red"))    key = KEY_RED;
+            else if (txt_is(c, len, "blue"))   key = KEY_BLUE;
+            else if (txt_is(c, len, "yellow")) key = KEY_YELLOW;
+            continue;
+        }
+        break;      /* not ours: leave it for the outer loop */
+    }
+
+    if (!cur) return p;
+    if (out->n_doors >= LVL_MAX_DOORS) { DIAG(DIAG_DOOR_CAP); return p; }
+
+    DoorDef *d = &out->doors[out->n_doors++];
+    d->sector = (short)(cur - out->sectors);
+    d->axis   = (short)axis;
+    d->amount = (short)amount;
+    d->speed  = (short)speed;
+    d->tag    = (short)tag;
+    d->key    = (short)key;
+    return p;
+    return p;
+}
+
+/**
+ * @brief Reads one `e` opcode: an entity's kind, position and parameters.
+ *
+ * ENGLISH
+ * -------
+ * @param[in]     p     Cursor just past the opcode word.
+ * @param[in,out] out   Level receiving the entity.
+ * @param[in]     found Non-zero while the wanted level is being read; entities
+ *                      outside it are parsed and discarded, because the cursor
+ *                      still has to travel over them.
+ * @return The advanced cursor, or null when the text ran out mid-opcode --
+ *         which stops the parse, the way the `break` in the old loop did.
+ *
+ * 한국어
+ * ------
+ * @brief `e` opcode 하나를 읽습니다. 엔티티의 종류, 위치, 매개변수입니다.
+ * @param[in]     p     opcode 단어 바로 뒤의 커서.
+ * @param[in,out] out   엔티티를 받을 레벨.
+ * @param[in]     found 원하는 레벨을 읽는 동안 0이 아닙니다. 그 바깥의 엔티티는 파싱한 뒤
+ *                      버립니다. 커서는 어차피 그 위를 지나가야 하기 때문입니다.
+ * @return 진행된 커서. opcode 도중에 텍스트가 끝나면 널이며, 기존 루프의 `break`와 같이
+ *         파싱을 중단시킵니다.
+ */
+static const char *parse_entity(const char *p, Level *out, int found) {
+    int len;
+    const char *kind = txt_token(p, &len);
+    if (!kind) return 0;
+    int klen = len;
+    p = kind + len;
+
+    int x, z, ok;
+    p = txt_read_int(p, &x, &ok);
+    if (!ok) return p;
+    p = txt_read_int(p, &z, &ok);
+    if (!ok) return p;
+
+    /* OPTIONAL TRAILING NUMBERS, as many as the line supplies.
+       Safe to attempt because txt_read_int leaves the stream exactly
+       where it found it when the next token is not a number -- so
+       reading past the end of one entity's line stops on the `e` or
+       `s` that starts the next statement without consuming it. An
+       entity that writes none keeps the zeros, which is what every
+       level authored before this did.
+       줄이 제공하는 만큼 선택적으로 뒤따르는 수치를 읽습니다. txt_read_int가 다음
+       토큰이 숫자가 아닐 때 스트림을 발견한 그대로 남기므로 시도해도 안전합니다.
+       한 엔티티의 줄 끝을 지나 읽어도 다음 문장을 시작하는 `e`나 `s`에서 멈추고
+       그것을 소비하지 않습니다. 아무것도 쓰지 않은 엔티티는 0을 유지하며, 이 필드
+       이전에 작성된 모든 레벨이 그렇습니다. */
+    int par[LVL_ENT_PARAMS] = {0};
+    for (int i = 0; i < LVL_ENT_PARAMS; i++) {
+        int got, more;
+        p = txt_read_int(p, &got, &more);
+        if (!more) break;
+        par[i] = got;
+    }
+
+    /* Parsed either way, stored only for the level being loaded: the cursor
+       has to travel over another level's entities regardless, and returning
+       early would leave it mid-line.
+       어느 쪽이든 파싱하되 로드 중인 레벨에 대해서만 저장합니다. 커서는 다른 레벨의
+       엔티티 위도 어차피 지나가야 하며, 일찍 반환하면 줄 중간에 남게 됩니다. */
+    if (found && out->n_ents < LVL_MAX_ENTS) {
+        Entity *e = &out->ents[out->n_ents++];
+        copy_name(e->kind, LVL_MAT, kind, klen);
+        e->x = (short)x;
+        e->z = (short)z;
+        for (int i = 0; i < LVL_ENT_PARAMS; i++) e->p[i] = (short)par[i];
+    }
+    return p;
+}
+
+/**
+ * @brief Reads the level text and fills `out` with the named level.
+ *
+ * ENGLISH: The tokenizer loop and its eleven opcodes, which is the whole of
+ * what the file format is. Separated from ::level_load so that function is a
+ * statement of the four stages a load runs through rather than a place where
+ * one of them happens to be three hundred lines long.
+ * @return Non-zero when the named level was found.
+ *
+ * 한국어: 토크나이저 루프와 열한 개의 opcode이며, 파일 형식의 전부입니다. ::level_load에서
+ * 분리하여 그 함수가 로드가 거치는 네 단계에 대한 서술이 되도록 했습니다. 그러지 않으면 그중
+ * 하나가 우연히 삼백 줄인 자리가 됩니다.
+ * @return 지정한 이름의 레벨을 찾으면 0이 아닙니다.
+ */
+static int level_parse_text(const char *name, Level *out) {
     const char *p = data_text(DATA_LEVELS);
     int found = 0, len;
     Sector *cur = 0;
-
-    /* The baked light belongs to the level it was traced against, and a new
-       level puts different walls between the same coordinates and a lamp.
-       Cleared here rather than by the caller because this is the one place a
-       level can become a different one, and a cache nobody remembered to drop
-       would light the new map with the old map's shadows -- correct-looking
-       geometry lit by a building that is no longer there.
-       구워진 빛은 그것이 판정된 레벨에 속하며, 새 레벨은 같은 좌표와 등 사이에 다른 벽을
-       놓습니다. 호출자가 아니라 이곳에서 비우는 이유는 레벨이 다른 레벨이 될 수 있는 곳이
-       이곳뿐이기 때문입니다. 아무도 비울 것을 기억하지 못한 캐시는 새 맵을 옛 맵의 그림자로
-       밝히게 됩니다. 멀쩡해 보이는 지오메트리가 더 이상 없는 건물의 그림자를 쓰는 것입니다. */
-    level_light_cache_reset();
-
-    out->n_sectors = 0;
-    out->n_ents = 0;
-    out->n_lights = 0;
-    out->n_doors  = 0;
-    out->name[0] = 0;
-    out->next[0] = 0;
-    out->start[0] = out->start[1] = out->start[2] = 0;
 
     for (;;) {
         const char *t = txt_token(p, &len);
@@ -377,68 +685,7 @@ int level_load(const char *name, Level *out) {
          * 표시자가 필요 없습니다.
          */
         if (txt_is(t, len, "door")) {
-            const char *ax = txt_token(p, &len);
-            if (!ax) continue;
-            p = ax + len;
-
-            int axis = -1;
-            if      (txt_is(ax, len, "up"))   axis = DOOR_UP;
-            else if (txt_is(ax, len, "down")) axis = DOOR_DOWN;
-            else if (txt_is(ax, len, "x"))    axis = DOOR_X;
-            else if (txt_is(ax, len, "z"))    axis = DOOR_Z;
-            if (axis < 0) continue;
-
-            int amount, ok = 1;
-            p = txt_read_int(p, &amount, &ok);
-            if (!ok) continue;
-
-            /* Defaults chosen so `door up 300` alone is a complete, sensible
-               door: it opens on touch, needs no key, and travels at a speed
-               that reads as a door rather than as a lift.
-               `door up 300`만으로도 완결된 문이 되도록 기본값을 정했습니다. 접촉 시
-               열리고, 열쇠가 필요 없으며, 승강기가 아니라 문으로 읽히는 속도로
-               움직입니다. */
-            int speed = 300, tag = 0, key = KEY_NONE;
-
-            for (;;) {
-                const char *o = txt_token(p, &len);
-                if (!o) break;
-
-                if (txt_is(o, len, "speed")) {
-                    p = o + len;
-                    int v; p = txt_read_int(p, &v, &ok);
-                    if (ok && v > 0) speed = v;
-                    continue;
-                }
-                if (txt_is(o, len, "tag")) {
-                    p = o + len;
-                    int v; p = txt_read_int(p, &v, &ok);
-                    if (ok) tag = v;
-                    continue;
-                }
-                if (txt_is(o, len, "key")) {
-                    p = o + len;
-                    const char *c = txt_token(p, &len);
-                    if (!c) break;
-                    p = c + len;
-                    if      (txt_is(c, len, "red"))    key = KEY_RED;
-                    else if (txt_is(c, len, "blue"))   key = KEY_BLUE;
-                    else if (txt_is(c, len, "yellow")) key = KEY_YELLOW;
-                    continue;
-                }
-                break;      /* not ours: leave it for the outer loop */
-            }
-
-            if (!cur) continue;
-            if (out->n_doors >= LVL_MAX_DOORS) { DIAG(DIAG_DOOR_CAP); continue; }
-
-            DoorDef *d = &out->doors[out->n_doors++];
-            d->sector = (short)(cur - out->sectors);
-            d->axis   = (short)axis;
-            d->amount = (short)amount;
-            d->speed  = (short)speed;
-            d->tag    = (short)tag;
-            d->key    = (short)key;
+            p = parse_door(p, out, cur);
             continue;
         }
 
@@ -489,44 +736,8 @@ int level_load(const char *name, Level *out) {
         }
 
         if (txt_is(t, len, "e")) {
-            const char *kind = txt_token(p, &len);
-            if (!kind) break;
-            int klen = len;
-            p = kind + len;
-
-            int x, z, ok;
-            p = txt_read_int(p, &x, &ok);
-            if (!ok) continue;
-            p = txt_read_int(p, &z, &ok);
-            if (!ok) continue;
-
-            /* OPTIONAL TRAILING NUMBERS, as many as the line supplies.
-               Safe to attempt because txt_read_int leaves the stream exactly
-               where it found it when the next token is not a number -- so
-               reading past the end of one entity's line stops on the `e` or
-               `s` that starts the next statement without consuming it. An
-               entity that writes none keeps the zeros, which is what every
-               level authored before this did.
-               줄이 제공하는 만큼 선택적으로 뒤따르는 수치를 읽습니다. txt_read_int가 다음
-               토큰이 숫자가 아닐 때 스트림을 발견한 그대로 남기므로 시도해도 안전합니다.
-               한 엔티티의 줄 끝을 지나 읽어도 다음 문장을 시작하는 `e`나 `s`에서 멈추고
-               그것을 소비하지 않습니다. 아무것도 쓰지 않은 엔티티는 0을 유지하며, 이 필드
-               이전에 작성된 모든 레벨이 그렇습니다. */
-            int par[LVL_ENT_PARAMS] = {0};
-            for (int i = 0; i < LVL_ENT_PARAMS; i++) {
-                int got, more;
-                p = txt_read_int(p, &got, &more);
-                if (!more) break;
-                par[i] = got;
-            }
-
-            if (found && out->n_ents < LVL_MAX_ENTS) {
-                Entity *e = &out->ents[out->n_ents++];
-                copy_name(e->kind, LVL_MAT, kind, klen);
-                e->x = (short)x;
-                e->z = (short)z;
-                for (int i = 0; i < LVL_ENT_PARAMS; i++) e->p[i] = (short)par[i];
-            }
+            p = parse_entity(p, out, found);
+            if (!p) break;
             continue;
         }
 
@@ -567,89 +778,46 @@ int level_load(const char *name, Level *out) {
         }
     }
 
-    /* A sector with fewer than three points cannot be triangulated; drop it
-       rather than letting it produce degenerate geometry later. */
-    int w = 0;
-    for (int i = 0; i < out->n_sectors; i++)
-        if (out->sectors[i].n >= 3) out->sectors[w++] = out->sectors[i];
-    out->n_sectors = w;
+    return found;
+}
 
-    /* Cache each surviving sector's bounding box. After the compaction above,
-       so the dropped sectors are not walked, and before anything can query the
-       level -- point_in_sector rejects against these, so a level whose bounds
-       were never computed would collide as if every sector were empty.
-       살아남은 각 섹터의 바운딩 박스를 캐시합니다. 위의 압축 이후에 수행하여 버려진
-       섹터를 순회하지 않으며, 레벨에 대한 질의가 가능해지기 전에 수행합니다.
-       point_in_sector가 이 값으로 기각하므로, 경계값이 계산되지 않은 레벨은 모든 섹터가
-       비어 있는 것처럼 충돌 판정됩니다. */
-    for (int i = 0; i < out->n_sectors; i++)
-        level_bounds(&out->sectors[i]);
+int level_load(const char *name, Level *out) {
+    /* The baked light belongs to the level it was traced against, and a new
+       level puts different walls between the same coordinates and a lamp.
+       Dropped here rather than by the caller because this is the one place a
+       level can become a different one.
+       구워진 빛은 그것이 판정된 레벨에 속하며, 새 레벨은 같은 좌표와 등 사이에 다른 벽을
+       놓습니다. 호출자가 아니라 이곳에서 비우는 이유는 레벨이 다른 레벨이 될 수 있는 곳이
+       이곳뿐이기 때문입니다. */
+    level_light_cache_reset();
+    level_clear(out);
 
-    /* And the lookup grid, which is built FROM those boxes -- so it has to
-       follow them, and both have to precede any query.
-       그리고 조회 격자입니다. 그 박스들로부터 생성되므로 반드시 그 뒤에 와야 하며, 둘
-       모두 어떤 질의보다도 앞서야 합니다. */
+    int found = level_parse_text(name, out);
+
+    /* --- what the text does not say, derived once, in the only order that
+           works ------------------------------------------------------------
+       Each of these reads what the one before it wrote: the boxes are cached
+       for the sectors that survived the drop, the grid is built FROM those
+       boxes, and all three must precede any query into the level.
+       ::point_in_sector rejects against the cached boxes, so a level whose
+       bounds were never computed collides as if every sector were empty.
+
+       Named steps rather than eighty lines of comments and loops, because the
+       ORDER is the rule here and a sequence of four calls states it where a
+       run of loops only implies it.
+
+       텍스트가 말하지 않는 것을 한 번만 유도하며, 유일하게 성립하는 순서로 수행합니다.
+       각각은 바로 앞의 것이 기록한 결과를 읽습니다. 박스는 버려짐을 견딘 섹터에 대해
+       캐시되고, 격자는 *그 박스들로부터* 생성되며, 셋 모두 레벨에 대한 어떤 질의보다도
+       앞서야 합니다. ::point_in_sector가 캐시된 박스로 기각하므로, 경계값이 계산되지 않은
+       레벨은 모든 섹터가 비어 있는 것처럼 충돌 판정됩니다.
+
+       주석과 루프 여든 줄이 아니라 이름 붙은 단계인 이유는, 이곳의 규칙이 곧 *순서*이기
+       때문입니다. 네 번의 호출은 그것을 명시하지만, 이어진 루프들은 암시할 뿐입니다. */
+    level_drop_degenerate(out);
+    level_cache_bounds(out);
     level_grid_build(out);
-
-    /* --- a locked door wears its key -------------------------------------
-     *
-     * ENGLISH
-     * -------
-     * DERIVED, NOT AUTHORED. The key a door needs is already written in the
-     * level text; making the author also write the matching material is asking
-     * them to state the same fact twice, and the failure mode is a red door
-     * that opens with the blue card -- a level that lies to the player about
-     * its own rules, and lies convincingly, because the picture is exactly the
-     * kind of thing a player trusts without checking.
-     *
-     * Only the generic `wall_door` is replaced. A door the author gave some
-     * other surface keeps it, so this is a default rather than an override:
-     * the moment it takes a decision away from whoever wrote the level, it
-     * stops being a convenience and becomes an obstacle.
-     *
-     * This pairs with the HUD keycard row. The row says which cards you hold;
-     * this says which card the door in front of you wants. Neither is much use
-     * without the other -- knowing you have the blue card does not help at a
-     * door whose colour you cannot see.
-     *
-     * 한국어
-     * ------
-     * 작성된 것이 아니라 *파생된* 것입니다. 문이 요구하는 열쇠는 이미 레벨 텍스트에 적혀
-     * 있습니다. 작성자에게 대응하는 재질까지 쓰게 하는 것은 같은 사실을 두 번 말하라는
-     * 것이고, 실패 형태는 파란 카드로 열리는 빨간 문입니다. 레벨이 자기 규칙에 대해
-     * 플레이어에게 거짓말을 하는 것이며, 설득력 있게 합니다. 그림은 플레이어가 확인 없이
-     * 믿는 바로 그런 것이기 때문입니다.
-     *
-     * 일반 `wall_door`만 교체합니다. 작성자가 다른 표면을 준 문은 그대로 유지되므로,
-     * 이것은 덮어쓰기가 아니라 기본값입니다. 레벨을 쓴 사람에게서 결정을 빼앗는 순간
-     * 편의가 아니라 방해가 됩니다.
-     *
-     * HUD의 키카드 행과 짝을 이룹니다. 그 행은 어떤 카드를 가졌는지 말하고, 이것은 앞에
-     * 있는 문이 어떤 카드를 원하는지 말합니다. 한쪽만으로는 쓸모가 적습니다. 파란 카드를
-     * 가졌다는 것을 알아도 색을 볼 수 없는 문 앞에서는 도움이 되지 않습니다. */
-    for (int i = 0; i < out->n_doors; i++) {
-        const DoorDef *d = &out->doors[i];
-        if (d->key == KEY_NONE) continue;
-        if (d->sector < 0 || d->sector >= out->n_sectors) continue;
-
-        Sector *s = &out->sectors[d->sector];
-        int wl = 0;
-        while (wl < LVL_MAT && s->mat_wall[wl]) wl++;
-        if (!txt_is(s->mat_wall, wl, "wall_door")) continue;
-
-        /* Lowest set bit wins, the same rule door_key_name uses, so a door
-           needing two cards shows the first of them rather than nothing.
-           door_key_name과 같이 가장 낮은 비트가 이깁니다. 두 카드를 요구하는 문이
-           아무것도 아닌 것이 아니라 그중 첫 번째를 보여 줍니다. */
-        const char *m = (d->key & KEY_RED)    ? "door_red"
-                      : (d->key & KEY_BLUE)   ? "door_blue"
-                      : (d->key & KEY_YELLOW) ? "door_yellow" : 0;
-        if (m) {
-            int ml = 0;
-            while (m[ml]) ml++;
-            copy_name(s->mat_wall, LVL_MAT, m, ml);
-        }
-    }
+    level_apply_door_materials(out);
 
     return found;
 }

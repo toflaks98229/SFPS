@@ -818,6 +818,284 @@ static int b64val(char c) {
 }
 
 /**
+ * @brief Reads a `pal` opcode: the shared 16-entry colour table.
+ *
+ * ENGLISH
+ * -------
+ * @param[in]  p     Cursor just past the opcode word.
+ * @param[out] pal   Table to fill; entry 0 stays transparent.
+ * @param[out] n_pal How many entries were read, clamped to 16.
+ * @return The advanced cursor, or null when the count could not be read --
+ *         which stops the parse, the way the `break` in the old loop did.
+ *
+ * 한국어
+ * ------
+ * @brief `pal` opcode를 읽습니다. 공유되는 16색 색상표입니다.
+ * @param[in]  p     opcode 단어 바로 뒤의 커서.
+ * @param[out] pal   채울 표. 0번 항목은 투명으로 남습니다.
+ * @param[out] n_pal 읽어 들인 항목 수. 16으로 제한됩니다.
+ * @return 진행된 커서. 개수를 읽지 못하면 널이며, 기존 루프의 `break`와 같이 파싱을
+ *         중단시킵니다.
+ */
+static const char *parse_palette(const char *p, unsigned char pal[16][3], int *n_pal) {
+    int len;
+    int ok = 1;
+    p = txt_read_int(p, n_pal, &ok);
+    if (!ok) return 0;
+    if (*n_pal > 16) *n_pal = 16;
+    for (int i = 0; i < *n_pal; i++) {
+        const char *h = txt_token(p, &len);
+        if (!h || len < 6) { i = *n_pal; break; }
+        p = h + len;
+        for (int k = 0; k < 3; k++) {
+            int hi = hexval(h[k*2]), lo = hexval(h[k*2+1]);
+            pal[i][k] = (unsigned char)((hi < 0 ? 0 : hi) * 16 + (lo < 0 ? 0 : lo));
+        }
+    }
+    return p;
+}
+
+/**
+ * @brief Blanks one atlas cell before a drawing is painted into it.
+ *
+ * ENGLISH: A drawn frame OWNS its cell -- the generated creature underneath is
+ * erased rather than layered under, because leaving the SDF version below made
+ * it bleed out as a halo everywhere the drawing was narrower. Per CELL rather
+ * than per atlas, so a half-drawn bestiary still shows generated creatures for
+ * the frames no art reached.
+ *
+ * 한국어: 그려진 프레임이 자기 셀을 *소유*합니다. 아래의 생성된 생물은 겹쳐지지 않고
+ * 지워집니다. SDF 버전을 남겨 두면 그림이 더 좁은 모든 곳에서 후광처럼 비쳐 나오기
+ * 때문입니다. 아틀라스가 아니라 *셀* 단위이므로, 절반만 그려진 도감도 아트가 닿지 않은
+ * 프레임에 대해서는 생성된 생물을 그대로 보여 줍니다.
+ */
+static void clear_cell(unsigned char *buf, int W, int H,
+                       int ox, int oy, int cell_w, int cell_h) {
+    for (int cy = 0; cy < cell_h; cy++) {
+        int ay = oy + cy;
+        if (ay < 0 || ay >= H) continue;
+        for (int cx = 0; cx < cell_w; cx++) {
+            int ax = ox + cx;
+            if (ax < 0 || ax >= W) continue;
+            unsigned char *q = &buf[(ay * W + ax) * 4];
+            q[0] = q[1] = q[2] = q[3] = 0;
+        }
+    }
+}
+
+/**
+ * @struct SprTarget
+ * @brief Where a decoded drawing lands, so ::blit_pixels takes five arguments
+ *        instead of eleven.
+ * / 디코드된 그림이 놓이는 위치입니다. ::blit_pixels가 인자를 열한 개가 아니라 다섯 개만
+ *   받도록 합니다.
+ */
+typedef struct {
+    unsigned char *buf;   /**< Atlas being filled. / 채우고 있는 아틀라스. */
+    int W, H;             /**< Its dimensions. / 아틀라스의 크기. */
+    int x, y;             /**< Where the drawing's top-left lands. / 그림의 좌상단이 놓이는 위치. */
+    int sw;               /**< The drawing's width, which wraps its rows. / 그림의 너비. 행을 감는 기준입니다. */
+    int total;            /**< Pixels the drawing holds. / 그림이 담은 픽셀 수. */
+} SprTarget;
+
+/**
+ * @brief Decodes one drawing's pixel stream into the atlas.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] data   The encoded run, base64-ish.
+ * @param[in] len    Its length in characters.
+ * @param[in] is_rle Non-zero for `r` (run-length), zero for `p` (packed).
+ * @param[in] t      Where it lands; see ::SprTarget.
+ * @param[in] pal    The 16-entry table indices refer into.
+ *
+ * @note THE TWO ENCODINGS SHARE THE RUN LOOP. `r` emits a count and an index;
+ *       `p` emits one pixel per turn and holds the other two of its packed
+ *       triple in `pend`. That is why the packed branch sets `count = 1`
+ *       rather than having a loop of its own.
+ *
+ * 한국어
+ * ------
+ * @brief 그림 하나의 픽셀 스트림을 아틀라스로 디코드합니다.
+ * @param[in] data   인코딩된 데이터. base64 계열입니다.
+ * @param[in] len    문자 단위 길이.
+ * @param[in] is_rle `r`(런렝스)이면 0이 아니고 `p`(패킹)이면 0입니다.
+ * @param[in] t      놓이는 위치. ::SprTarget을 참조하십시오.
+ * @param[in] pal    인덱스가 참조하는 16색 표.
+ *
+ * @note *두 인코딩이 실행 루프를 공유합니다*. `r`은 개수와 인덱스를 내보내고, `p`는 한
+ *       차례에 한 픽셀을 내보내며 패킹된 삼중항의 나머지 둘을 `pend`에 보관합니다. 패킹
+ *       분기가 자체 루프를 갖지 않고 `count = 1`을 두는 이유가 그것입니다.
+ */
+static void blit_pixels(const char *data, int len, int is_rle,
+                        const SprTarget *t, const unsigned char pal[16][3]) {
+    int px_i = 0;
+    int pend[2] = {0, 0}, n_pend = 0;
+
+    /* `n_pend > 0` in the condition, not just `i < len`.
+     *
+     * A packed pair carries THREE pixels and the loop emits one per turn,
+     * so when the last pair is read `i` reaches `len` with two pixels still
+     * held. Testing only `i < len` dropped them -- every packed sprite lost
+     * its final one or two pixels.
+     *
+     * That is a corner of an image, on art that is usually transparent at
+     * its edges, so it survived a screenshot easily. tools/sprtest.c found
+     * it on a three-pixel sprite where two thirds of the picture went
+     * missing and the failure was impossible to miss.
+     *
+     * 조건에 `i < len`뿐 아니라 `n_pend > 0`이 필요합니다.
+     *
+     * 패킹된 한 쌍은 픽셀 *세 개*를 담고 루프는 한 번에 하나씩 내보내므로, 마지막
+     * 쌍을 읽으면 두 픽셀이 남은 채로 `i`가 `len`에 도달합니다. `i < len`만
+     * 검사하면 그것들이 버려졌고, 모든 패킹 스프라이트가 마지막 한두 픽셀을
+     * 잃었습니다.
+     *
+     * 이미지의 모서리이고 대개 가장자리가 투명한 아트이므로 스크린샷으로는 쉽게
+     * 살아남았습니다. tools/sprtest.c가 그림의 3분의 2가 사라져 실패를 놓칠 수 없는
+     * 3픽셀 스프라이트에서 이를 찾아냈습니다. */
+    for (int i = 0; (i < len || n_pend > 0) && px_i < t->total; ) {
+        int count, index;
+
+        if (is_rle) {
+            /* r: one character of run, one of palette index. */
+            if (i + 1 >= len) break;
+            count = b64val(data[i]);
+            index = b64val(data[i+1]);
+            i += 2;
+            if (count < 0 || index < 0 || index >= 16) break;
+        } else {
+            /* p: three 4-bit indices packed into two characters. Emitted
+               one pixel at a time so the run loop below is shared -- the
+               remaining two are held in `pend` until the next turns.
+               세 개의 4비트 인덱스가 두 문자에 담깁니다. 아래의 실행 루프를
+               공유하도록 한 번에 한 픽셀씩 내보내며, 나머지 둘은 다음 차례까지
+               `pend`에 보관합니다. */
+            if (n_pend > 0) {
+                index = pend[0];
+                pend[0] = pend[1];
+                n_pend--;
+            } else {
+                if (i + 1 >= len) break;
+                int hi = b64val(data[i]), lo = b64val(data[i+1]);
+                i += 2;
+                if (hi < 0 || lo < 0) break;
+                int v = (hi << 6) | lo;             /* 12 bits */
+                index   = (v >> 8) & 0xf;
+                pend[0] = (v >> 4) & 0xf;
+                pend[1] =  v       & 0xf;
+                n_pend  = 2;
+            }
+            count = 1;
+        }
+
+        for (int r = 0; r < count && px_i < t->total; r++, px_i++) {
+            if (index == 0) continue;          /* transparent: leave what is under it */
+
+            int sx = px_i % t->sw, sy = px_i / t->sw;
+            int ax = t->x + sx;
+            int ay = t->y + sy;
+            if (ax < 0 || ax >= t->W || ay < 0 || ay >= t->H) continue;
+
+            unsigned char *q = &t->buf[(ay * t->W + ax) * 4];
+            q[0] = pal[index][0];
+            q[1] = pal[index][1];
+            q[2] = pal[index][2];
+            q[3] = 255;
+        }
+    }
+}
+
+/**
+ * @brief Works out which atlas slot a sprite's name asks for.
+ *
+ * ENGLISH
+ * -------
+ * @param[in]     dest   Which atlas is being filled.
+ * @param[in]     nm     Sprite name token.
+ * @param[in]     nm_len Its length.
+ * @param[in]     want   The one name a WALL pass is looking for; ignored by
+ *                       every other destination.
+ * @param[in,out] frame  In: the digit split off the name. Out: clamped to the
+ *                       destination's range, or zeroed for the destinations
+ *                       that are one drawing each.
+ * @return The slot index, or -1 when this sprite belongs to another atlas.
+ *
+ * @note THE ONLY PLACE THE FOUR DESTINATIONS DISAGREE. Everything else in
+ *       ::decode_sprites -- the tokenizer, the palette, the RLE, the cell blit
+ *       -- is identical for all four, which is why one parser can serve four
+ *       atlases. Out here that is visible. Inside, it was forty lines of
+ *       if/else in the middle of a three-hundred-line function, and the shared
+ *       part looked like it might be destination-specific too.
+ *
+ * 한국어
+ * ------
+ * @brief 스프라이트 이름이 요구하는 아틀라스 슬롯을 결정합니다.
+ * @param[in]     dest   채우고 있는 아틀라스.
+ * @param[in]     nm     스프라이트 이름 토큰.
+ * @param[in]     nm_len 그 길이.
+ * @param[in]     want   *벽* 패스가 찾는 단 하나의 이름. 다른 대상은 무시합니다.
+ * @param[in,out] frame  입력: 이름에서 떼어 낸 숫자. 출력: 대상의 범위로 제한되거나, 그림이
+ *                       하나뿐인 대상에 대해서는 0입니다.
+ * @return 슬롯 인덱스. 이 스프라이트가 다른 아틀라스에 속하면 -1입니다.
+ *
+ * @note *네 대상이 서로 달라지는 유일한 지점*입니다. ::decode_sprites의 나머지 전부
+ *       (토크나이저, 팔레트, RLE, 셀 배치)는 넷 모두에 동일하며, 그래서 하나의 파서가 네
+ *       아틀라스를 담당할 수 있습니다. 밖으로 나오면 그 사실이 보입니다. 안에서는 삼백 줄짜리
+ *       함수 한가운데의 마흔 줄 if/else였고, 공유되는 부분마저 대상별로 다른 것처럼
+ *       보였습니다.
+ */
+static int sprite_slot_for(int dest, const char *nm, int nm_len,
+                           const char *want, int *frame) {
+    int type;
+    if (dest == SPR_DEST_PICKUP) {
+        /* An `item` prefix, then the very name a level uses to place the
+           thing. The prefix is not decoration: without it a drawing called
+           `shotgun0` would be both the shotgun's VIEWMODEL and the shotgun
+           lying on the floor, and one of the two would silently be the
+           other. With it the collision cannot be written.
+           `item` 접두사 뒤에 레벨이 그 물건을 배치할 때 쓰는 바로 그 이름이 옵니다.
+           접두사는 장식이 아닙니다. 그것이 없으면 `shotgun0`이라는 그림이 샷건의
+           *뷰 모델*이자 바닥에 놓인 샷건이 되고, 둘 중 하나가 조용히 다른 하나가
+           됩니다. 접두사가 있으면 그 충돌을 쓸 수조차 없습니다. */
+        const char *k = nm; int klen = nm_len - 1;
+        if (klen > 4 && k[0]=='i' && k[1]=='t' && k[2]=='e' && k[3]=='m') {
+            type = pickup_kind_for_n(k + 4, klen - 4);
+        } else {
+            type = -1;
+        }
+        /* Pickups are one drawing each; the digit only keeps the naming
+           rule uniform. */
+        *frame = 0;
+    } else if (dest == SPR_DEST_WALL) {
+        /* THE WHOLE NAME, with no frame digit split off it. A surface is
+           one drawing and `wall_brick` ends in a letter, so the trailing
+           character is part of the name rather than a frame number -- the
+           split every other destination performs would ask for
+           `wall_bric` and find nothing.
+           Matched against ONE requested name rather than a table, because
+           a wall is fetched on demand by the material that wants it: there
+           is no atlas of every surface to fill, and building one would
+           carry every texture in the game for a level that uses three.
+           프레임 숫자를 떼지 않은 *이름 전체*입니다. 표면은 그림 하나이고
+           `wall_brick`은 글자로 끝나므로 마지막 문자는 프레임 번호가 아니라 이름의
+           일부입니다. 다른 대상들이 하는 분리는 `wall_bric`을 찾게 됩니다.
+           표가 아니라 요청된 이름 *하나*와 대조하는 이유는, 벽이 그것을 원하는 재질에
+           의해 필요할 때 가져와지기 때문입니다. 채워야 할 전체 표면 아틀라스가 없으며,
+           만든다면 셋만 쓰는 레벨을 위해 게임의 모든 텍스처를 싣게 됩니다. */
+        type  = (want && txt_is(nm, nm_len, want)) ? 0 : -1;
+        *frame = 0;
+    } else if (dest == SPR_DEST_WEAPON) {
+        type = weapon_type_for_prefix(nm, nm_len - 1);
+        if (*frame < 0 || *frame >= WPN_FRAMES) *frame = 0;
+    } else {
+        type = mon_type_for_prefix(nm, nm_len - 1);
+        if (*frame < 0 || *frame >= SPR_FRAMES) *frame = 0;
+    }
+    return type;
+}
+
+/**
  * @brief Paints hand-drawn PNG sprites over the generated atlas.
  *
  * ENGLISH
@@ -950,19 +1228,8 @@ static int decode_sprites(const char *p, unsigned char *buf, int W, int H,
 
         /* The shared palette, once, before any sprite. */
         if (txt_is(t, len, "pal")) {
-            int ok = 1;
-            p = txt_read_int(p, &n_pal, &ok);
-            if (!ok) break;
-            if (n_pal > 16) n_pal = 16;
-            for (int i = 0; i < n_pal; i++) {
-                const char *h = txt_token(p, &len);
-                if (!h || len < 6) { i = n_pal; break; }
-                p = h + len;
-                for (int k = 0; k < 3; k++) {
-                    int hi = hexval(h[k*2]), lo = hexval(h[k*2+1]);
-                    pal[i][k] = (unsigned char)((hi < 0 ? 0 : hi) * 16 + (lo < 0 ? 0 : lo));
-                }
-            }
+            p = parse_palette(p, pal, &n_pal);
+            if (!p) break;
             continue;
         }
 
@@ -995,51 +1262,7 @@ static int decode_sprites(const char *p, unsigned char *buf, int W, int H,
            달라집니다. 다른 아틀라스로 향하는 스프라이트는 이곳에서 건너뛰되 아래에서
            데이터는 소비되므로, 하나의 스트림이 서로의 이름을 알 필요 없이 두 패스를
            모두 먹입니다. */
-        int type;
-        if (dest == SPR_DEST_PICKUP) {
-            /* An `item` prefix, then the very name a level uses to place the
-               thing. The prefix is not decoration: without it a drawing called
-               `shotgun0` would be both the shotgun's VIEWMODEL and the shotgun
-               lying on the floor, and one of the two would silently be the
-               other. With it the collision cannot be written.
-               `item` 접두사 뒤에 레벨이 그 물건을 배치할 때 쓰는 바로 그 이름이 옵니다.
-               접두사는 장식이 아닙니다. 그것이 없으면 `shotgun0`이라는 그림이 샷건의
-               *뷰 모델*이자 바닥에 놓인 샷건이 되고, 둘 중 하나가 조용히 다른 하나가
-               됩니다. 접두사가 있으면 그 충돌을 쓸 수조차 없습니다. */
-            const char *k = nm; int klen = nm_len - 1;
-            if (klen > 4 && k[0]=='i' && k[1]=='t' && k[2]=='e' && k[3]=='m') {
-                type = pickup_kind_for_n(k + 4, klen - 4);
-            } else {
-                type = -1;
-            }
-            /* Pickups are one drawing each; the digit only keeps the naming
-               rule uniform. */
-            frame = 0;
-        } else if (dest == SPR_DEST_WALL) {
-            /* THE WHOLE NAME, with no frame digit split off it. A surface is
-               one drawing and `wall_brick` ends in a letter, so the trailing
-               character is part of the name rather than a frame number -- the
-               split every other destination performs would ask for
-               `wall_bric` and find nothing.
-               Matched against ONE requested name rather than a table, because
-               a wall is fetched on demand by the material that wants it: there
-               is no atlas of every surface to fill, and building one would
-               carry every texture in the game for a level that uses three.
-               프레임 숫자를 떼지 않은 *이름 전체*입니다. 표면은 그림 하나이고
-               `wall_brick`은 글자로 끝나므로 마지막 문자는 프레임 번호가 아니라 이름의
-               일부입니다. 다른 대상들이 하는 분리는 `wall_bric`을 찾게 됩니다.
-               표가 아니라 요청된 이름 *하나*와 대조하는 이유는, 벽이 그것을 원하는 재질에
-               의해 필요할 때 가져와지기 때문입니다. 채워야 할 전체 표면 아틀라스가 없으며,
-               만든다면 셋만 쓰는 레벨을 위해 게임의 모든 텍스처를 싣게 됩니다. */
-            type  = (want && txt_is(nm, nm_len, want)) ? 0 : -1;
-            frame = 0;
-        } else if (dest == SPR_DEST_WEAPON) {
-            type = weapon_type_for_prefix(nm, nm_len - 1);
-            if (frame < 0 || frame >= WPN_FRAMES) frame = 0;
-        } else {
-            type = mon_type_for_prefix(nm, nm_len - 1);
-            if (frame < 0 || frame >= SPR_FRAMES) frame = 0;
-        }
+        int type = sprite_slot_for(dest, nm, nm_len, want, &frame);
 
         /* An optional muzzle marker, then the data line.
            Only weapons carry one -- bake.ps1 emits it for a magenta pixel --
@@ -1100,7 +1323,11 @@ static int decode_sprites(const char *p, unsigned char *buf, int W, int H,
         int oy = (dest == SPR_DEST_WALL)   ? 0
                : (dest == SPR_DEST_PICKUP) ? 0             : type  * cell_h;
         placed++;
-        int px_i = 0, total = sw * sh;
+
+        /* `px_i` moved into blit_pixels, which is the only thing that ever
+           advanced it.
+           `px_i`는 그것을 진행시키던 유일한 곳인 blit_pixels 안으로 옮겼습니다. */
+        int total = sw * sh;
 
         /* A DRAWN FRAME OWNS ITS CELL: clear the generated creature out of it
            before painting. The two are not layers of one picture, and leaving
@@ -1119,16 +1346,7 @@ static int decode_sprites(const char *p, unsigned char *buf, int W, int H,
            아틀라스 단위가 아니라 *셀* 단위로 지우므로, 이름이 가리키는 성질은 유지됩니다.
            절반만 그려진 도감도 여전히 생물을 보여 줍니다. 아트가 없는 프레임은 이 줄에
            닿지 않아 생성된 것을 그대로 갖기 때문입니다. */
-        for (int cy = 0; cy < cell_h; cy++) {
-            int ay = oy + cy;
-            if (ay < 0 || ay >= H) continue;
-            for (int cx = 0; cx < cell_w; cx++) {
-                int ax = ox + cx;
-                if (ax < 0 || ax >= W) continue;
-                unsigned char *q = &buf[(ay * W + ax) * 4];
-                q[0] = q[1] = q[2] = q[3] = 0;
-            }
-        }
+        clear_cell(buf, W, H, ox, oy, cell_w, cell_h);
 
         /* WHERE THE DRAWING SITS IN ITS CELL, decided once. An explicit `o`
            wins; otherwise centre it and sit it on the cell's floor, so a 32x32
@@ -1166,80 +1384,8 @@ static int decode_sprites(const char *p, unsigned char *buf, int W, int H,
            한 그림에서 다음 그림으로 넘어가, 픽셀 수가 3의 배수가 아닌 스프라이트 뒤의
            모든 스프라이트가 한 픽셀씩 밀렸을 것입니다. 디코더 버그가 아니라 아트가
            잘못된 것처럼 보이는 종류의 결함입니다. */
-        int pend[2] = {0, 0}, n_pend = 0;
-
-        /* `n_pend > 0` in the condition, not just `i < len`.
-         *
-         * A packed pair carries THREE pixels and the loop emits one per turn,
-         * so when the last pair is read `i` reaches `len` with two pixels still
-         * held. Testing only `i < len` dropped them -- every packed sprite lost
-         * its final one or two pixels.
-         *
-         * That is a corner of an image, on art that is usually transparent at
-         * its edges, so it survived a screenshot easily. tools/sprtest.c found
-         * it on a three-pixel sprite where two thirds of the picture went
-         * missing and the failure was impossible to miss.
-         *
-         * 조건에 `i < len`뿐 아니라 `n_pend > 0`이 필요합니다.
-         *
-         * 패킹된 한 쌍은 픽셀 *세 개*를 담고 루프는 한 번에 하나씩 내보내므로, 마지막
-         * 쌍을 읽으면 두 픽셀이 남은 채로 `i`가 `len`에 도달합니다. `i < len`만
-         * 검사하면 그것들이 버려졌고, 모든 패킹 스프라이트가 마지막 한두 픽셀을
-         * 잃었습니다.
-         *
-         * 이미지의 모서리이고 대개 가장자리가 투명한 아트이므로 스크린샷으로는 쉽게
-         * 살아남았습니다. tools/sprtest.c가 그림의 3분의 2가 사라져 실패를 놓칠 수 없는
-         * 3픽셀 스프라이트에서 이를 찾아냈습니다. */
-        for (int i = 0; (i < len || n_pend > 0) && px_i < total; ) {
-            int count, index;
-
-            if (is_rle) {
-                /* r: one character of run, one of palette index. */
-                if (i + 1 >= len) break;
-                count = b64val(data[i]);
-                index = b64val(data[i+1]);
-                i += 2;
-                if (count < 0 || index < 0 || index >= 16) break;
-            } else {
-                /* p: three 4-bit indices packed into two characters. Emitted
-                   one pixel at a time so the run loop below is shared -- the
-                   remaining two are held in `pend` until the next turns.
-                   세 개의 4비트 인덱스가 두 문자에 담깁니다. 아래의 실행 루프를
-                   공유하도록 한 번에 한 픽셀씩 내보내며, 나머지 둘은 다음 차례까지
-                   `pend`에 보관합니다. */
-                if (n_pend > 0) {
-                    index = pend[0];
-                    pend[0] = pend[1];
-                    n_pend--;
-                } else {
-                    if (i + 1 >= len) break;
-                    int hi = b64val(data[i]), lo = b64val(data[i+1]);
-                    i += 2;
-                    if (hi < 0 || lo < 0) break;
-                    int v = (hi << 6) | lo;             /* 12 bits */
-                    index   = (v >> 8) & 0xf;
-                    pend[0] = (v >> 4) & 0xf;
-                    pend[1] =  v       & 0xf;
-                    n_pend  = 2;
-                }
-                count = 1;
-            }
-
-            for (int r = 0; r < count && px_i < total; r++, px_i++) {
-                if (index == 0) continue;          /* transparent: leave what is under it */
-
-                int sx = px_i % sw, sy = px_i / sw;
-                int ax = ox + place_x + sx;
-                int ay = oy + place_y + sy;
-                if (ax < 0 || ax >= W || ay < 0 || ay >= H) continue;
-
-                unsigned char *q = &buf[(ay * W + ax) * 4];
-                q[0] = pal[index][0];
-                q[1] = pal[index][1];
-                q[2] = pal[index][2];
-                q[3] = 255;
-            }
-        }
+        SprTarget tgt = { buf, W, H, ox + place_x, oy + place_y, sw, total };
+        blit_pixels(data, len, is_rle, &tgt, pal);
     }
     return placed;
 }

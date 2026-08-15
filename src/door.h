@@ -12,6 +12,13 @@
  *       refusing without a key, being held open by something standing in it --
  *       is arithmetic over a struct, so tools/doortest.c drives a door through
  *       its full cycle without a window.
+ * @note HOLDS NOTHING ITSELF. Every call below takes the ::Level whose doors it
+ *       is about, and the motion lives in ::Level::door_run. This module was a
+ *       set of file-scope arrays, which made a second Level in play share the
+ *       first one's doors -- and made ::DIAG_DOOR_STALE necessary, because
+ *       state that can outlive the level it describes has to be checked for.
+ *       See ::DoorSet for the argument, which is the one ::Pools was extracted
+ *       on, one layer up.
  * @note Mutates the Level, which almost nothing else here does. That is the
  *       point: writing the moved heights and points back into the sector is
  *       what makes level_ground, open_at and level_trace see the door without
@@ -28,6 +35,12 @@
  * @note 이곳의 거의 모든 것과 달리 Level을 *수정*합니다. 그것이 요점입니다. 옮겨진 높이와
  *       점을 섹터에 되써 주는 것이, level_ground와 open_at과 level_trace가 문의 존재를
  *       모르면서도 문을 보게 만드는 방법입니다.
+ * @note 이 모듈은 스스로 아무것도 보유하지 않습니다. 아래의 모든 함수가 대상이 되는 ::Level을
+ *       인자로 받으며, 움직임은 ::Level::door_run에 있습니다. 이전에는 파일 스코프 배열의
+ *       모음이었고, 그래서 진행 중인 두 번째 Level이 첫 번째의 문을 공유했습니다. 또한 그것이
+ *       ::DIAG_DOOR_STALE을 필요하게 만들었습니다. 자신이 서술하는 레벨보다 오래 살아남을 수
+ *       있는 상태는 검사해야 하기 때문입니다. 근거는 ::DoorSet을 참조하십시오. 한 계층 위에서
+ *       ::Pools를 추출한 것과 같은 근거입니다.
  */
 #ifndef DOOR_H
 #define DOOR_H
@@ -83,7 +96,7 @@
  *       덮어쓰기 때문입니다. 한 프레임만 움직여도 레벨은 문이 어디서 출발했는지 더 이상
  *       기억하지 못합니다.
  */
-void door_reset(const Level *l);
+void door_reset(Level *l);
 
 /**
  * @brief Advances every door, writing the result back into the level.
@@ -126,7 +139,7 @@ int door_update(Level *l, v3 player_pos, int keys, float dt);
  *
  * @brief 문 `i`가 얼마나 이동했는지. 0이면 닫힘, 1이면 열림입니다.
  */
-float door_openness(int i);
+float door_openness(const Level *l, int i);
 
 /**
  * @brief The key a door refused for, if the player has just been turned away.
@@ -141,7 +154,7 @@ float door_openness(int i);
  * @note 알리지 않고 *보고*하므로 HUD가 표현 방식을 정합니다. 메시지는 화면을 소유한 쪽의
  *       것이며, 이 모듈은 폰트도 언어도 소유하지 않습니다.
  */
-int door_refused(void);
+int door_refused(const Level *l);
 
 /**
  * @brief The key of the most recent refusal, while its message should be up.
@@ -167,7 +180,7 @@ int door_refused(void);
  * @note 만료되었을 때만이 아니라 닿을 때마다 시간을 가득 채우므로, 잠긴 문에 붙어 있으면
  *       메시지가 깜빡이지 않고 유지됩니다.
  */
-int door_notice_key(void);
+int door_notice_key(const Level *l);
 
 /**
  * @brief Seconds left on the refusal message, for fading it out.
@@ -182,7 +195,7 @@ int door_notice_key(void);
  *       한 프레임 만에 사라지는 문장은 결함처럼 읽히고, 서서히 사라지는 것은 답을 받은
  *       것처럼 읽힙니다.
  */
-float door_notice_left(void);
+float door_notice_left(const Level *l);
 
 /**
  * @brief The name of a single KEY_* bit, for the HUD to print.
@@ -227,6 +240,6 @@ const char *door_key_name(int key);
  * @note 굴러다니는 열쇠가 아니라 *문*에게 묻습니다. 질문은 어떤 카드가 *요구될 수*
  *       있는가입니다.
  */
-int door_keys_used(void);
+int door_keys_used(const Level *l);
 
 #endif

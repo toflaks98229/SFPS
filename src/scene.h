@@ -428,7 +428,8 @@ void scene_draw_proj(Scene *s, const Pools *pl, mat4 vp, v3 cam_right, v3 cam_up
  *       디더링된 텍스트는 더 나쁘므로 ::post_end 이후에 실행됩니다.
  * @note 체력은 충분하면 초록, 낮으면 빨강이므로 색만 봐도 숫자만큼의 정보를 얻습니다.
  */
-void scene_draw_hud(Scene *s, int vw, int vh, const Player *p, const Weapon *w);
+void scene_draw_hud(Scene *s, int vw, int vh, const Level *l,
+                    const Player *p, const Weapon *w);
 
 /**
  * @brief Draws the win screen over the frozen world.

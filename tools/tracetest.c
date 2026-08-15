@@ -856,7 +856,7 @@ static void test_door(void) {
     check(d->speed > 0, "at the speed the entity asked for");
 
     door_reset(&LV);
-    checkf(door_openness(0), 0.0f, 0.001f, "and it starts closed");
+    checkf(door_openness(&LV, 0), 0.0f, 0.001f, "and it starts closed");
 
     /* The doorway is at engine x 0, z -8.25. Closed, the leaf fills it. */
     const v3 THROUGH_FROM = { 0.0f, 1.0f, -6.0f };
@@ -874,10 +874,10 @@ static void test_door(void) {
        *움직이는지*에 관한 것입니다. */
     v3 at_door = v3f(0.0f, 1.7f, -6.5f);
     float y_closed = LV.brushes->brushes[d->first_brush].min.y;
-    for (int i = 0; i < 300 && door_openness(0) < 0.999f; i++)
+    for (int i = 0; i < 300 && door_openness(&LV, 0) < 0.999f; i++)
         door_update(&LV, at_door, KEY_RED, DT);
 
-    checkf(door_openness(0), 1.0f, 0.001f, "standing in its trigger, the door opens");
+    checkf(door_openness(&LV, 0), 1.0f, 0.001f, "standing in its trigger, the door opens");
 
     float y_open = LV.brushes->brushes[d->first_brush].min.y;
     check(y_open > y_closed + 3.0f, "and the leaf's brush actually moved up");
@@ -895,9 +895,9 @@ static void test_door(void) {
        다시 닫히면 파일이 그린 자리로 돌아갑니다. 주기마다 조금씩 밀리는 문은 충분히 많은
        주기 뒤에 출입구를 막아 버립니다. */
     v3 far_away = v3f(0.0f, 1.7f, 6.0f);
-    for (int i = 0; i < 900 && door_openness(0) > 0.001f; i++)
+    for (int i = 0; i < 900 && door_openness(&LV, 0) > 0.001f; i++)
         door_update(&LV, far_away, KEY_RED, DT);
-    checkf(door_openness(0), 0.0f, 0.001f, "walking away closes it");
+    checkf(door_openness(&LV, 0), 0.0f, 0.001f, "walking away closes it");
     checkf(LV.brushes->brushes[d->first_brush].min.y, y_closed, 0.01f,
            "and the leaf is back where the .map drew it");
 
@@ -1081,8 +1081,8 @@ static void test_trigger_and_key(void) {
     /* Walking into it without the key: refused, and the door does not budge. */
     door_reset(&LV);
     for (int i = 0; i < 120; i++) door_update(&LV, in_volume, KEY_NONE, DT);
-    checkf(door_openness(0), 0.0f, 0.001f, "with no key it stays shut");
-    check(door_refused() == KEY_RED, "and says which card it wanted");
+    checkf(door_openness(&LV, 0), 0.0f, 0.001f, "with no key it stays shut");
+    check(door_refused(&LV) == KEY_RED, "and says which card it wanted");
 
     /* A TAGGED DOOR IGNORES BEING TOUCHED. Standing against the leaf itself,
        outside the trigger, must do nothing -- otherwise the trigger is
@@ -1095,14 +1095,14 @@ static void test_trigger_and_key(void) {
     check(!brush_point_in(LV.brushes, t->first_brush, t->n_brushes, at_leaf),
           "fixture: the leaf itself is outside the trigger");
     for (int i = 0; i < 120; i++) door_update(&LV, at_leaf, KEY_RED, DT);
-    checkf(door_openness(0), 0.0f, 0.001f,
+    checkf(door_openness(&LV, 0), 0.0f, 0.001f,
            "touching a tagged door does not open it");
 
     /* In the volume, with the card: it opens. */
     door_reset(&LV);
-    for (int i = 0; i < 300 && door_openness(0) < 0.999f; i++)
+    for (int i = 0; i < 300 && door_openness(&LV, 0) < 0.999f; i++)
         door_update(&LV, in_volume, KEY_RED, DT);
-    checkf(door_openness(0), 1.0f, 0.001f, "in the volume with the card, it opens");
+    checkf(door_openness(&LV, 0), 1.0f, 0.001f, "in the volume with the card, it opens");
 
     /* And the player can be in there at all, which they could not be if the
        trigger's brushes had stayed solid. */

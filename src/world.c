@@ -914,21 +914,37 @@ static void grant_weapons_of(const Level *l, PlayerProgress *out) {
     }
 }
 
-int world_progress_for_stage(const char *name, PlayerProgress *out) {
+/**
+ * @brief The walk itself, so its four exits all get the release below.
+ *
+ * ENGLISH
+ * -------
+ * @param[in]     name Stage to walk to.
+ * @param[out]    out  The belt on arrival; untouched unless 1 is returned.
+ * @param[in,out] scan Scratch level, reused for every hop.
+ *
+ * @note Split out for one reason: this function leaves by four different
+ *       returns and the scratch level has to be released on every one of them.
+ *       A release before each return is four chances to add a fifth return and
+ *       forget; a wrapper is one place that cannot be forgotten.
+ *
+ * 한국어
+ * ------
+ * @brief 순회 자체이며, 네 개의 출구 모두가 아래의 반납을 거치도록 분리했습니다.
+ * @param[in]     name 걸어갈 스테이지.
+ * @param[out]    out  도착 시점의 탄약대. 1을 반환할 때만 기록됩니다.
+ * @param[in,out] scan 모든 구간에 재사용하는 임시 레벨.
+ *
+ * @note 분리한 이유는 하나입니다. 이 함수는 서로 다른 네 개의 return으로 빠져나가고, 임시
+ *       레벨은 그 전부에서 반납되어야 합니다. return마다 반납을 두는 것은 다섯 번째 return을
+ *       추가하며 잊을 기회가 네 번 있다는 뜻이고, 감싸는 함수는 잊을 수 없는 한 곳입니다.
+ */
+static int stage_walk(const char *name, PlayerProgress *out, Level *scan) {
     PlayerProgress p;
     progress_boot(&p);
 
     char at[WORLD_LEVEL_MAX];
     txt_copy(at, sizeof(at), WORLD_START_LEVEL, -1);
-
-    /* One scratch level, reused for every hop. Zeroed once: level_load resets
-       the counts and names it fills, so nothing stale is ever read, but a
-       19KB local that begins as whatever was on the stack is a bad habit to
-       leave lying around next to a parser.
-       모든 구간에 재사용하는 임시 레벨 하나입니다. 한 번만 0으로 만듭니다. level_load가
-       자신이 채우는 개수와 이름을 초기화하므로 낡은 값을 읽을 일은 없지만, 스택에 있던
-       무엇으로 시작하는 19KB 지역 변수를 파서 옆에 남겨 두는 것은 나쁜 습관입니다. */
-    Level scan = {0};
 
     /* Bounded because `next` is authored text and may point backwards. A cycle
        would otherwise walk for ever, and a stage-select menu is not a place to
@@ -955,15 +971,44 @@ int world_progress_for_stage(const char *name, PlayerProgress *out) {
             return 1;
         }
 
-        if (!level_load(at, &scan)) return 0;   /* a broken link in the chain */
+        if (!level_load(at, scan)) return 0;    /* a broken link in the chain */
 
-        grant_weapons_of(&scan, &p);
+        grant_weapons_of(scan, &p);
 
-        if (!scan.next[0]) return 0;            /* the chain ended first */
-        txt_copy(at, sizeof(at), scan.next, -1);
+        if (!scan->next[0]) return 0;           /* the chain ended first */
+        txt_copy(at, sizeof(at), scan->next, -1);
     }
 
     return 0;   /* longer than any episode, or a loop */
+}
+
+int world_progress_for_stage(const char *name, PlayerProgress *out) {
+    /* One scratch level, reused for every hop. Zeroed once: level_load resets
+       the counts and names it fills, so nothing stale is ever read, but a
+       19KB local that begins as whatever was on the stack is a bad habit to
+       leave lying around next to a parser.
+       모든 구간에 재사용하는 임시 레벨 하나입니다. 한 번만 0으로 만듭니다. level_load가
+       자신이 채우는 개수와 이름을 초기화하므로 낡은 값을 읽을 일은 없지만, 스택에 있던
+       무엇으로 시작하는 19KB 지역 변수를 파서 옆에 남겨 두는 것은 나쁜 습관입니다. */
+    Level scan = {0};
+
+    int found = stage_walk(name, out, &scan);
+
+    /* GIVEN BACK BEFORE THIS FRAME ENDS, and this is the call the whole brush
+       slot change was made for. `scan` is a stack local that is about to stop
+       existing; there are ::LVL_BRUSH_SLOTS of them and the running level holds
+       one, so a scan that walked away with the other left the pool full for the
+       rest of the process. The old pool keyed slots by a `Level *` and would
+       have handed this address out again on the next call, which is how a dead
+       Level went on owning storage -- see ::Level::brush_key.
+       이번 프레임이 끝나기 전에 돌려주며, 브러시 슬롯 변경 전체가 이 호출을 위해 이루어졌습니다.
+       `scan`은 곧 존재하기를 그만둘 스택 지역 변수입니다. 슬롯은 ::LVL_BRUSH_SLOTS개뿐이고
+       실행 중인 레벨이 하나를 쥐고 있으므로, 나머지 하나를 들고 떠난 스캔은 프로세스가 끝날
+       때까지 풀을 가득 찬 채로 남겼습니다. 이전 풀은 슬롯을 `Level *`로 키잉했고 다음 호출에서
+       이 주소를 다시 내주었을 것이며, 그것이 죽은 Level이 저장 공간을 계속 소유하던
+       방식입니다. ::Level::brush_key를 참조하십시오. */
+    level_release(&scan);
+    return found;
 }
 
 int world_start_stage(World *w, const char *name) {

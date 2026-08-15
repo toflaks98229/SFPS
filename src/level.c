@@ -295,6 +295,35 @@ static void level_clear(Level *out) {
     out->next[0]    = 0;
     out->start[0]   = out->start[1] = out->start[2] = 0;
     out->start_h    = 0;
+
+    /* THE DOORS STOP BEING THE DOORS THIS DESCRIBED. Cleared here rather than
+       left for ::door_reset, because the two answer different questions and
+       only one of them is guaranteed to be asked: door_reset is a thing a
+       caller does, and a caller that forgets it used to leave the previous
+       level's travel and closed outlines sitting behind this level's
+       definitions. `count` of 0 is what makes that a level whose doors do not
+       move, instead of one moving somebody else's geometry.
+
+       ::DIAG_DOOR_STALE still fires for it -- door_update compares this count
+       against `n_doors` -- so a forgotten reset is reported rather than merely
+       survived.
+
+       Not the brush claim, which ::level_load deliberately keeps: see
+       ::Level::brush_key.
+
+       문이 이것이 서술하던 문이기를 그만둡니다. ::door_reset에 맡기지 않고 이곳에서 비우는
+       이유는, 둘이 서로 다른 질문에 답하는데 반드시 던져지는 것은 한쪽뿐이기 때문입니다.
+       door_reset은 호출자가 하는 일이며, 그것을 잊은 호출자는 이전 레벨의 이동량과 닫힌
+       외곽선을 이번 레벨의 정의 뒤에 그대로 남겨 두었습니다. `count`가 0이라는 것이, 남의
+       지오메트리를 움직이는 레벨이 아니라 문이 움직이지 않는 레벨로 만듭니다.
+
+       그래도 ::DIAG_DOOR_STALE은 발생합니다. door_update가 이 개수를 `n_doors`와 비교하기
+       때문이며, 따라서 잊힌 reset은 그냥 넘어가지 않고 보고됩니다.
+
+       브러시 주장은 지우지 않습니다. ::level_load가 의도적으로 유지합니다.
+       ::Level::brush_key를 참조하십시오. */
+    DoorSet none = {0};
+    out->door_run = none;
 }
 
 /**
@@ -865,29 +894,107 @@ static const v3 POINT_BOX = { 0.0f, 0.0f, 0.0f };
  */
 #define LVL_BRUSH_SLOTS 2
 static BrushMap g_brush_pool[LVL_BRUSH_SLOTS];
-static Level   *g_brush_owner[LVL_BRUSH_SLOTS];
+
+/* WHAT IDENTIFIES THE HOLDER OF A SLOT, and the whole of this change is that it
+   is no longer a `Level *`.
+
+   It was. `g_brush_owner[i] == out` matched a load against the ADDRESS of the
+   Level that last took the slot, and an address says nothing about whether the
+   object at it is still the same object -- or still an object. world.c's
+   level-chain scan loads into a stack local and returns; that address then sat
+   in this table, and the next Level to land on it inherited a brush map it had
+   never loaded. The eviction path was worse: it wrote through the stored
+   pointer, so telling a dead Level it had been evicted was a write to a stack
+   frame that no longer existed.
+
+   A serial is issued once and never reused, so a stale key matches nothing and
+   is simply not a claim. Nothing here records where a Level lives, which is
+   what makes "is that Level still alive?" a question this file never has to
+   answer.
+
+   슬롯을 쥔 쪽을 무엇으로 식별하는가이며, 이번 변경의 전부는 그것이 더 이상 `Level *`가
+   아니라는 점입니다.
+
+   이전에는 그러했습니다. `g_brush_owner[i] == out`은 로드를 마지막으로 슬롯을 가져간 Level의
+   *주소*와 대응시켰는데, 주소는 그 자리의 객체가 여전히 같은 객체인지, 애초에 객체이기는
+   한지에 대해 아무 말도 하지 않습니다. world.c의 레벨 사슬 스캔은 스택 지역 변수에 로드한 뒤
+   반환합니다. 그 주소가 이 표에 남았고, 그 자리에 놓인 다음 Level은 자신이 로드한 적 없는
+   브러시 맵을 물려받았습니다. 축출 경로는 더 나빴습니다. 저장된 포인터를 통해 기록했으므로,
+   죽은 Level에게 축출되었다고 알리는 일이 더 이상 존재하지 않는 스택 프레임에 대한 쓰기가
+   되었습니다.
+
+   일련번호는 한 번 발급되고 재사용되지 않으므로, 낡은 키는 어느 것과도 맞지 않고 그저 주장이
+   아닐 뿐입니다. 이곳의 무엇도 Level이 어디 사는지 기록하지 않으며, 그것이 "그 Level이 아직
+   살아 있는가"를 이 파일이 결코 답하지 않아도 되게 만듭니다. */
+static unsigned g_brush_key[LVL_BRUSH_SLOTS];
+
+/* Never 0: 0 is what `Level l = {0}` holds and has to mean "no claim".
+   0이 되지 않습니다. 0은 `Level l = {0}`이 가진 값이며 "주장 없음"을 뜻해야 합니다. */
+static unsigned g_brush_next_key = 1;
 
 static BrushMap *brush_slot_for(Level *out) {
-    /* The slot this Level already had, so reloading the running level reuses
-       its own storage rather than taking the scan's.
-       이 Level이 이미 가지고 있던 슬롯입니다. 실행 중인 레벨을 다시 로드할 때 스캔의 것을
-       빼앗지 않고 자기 저장 공간을 재사용합니다. */
-    for (int i = 0; i < LVL_BRUSH_SLOTS; i++)
-        if (g_brush_owner[i] == out) return &g_brush_pool[i];
+    /* The slot this Level already holds, so reloading the running level -- a
+       restart, a hot reload -- reuses its own storage rather than taking the
+       scan's. Asked first, and asked of the key rather than of the address.
+       이 Level이 이미 쥐고 있는 슬롯입니다. 실행 중인 레벨을 다시 로드하는 경우(재시작, 핫
+       리로드) 스캔의 것을 빼앗지 않고 자기 저장 공간을 재사용합니다. 주소가 아니라 키에게,
+       그리고 가장 먼저 묻습니다. */
+    if (out->brush_key)
+        for (int i = 0; i < LVL_BRUSH_SLOTS; i++)
+            if (g_brush_key[i] == out->brush_key) return &g_brush_pool[i];
 
-    for (int i = 0; i < LVL_BRUSH_SLOTS; i++)
-        if (!g_brush_owner[i]) { g_brush_owner[i] = out; return &g_brush_pool[i]; }
+    for (int i = 0; i < LVL_BRUSH_SLOTS; i++) {
+        if (g_brush_key[i]) continue;
+        g_brush_key[i] = g_brush_next_key++;
+        out->brush_key = g_brush_key[i];
+        return &g_brush_pool[i];
+    }
 
-    /* Full. The oldest is evicted and, crucially, TOLD: its pointer is cleared
-       so it becomes a level with no geometry rather than a level reading
-       somebody else's. Both are broken; only one of them is quiet.
-       가득 찼습니다. 가장 오래된 것을 축출하되 결정적으로 그 사실을 *알립니다*. 포인터를
-       비워 다른 레벨의 것을 읽는 레벨이 아니라 지오메트리가 없는 레벨이 되게 합니다. 둘 다
-       망가진 상태이지만 조용한 쪽은 하나뿐입니다. */
+    /* Full, and THE NEWCOMER IS REFUSED rather than an incumbent evicted.
+
+       Eviction was the old answer and it could not be made safe: the evicted
+       Level has to be told, or it goes on reading storage that now holds
+       somebody else's map, and telling it means holding its address -- which is
+       the defect above. Refusing needs no such reach. The caller gets 0 from
+       ::load_brush_level, falls through to the text loader, and a level that
+       cannot be loaded leaves the player where they are, which is the contract
+       ::level_load already keeps for a name that does not resolve.
+
+       Refusing also fails toward the incumbent rather than away from it. Two
+       slots are enough for the two Levels this project runs at once; a third
+       asking is a new situation, and quietly breaking one of the two that were
+       already working is the worst of the available answers.
+
+       가득 찼으며, 기존 것을 축출하는 대신 *새로 온 쪽을 거절*합니다.
+
+       축출이 이전의 답이었고 안전하게 만들 수 없었습니다. 축출된 Level에게 알려야 하며,
+       그러지 않으면 이제 남의 맵이 든 저장 공간을 계속 읽습니다. 그리고 알리려면 그 주소를
+       쥐고 있어야 하는데, 그것이 위에서 말한 결함입니다. 거절은 그렇게 손을 뻗을 필요가
+       없습니다. 호출자는 ::load_brush_level에서 0을 받고 텍스트 로더로 내려가며, 로드할 수
+       없는 레벨은 플레이어를 있던 자리에 둡니다. 해석되지 않는 이름에 대해 ::level_load가
+       이미 지키는 계약입니다.
+
+       또한 거절은 기존 쪽을 향해서가 아니라 기존 쪽을 *지키는* 방향으로 실패합니다. 슬롯 둘은
+       이 프로젝트가 동시에 돌리는 Level 둘에 충분하며, 셋째가 요청하는 것은 새로운 상황입니다.
+       이미 동작하던 둘 중 하나를 조용히 망가뜨리는 것은 가능한 답 중 최악입니다. */
     DIAG(DIAG_LEVEL_SLOTS);
-    if (g_brush_owner[0]) g_brush_owner[0]->brushes = 0;
-    g_brush_owner[0] = out;
-    return &g_brush_pool[0];
+    return 0;
+}
+
+void level_release(Level *l) {
+    if (!l) return;
+
+    if (l->brush_key)
+        for (int i = 0; i < LVL_BRUSH_SLOTS; i++)
+            if (g_brush_key[i] == l->brush_key) { g_brush_key[i] = 0; break; }
+
+    /* Both, and in this order does not matter -- what matters is that neither
+       is left behind. A Level that gave back its slot but kept the pointer is
+       the exact state eviction used to produce.
+       둘 다이며 순서는 상관없습니다. 중요한 것은 어느 쪽도 남지 않는 것입니다. 슬롯은
+       돌려주고 포인터는 쥐고 있는 Level이 바로 축출이 만들어 내던 그 상태입니다. */
+    l->brush_key = 0;
+    l->brushes   = 0;
 }
 
 /* The player start, in the units ::Level already speaks: centimetres and
@@ -1373,7 +1480,15 @@ static int load_brush_level(const char *name, Level *out) {
     const char *text = data_map(name, &len);
     if (!text) return 0;                     /* no .map of that name */
 
+    /* No slot left, so this is not a brush level today. Returning 0 sends
+       ::level_load down to the text loader, and a name with no text either
+       fails the load outright -- which leaves the player where they are.
+       남은 슬롯이 없으므로 이것은 오늘은 브러시 레벨이 아닙니다. 0을 반환하면 ::level_load가
+       텍스트 로더로 내려가고, 텍스트도 없는 이름은 로드 자체가 실패하며 그것은 플레이어를
+       있던 자리에 둡니다. */
     BrushMap *bm = brush_slot_for(out);
+    if (!bm) return 0;
+
     if (!brush_parse(text, len, bm)) return 0;
 
     out->brushes = bm;
@@ -2345,12 +2460,46 @@ _Static_assert((LIGHT_CACHE_SLOTS & (LIGHT_CACHE_SLOTS - 1)) == 0,
 
 typedef struct {
     float px, py, pz;   /**< Where the vertex was. / 정점이 있던 자리. */
-    float nx, ny, nz;   /**< Which way it faced. Zero means the slot is empty. / 향하던 방향. 0이면 빈 슬롯입니다. */
+    float nx, ny, nz;   /**< Which way it faced. / 향하던 방향. */
     float lr, lg, lb;   /**< What the bake produced there. / 그곳에서 베이크가 만든 값. */
+
+    /**
+     * @brief Which fill of the table this entry belongs to.
+     *
+     * A slot is OCCUPIED when this equals ::g_lcache_gen and free otherwise,
+     * which is what lets ::level_light_cache_reset be one increment instead of
+     * a walk over every slot. The table is 8192 entries and the reset runs on
+     * every ::level_load -- including once per hop of world.c's level-chain
+     * scan, which is up to ::WORLD_STAGE_MAX_HOPS of them for one stage-select.
+     *
+     * A zero normal used to mark a slot free. It could, because a normal is
+     * always unit length, and it cost nothing extra -- but it made "free"
+     * a property of the vertex data rather than of the table, so the only way
+     * to empty the table was to write over all of it.
+     *
+     * 이 항목이 테이블의 몇 번째 채움에 속하는지입니다.
+     *
+     * 이 값이 ::g_lcache_gen과 같으면 슬롯이 *사용 중*이고 아니면 비어 있습니다. 그것이
+     * ::level_light_cache_reset을 모든 슬롯 순회가 아니라 증가 한 번으로 만듭니다. 테이블은
+     * 8192개이고 초기화는 모든 ::level_load에서 실행되며, 여기에는 world.c의 레벨 사슬 스캔이
+     * 구간마다 하는 호출도 포함됩니다. 스테이지 선택 한 번에 최대
+     * ::WORLD_STAGE_MAX_HOPS번입니다.
+     *
+     * 이전에는 0 법선이 빈 슬롯을 표시했습니다. 법선은 언제나 단위 길이이므로 그럴 수 있었고
+     * 추가 비용도 없었지만, "비어 있음"을 테이블이 아니라 *정점 데이터*의 성질로 만들었습니다.
+     * 그래서 테이블을 비우는 유일한 방법이 전체를 덮어쓰는 것이었습니다.
+     */
+    unsigned gen;
 } LightSlot;
 
 static LightSlot g_lcache[LIGHT_CACHE_SLOTS];
 static int       g_lcache_used;
+
+/* STARTS AT 1, so the zeroed table every process begins with is already empty:
+   every slot holds generation 0 and nothing will ever match it again.
+   1에서 시작하므로 모든 프로세스가 시작할 때 갖는 0으로 초기화된 테이블이 이미 비어
+   있습니다. 모든 슬롯이 세대 0을 담고 있고 그것과 다시 일치하는 것은 없습니다. */
+static unsigned g_lcache_gen = 1;
 
 /* Switched off, ::bake_light is the function it was before the cache existed:
    every vertex traced, nothing looked up, nothing kept. That is not a debug
@@ -2365,12 +2514,12 @@ static int       g_lcache_used;
    문장이었습니다. */
 static int g_lcache_on = 1;
 
-/* A normal is always unit length, so all-zero cannot be a real entry and needs
-   no separate occupancy flag or clearing pass beyond zeroing the table.
-   법선은 언제나 단위 길이이므로 전부 0인 값은 실제 항목일 수 없으며, 테이블을 0으로 만드는
-   것 외에 별도의 사용 플래그도 초기화 순회도 필요하지 않습니다. */
+/* A slot from an earlier fill is indistinguishable from one that was never
+   written, and that is the point: both are free. See ::LightSlot::gen.
+   이전 채움에 속한 슬롯은 한 번도 기록된 적 없는 슬롯과 구별되지 않으며, 그것이 요점입니다.
+   둘 다 비어 있습니다. ::LightSlot::gen을 참조하십시오. */
 static int slot_empty(const LightSlot *s) {
-    return s->nx == 0.0f && s->ny == 0.0f && s->nz == 0.0f;
+    return s->gen != g_lcache_gen;
 }
 
 static unsigned light_hash(const Vtx *v) {
@@ -2396,9 +2545,28 @@ static int light_same(const LightSlot *s, const Vtx *v) {
 }
 
 void level_light_cache_reset(void) {
-    for (int i = 0; i < LIGHT_CACHE_SLOTS; i++) {
-        g_lcache[i].nx = g_lcache[i].ny = g_lcache[i].nz = 0.0f;
+    /* One increment empties the table: every entry now names a fill that is
+       over. See ::LightSlot::gen.
+       증가 한 번이 테이블을 비웁니다. 이제 모든 항목이 끝난 채움을 가리킵니다.
+       ::LightSlot::gen을 참조하십시오. */
+    g_lcache_gen++;
+
+    /* WRAPPED, after four billion resets. Vanishingly unlikely and not
+       impossible, and the failure it would produce is the one this whole file
+       is careful about elsewhere: generation 0 would match every slot that was
+       never written, so a fresh table would read as full of entries whose
+       colours belong to nothing. Cheaper to spend one walk here than to leave
+       a case that cannot be tested and cannot be explained when it happens.
+       사십억 번의 초기화 뒤에 순환합니다. 극히 일어나기 어렵지만 불가능하지는 않으며, 그때
+       발생할 고장은 이 파일이 다른 곳에서 조심하고 있는 바로 그것입니다. 세대 0은 한 번도
+       기록된 적 없는 모든 슬롯과 일치하므로, 새 테이블이 아무것에도 속하지 않는 색을 지닌
+       항목으로 가득 찬 것처럼 읽힙니다. 테스트할 수도 없고 일어났을 때 설명할 수도 없는
+       경우를 남기는 것보다 이곳에서 한 번 순회하는 편이 쌉니다. */
+    if (g_lcache_gen == 0) {
+        for (int i = 0; i < LIGHT_CACHE_SLOTS; i++) g_lcache[i].gen = 0;
+        g_lcache_gen = 1;
     }
+
     g_lcache_used = 0;
 }
 
@@ -2446,15 +2614,23 @@ static void bake_light(MeshBuf *b, const Level *l, int first) {
            the trace below is what this exists to avoid.
            무엇을 판정하기도 전에 묻습니다. 적중이 존재 이유 전부이며, 아래의 판정이 바로
            이것이 피하려는 대상이기 때문입니다. */
-        /* A zero normal is what marks a slot free, so a vertex carrying one
-           cannot be stored without erasing itself. It is also unlit by
-           construction -- the facing test below rejects it against every light
-           -- so there is nothing worth storing. Skipped rather than special
+        /* A vertex with no normal is unlit by construction -- the facing test
+           below rejects it against every light -- so the answer is always zero
+           and there is nothing worth a slot. Skipped rather than special
            cased, and not counted as an overflow, because the table is fine.
-           빈 슬롯을 표시하는 것이 0 법선이므로, 그것을 지닌 정점은 자기 자신을 지우지 않고는
-           저장할 수 없습니다. 또한 구조적으로 빛을 받지 않습니다. 아래의 방향 검사가 모든
-           광원에 대해 기각합니다. 따라서 저장할 가치가 있는 것이 없습니다. 특수 처리가 아니라
-           건너뛰며, 테이블에는 아무 문제가 없으므로 초과로 세지도 않습니다. */
+
+           This used to be a correctness requirement as well as a saving: a zero
+           normal marked a slot FREE, so storing such a vertex erased itself.
+           ::LightSlot::gen holds occupancy now and the hazard is gone, but the
+           saving is the same and so is the reasoning.
+
+           법선이 없는 정점은 구조적으로 빛을 받지 않습니다. 아래의 방향 검사가 모든 광원에
+           대해 기각하므로 답은 언제나 0이고 슬롯을 쓸 가치가 없습니다. 특수 처리가 아니라
+           건너뛰며, 테이블에는 아무 문제가 없으므로 초과로 세지도 않습니다.
+
+           이전에는 절약일 뿐 아니라 정확성 요구이기도 했습니다. 0 법선이 슬롯을 *비어 있음*으로
+           표시했으므로 그런 정점을 저장하면 자기 자신을 지웠습니다. 이제 사용 여부는
+           ::LightSlot::gen이 담당하며 그 위험은 사라졌지만, 절약도 그 근거도 그대로입니다. */
         int no_normal = (v->nx == 0.0f && v->ny == 0.0f && v->nz == 0.0f);
         int slot      = (!g_lcache_on || no_normal) ? -1 : light_slot(v);
 
@@ -2535,6 +2711,18 @@ static void bake_light(MeshBuf *b, const Level *l, int first) {
             s->px = v->px; s->py = v->py; s->pz = v->pz;
             s->nx = v->nx; s->ny = v->ny; s->nz = v->nz;
             s->lr = v->lr; s->lg = v->lg; s->lb = v->lb;
+
+            /* Last, and it is what makes the slot occupied. Written after the
+               fields rather than before, so a slot is never live while holding
+               half an entry -- which matters for exactly the reason the whole
+               generation scheme does: nothing clears this table, so a partial
+               entry would be read as a complete one for as long as the level
+               is loaded.
+               마지막이며, 이것이 슬롯을 사용 중으로 만듭니다. 필드보다 먼저가 아니라 나중에
+               쓰므로 슬롯이 항목의 절반만 담은 채 살아 있는 일이 없습니다. 세대 방식 전체가
+               존재하는 것과 정확히 같은 이유로 중요합니다. 이 테이블을 비우는 것이 없으므로,
+               절반짜리 항목은 레벨이 로드되어 있는 내내 완전한 항목으로 읽힙니다. */
+            s->gen = g_lcache_gen;
         }
     }
 }

@@ -301,6 +301,256 @@ typedef struct {
 } DoorDef;
 
 /**
+ * @struct DoorState
+ * @brief Where one door is in its travel, and what shape it started as.
+ *
+ * ENGLISH
+ * -------
+ * DECLARED HERE, WRITTEN ONLY BY door.c. level.c does not read a field of this
+ * and never should: the storage is the level's because it must be matched to
+ * ::Level::doors index for index, and the MEANING is door.c's. That is the
+ * split ::Level::brushes already keeps with brush.c, one layer down -- the
+ * difference is only that a ::DoorSet is small enough to hold by value.
+ *
+ * The closed shape is copied here at ::door_reset because ::door_update
+ * overwrites the sector: after one frame of motion the level no longer holds
+ * the door's starting position, so anything that derived "closed" from the
+ * level would drift a little further open every frame.
+ *
+ * 한국어
+ * ------
+ * @brief 문 하나가 이동 중 어디에 있는지, 그리고 무슨 형상으로 출발했는지.
+ *
+ * 이곳에 선언되지만 기록하는 것은 door.c뿐입니다. level.c는 이 구조체의 필드를 읽지 않으며
+ * 그래서도 안 됩니다. 저장 공간이 레벨의 것인 이유는 ::Level::doors와 인덱스 대 인덱스로
+ * 대응해야 하기 때문이고, *의미*는 door.c의 것입니다. 한 계층 아래에서 ::Level::brushes가
+ * brush.c와 이미 지키고 있는 분리이며, 차이는 ::DoorSet이 값으로 담을 만큼 작다는 것뿐입니다.
+ *
+ * 닫힌 형상을 ::door_reset에서 이곳으로 복사합니다. ::door_update가 섹터를 덮어쓰므로,
+ * 한 프레임만 움직여도 레벨은 문의 출발 위치를 더 이상 담고 있지 않습니다. "닫힘"을
+ * 레벨에서 유도하는 것은 무엇이든 매 프레임 조금씩 더 열리게 됩니다.
+ */
+typedef struct {
+    float t;                        /**< 0 closed .. 1 open. / 0이면 닫힘, 1이면 열림. */
+    float wait;                     /**< Seconds left of the open pause. / 열린 채 대기하는 남은 시간. */
+    int   opening;                  /**< Non-zero while travelling open. / 열리는 중이면 0이 아닙니다. */
+    short floor0, ceil0;            /**< Closed heights. / 닫힌 상태의 높이. */
+    short pts0[LVL_MAX_PTS * 2];    /**< Closed outline. / 닫힌 상태의 외곽선. */
+    int   n0;                       /**< Points in `pts0`; 0 marks a slot nothing captured. / `pts0`의 점 개수. 0이면 포착된 적 없는 슬롯입니다. */
+
+    /**
+     * @brief How far a BRUSH door has already been translated, in metres.
+     *
+     * ENGLISH
+     * -------
+     * The sector door needs nothing like this: `pts0` and `floor0` are the
+     * closed shape, and ::apply writes the target absolutely from them every
+     * frame, so where it currently is never has to be remembered.
+     *
+     * Brush planes carry no such snapshot -- ::brush_translate is relative and
+     * there are up to ::BR_MAX_FACES of them per brush -- so what is stored is
+     * the one number that makes the move reversible: how much has been applied.
+     * The next frame asks for the difference.
+     *
+     * @warning Zero means the brushes are where the .map drew them, which is
+     *          true immediately after ::level_load and is why ::door_reset must
+     *          follow one. A reset against a level whose doors are part way
+     *          open would call that position closed and the leaf would never
+     *          return to the doorway.
+     *
+     * 한국어
+     * ------
+     * @brief *브러시* 문이 이미 평행이동된 거리이며 미터 단위입니다.
+     *
+     * 섹터 문에는 이런 것이 필요 없습니다. `pts0`와 `floor0`가 닫힌 형상이고 ::apply가 매
+     * 프레임 그것으로부터 목표를 절대적으로 기록하므로, 지금 어디에 있는지는 기억할 필요가
+     * 없습니다.
+     *
+     * 브러시 평면에는 그런 스냅숏이 없습니다. ::brush_translate는 상대적이고 브러시마다
+     * 최대 ::BR_MAX_FACES개가 있습니다. 그래서 저장하는 것은 이동을 되돌릴 수 있게 만드는 단
+     * 하나의 숫자, 즉 얼마나 적용했는가입니다. 다음 프레임은 그 차이를 요청합니다.
+     *
+     * @warning 0은 브러시가 .map이 그린 자리에 있다는 뜻이며, ::level_load 직후에 참입니다.
+     *          ::door_reset이 그 뒤를 따라야 하는 이유입니다. 문이 반쯤 열린 레벨에 대해
+     *          리셋하면 그 위치를 닫힘이라 부르게 되고 문짝은 결코 출입구로 돌아오지
+     *          않습니다.
+     */
+    float applied;
+
+    /**
+     * @brief A brush door's CLOSED extent, in world units.
+     *
+     * The counterpart of `pts0` for the other model, and it exists for the same
+     * reason: the touch test and the sound both measure against where the door
+     * is when shut, so that a door already sliding does not walk away from the
+     * player who opened it and stall halfway across.
+     *
+     * 브러시 문의 *닫힌* 크기이며 월드 단위입니다.
+     * @note 다른 모델에서의 `pts0`에 해당하며 이유도 같습니다. 접촉 판정과 소리는 모두 문이
+     *       닫혀 있을 때의 자리를 기준으로 재며, 그래야 이미 미끄러지고 있는 문이 그것을 연
+     *       플레이어에게서 멀어져 중간에 멈추지 않습니다.
+     */
+    v3 lo0, hi0;
+
+    /**
+     * @brief Which sector the shape above was copied from, or -1.
+     *
+     * ENGLISH
+     * -------
+     * PROVENANCE, NOT A SECOND COPY OF THE TRUTH. The note on ::DoorSet::keys
+     * argues against copying a door's `key` into this struct, and the argument
+     * is right: nothing writes `key`, so a copy of it would be a second source
+     * kept in step by nothing. This field is the opposite case and has to be
+     * read as such. It is not the sector the door acts on -- ::apply still asks
+     * the definition for that, and always will. It is a record of where the
+     * snapshot beside it came from, which is a fact about `pts0` and belongs
+     * with `pts0`.
+     *
+     * A snapshot that does not know what it is a snapshot OF is the actual
+     * defect here. This array and the level's `doors[]` are matched by index
+     * and by nothing else; ::door_reset is what agrees them, and until this
+     * field existed, a ::door_update run against a level that reset never saw
+     * would write one sector's geometry out of another's closed shape and look
+     * exactly like a door working. Now it is a ::DIAG_DOOR_STALE and a door
+     * that does not move.
+     *
+     * 한국어
+     * ------
+     * @brief 위의 형상을 복사해 온 섹터, 또는 -1.
+     *
+     * *출처*이지 진실의 두 번째 사본이 아닙니다. ::DoorSet::keys의 주석은 문의 `key`를 이
+     * 구조체로 복사하는 것에 반대하며, 그 주장은 옳습니다. `key`는 아무도 쓰지 않으므로 그
+     * 사본은 무엇으로도 일치가 유지되지 않는 두 번째 진실이 됩니다. 이 필드는 정반대의
+     * 경우이며 그렇게 읽어야 합니다. 이것은 문이 작용하는 섹터가 아닙니다. ::apply는 여전히
+     * 그것을 정의에게 묻고 앞으로도 그럴 것입니다. 이것은 옆에 있는 스냅숏이 어디에서 왔는지에
+     * 대한 기록이며, `pts0`에 관한 사실이므로 `pts0` 옆에 있어야 합니다.
+     *
+     * 자신이 무엇의 스냅숏인지 모르는 스냅숏이 이곳의 실제 결함입니다. 이 배열과 레벨의
+     * `doors[]`는 인덱스로만 대응하며 다른 무엇으로도 대응하지 않습니다. 둘을 일치시키는 것은
+     * ::door_reset이고, 이 필드가 생기기 전에는 reset이 본 적 없는 레벨에 대해 실행된
+     * ::door_update가 한 섹터의 지오메트리를 다른 섹터의 닫힌 형상으로부터 쓰면서도 정확히
+     * 정상 동작하는 문처럼 보였습니다. 이제 그것은 ::DIAG_DOOR_STALE이며 움직이지 않는
+     * 문입니다.
+     */
+    short sector;
+} DoorState;
+
+/**
+ * @struct DoorSet
+ * @brief Every door's motion, owned by the level whose doors they are.
+ *
+ * ENGLISH
+ * -------
+ * WHY THIS IS A FIELD OF ::Level AND NOT A GLOBAL IN door.c. It was the
+ * latter, and the cost was the one ::Pools was extracted to remove one layer
+ * up: a second ::Level in play shared the first one's doors, so a ::World whose
+ * whole premise is that a caller cannot hold half a game held exactly half of
+ * one. ::DIAG_DOOR_STALE exists because of it -- the counter was added to
+ * detect state that had outlived the level it described, which is a thing that
+ * can only happen while the state and the level are separable.
+ *
+ * WHY ::Level AND NOT ::World, which is where ::Pools went. The pools are what
+ * a RUN spawns and they outlive any one level; these are matched to
+ * ::Level::doors index for index and mean nothing without it. Holding them in
+ * ::World would have kept two things that must agree in two structs a caller
+ * passes separately -- which is the same shape as the bug, with the global
+ * spelled differently. Here the mismatch is not detected, it is unconstructable:
+ * ::door_update takes one ::Level and there is no second one to get wrong.
+ *
+ * @note ~3.8KB against this struct's 24KB, and ::Level is a stack local all
+ *       over the test suite. That is the trade, made deliberately: ::BrushMap
+ *       at 420KB was too big and stayed a pointer, this is not, and unlike the
+ *       brushes it has to agree with an array that is already in here.
+ * @note All-zero is a valid empty set -- `count` of 0, every `n0` of 0 -- so
+ *       `Level l = {0}` needs no further reset and a fixture that builds a
+ *       Level field by field stays a level whose doors do not move.
+ *
+ * 한국어
+ * ------
+ * @brief 모든 문의 움직임이며, 그 문들이 속한 레벨이 소유합니다.
+ *
+ * 왜 door.c의 전역이 아니라 ::Level의 필드인가. 이전에는 전역이었고, 그 대가는 한 계층
+ * 위에서 ::Pools를 추출해 없앤 것과 같았습니다. 진행 중인 두 번째 ::Level이 첫 번째의 문을
+ * 공유했으므로, 호출자가 게임의 절반만 들고 있을 수 없다는 것이 존재 이유인 ::World가 정확히
+ * 절반만 들고 있었습니다. ::DIAG_DOOR_STALE이 존재하는 이유가 그것입니다. 그 카운터는 자신이
+ * 서술하던 레벨보다 오래 살아남은 상태를 잡아내려고 추가되었고, 그것은 상태와 레벨이 분리
+ * 가능한 동안에만 일어날 수 있는 일입니다.
+ *
+ * 왜 ::Pools가 간 ::World가 아니라 ::Level인가. 풀은 한 *플레이*가 생성하는 것이며 어느 한
+ * 레벨보다 오래 삽니다. 이것들은 ::Level::doors와 인덱스 대 인덱스로 대응하며 그것 없이는
+ * 아무 의미도 없습니다. ::World에 두었다면, 일치해야 하는 두 가지를 호출자가 따로 전달하는 두
+ * 구조체에 두는 셈이 됩니다. 전역의 철자만 바꾼 것일 뿐 버그와 같은 형태입니다. 이곳에서는
+ * 불일치가 *감지*되는 것이 아니라 *구성 불가능*합니다. ::door_update는 ::Level 하나를 받고,
+ * 잘못 짝지을 두 번째 것이 없습니다.
+ *
+ * @note 이 구조체의 24KB에 대해 약 3.8KB이며, ::Level은 테스트 묶음 곳곳에서 스택 지역
+ *       변수입니다. 그것이 의도적으로 감수한 거래입니다. 420KB의 ::BrushMap은 너무 커서
+ *       포인터로 남았지만 이것은 그렇지 않고, 브러시와 달리 이것은 이미 이 안에 있는 배열과
+ *       일치해야 합니다.
+ * @note 전부 0이 유효한 빈 집합입니다(`count`가 0, 모든 `n0`가 0). 따라서 `Level l = {0}`에는
+ *       추가 초기화가 필요 없고, 필드를 하나씩 채워 Level을 만드는 픽스처는 문이 움직이지 않는
+ *       레벨로 남습니다.
+ */
+typedef struct {
+    DoorState d[LVL_MAX_DOORS];  /**< Matched to ::Level::doors by index. / ::Level::doors와 인덱스로 대응합니다. */
+
+    /**
+     * @brief How many slots ::door_reset captured.
+     *
+     * Not the same number as ::Level::n_doors, and the difference is the point:
+     * this says how many states exist, that says how many definitions do, and
+     * ::door_update walking to the larger would read a slot nobody filled in.
+     *
+     * ::door_reset이 포착한 슬롯의 수입니다. ::Level::n_doors와 같은 수가 아니며 그 차이가
+     * 요점입니다. 이것은 상태가 몇 개인지를, 그쪽은 정의가 몇 개인지를 말하고, ::door_update가
+     * 큰 쪽까지 순회하면 아무도 채우지 않은 슬롯을 읽게 됩니다.
+     */
+    int   count;
+
+    /**
+     * @brief The key a door refused for THIS FRAME, or ::KEY_NONE.
+     *
+     * Cleared at the top of every ::door_update, which is right for asking "was
+     * the player turned away just now" and useless for telling them so.
+     * ::notice_key below is the same fact kept long enough to read.
+     *
+     * *이번 프레임에* 문이 거절한 열쇠, 또는 ::KEY_NONE입니다. 매 ::door_update의 맨 위에서
+     * 초기화되며, "방금 거절당했는가"를 묻기에는 맞지만 그것을 알리기에는 쓸모없습니다.
+     * 아래의 ::notice_key가 같은 사실을 읽을 수 있을 만큼 오래 붙잡아 둔 것입니다.
+     */
+    int   refused;
+
+    /* THE REFUSAL HAS TO OUTLIVE THE FRAME IT HAPPENED IN. A message that is
+       true for one frame at 60Hz is a message nobody reads. Kept beside the
+       door rather than in the HUD because the door is what knows, and a timer
+       on the drawing side would be a second copy of an event that already has
+       an owner. door_update is also the only place with a dt to count down.
+       거절은 그것이 일어난 프레임보다 오래 살아남아야 합니다. 60Hz에서 한 프레임 동안만 참인
+       메시지는 아무도 읽지 못합니다. HUD가 아니라 문 곁에 두는 이유는 아는 쪽이 문이기
+       때문이며, 그리는 쪽의 타이머는 이미 주인이 있는 사건의 사본이 됩니다. door_update는 셀
+       dt를 가진 유일한 곳이기도 합니다. */
+    int   notice_key;
+    float notice_t;
+
+    /**
+     * @brief The union of every door's key, folded once at ::door_reset.
+     *
+     * Derived rather than stored per door, because the key is the LEVEL's and
+     * does not change: copying it into ::DoorState beside `floor0` and `pts0`
+     * would look like the same pattern and is not. Those are snapshots of
+     * fields ::door_update overwrites, and this one nothing ever writes -- a
+     * copy of it would be a second source of truth kept in step by nothing.
+     *
+     * 모든 문의 열쇠의 합집합이며 ::door_reset에서 한 번 접어 둡니다. 문마다 저장하지 않고
+     * 유도하는 이유는 열쇠가 *레벨*의 것이고 변하지 않기 때문입니다. `floor0`나 `pts0` 옆에
+     * ::DoorState로 복사하면 같은 패턴처럼 보이지만 아닙니다. 그것들은 ::door_update가 덮어쓰는
+     * 필드의 스냅숏이고, 이것은 아무도 쓰지 않습니다. 사본을 두면 무엇으로도 일치가 유지되지
+     * 않는 두 번째 진실이 됩니다.
+     */
+    int   keys;
+} DoorSet;
+
+/**
  * @brief How many lamps one level may declare.
  *
  * ENGLISH
@@ -992,8 +1242,22 @@ typedef struct {
     int     n_ents;                       /**< Number of entities in use. / 사용 중인 엔티티의 수. */
     Light   lights[LVL_MAX_LIGHTS];       /**< Point lights. / 점광원. */
     int     n_lights;                     /**< Number of lights in use. / 사용 중인 광원의 수. */
-    DoorDef doors[LVL_MAX_DOORS];         /**< Moving sectors. / 이동하는 섹터. */
+    DoorDef doors[LVL_MAX_DOORS];         /**< Moving sectors, as authored. / 제작된 그대로의 이동 섹터. */
     int     n_doors;                      /**< Number of doors in use. / 사용 중인 문의 수. */
+
+    /**
+     * @brief Where those doors have got to. Written only by door.c.
+     *
+     * ENGLISH: The runtime half of `doors` above, in the same struct so the two
+     * cannot be separated and therefore cannot disagree. ::level_load clears it,
+     * ::door_reset fills it, ::door_update advances it. Nothing in level.c ever
+     * reads a field of it. See ::DoorSet.
+     *
+     * 한국어: 위 `doors`의 실행 시점 절반이며, 둘이 분리될 수 없고 따라서 어긋날 수 없도록
+     * 같은 구조체에 둡니다. ::level_load가 비우고, ::door_reset이 채우고, ::door_update가
+     * 진행시킵니다. level.c의 무엇도 이 필드를 읽지 않습니다. ::DoorSet을 참조하십시오.
+     */
+    DoorSet door_run;
     TriggerDef triggers[LVL_MAX_TRIGGERS];/**< Volumes that fire tags. / 태그를 발동시키는 부피. */
     int     n_triggers;                   /**< Number of triggers in use. / 사용 중인 트리거의 수. */
     HazardDef hazards[LVL_MAX_HAZARDS];   /**< Volumes that burn. / 태우는 부피. */
@@ -1091,8 +1355,10 @@ typedef struct {
      * @warning Copying a Level copies the pointer, so two Levels share one map.
      *          That is safe for reading and is what the level-chain scan in
      *          world.c does; it is NOT safe to run doors on both, because they
-     *          would each translate the same brushes. Nothing does, and nothing
-     *          should start.
+     *          would each translate the same brushes. Nor is it safe to
+     *          ::level_load into both, because the copy carries ::brush_key and
+     *          would be granted the original's slot. Nothing does either, and
+     *          nothing should start.
      *
      * 한국어
      * ------
@@ -1133,6 +1399,58 @@ typedef struct {
      *          없으며, 시작해서도 안 됩니다.
      */
     BrushMap *brushes;
+
+    /**
+     * @brief Which brush slot this level was granted, as a serial. 0 means none.
+     *
+     * ENGLISH
+     * -------
+     * THE SLOT POOL USED TO BE KEYED BY THIS LEVEL'S ADDRESS, and that was the
+     * defect. `level.c` held a `Level *owner[]` and matched a load against it
+     * with `owner[i] == out`, so a Level that had gone out of scope left a dead
+     * address claiming a slot -- and world.c's level-chain scan builds exactly
+     * such a Level, a stack local it abandons when it returns. A later Level at
+     * the same address inherited a brush map it never loaded, and the eviction
+     * path went further still: it wrote `owner[0]->brushes = 0` THROUGH the dead
+     * pointer to tell the evicted level it had been evicted.
+     *
+     * A serial cannot be reused, so it cannot be mistaken. ::level_load issues a
+     * fresh one when it grants a slot and stores it here; the pool holds the
+     * same number. A stale key matches nothing and is simply not a claim. The
+     * address of a ::Level is never recorded anywhere, which is what makes the
+     * question "is this Level still alive" one nothing has to ask.
+     *
+     * @note Give a slot back with ::level_release when a Level is about to go
+     *       out of scope. Nothing breaks if you forget -- the serial is dead
+     *       either way -- but the slot stays claimed, and there are two.
+     * @note Not cleared by ::level_load: reloading the SAME Level must reuse the
+     *       storage it already holds rather than take the other one's. That is
+     *       what makes a hot reload, and a restart, cost one slot and not two.
+     *
+     * 한국어
+     * ------
+     * @brief 이 레벨이 배정받은 브러시 슬롯의 일련번호. 0이면 없음.
+     *
+     * 슬롯 풀은 이전에 이 레벨의 *주소*로 키잉되었고, 그것이 결함이었습니다. level.c가
+     * `Level *owner[]`를 들고 `owner[i] == out`으로 로드를 대응시켰으므로, 스코프를 벗어난
+     * Level이 죽은 주소로 슬롯을 계속 주장했습니다. world.c의 레벨 사슬 스캔이 바로 그런
+     * Level을 만듭니다. 반환할 때 버리는 스택 지역 변수입니다. 같은 주소에 놓인 나중의 Level은
+     * 자신이 로드한 적 없는 브러시 맵을 물려받았고, 축출 경로는 한 걸음 더 나아가
+     * `owner[0]->brushes = 0`을 죽은 포인터를 *통해* 기록해 축출 사실을 알렸습니다.
+     *
+     * 일련번호는 재사용되지 않으므로 오인될 수 없습니다. ::level_load가 슬롯을 부여할 때 새
+     * 번호를 발급해 이곳에 저장하고 풀이 같은 번호를 보관합니다. 낡은 키는 어느 것과도 맞지
+     * 않으며 그저 주장이 아닐 뿐입니다. ::Level의 주소는 어디에도 기록되지 않으며, 그것이
+     * "이 Level이 아직 살아 있는가"를 아무도 물을 필요가 없게 만드는 장치입니다.
+     *
+     * @note Level이 스코프를 벗어나기 직전에 ::level_release로 슬롯을 돌려주십시오. 잊어도
+     *       무엇도 망가지지 않지만(어느 쪽이든 일련번호는 죽습니다) 슬롯은 계속 점유되며,
+     *       슬롯은 둘뿐입니다.
+     * @note ::level_load가 지우지 않습니다. *같은* Level을 다시 로드할 때는 다른 쪽의 것을
+     *       빼앗지 않고 이미 보유한 저장 공간을 재사용해야 하기 때문입니다. 그것이 핫 리로드와
+     *       재시작이 슬롯 하나만 쓰고 둘을 쓰지 않게 하는 장치입니다.
+     */
+    unsigned brush_key;
 } Level;
 
 /**
@@ -1201,6 +1519,48 @@ typedef struct {
  *          지역 변수로 사용해서는 안 됩니다.
  */
 int level_load(const char *name, Level *out);
+
+/**
+ * @brief Gives back the brush slot a level holds, and forgets its geometry.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] l Level to release. Safe on one that holds no slot, and safe
+ *                  to call twice.
+ *
+ * THE PAIR TO THE GRANT ::level_load MAKES. There are ::LVL_BRUSH_SLOTS of
+ * them and no destructor anywhere in this project runs by itself, so a Level
+ * that is about to go out of scope has to say so or its slot is claimed until
+ * the process ends. world.c's level-chain scan is the case this was written
+ * for: it loads up to ::WORLD_STAGE_MAX_HOPS levels into one stack local and
+ * then returns.
+ *
+ * @note Clears ::Level::brushes as well as the claim. A released level is a
+ *       SECTOR level -- which `Level l = {0}` already is, and which every query
+ *       in this header already handles -- rather than one pointing into storage
+ *       that now belongs to somebody else.
+ * @note Does NOT clear the sectors, entities or lights. Releasing is about the
+ *       brush storage, not about emptying a level; a released level still
+ *       answers every question a sector level can.
+ *
+ * 한국어
+ * ------
+ * @brief 레벨이 보유한 브러시 슬롯을 반납하고 그 지오메트리를 잊습니다.
+ * @param[in,out] l 반납할 레벨. 슬롯이 없어도 안전하며 두 번 호출해도 안전합니다.
+ *
+ * ::level_load가 하는 부여에 대응하는 짝입니다. 슬롯은 ::LVL_BRUSH_SLOTS개뿐이고 이
+ * 프로젝트의 어떤 소멸자도 저절로 실행되지 않으므로, 스코프를 벗어나려는 Level은 그 사실을
+ * 말해야 합니다. 그러지 않으면 슬롯은 프로세스가 끝날 때까지 점유됩니다. 이 함수가 쓰인
+ * 계기는 world.c의 레벨 사슬 스캔입니다. 하나의 스택 지역 변수에 최대
+ * ::WORLD_STAGE_MAX_HOPS개의 레벨을 로드한 뒤 반환합니다.
+ *
+ * @note 주장과 함께 ::Level::brushes도 비웁니다. 반납된 레벨은 이제 남의 것이 된 저장 공간을
+ *       가리키는 레벨이 아니라 *섹터* 레벨입니다. `Level l = {0}`이 이미 그러하고, 이 헤더의
+ *       모든 질의가 이미 그 경우를 처리합니다.
+ * @note 섹터·엔티티·광원은 지우지 *않습니다*. 반납은 브러시 저장 공간에 관한 것이지 레벨을
+ *       비우는 일이 아니며, 반납된 레벨도 섹터 레벨이 답할 수 있는 모든 질문에 답합니다.
+ */
+void level_release(Level *l);
 
 /**
  * @brief Recomputes one sector's cached bounding box from its points.

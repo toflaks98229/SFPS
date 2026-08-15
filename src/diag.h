@@ -120,22 +120,34 @@ typedef enum {
      * @brief A door's saved shape belongs to a sector its definition no longer
      *        names -- ::door_reset was not called for the level being stepped.
      *
-     * ENGLISH: The door module keeps one array of runtime state alongside the
-     * level's own array of door definitions, matched by index. The two are
-     * brought into agreement by ::door_reset, and nothing but calling it at the
-     * right moment kept them there. When they disagree, ::door_update would
-     * write one sector's geometry out of another sector's snapshot: a wall in
-     * the wrong place, moving. This counter is raised instead, and the door is
-     * left alone.
+     * ENGLISH: ::Level::door_run holds one runtime state per door, matched to
+     * ::Level::doors by index. They are brought into agreement by ::door_reset.
+     * When they disagree, ::door_update would write one sector's geometry out
+     * of another sector's snapshot: a wall in the wrong place, moving. This
+     * counter is raised instead, and the door is left alone.
+     *
+     * WHAT THIS NO LONGER CATCHES, because it can no longer happen: the state
+     * used to be a file-scope array in door.c, so a SECOND Level being stepped
+     * arrived carrying the first one's doors. Moving it into ::Level made that
+     * unconstructable -- ::door_update takes one level and reads that level's
+     * own state. What is left is the case in the summary: a level loaded and
+     * stepped without ::door_reset between, which ::level_load turns into a
+     * count of 0 against a level full of definitions.
      *
      * 한국어: 문의 저장된 형상이, 그 정의가 더 이상 지목하지 않는 섹터의 것입니다.
      * 진행 중인 레벨에 대해 ::door_reset이 호출되지 않았습니다.
      *
-     * door 모듈은 레벨 자신의 문 정의 배열과 나란히 런타임 상태 배열 하나를 인덱스로
-     * 대응시켜 유지합니다. 둘을 일치시키는 것은 ::door_reset이며, 그것을 올바른 시점에
-     * 호출하는 것 외에는 무엇도 일치를 지켜 주지 않았습니다. 어긋나면 ::door_update가 한
-     * 섹터의 지오메트리를 *다른* 섹터의 스냅숏으로부터 씁니다. 엉뚱한 자리에서 움직이는
-     * 벽입니다. 대신 이 카운터를 올리고 그 문은 건드리지 않습니다.
+     * ::Level::door_run이 문마다 하나의 런타임 상태를 담으며 ::Level::doors와 인덱스로
+     * 대응합니다. 둘을 일치시키는 것은 ::door_reset입니다. 어긋나면 ::door_update가 한 섹터의
+     * 지오메트리를 *다른* 섹터의 스냅숏으로부터 씁니다. 엉뚱한 자리에서 움직이는 벽입니다.
+     * 대신 이 카운터를 올리고 그 문은 건드리지 않습니다.
+     *
+     * 이제 더 이상 잡지 않는 경우이며, 그것은 더 이상 일어날 수 없기 때문입니다. 상태는 예전에
+     * door.c의 파일 스코프 배열이었으므로, 진행 중인 *두 번째* Level이 첫 번째의 문을 들고
+     * 도착했습니다. 그것을 ::Level 안으로 옮겨 구성 불가능하게 만들었습니다. ::door_update는
+     * 레벨 하나를 받고 그 레벨 자신의 상태를 읽습니다. 남은 것은 요약에 적힌 경우입니다. 사이에
+     * ::door_reset 없이 로드되고 진행된 레벨이며, ::level_load가 그것을 정의로 가득 찬 레벨에
+     * 대한 개수 0으로 만듭니다.
      */
     DIAG_DOOR_STALE,
     /**

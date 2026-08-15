@@ -9,175 +9,30 @@
 #include "diag.h"   /* DIAG_DOOR_STALE -- state that outlived the level it described */
 #include <math.h>
 
-/**
- * @struct DoorState
- * @brief Where one door is in its travel, and what it started as.
- *
- * ENGLISH
- * -------
- * The closed shape is copied here at ::door_reset because ::door_update
- * overwrites the sector: after one frame of motion the level no longer holds
- * the door's starting position, so anything that derived "closed" from the
- * level would drift a little further open every frame.
- *
- * 한국어
- * ------
- * 닫힌 형상을 ::door_reset에서 이곳으로 복사합니다. ::door_update가 섹터를 덮어쓰므로,
- * 한 프레임만 움직여도 레벨은 문의 출발 위치를 더 이상 담고 있지 않습니다. "닫힘"을
- * 레벨에서 유도하는 것은 무엇이든 매 프레임 조금씩 더 열리게 됩니다.
- */
-typedef struct {
-    float t;                        /**< 0 closed .. 1 open. / 0이면 닫힘, 1이면 열림. */
-    float wait;                     /**< Seconds left of the open pause. / 열린 채 대기하는 남은 시간. */
-    int   opening;                  /**< Non-zero while travelling open. / 열리는 중이면 0이 아닙니다. */
-    short floor0, ceil0;            /**< Closed heights. / 닫힌 상태의 높이. */
-    short pts0[LVL_MAX_PTS * 2];    /**< Closed outline. / 닫힌 상태의 외곽선. */
-    int   n0;                       /**< Points in `pts0`. / `pts0`의 점 개수. */
+/* DoorState and DoorSet are declared in level.h, because ::Level holds one.
+   That is where the note on why lives; what follows is the only code that
+   writes either.
+   DoorState와 DoorSet은 level.h에 선언되어 있습니다. ::Level이 그것을 담기 때문입니다. 왜
+   그런지에 대한 설명이 그곳에 있으며, 아래는 그 둘에 기록하는 유일한 코드입니다. */
 
-    /**
-     * @brief How far a BRUSH door has already been translated, in metres.
-     *
-     * ENGLISH
-     * -------
-     * The sector door needs nothing like this: `pts0` and `floor0` are the
-     * closed shape, and ::apply writes the target absolutely from them every
-     * frame, so where it currently is never has to be remembered.
-     *
-     * Brush planes carry no such snapshot -- ::brush_translate is relative and
-     * there are up to ::BR_MAX_FACES of them per brush -- so what is stored is
-     * the one number that makes the move reversible: how much has been applied.
-     * The next frame asks for the difference.
-     *
-     * @warning Zero means the brushes are where the .map drew them, which is
-     *          true immediately after ::level_load and is why ::door_reset must
-     *          follow one. A reset against a level whose doors are part way
-     *          open would call that position closed and the leaf would never
-     *          return to the doorway.
-     *
-     * 한국어
-     * ------
-     * @brief *브러시* 문이 이미 평행이동된 거리이며 미터 단위입니다.
-     *
-     * 섹터 문에는 이런 것이 필요 없습니다. `pts0`와 `floor0`가 닫힌 형상이고 ::apply가 매
-     * 프레임 그것으로부터 목표를 절대적으로 기록하므로, 지금 어디에 있는지는 기억할 필요가
-     * 없습니다.
-     *
-     * 브러시 평면에는 그런 스냅숏이 없습니다. ::brush_translate는 상대적이고 브러시마다
-     * 최대 ::BR_MAX_FACES개가 있습니다. 그래서 저장하는 것은 이동을 되돌릴 수 있게 만드는 단
-     * 하나의 숫자, 즉 얼마나 적용했는가입니다. 다음 프레임은 그 차이를 요청합니다.
-     *
-     * @warning 0은 브러시가 .map이 그린 자리에 있다는 뜻이며, ::level_load 직후에 참입니다.
-     *          ::door_reset이 그 뒤를 따라야 하는 이유입니다. 문이 반쯤 열린 레벨에 대해
-     *          리셋하면 그 위치를 닫힘이라 부르게 되고 문짝은 결코 출입구로 돌아오지
-     *          않습니다.
-     */
-    float applied;
+void door_reset(Level *l) {
+    DoorSet *ds = &l->door_run;
 
-    /**
-     * @brief A brush door's CLOSED extent, in world units.
-     *
-     * The counterpart of `pts0` for the other model, and it exists for the same
-     * reason: the touch test and the sound both measure against where the door
-     * is when shut, so that a door already sliding does not walk away from the
-     * player who opened it and stall halfway across.
-     *
-     * 브러시 문의 *닫힌* 크기이며 월드 단위입니다.
-     * @note 다른 모델에서의 `pts0`에 해당하며 이유도 같습니다. 접촉 판정과 소리는 모두 문이
-     *       닫혀 있을 때의 자리를 기준으로 재며, 그래야 이미 미끄러지고 있는 문이 그것을 연
-     *       플레이어에게서 멀어져 중간에 멈추지 않습니다.
-     */
-    v3 lo0, hi0;
-    /**
-     * @brief Which sector the shape above was copied from, or -1.
-     *
-     * ENGLISH
-     * -------
-     * PROVENANCE, NOT A SECOND COPY OF THE TRUTH. The note on ::g_keys_used
-     * below argues against copying a door's `key` into this struct, and the
-     * argument is right: nothing writes `key`, so a copy of it would be a
-     * second source kept in step by nothing. This field is the opposite case
-     * and has to be read as such. It is not the sector the door acts on --
-     * ::apply still asks the definition for that, and always will. It is a
-     * record of where the snapshot beside it came from, which is a fact about
-     * `pts0` and belongs with `pts0`.
-     *
-     * A snapshot that does not know what it is a snapshot OF is the actual
-     * defect here. This array and the level's `doors[]` are matched by index
-     * and by nothing else; ::door_reset is what agrees them, and until this
-     * field existed, a ::door_update run against a level that reset never saw
-     * would write one sector's geometry out of another's closed shape and look
-     * exactly like a door working. Now it is a ::DIAG_DOOR_STALE and a door
-     * that does not move.
-     *
-     * 한국어
-     * ------
-     * @brief 위의 형상을 복사해 온 섹터, 또는 -1.
-     *
-     * *출처*이지 진실의 두 번째 사본이 아닙니다. 아래 ::g_keys_used의 주석은 문의 `key`를 이
-     * 구조체로 복사하는 것에 반대하며, 그 주장은 옳습니다. `key`는 아무도 쓰지 않으므로 그
-     * 사본은 무엇으로도 일치가 유지되지 않는 두 번째 진실이 됩니다. 이 필드는 정반대의
-     * 경우이며 그렇게 읽어야 합니다. 이것은 문이 작용하는 섹터가 아닙니다. ::apply는 여전히
-     * 그것을 정의에게 묻고 앞으로도 그럴 것입니다. 이것은 옆에 있는 스냅숏이 어디에서 왔는지에
-     * 대한 기록이며, `pts0`에 관한 사실이므로 `pts0` 옆에 있어야 합니다.
-     *
-     * 자신이 무엇의 스냅숏인지 모르는 스냅숏이 이곳의 실제 결함입니다. 이 배열과 레벨의
-     * `doors[]`는 인덱스로만 대응하며 다른 무엇으로도 대응하지 않습니다. 둘을 일치시키는 것은
-     * ::door_reset이고, 이 필드가 생기기 전에는 reset이 본 적 없는 레벨에 대해 실행된
-     * ::door_update가 한 섹터의 지오메트리를 다른 섹터의 닫힌 형상으로부터 쓰면서도 정확히
-     * 정상 동작하는 문처럼 보였습니다. 이제 그것은 ::DIAG_DOOR_STALE이며 움직이지 않는
-     * 문입니다.
-     */
-    short sector;
-} DoorState;
-
-static DoorState g_door[LVL_MAX_DOORS];
-static int       g_n;
-static int       g_refused;
-
-/* THE REFUSAL HAS TO OUTLIVE THE FRAME IT HAPPENED IN. `g_refused` is cleared
-   at the top of every door_update, which is right for asking "was the player
-   turned away just now" and useless for telling them so: a message that is
-   true for one frame at 60Hz is a message nobody reads.
-   Kept here rather than in the HUD because the door is what knows, and a timer
-   on the drawing side would be a second copy of an event that already has an
-   owner. door_update is also the only place with a dt to count down.
-   거절은 그것이 일어난 프레임보다 오래 살아남아야 합니다. `g_refused`는 door_update의
-   맨 위에서 초기화되며, "방금 거절당했는가"를 묻기에는 맞지만 그것을 *알리기에는*
-   쓸모없습니다. 60Hz에서 한 프레임 동안만 참인 메시지는 아무도 읽지 못합니다. HUD가
-   아니라 여기에 두는 이유는 아는 쪽이 문이기 때문이며, 그리는 쪽의 타이머는 이미 주인이
-   있는 사건의 사본이 됩니다. door_update는 셀 dt를 가진 유일한 곳이기도 합니다. */
-static int       g_notice_key;
-static float     g_notice_t;
-
-/* The union of every door's key, folded once at ::door_reset. Derived rather
-   than stored per door, because the key is the LEVEL's and does not change:
-   copying it into DoorState beside floor0 and pts0 would look like the same
-   pattern and is not. Those are snapshots of fields door_update overwrites,
-   and this one nothing ever writes -- a copy of it would be a second source of
-   truth kept in step by nothing.
-   모든 문의 열쇠를 합집합으로 ::door_reset에서 한 번 접어 둡니다. 문마다 저장하지 않고
-   유도하는 이유는 열쇠가 *레벨*의 것이고 변하지 않기 때문입니다. floor0나 pts0 옆에
-   DoorState로 복사하면 같은 패턴처럼 보이지만 아닙니다. 그것들은 door_update가 덮어쓰는
-   필드의 스냅숏이고, 이것은 아무도 쓰지 않습니다. 사본을 두면 무엇으로도 일치가 유지되지
-   않는 두 번째 진실이 됩니다. */
-static int       g_keys_used;
-
-void door_reset(const Level *l) {
-    g_n = l->n_doors > LVL_MAX_DOORS ? LVL_MAX_DOORS : l->n_doors;
-    g_refused = KEY_NONE;
+    ds->count   = l->n_doors > LVL_MAX_DOORS ? LVL_MAX_DOORS : l->n_doors;
+    ds->refused = KEY_NONE;
 
     /* Cleared with everything else: a message about the last level's locked
        door has no business surviving into the next one.
        나머지와 함께 초기화합니다. 이전 레벨의 잠긴 문에 대한 메시지가 다음 레벨까지
        살아남을 이유는 없습니다. */
-    g_notice_key = KEY_NONE;
-    g_notice_t   = 0.0f;
+    ds->notice_key = KEY_NONE;
+    ds->notice_t   = 0.0f;
 
-    g_keys_used = KEY_NONE;
-    for (int i = 0; i < g_n; i++) g_keys_used |= l->doors[i].key;
+    ds->keys = KEY_NONE;
+    for (int i = 0; i < ds->count; i++) ds->keys |= l->doors[i].key;
 
-    for (int i = 0; i < g_n; i++) {
-        DoorState *st = &g_door[i];
+    for (int i = 0; i < ds->count; i++) {
+        DoorState *st = &ds->d[i];
         st->t = 0.0f;
         st->wait = 0.0f;
         st->opening = 0;
@@ -235,11 +90,11 @@ void door_reset(const Level *l) {
     }
 }
 
-float door_openness(int i) {
-    return (i >= 0 && i < g_n) ? g_door[i].t : 0.0f;
+float door_openness(const Level *l, int i) {
+    return (i >= 0 && i < l->door_run.count) ? l->door_run.d[i].t : 0.0f;
 }
 
-int door_refused(void) { return g_refused; }
+int door_refused(const Level *l) { return l->door_run.refused; }
 
 /* Indexed by BIT POSITION, so KEY_RED (1<<0) is [0]. Ordered to match the
    KEY_* enum, which is also the order pickup.h's PK_KEY0..PK_KEY_LAST run in,
@@ -264,19 +119,23 @@ const char *door_key_name(int key) {
     return "";
 }
 
-int door_keys_used(void) {
+int door_keys_used(const Level *l) {
     /* Asked of the DOORS rather than of the level's pickups: the question the
        HUD is answering is "which cards can this map demand", and a level that
        scatters a key no door wants would light a row the player never needs.
        아이템이 아니라 *문*에게 묻습니다. HUD가 답하는 질문은 "이 맵이 요구할 수 있는
        카드는 무엇인가"이며, 어떤 문도 원하지 않는 열쇠를 뿌린 레벨은 플레이어에게 결코
        필요 없는 행을 켜게 됩니다. */
-    return g_keys_used;
+    return l->door_run.keys;
 }
 
-int door_notice_key(void) { return g_notice_t > 0.0f ? g_notice_key : KEY_NONE; }
+int door_notice_key(const Level *l) {
+    return l->door_run.notice_t > 0.0f ? l->door_run.notice_key : KEY_NONE;
+}
 
-float door_notice_left(void) { return g_notice_t > 0.0f ? g_notice_t : 0.0f; }
+float door_notice_left(const Level *l) {
+    return l->door_run.notice_t > 0.0f ? l->door_run.notice_t : 0.0f;
+}
 
 /* The closest a point gets to the door's closed outline, in metres. Measured
    against the CLOSED shape rather than the current one, so a door that has
@@ -451,7 +310,7 @@ static void apply(Level *l, const DoorDef *d, DoorState *st) {
  * ENGLISH
  * -------
  * @param[in,out] l          Level whose sector this door drives.
- * @param[in]     i          Door index, into both `l->doors` and ::g_door.
+ * @param[in]     i          Door index, into both `l->doors` and `l->door_run.d`.
  * @param[in]     player_pos Where the player is, for the proximity trigger.
  * @param[in]     keys       Keycards held, for a locked door.
  * @param[in]     tagged     Non-zero when a switch fired this door's tag.
@@ -470,7 +329,7 @@ static void apply(Level *l, const DoorDef *d, DoorState *st) {
  * ------
  * @brief 문 하나를 진행시킵니다. 작동 조건, 이동, 그리고 그것이 움직이는 섹터입니다.
  * @param[in,out] l          이 문이 구동하는 섹터를 지닌 레벨.
- * @param[in]     i          문 인덱스. `l->doors`와 ::g_door 양쪽에 대한 것입니다.
+ * @param[in]     i          문 인덱스. `l->doors`와 `l->door_run.d` 양쪽에 대한 것입니다.
  * @param[in]     player_pos 근접 작동을 위한 플레이어 위치.
  * @param[in]     keys       잠긴 문을 위해 보유한 키카드.
  * @param[in]     tagged     스위치가 이 문의 태그를 작동시켰으면 0이 아닙니다.
@@ -488,7 +347,7 @@ static int door_step_one(Level *l, int i, v3 player_pos, int keys,
                          int tagged, float dt) {
     int moved = 0;
     const DoorDef *d = &l->doors[i];
-    DoorState *st = &g_door[i];
+    DoorState *st = &l->door_run.d[i];
     if (st->n0 <= 0) return 0;          /* was `continue`: skip this door */
 
     /* --- is this state still about this door? --------------------------
@@ -531,15 +390,15 @@ static int door_step_one(Level *l, int i, v3 player_pos, int keys,
            and the door does not budge.
            거절되었습니다. HUD가 어떤 열쇠인지 말할 수 있도록 프레임당 한 번
            보고하며, 문은 움직이지 않습니다. */
-        g_refused = d->key;
+        l->door_run.refused = d->key;
 
         /* Re-armed to the full time on every touch rather than only when
            it has run out, so leaning on a locked door keeps the message up
            instead of letting it blink.
            이미 떠 있든 아니든 닿을 때마다 시간을 가득 채웁니다. 잠긴 문에 계속 붙어
            있으면 메시지가 깜빡이지 않고 유지됩니다. */
-        g_notice_key = d->key;
-        g_notice_t   = DOOR_NOTICE_TIME;
+        l->door_run.notice_key = d->key;
+        l->door_run.notice_t   = DOOR_NOTICE_TIME;
         asked = 0;
     }
 
@@ -601,7 +460,7 @@ static int door_step_one(Level *l, int i, v3 player_pos, int keys,
 
 int door_update(Level *l, v3 player_pos, int keys, float dt) {
     int moved = 0;
-    g_refused = KEY_NONE;
+    l->door_run.refused = KEY_NONE;
 
     /* Counted down before the touch tests below, which may re-arm it. Order
        matters only in that a refusal this frame must not be shortened by this
@@ -609,23 +468,28 @@ int door_update(Level *l, v3 player_pos, int keys, float dt) {
        아래의 접촉 검사보다 먼저 감소시킵니다. 검사가 다시 채울 수 있기 때문입니다. 순서가
        중요한 이유는, 이번 프레임의 거절이 이번 프레임의 dt만큼 깎여서는 안 되기
        때문입니다. */
-    if (g_notice_t > 0.0f) g_notice_t -= dt;
+    if (l->door_run.notice_t > 0.0f) l->door_run.notice_t -= dt;
 
     /* --- how many doors are there, really? --------------------------------
-       Two answers, and they are allowed to disagree only because nothing made
-       them agree: `g_n` is how many states door_reset captured, and the level in
-       hand says how many definitions it has. Walking to the larger reads a slot
-       nobody filled in -- a DoorDef past n_doors, or a DoorState past whatever
-       the last reset saw -- so the loops below walk to the smaller and the
-       disagreement is counted rather than absorbed.
-       답이 둘이며, 둘을 일치시킨 것이 없기 때문에만 어긋날 수 있습니다. `g_n`은 door_reset이
-       포착한 상태의 수이고, 손에 든 레벨은 자신의 정의가 몇 개인지 말합니다. 큰 쪽까지
-       순회하면 아무도 채우지 않은 슬롯을 읽게 됩니다(n_doors를 넘은 DoorDef, 또는 마지막
-       reset이 본 것을 넘은 DoorState). 그래서 아래의 루프들은 작은 쪽까지만 돌고, 그 불일치는
-       흡수되지 않고 계수됩니다. */
+       Two answers, and they can still disagree: `door_run.count` is how many
+       states ::door_reset captured, and `n_doors` is how many definitions the
+       level holds. They now live in the same struct, which removes the way they
+       used to disagree -- a state array left over from ANOTHER level -- but not
+       this one: ::level_load clears the count and a caller that never called
+       door_reset arrives here with 0 against a level full of doors.
+       Walking to the larger would read a slot nobody filled in, so the loops
+       below walk to the smaller and the disagreement is counted rather than
+       absorbed.
+       답이 둘이며 여전히 어긋날 수 있습니다. `door_run.count`는 ::door_reset이 포착한 상태의
+       수이고 `n_doors`는 레벨이 담은 정의의 수입니다. 이제 둘은 같은 구조체 안에 있으며, 그것이
+       이전에 둘이 어긋나던 경로(*다른* 레벨에서 남은 상태 배열)를 없앱니다. 그러나 이 경로는
+       남습니다. ::level_load가 개수를 비우므로, door_reset을 부른 적 없는 호출자는 문이 가득 찬
+       레벨에 대해 0을 들고 이곳에 도달합니다. 큰 쪽까지 순회하면 아무도 채우지 않은 슬롯을 읽게
+       되므로, 아래의 루프들은 작은 쪽까지만 돌고 그 불일치는 흡수되지 않고 계수됩니다. */
     int n_level = l->n_doors > LVL_MAX_DOORS ? LVL_MAX_DOORS : l->n_doors;
-    if (n_level != g_n) DIAG(DIAG_DOOR_STALE);
-    int n = n_level < g_n ? n_level : g_n;
+    int n_state = l->door_run.count;
+    if (n_level != n_state) DIAG(DIAG_DOOR_STALE);
+    int n = n_level < n_state ? n_level : n_state;
 
     /* Switch entities, gathered once: a tagged door asks whether anything is
        standing on a switch that names it. Touch-activated, so there is no key

@@ -113,8 +113,8 @@ int main(void) {
         run(3.0f, 0.0f, 2.6f, KEY_NONE);        /* 0.6 m from its edge */
         okf(L.sectors[1].ceil >= 380, "touching it raises the ceiling",
             (float)L.sectors[1].ceil, 400.0f);
-        okf(door_openness(0) >= 0.99f, "and the door reports itself open",
-            door_openness(0), 1.0f);
+        okf(door_openness(&L, 0) >= 0.99f, "and the door reports itself open",
+            door_openness(&L, 0), 1.0f);
     }
 
     /* --- and closes again once you leave -------------------------------- */
@@ -162,9 +162,9 @@ int main(void) {
     {
         build(DOOR_X, 500, 7, KEY_NONE);
         run(3.0f, 0.0f, 2.6f, KEY_NONE);
-        okf(door_openness(0) <= 0.01f,
+        okf(door_openness(&L, 0) <= 0.01f,
             "a tagged door does not open just because you touched it",
-            door_openness(0), 0.0f);
+            door_openness(&L, 0), 0.0f);
 
         /* Give it a switch far from the door, and stand on that instead. */
         Entity *e = &L.ents[L.n_ents++];
@@ -173,8 +173,8 @@ int main(void) {
         e->x = 1500; e->z = 1500;
 
         run(4.0f, 15.0f, 15.0f, KEY_NONE);
-        okf(door_openness(0) >= 0.99f, "and opens when its own switch is touched",
-            door_openness(0), 1.0f);
+        okf(door_openness(&L, 0) >= 0.99f, "and opens when its own switch is touched",
+            door_openness(&L, 0), 1.0f);
     }
 
     /* --- a switch opens only the door that names it ---------------------- */
@@ -199,29 +199,29 @@ int main(void) {
         door_reset(&L);
         run(4.0f, 15.0f, 15.0f, KEY_NONE);
 
-        okf(door_openness(0) >= 0.99f, "switch 7 opens the door tagged 7",
-            door_openness(0), 1.0f);
-        okf(door_openness(1) <= 0.01f, "and leaves the one tagged 9 alone",
-            door_openness(1), 0.0f);
+        okf(door_openness(&L, 0) >= 0.99f, "switch 7 opens the door tagged 7",
+            door_openness(&L, 0), 1.0f);
+        okf(door_openness(&L, 1) <= 0.01f, "and leaves the one tagged 9 alone",
+            door_openness(&L, 1), 0.0f);
     }
 
     /* --- a keyed door refuses, and says which key ------------------------ */
     {
         build(DOOR_UP, 400, 0, KEY_RED);
         run(2.0f, 0.0f, 2.6f, KEY_NONE);
-        okf(door_openness(0) <= 0.01f, "a red door refuses without the red key",
-            door_openness(0), 0.0f);
-        ok(door_refused() == KEY_RED, "and reports which key it wanted");
+        okf(door_openness(&L, 0) <= 0.01f, "a red door refuses without the red key",
+            door_openness(&L, 0), 0.0f);
+        ok(door_refused(&L) == KEY_RED, "and reports which key it wanted");
 
         /* The wrong key is no better than none. */
         run(2.0f, 0.0f, 2.6f, KEY_BLUE);
-        okf(door_openness(0) <= 0.01f, "and the blue key does not open it",
-            door_openness(0), 0.0f);
+        okf(door_openness(&L, 0) <= 0.01f, "and the blue key does not open it",
+            door_openness(&L, 0), 0.0f);
 
         run(3.0f, 0.0f, 2.6f, KEY_RED);
-        okf(door_openness(0) >= 0.99f, "the red key opens it",
-            door_openness(0), 1.0f);
-        ok(door_refused() == KEY_NONE, "and nothing is refused once it is open");
+        okf(door_openness(&L, 0) >= 0.99f, "the red key opens it",
+            door_openness(&L, 0), 1.0f);
+        ok(door_refused(&L) == KEY_NONE, "and nothing is refused once it is open");
     }
 
     /* --- the refusal outlives the frame, and then stops -------------------
@@ -244,7 +244,7 @@ int main(void) {
     {
         build(DOOR_UP, 400, 0, KEY_RED);
         run(0.5f, 0.0f, 2.6f, KEY_NONE);
-        ok(door_notice_key() == KEY_RED,
+        ok(door_notice_key(&L) == KEY_RED,
            "a refusal raises a notice naming the key");
 
         /* Walked away, so nothing re-arms it. One frame later door_refused has
@@ -252,15 +252,15 @@ int main(void) {
            멀어졌으므로 아무것도 다시 채우지 않습니다. 한 프레임 뒤 door_refused는 이미
            조용해졌지만 알림은 아직 남아 있습니다. */
         run(1.0f / 60.0f, 0.0f, 40.0f, KEY_NONE);
-        ok(door_refused() == KEY_NONE,
+        ok(door_refused(&L) == KEY_NONE,
            "which survives the frame door_refused itself does not");
-        ok(door_notice_key() == KEY_RED, "and still names the key a frame later");
+        ok(door_notice_key(&L) == KEY_RED, "and still names the key a frame later");
 
         /* Past its life, still standing well clear. */
         run(DOOR_NOTICE_TIME + 0.2f, 0.0f, 40.0f, KEY_NONE);
-        ok(door_notice_key() == KEY_NONE, "and expires once its time is up");
-        okf(door_notice_left() == 0.0f, "reporting no time left with it",
-            door_notice_left(), 0.0f);
+        ok(door_notice_key(&L) == KEY_NONE, "and expires once its time is up");
+        okf(door_notice_left(&L) == 0.0f, "reporting no time left with it",
+            door_notice_left(&L), 0.0f);
 
         /* Leaning on the door holds it steady rather than letting it blink:
            after far longer than its life, spent entirely against a door that
@@ -268,17 +268,17 @@ int main(void) {
            문에 계속 붙어 있으면 깜빡이지 않고 유지됩니다. 수명보다 훨씬 오래, 계속 거절하는
            문에 붙어서 보낸 뒤에도 여전히 떠 있어야 합니다. */
         run(DOOR_NOTICE_TIME * 3.0f, 0.0f, 2.6f, KEY_NONE);
-        ok(door_notice_key() == KEY_RED,
+        ok(door_notice_key(&L) == KEY_RED,
            "and leaning on a locked door keeps it up rather than blinking");
     }
 
     /* --- the HUD only draws a keycard row where one means something ------- */
     {
         build(DOOR_UP, 400, 0, KEY_RED);
-        ok(door_keys_used() == KEY_RED, "a level's demanded keys are reported");
+        ok(door_keys_used(&L) == KEY_RED, "a level's demanded keys are reported");
 
         build(DOOR_UP, 400, 0, KEY_NONE);
-        ok(door_keys_used() == KEY_NONE,
+        ok(door_keys_used(&L) == KEY_NONE,
            "and a level with no locked door demands none");
     }
 

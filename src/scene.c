@@ -634,7 +634,8 @@ static void ui_end(void) {
     glEnable(GL_CULL_FACE);
 }
 
-void scene_draw_hud(Scene *s, int vw, int vh, const Player *p, const Weapon *w) {
+void scene_draw_hud(Scene *s, int vw, int vh, const Level *l,
+                    const Player *p, const Weapon *w) {
     DIAG_WANT_UI_PASS(post_in_world_pass());
 
     ui_begin(vw, vh);
@@ -753,7 +754,7 @@ void scene_draw_hud(Scene *s, int vw, int vh, const Player *p, const Weapon *w) 
            이 레벨이 요구할 수 있는 종류입니다. 맵이 배치하지 않는 열쇠를 요구하는 문은
            설계 결함이지만, 여기서는 계속 회색인 이름으로 드러나므로 잡동사니가 아니라
            정보입니다. */
-        int wanted = door_keys_used();
+        int wanted = door_keys_used(l);
 
         if (wanted != KEY_NONE) {
             float x = HUD_MARGIN;
@@ -801,7 +802,7 @@ void scene_draw_hud(Scene *s, int vw, int vh, const Player *p, const Weapon *w) 
      * 있기 때문입니다. 마지막 순간에 서서히 사라져 결함이 아니라 주어진 답으로 읽힙니다.
      */
     {
-        int k = door_notice_key();
+        int k = door_notice_key(l);
         if (k != KEY_NONE) {
             char line[48];
             wsprintfA(line, "%s KEYCARD REQUIRED", door_key_name(k));
@@ -812,7 +813,7 @@ void scene_draw_hud(Scene *s, int vw, int vh, const Player *p, const Weapon *w) 
                moment it appears.
                *끝부분*에서만 사라집니다. 수명 전체에 걸쳐 페이드하면 시작부터 흐릿하며,
                가장 필요한 순간은 나타나는 그 순간입니다. */
-            float a = door_notice_left() / HUD_NOTICE_FADE;
+            float a = door_notice_left(l) / HUD_NOTICE_FADE;
             if (a > 1.0f) a = 1.0f;
 
             text_run(s, (vw - lw) * 0.5f, vh * HUD_NOTICE_Y, HUD_NOTICE_SIZE,
@@ -1529,7 +1530,7 @@ void scene_frame(const World *w, Scene *sc, int vw, int vh, int frozen) {
        놓입니다. 둘을 배타적으로 만드는 것이 자명한 단순화처럼 보이지만 틀렸습니다. 그 수치들은
        아래에 정지된 프레임에 속하며, 흐리게 처리하는 것은 그것들을 제거하는 것이 아니라 뒤로
        밀어내는 일입니다. */
-    if (!w->run.title) scene_draw_hud(sc, vw, vh, &w->player, &w->weapon);
+    if (!w->run.title) scene_draw_hud(sc, vw, vh, &w->level, &w->player, &w->weapon);
 
     /* The three end/start screens are mutually exclusive by construction:
        `title` is cleared before a run can begin, and a run that has been won

@@ -657,7 +657,19 @@ static void test_atrium(void) {
        atrium이 광원을 얻는 순간 깨졌습니다. 그것은 결함이 아니라 레벨이 평범한 일을 한
        것입니다. 픽스처가 자랄 때 실패하는 시험은 그것을 읽지 않도록 가르칩니다. */
     check(brush_parse(text, len, &M2) >= 3, "the level's entities parse");
-    checki(M2.n_brushes, 11, "eleven brushes");
+    /* Every brush belongs to exactly one entity, which is a thing that must be
+       true of any .map and stays true when the level grows. The first version
+       named the total, and a trigger volume added later made it wrong without
+       anything being wrong -- the same lesson the door lookup above already
+       carries.
+       모든 브러시는 정확히 하나의 엔티티에 속하며, 이는 어떤 .map에서나 참이어야 하고 레벨이
+       자라도 계속 참입니다. 첫 판본은 총계를 명시했고, 나중에 더해진 트리거 부피가 아무것도
+       잘못되지 않은 채로 그것을 틀리게 만들었습니다. 위의 문 조회가 이미 담고 있는 것과 같은
+       교훈입니다. */
+    int owned = 0;
+    for (int i = 0; i < M2.n_ents; i++) owned += M2.ents[i].n_brushes;
+    checki(owned, M2.n_brushes, "every brush belongs to exactly one entity");
+    check(M2.n_brushes >= 11, "and the room is all there");
 
     const char *cn = brush_ent_value(&M2.ents[0], "classname");
     check(cn && txt_is(cn, 10, "worldspawn"), "entity 0 is worldspawn");

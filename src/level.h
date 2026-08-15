@@ -727,6 +727,49 @@ typedef struct {
     short hurt;
 } Sector;
 
+#define LVL_MAX_TRIGGERS 16   ///< @brief Trigger volumes per level. / 레벨당 트리거 부피 수.
+
+/**
+ * @struct TriggerDef
+ * @brief A volume that fires a tag while something stands in it.
+ *
+ * ENGLISH
+ * -------
+ * The brush model's answer to the sector model's `switch<n>` marker, and the
+ * difference is the shape: a switch is a point with a radius around it, and a
+ * trigger is the space an author drew. A round pad in a corridor and the whole
+ * end of a room are the same entity here and cannot be the same one there.
+ *
+ * ITS BRUSHES ARE NOT SOLID -- see ::Brush::solid. That is the point: a volume
+ * the player walks into is one the player must be able to walk into.
+ *
+ * @note `tag` is a small integer, but nobody types one. The .map links by name
+ *       -- a `trigger_*` names its `target` and a ::DoorDef its `targetname` --
+ *       and ::level_load interns those strings to numbers in the order it meets
+ *       them. Numbers are what the door state machine already compares; names
+ *       are what an editor and every Quake tutorial use.
+ *
+ * 한국어
+ * ------
+ * @brief 무언가가 그 안에 서 있는 동안 태그를 발동시키는 부피입니다.
+ *
+ * 섹터 모델의 `switch<n>` 표식에 대한 브러시 모델의 답이며, 차이는 형태입니다. 스위치는 점과
+ * 그 둘레의 반경이고, 트리거는 제작자가 그린 공간입니다. 복도의 둥근 발판과 방의 한쪽 끝 전체가
+ * 이곳에서는 같은 엔티티이며 그곳에서는 같은 것일 수 없습니다.
+ *
+ * 그 브러시는 고체가 아닙니다. ::Brush::solid를 참조하십시오. 그것이 요점입니다. 플레이어가
+ * 걸어 들어가는 부피는 플레이어가 걸어 들어갈 수 있어야 하는 부피입니다.
+ *
+ * @note `tag`는 작은 정수이지만 아무도 그것을 입력하지 않습니다. .map은 이름으로 연결합니다.
+ *       `trigger_*`가 자신의 `target`을, ::DoorDef가 자신의 `targetname`을 지목하며,
+ *       ::level_load가 그 문자열을 마주친 순서대로 숫자로 사상합니다. 숫자는 문 상태 기계가
+ *       이미 비교하는 것이고, 이름은 에디터와 모든 Quake 강좌가 쓰는 것입니다.
+ */
+typedef struct {
+    short first_brush, n_brushes;  /**< The volume, in ::BrushMap::brushes. / ::BrushMap::brushes 안의 부피. */
+    short tag;                     /**< What it fires; matches ::DoorDef::tag. / 발동시키는 대상. ::DoorDef::tag와 대응합니다. */
+} TriggerDef;
+
 /**
  * @struct Entity
  * @brief A point marker placed in the level: a spawn, a pickup, a monster, an exit.
@@ -887,6 +930,8 @@ typedef struct {
     int     n_lights;                     /**< Number of lights in use. / 사용 중인 광원의 수. */
     DoorDef doors[LVL_MAX_DOORS];         /**< Moving sectors. / 이동하는 섹터. */
     int     n_doors;                      /**< Number of doors in use. / 사용 중인 문의 수. */
+    TriggerDef triggers[LVL_MAX_TRIGGERS];/**< Volumes that fire tags. / 태그를 발동시키는 부피. */
+    int     n_triggers;                   /**< Number of triggers in use. / 사용 중인 트리거의 수. */
     short   start[3];                     /**< x, z, and yaw in millidegrees. / x, z 좌표와 밀리도 단위의 yaw. */
 
     /**

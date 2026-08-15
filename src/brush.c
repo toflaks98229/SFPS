@@ -531,6 +531,11 @@ static int parse_brush(Lex *L, BrushMap *m) {
     Brush *b = &m->brushes[m->n_brushes++];
     b->first_face = (short)first;
     b->n_faces    = (short)count;
+    /* Solid, because a brush is. Whoever knows the brush is a trigger clears
+       it -- see ::Brush::solid.
+       브러시는 고체이므로 고체입니다. 그 브러시가 트리거임을 아는 쪽이 이것을 지웁니다.
+       ::Brush::solid를 참조하십시오. */
+    b->solid = 1;
     /* Invalid until ::finish_bounds computes it, which is the state brush.h
        documents as "no faces bounded this".
        ::finish_bounds가 계산하기 전까지는 유효하지 않으며, 이는 brush.h가 "이것을 둘러싼
@@ -1044,6 +1049,12 @@ void brush_trace(const BrushMap *m, int first, int count,
            않는 벽이 생깁니다. */
         if (b->min.x > b->max.x) continue;
 
+        /* Not solid, not in the way. A trigger volume is a brush the player is
+           meant to walk into.
+           고체가 아니면 앞을 막지 않습니다. 트리거 부피는 플레이어가 걸어 들어가라고 있는
+           브러시입니다. */
+        if (!b->solid) continue;
+
         if (b->max.x < lo.x || b->min.x > hi.x) continue;
         if (b->max.y < lo.y || b->min.y > hi.y) continue;
         if (b->max.z < lo.z || b->min.z > hi.z) continue;
@@ -1311,6 +1322,34 @@ void brush_slide_move(const BrushMap *m, int first, int count,
     }
 
     probe_ground(m, first, count, mv);
+}
+
+int brush_point_in(const BrushMap *m, int first, int count, v3 p) {
+    if (!m) return 0;
+    if (first < 0) first = 0;
+    if (first + count > m->n_brushes) count = m->n_brushes - first;
+
+    for (int i = first; i < first + count; i++) {
+        const Brush *b = &m->brushes[i];
+        if (b->n_faces < 4) continue;
+        if (b->min.x > b->max.x) continue;
+
+        /* The box first, four compares against numbers already stored, exactly
+           as the sweep does -- most of a level is nowhere near any one point.
+           스윕과 똑같이 박스를 먼저 봅니다. 이미 저장된 숫자에 대한 비교 몇 번이며, 레벨의
+           대부분은 어떤 한 점 근처에도 없습니다. */
+        if (p.x < b->min.x || p.x > b->max.x) continue;
+        if (p.y < b->min.y || p.y > b->max.y) continue;
+        if (p.z < b->min.z || p.z > b->max.z) continue;
+
+        int inside = 1;
+        for (int f = 0; f < b->n_faces && inside; f++) {
+            const BrushFace *fc = &m->faces[b->first_face + f];
+            if (v3dot(fc->normal, p) - fc->dist > 0.0f) inside = 0;
+        }
+        if (inside) return 1;
+    }
+    return 0;
 }
 
 void brush_translate(BrushMap *m, int first, int count, v3 delta) {

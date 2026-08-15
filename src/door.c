@@ -657,6 +657,25 @@ int door_update(Level *l, v3 player_pos, int keys, float dt) {
             if (l->doors[i].tag == tag) touched_tag[i] = 1;
     }
 
+    /* Trigger VOLUMES, which is the brush model's shape for the same idea. A
+       switch is a point with a radius around it and a trigger is the space
+       somebody drew, so the test is "inside" rather than "within". Their
+       brushes are not solid -- that is what lets the player be inside one --
+       which is exactly why this asks ::brush_point_in and not the sweep.
+       트리거 *부피*이며, 같은 개념에 대한 브러시 모델의 형태입니다. 스위치는 점과 그 둘레의
+       반경이고 트리거는 누군가 그린 공간이므로, 판정은 "이내"가 아니라 "안"입니다. 그
+       브러시는 고체가 아니고 그것이 플레이어가 안에 있을 수 있게 하는 것이며, 그래서 이곳은
+       스윕이 아니라 ::brush_point_in에 묻습니다. */
+    if (l->brushes) {
+        for (int t = 0; t < l->n_triggers; t++) {
+            const TriggerDef *tr = &l->triggers[t];
+            if (!brush_point_in(l->brushes, tr->first_brush, tr->n_brushes,
+                                player_pos)) continue;
+            for (int i = 0; i < n; i++)
+                if (l->doors[i].tag == tr->tag) touched_tag[i] = 1;
+        }
+    }
+
     for (int i = 0; i < n; i++)
         if (door_step_one(l, i, player_pos, keys, touched_tag[i], dt))
             moved = 1;

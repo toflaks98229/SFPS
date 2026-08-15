@@ -206,8 +206,36 @@
 }
 // entity 2 -- the door leaf. Its own brush, which is the whole of "a door is a
 // group of brushes that moves".
+// A red keycard, so the door below has something to demand.
+{
+"classname" "item_redkey"
+"origin" "-192 -192 24"
+}
+// A trigger volume in front of the door: a brush entity, textured `trigger`,
+// whose brushes level.c marks not-solid so the player can stand in it. It is
+// linked to the door by NAME -- `target` here, `targetname` there -- which is
+// Quake's idiom; level.c interns the pair to the number door.c compares.
+//
+// 문 앞의 트리거 부피입니다. `trigger`로 텍스처된 브러시 엔티티이며, level.c가 그 브러시를
+// 고체가 아닌 것으로 표시해 플레이어가 그 안에 설 수 있습니다. 문과는 *이름*으로 연결됩니다.
+// 이곳의 `target`과 저곳의 `targetname`이며 Quake의 어법입니다. level.c가 그 쌍을 door.c가
+// 비교하는 숫자로 사상합니다.
+{
+"classname" "trigger_multiple"
+"target" "northdoor"
+{
+( -96 160 96 ) ( -96 256 96 ) ( 96 256 96 ) trigger [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -96 160 0 ) ( 96 160 0 ) ( 96 256 0 ) trigger [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1
+( -96 256 96 ) ( -96 160 96 ) ( -96 160 0 ) trigger [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 96 160 96 ) ( 96 256 96 ) ( 96 256 0 ) trigger [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 96 160 0 ) ( -96 160 0 ) ( -96 160 96 ) trigger [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( -96 256 0 ) ( 96 256 0 ) ( 96 256 96 ) trigger [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+}
 {
 "classname" "func_door"
+"targetname" "northdoor"
+"key" "red"
 "angle" "-1"
 "speed" "100"
 // brush 0

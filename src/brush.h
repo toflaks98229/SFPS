@@ -462,6 +462,54 @@ typedef struct {
 typedef struct {
     short first_face;   /**< Index into ::BrushMap::faces. / ::BrushMap::faces의 인덱스. */
     short n_faces;      /**< How many faces from there. / 그곳부터의 면 개수. */
+
+    /**
+     * @brief Non-zero when this brush stops things. Every brush starts solid.
+     *
+     * ENGLISH
+     * -------
+     * A TRIGGER IS A SHAPE, NOT A WALL. It has to be a brush, because what it
+     * asks is "is the player in here" and that is a question about a volume --
+     * but a volume you can walk into is a volume that must not stop you.
+     *
+     * SET BY WHOEVER KNOWS WHAT THE BRUSH IS FOR, which is not this module.
+     * ::brush_parse makes every brush solid because a brush is solid; level.c
+     * clears it for the ones a `trigger_*` entity owns, because level.c is
+     * where classnames mean something. brush.c still does not know what a
+     * trigger is -- it knows that some brushes are not solid, which is a fact
+     * about geometry.
+     *
+     * @note ::brush_point_in ignores this, and has to: the trigger test is
+     *       exactly the question "is the point inside this non-solid volume".
+     * @warning Zeroed memory means NOT solid, which is the opposite of the
+     *          default everywhere else here. A ::BrushMap is only ever filled
+     *          by ::brush_parse, which sets it -- but a hand-assembled brush
+     *          would be walked through, so anything that builds one by hand
+     *          must set it.
+     *
+     * 한국어
+     * ------
+     * @brief 이 브러시가 무언가를 막으면 0이 아닙니다. 모든 브러시는 고체로 시작합니다.
+     *
+     * 트리거는 벽이 아니라 형태입니다. 브러시여야만 하는 이유는 그것이 묻는 것이 "플레이어가
+     * 이 안에 있는가"이고 그것은 부피에 대한 질문이기 때문입니다. 그러나 걸어 들어갈 수 있는
+     * 부피는 걸음을 막아서는 안 되는 부피입니다.
+     *
+     * 이 브러시가 무엇을 위한 것인지 아는 쪽이 설정하며, 그것은 이 모듈이 아닙니다.
+     * ::brush_parse는 브러시가 고체이므로 모든 브러시를 고체로 만들고, level.c가 `trigger_*`
+     * 엔티티가 소유한 것들에 대해 그것을 지웁니다. classname이 의미를 갖는 곳이 level.c이기
+     * 때문입니다. brush.c는 여전히 트리거가 무엇인지 모릅니다. 어떤 브러시는 고체가 아니라는
+     * 것을 알 뿐이며, 그것은 기하에 관한 사실입니다.
+     *
+     * @note ::brush_point_in은 이것을 무시하며 그래야 합니다. 트리거 판정이 곧 "점이 이
+     *       고체가 아닌 부피 안에 있는가"라는 질문이기 때문입니다.
+     * @warning 0으로 초기화된 메모리는 고체가 *아님*을 뜻하며, 이곳 다른 모든 것의 기본값과
+     *          반대입니다. ::BrushMap은 오직 ::brush_parse만이 채우고 그것이 이 값을
+     *          설정하지만, 손으로 조립한 브러시는 통과되므로 그런 것을 만드는 쪽은 반드시 이
+     *          값을 설정해야 합니다.
+     */
+    short solid;
+
     v3    min, max;     /**< Bounding box in world units. Derived. / 월드 단위 바운딩 박스. 파생값. */
 } Brush;
 
@@ -1045,6 +1093,45 @@ void brush_slide_move(const BrushMap *m, int first, int count,
  *          놓친 호출자는 문을 한 프레임씩 레벨 밖으로 걸어 나가게 합니다.
  */
 void brush_translate(BrushMap *m, int first, int count, v3 delta);
+
+/**
+ * @brief Whether a point is inside any brush of a run, solid or not.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] m     The map.
+ * @param[in] first First brush to test.
+ * @param[in] count How many brushes from there.
+ * @param[in] p     The point, in world units.
+ * @return 1 when `p` is inside one of them.
+ *
+ * IGNORES ::Brush::solid, which is the whole reason it is a separate call from
+ * a zero-length ::brush_trace. A trigger's brushes are not solid precisely so
+ * the player can walk into them, and "the player walked into it" is the only
+ * question a trigger asks -- a query that skipped them would never fire one.
+ *
+ * @note A POINT, not the player's box. A trigger volume an author drew to be
+ *       stood in is one whose edges they placed; catching the player when a
+ *       corner of their bounding box clips it would fire triggers from outside
+ *       the shape on screen. Quake tests the box; this tests the point, because
+ *       the point is where the player is.
+ *
+ * 한국어
+ * ------
+ * @brief 점이 구간 안의 어떤 브러시 안에 있는지 여부이며, 고체인지는 상관하지 않습니다.
+ * @return `p`가 그중 하나의 안에 있으면 1.
+ *
+ * ::Brush::solid를 무시하며, 그것이 길이 0인 ::brush_trace와 별도의 호출인 이유 전부입니다.
+ * 트리거의 브러시가 고체가 아닌 것은 바로 플레이어가 걸어 들어갈 수 있게 하기 위함이고,
+ * "플레이어가 들어왔다"가 트리거가 묻는 유일한 질문입니다. 그것을 건너뛰는 질의는 결코 트리거를
+ * 발동시키지 못합니다.
+ *
+ * @note 플레이어의 상자가 아니라 *점*입니다. 제작자가 그 안에 서라고 그린 트리거 부피는 그
+ *       사람이 모서리를 놓은 부피입니다. 플레이어 바운딩 박스의 모퉁이가 스칠 때 잡으면 화면 속
+ *       형태 바깥에서 트리거가 발동합니다. Quake는 상자를 판정하고 이곳은 점을 판정합니다.
+ *       플레이어가 있는 곳이 그 점이기 때문입니다.
+ */
+int brush_point_in(const BrushMap *m, int first, int count, v3 p);
 
 /**
  * @brief The polygon one face bounds, in world units.

@@ -274,14 +274,26 @@ void level_grid_build(Level *l) {
  * 담고 있으며, 예순네 개의 섹터를 0으로 채운 뒤 쓰이는 것만 덮어쓰는 일은 어떤 프레임도
  * 필요로 하지 않기 때문입니다.
  */
+/* EVERY COUNT, and the omission is the failure this function exists to
+   prevent. n_triggers was added and not cleared here, so a Level loaded twice
+   kept the first load's triggers and appended the second's -- and because a
+   Level is normally a long-lived static reloaded per level, that is the common
+   path rather than an edge case. The symptom was a trigger count that grew by
+   one every time the level was opened.
+   모든 개수이며, 빠뜨리는 것이 바로 이 함수가 막으려고 존재하는 실패입니다. n_triggers가
+   추가되고 이곳에서 지워지지 않아, 두 번 로드된 Level이 첫 로드의 트리거를 유지한 채 두 번째
+   것을 덧붙였습니다. Level은 보통 레벨마다 다시 읽히는 오래 사는 정적 변수이므로, 그것은
+   예외가 아니라 일상적인 경로입니다. 증상은 레벨을 열 때마다 하나씩 늘어나는 트리거 수였습니다. */
 static void level_clear(Level *out) {
-    out->n_sectors = 0;
-    out->n_ents    = 0;
-    out->n_lights  = 0;
-    out->n_doors   = 0;
-    out->name[0]   = 0;
-    out->next[0]   = 0;
-    out->start[0]  = out->start[1] = out->start[2] = 0;
+    out->n_sectors  = 0;
+    out->n_ents     = 0;
+    out->n_lights   = 0;
+    out->n_doors    = 0;
+    out->n_triggers = 0;
+    out->name[0]    = 0;
+    out->next[0]    = 0;
+    out->start[0]   = out->start[1] = out->start[2] = 0;
+    out->start_h    = 0;
 }
 
 /**
@@ -1004,7 +1016,116 @@ static void brush_lights_of(Level *out, const BrushMap *bm) {
  * 문의 크기를 바꾼 제작자는 두 번째 숫자를 고치지 않고도 옳은 이동 거리를 얻으며, 그 두 번째
  * 숫자야말로 낡아 버리는 종류의 숫자입니다.
  */
-static void brush_doors_of(Level *out, const BrushMap *bm) {
+/**
+ * Names, interned to the small numbers the door state machine compares.
+ *
+ * ENGLISH
+ * -------
+ * A .map links by name: a trigger names its `target`, a door its `targetname`,
+ * and the two match when the strings do. ::DoorDef::tag is a number because
+ * that is what door.c has always compared and there is no reason to make it
+ * carry strings -- so the names are turned into numbers here, in the order they
+ * are first met.
+ *
+ * ORDER OF FIRST APPEARANCE, deliberately, rather than a hash. Two names that
+ * hashed alike would silently wire a trigger to the wrong door, and a hash
+ * needs a width chosen against a collision rate nobody can measure from inside
+ * one level. Sixteen names is the cap, which is ::LVL_MAX_DOORS, because a name
+ * that no door answers to has nothing to fire.
+ *
+ * 한국어
+ * ------
+ * 이름을 문 상태 기계가 비교하는 작은 숫자로 사상합니다.
+ *
+ * .map은 이름으로 연결합니다. 트리거가 자신의 `target`을, 문이 자신의 `targetname`을
+ * 지목하며, 문자열이 일치하면 둘이 대응합니다. ::DoorDef::tag가 숫자인 이유는 door.c가 늘
+ * 비교해 온 것이 숫자이고 그것에 문자열을 지우게 할 이유가 없기 때문입니다. 그래서 이름은
+ * 이곳에서 숫자가 되며, 처음 마주친 순서를 따릅니다.
+ *
+ * 해시가 아니라 처음 등장한 순서인 것은 의도적입니다. 같은 값으로 해시되는 두 이름은 트리거를
+ * 조용히 엉뚱한 문에 연결하며, 해시는 레벨 하나 안에서는 아무도 잴 수 없는 충돌률에 맞춰 폭을
+ * 골라야 합니다. 상한은 이름 열여섯 개이고 이는 ::LVL_MAX_DOORS입니다. 어떤 문도 응답하지 않는
+ * 이름에는 발동시킬 것이 없기 때문입니다.
+ */
+typedef struct {
+    char names[LVL_MAX_DOORS][BR_VAL];
+    int  n;
+} TagPool;
+
+static int tag_for(TagPool *tp, const char *name) {
+    if (!name || !name[0]) return 0;          /* unnamed: opens on touch */
+
+    for (int i = 0; i < tp->n; i++) {
+        int k = 0;
+        while (tp->names[i][k] && tp->names[i][k] == name[k]) k++;
+        if (!tp->names[i][k] && !name[k]) return i + 1;
+    }
+    if (tp->n >= LVL_MAX_DOORS) { DIAG(DIAG_DOOR_CAP); return 0; }
+
+    txt_copy(tp->names[tp->n], BR_VAL, name, -1);
+    return ++tp->n;                            /* tags are 1-based; 0 is "none" */
+}
+
+/* `key red`, or the mask an editor's dropdown writes. Both spellings, because
+   the .map is read by a person as often as by TrenchBroom and `1` says
+   nothing at all.
+   `key red`이거나 에디터의 드롭다운이 쓰는 마스크입니다. 두 표기를 모두 받는 이유는 .map을
+   TrenchBroom만큼이나 사람이 자주 읽고, `1`은 아무것도 말해 주지 않기 때문입니다. */
+static int key_for(const BrushEnt *e) {
+    const char *v = brush_ent_value(e, "key");
+    if (!v || !v[0]) return KEY_NONE;
+
+    if (v[0] >= '0' && v[0] <= '9') {
+        int m = 0;
+        for (int i = 0; v[i] >= '0' && v[i] <= '9'; i++) m = m * 10 + (v[i] - '0');
+        return m & (KEY_RED | KEY_BLUE | KEY_YELLOW);
+    }
+    if (txt_is(v, 3, "red"))    return KEY_RED;
+    if (txt_is(v, 4, "blue"))   return KEY_BLUE;
+    if (txt_is(v, 6, "yellow")) return KEY_YELLOW;
+    return KEY_NONE;
+}
+
+/**
+ * `trigger_*` entities: their brushes stop being solid and become a volume.
+ *
+ * ENGLISH: The classname prefix is all that is read, so `trigger_multiple` and
+ * `trigger_once` both arrive here -- this engine has no notion of a trigger
+ * that fires only once, and a door that reopens is closer to what the name
+ * `trigger_once` promises than refusing to load it would be.
+ *
+ * 한국어: classname 접두사만 읽으므로 `trigger_multiple`과 `trigger_once`가 모두 이곳에
+ * 도착합니다. 이 엔진에는 한 번만 발동하는 트리거라는 개념이 없으며, 다시 열리는 문이
+ * `trigger_once`라는 이름이 약속하는 것에 더 가깝습니다. 로드를 거부하는 것보다는 그렇습니다.
+ */
+static void brush_triggers_of(Level *out, BrushMap *bm, TagPool *tp) {
+    for (int i = 0; i < bm->n_ents; i++) {
+        const BrushEnt *e = &bm->ents[i];
+        const char *cn = brush_ent_value(e, "classname");
+        if (!cn) continue;
+
+        static const char PRE[] = "trigger_";
+        int n = 0;
+        while (PRE[n] && cn[n] == PRE[n]) n++;
+        if (PRE[n]) continue;
+        if (e->n_brushes < 1) continue;
+
+        /* Walked into, not bumped into. Cleared before anything can trace
+           against them, which is why this runs at load and not on first touch.
+           부딪히는 것이 아니라 걸어 들어가는 것입니다. 무엇도 그것에 대해 판정하기 전에
+           지웁니다. 이것이 첫 접촉이 아니라 로드 시점에 실행되는 이유입니다. */
+        for (int k = 0; k < e->n_brushes; k++)
+            bm->brushes[e->first_brush + k].solid = 0;
+
+        if (out->n_triggers >= LVL_MAX_TRIGGERS) { DIAG(DIAG_ENT_CAP); continue; }
+        TriggerDef *t = &out->triggers[out->n_triggers++];
+        t->first_brush = (short)e->first_brush;
+        t->n_brushes   = (short)e->n_brushes;
+        t->tag         = (short)tag_for(tp, brush_ent_value(e, "target"));
+    }
+}
+
+static void brush_doors_of(Level *out, const BrushMap *bm, TagPool *tp) {
     for (int i = 0; i < bm->n_ents; i++) {
         const BrushEnt *e = &bm->ents[i];
         const char *cn = brush_ent_value(e, "classname");
@@ -1033,8 +1154,12 @@ static void brush_doors_of(Level *out, const BrushMap *bm) {
         d->sector      = -1;
         d->first_brush = (short)e->first_brush;
         d->n_brushes   = (short)e->n_brushes;
-        d->tag         = 0;                      /* triggers are entities, step 4 */
-        d->key         = KEY_NONE;
+        /* Named, so a trigger can reach it. An unnamed door opens on touch,
+           which is what door.c already does when the tag is zero.
+           이름이 있으면 트리거가 닿을 수 있습니다. 이름 없는 문은 접촉으로 열리며, 태그가
+           0일 때 door.c가 이미 하는 일입니다. */
+        d->tag         = (short)tag_for(tp, brush_ent_value(e, "targetname"));
+        d->key         = (short)key_for(e);
 
         float ang  = brush_ent_num(e, "angle", -1.0f);
         float span;
@@ -1156,7 +1281,19 @@ static int load_brush_level(const char *name, Level *out) {
     copy_name(out->name, sizeof(out->name), name, -1);
     brush_start_of(out, bm);
     brush_lights_of(out, bm);
-    brush_doors_of(out, bm);
+
+    /* Triggers before doors, so a trigger's `target` is interned first and a
+       door's `targetname` finds the number already assigned. Either order
+       works -- the pool is order-of-first-appearance and both sides go through
+       it -- but reading the thing that POINTS before the thing pointed at is
+       the order somebody tracing the link would take.
+       문보다 트리거를 먼저 봅니다. 트리거의 `target`이 먼저 사상되고 문의 `targetname`이
+       이미 배정된 숫자를 찾도록 하기 위함입니다. 어느 순서든 동작합니다. 풀은 처음 등장한
+       순서를 따르고 양쪽 모두 그것을 거칩니다. 다만 *가리키는* 것을 가리켜지는 것보다 먼저
+       읽는 것이 그 연결을 따라가는 사람이 택할 순서입니다. */
+    TagPool tags = {0};
+    brush_triggers_of(out, bm, &tags);
+    brush_doors_of(out, bm, &tags);
     brush_ents_of(out, bm);
     return 1;
 }

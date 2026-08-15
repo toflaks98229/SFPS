@@ -866,14 +866,18 @@ static void test_door(void) {
     check(level_trace(&LV, THROUGH_FROM, dir, 6.0f, &t, &n),
           "closed, a shot into the doorway is stopped");
 
-    /* Standing in front of it opens it. The player position is what
-       door_update takes; no key, no switch -- atrium's door is a plain one. */
-    v3 at_door = v3f(0.0f, 0.0f, -7.0f);
+    /* Standing in the trigger volume with the card. atrium's door is tagged
+       and locked -- what it takes to open is test_trigger_and_key's subject;
+       this one is about what MOVES once it does.
+       카드를 들고 트리거 부피 안에 섭니다. atrium의 문은 태그가 있고 잠겨 있습니다. 무엇이
+       그것을 열게 하는지는 test_trigger_and_key의 주제이고, 이 시험은 열린 뒤에 무엇이
+       *움직이는지*에 관한 것입니다. */
+    v3 at_door = v3f(0.0f, 1.7f, -6.5f);
     float y_closed = LV.brushes->brushes[d->first_brush].min.y;
     for (int i = 0; i < 300 && door_openness(0) < 0.999f; i++)
-        door_update(&LV, at_door, KEY_NONE, DT);
+        door_update(&LV, at_door, KEY_RED, DT);
 
-    checkf(door_openness(0), 1.0f, 0.001f, "standing at it, the door opens");
+    checkf(door_openness(0), 1.0f, 0.001f, "standing in its trigger, the door opens");
 
     float y_open = LV.brushes->brushes[d->first_brush].min.y;
     check(y_open > y_closed + 3.0f, "and the leaf's brush actually moved up");
@@ -890,9 +894,9 @@ static void test_door(void) {
        by a fraction each cycle would seal a doorway after enough of them.
        다시 닫히면 파일이 그린 자리로 돌아갑니다. 주기마다 조금씩 밀리는 문은 충분히 많은
        주기 뒤에 출입구를 막아 버립니다. */
-    v3 far_away = v3f(0.0f, 0.0f, 6.0f);
+    v3 far_away = v3f(0.0f, 1.7f, 6.0f);
     for (int i = 0; i < 900 && door_openness(0) > 0.001f; i++)
-        door_update(&LV, far_away, KEY_NONE, DT);
+        door_update(&LV, far_away, KEY_RED, DT);
     checkf(door_openness(0), 0.0f, 0.001f, "walking away closes it");
     checkf(LV.brushes->brushes[d->first_brush].min.y, y_closed, 0.01f,
            "and the leaf is back where the .map drew it");
@@ -1030,6 +1034,93 @@ static void test_entities(void) {
     check(enemy_count(&PL) == settled, "a minute later it has made nothing more");
 }
 
+/* --- a locked door, and a volume that opens it ----------------------------
+ *
+ * Two things the sector model expressed and the brush model had to grow back.
+ * The key is the same idea in both -- a mask the door demands and the player
+ * either holds or does not. The trigger is not: a `switch<n>` is a point with a
+ * radius round it and a `trigger_multiple` is the space somebody drew, and the
+ * second is why a trigger's brushes must not be solid.
+ *
+ * 섹터 모델이 표현하던 것 중 브러시 모델이 되찾아야 했던 두 가지입니다. 열쇠는 양쪽에서 같은
+ * 개념입니다. 문이 요구하는 마스크이고 플레이어는 그것을 지녔거나 지니지 않았습니다. 트리거는
+ * 다릅니다. `switch<n>`은 점과 그 둘레의 반경이고 `trigger_multiple`은 누군가 그린 공간이며,
+ * 그 두 번째가 트리거의 브러시가 고체여서는 안 되는 이유입니다.
+ */
+static void test_trigger_and_key(void) {
+    printf("\na locked door, and a volume that opens it\n");
+
+    if (!level_load("atrium", &LV) || !LV.brushes) {
+        printf("  no atrium.map\n"); fails++; return;
+    }
+    check(LV.n_doors == 1,    "the door is still there");
+    check(LV.n_triggers == 1, "and now a trigger volume beside it");
+    if (LV.n_doors != 1 || LV.n_triggers != 1) return;
+
+    const DoorDef *d  = &LV.doors[0];
+    const TriggerDef *t = &LV.triggers[0];
+    check(d->key == KEY_RED, "`key red` became the red mask");
+    check(d->tag > 0,        "and the door carries a tag from its targetname");
+    check(t->tag == d->tag,  "which is the number the trigger's target became");
+
+    /* NOT SOLID, which is the whole of why a trigger can be a brush. A sweep
+       across the doorway must meet the door and nothing else. */
+    for (int k = 0; k < t->n_brushes; k++)
+        check(!LV.brushes->brushes[t->first_brush + k].solid,
+              "the trigger's brushes are not solid");
+
+    /* The player stands in it. door_update is given the EYE, so the volume has
+       to contain that -- a trigger drawn only ankle-deep would never fire. */
+    v3 in_volume  = v3f(0.0f, 1.7f, -6.5f);
+    v3 out_volume = v3f(0.0f, 1.7f,  4.0f);
+    check(brush_point_in(LV.brushes, t->first_brush, t->n_brushes, in_volume),
+          "and the player standing in front of the door is inside it");
+    check(!brush_point_in(LV.brushes, t->first_brush, t->n_brushes, out_volume),
+          "and across the room is not");
+
+    /* Walking into it without the key: refused, and the door does not budge. */
+    door_reset(&LV);
+    for (int i = 0; i < 120; i++) door_update(&LV, in_volume, KEY_NONE, DT);
+    checkf(door_openness(0), 0.0f, 0.001f, "with no key it stays shut");
+    check(door_refused() == KEY_RED, "and says which card it wanted");
+
+    /* A TAGGED DOOR IGNORES BEING TOUCHED. Standing against the leaf itself,
+       outside the trigger, must do nothing -- otherwise the trigger is
+       decoration and every tagged door in the level opens by leaning on it.
+       태그가 있는 문은 접촉을 무시합니다. 트리거 바깥에서 문짝 자체에 붙어 서 있는 것은
+       아무 일도 하지 말아야 합니다. 그러지 않으면 트리거는 장식이고 레벨의 모든 태그 달린
+       문이 기대는 것만으로 열립니다. */
+    door_reset(&LV);
+    v3 at_leaf = v3f(0.0f, 1.7f, -8.2f);
+    check(!brush_point_in(LV.brushes, t->first_brush, t->n_brushes, at_leaf),
+          "fixture: the leaf itself is outside the trigger");
+    for (int i = 0; i < 120; i++) door_update(&LV, at_leaf, KEY_RED, DT);
+    checkf(door_openness(0), 0.0f, 0.001f,
+           "touching a tagged door does not open it");
+
+    /* In the volume, with the card: it opens. */
+    door_reset(&LV);
+    for (int i = 0; i < 300 && door_openness(0) < 0.999f; i++)
+        door_update(&LV, in_volume, KEY_RED, DT);
+    checkf(door_openness(0), 1.0f, 0.001f, "in the volume with the card, it opens");
+
+    /* And the player can be in there at all, which they could not be if the
+       trigger's brushes had stayed solid. */
+    BrushMove mv = mover(v3f(0.0f, BRUSH_SKIN, -4.0f), v3f(0, 0, -4.0f), PLAYER_STEP);
+    brush_slide_move(LV.brushes, 0, LV.brushes->n_brushes, &mv, 0.8f);
+    check(mv.pos.z < -6.5f, "and walks into the trigger rather than off it");
+
+    /* The keycard is in the level for the player to find. */
+    Pools zero = {0};
+    PL = zero;
+    pickup_reset(&PL);
+    pickup_spawn_level(&PL, &LV);
+    int reds = 0;
+    for (int i = 0; i < pickup_count(&PL); i++)
+        if (pickup_at(&PL, i)->kind == PK_KEY0 + 0) reds++;
+    check(reds == 1, "and the red card is somewhere to be picked up");
+}
+
 int main(void) {
     printf("tracetest\n");
     build();
@@ -1053,6 +1144,7 @@ int main(void) {
     test_level_on_map();
     test_door();
     test_entities();
+    test_trigger_and_key();
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall trace checks passed\n", fails);
     return fails != 0;

@@ -35,6 +35,30 @@
     ]
     speed(integer) : "Units per second" : 100
     lip(integer) : "Units left behind" : 8
+    targetname(target_source) : "Name a trigger can point at"
+    key(choices) : "Keycard it demands" : 0 =
+    [
+        0 : "none"
+        1 : "red"
+        2 : "blue"
+        4 : "yellow"
+    ]
+]
+
+// A volume, not a wall: level.c marks a trigger's brushes not-solid so the
+// player can stand in one. Texture them `trigger` and the editor greys them
+// out. Linked to what it fires by name -- `target` here, `targetname` there.
+//
+// There is no once-only trigger in this engine, so trigger_once loads as a
+// trigger_multiple. A door that reopens is nearer what the name promises than
+// refusing the map would be.
+@SolidClass color(220 220 60) = trigger_multiple : "Fires its target while something stands in it."
+[
+    target(target_destination) : "What it opens"
+]
+@SolidClass color(220 220 60) = trigger_once : "Same, and this engine does not forget."
+[
+    target(target_destination) : "What it opens"
 ]
 
 // A point light. `light` is Quake's brightness and this engine reads it as

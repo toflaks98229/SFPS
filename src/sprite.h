@@ -47,6 +47,65 @@
    샘플링하면 작가가 그리지 않은 디테일을 지어내게 되기 때문입니다. tex.c의 버퍼는
    256이며 이것을 두 번 반복하는데, 타일 수가 정수이므로 이음매가 없습니다. 256을 나누어
    떨어지지 않는 크기는 게임의 모든 벽에 눈에 보이는 이음매를 남깁니다. */
+/**
+ * @brief The most colours one drawing's palette may hold.
+ *
+ * ENGLISH
+ * -------
+ * WAS SIXTEEN, AND SIXTEEN WAS THE CODEC rather than a choice: the packed form
+ * put three 4-bit indices into two characters, so a seventeenth colour had
+ * nowhere to go. That was fine for the creatures, which are dithered and drawn
+ * at 64x96, and it was quietly throwing away the wall art -- measured, the
+ * eight imported walls carry 15, 15, 15, 21, 22, 40, 41 and 51 distinct
+ * colours, so five of them were being crushed.
+ *
+ * 256 because an index then fits a byte and the `q` form spends two characters
+ * on one. Measured end to end on the shipped binary, in the order the two
+ * changes landed:
+ *
+ *     357,888   before
+ *     361,472   +3,584  median cut fixed (see bake.ps1: the cut could land on
+ *                       Count and split a box into itself, so fifteen slots
+ *                       were only ever yielding about eight colours)
+ *     374,784  +13,312  walls widened to 255 slots
+ *
+ * Thirteen kilobytes for every colour the artist drew, and the floppy is still
+ * three quarters empty.
+ *
+ * @note A drawing that fits in sixteen is still emitted the old way, so
+ *       wall_plain, wall_stone and wall_track keep the narrow `p` encoding.
+ *       Their BYTES still moved, and so did every creature and pickup: the
+ *       median-cut fix changed which colours a 15-slot palette holds. bake.ps1
+ *       chooses the encoding per group; see its note on palette budgets.
+ *
+ * 한국어
+ * ------
+ * @brief 하나의 그림 팔레트가 담을 수 있는 최대 색 수입니다.
+ *
+ * 16이었고, 그 16은 선택이 아니라 *코덱*이었습니다. 압축 형식이 4비트 인덱스 셋을 두 문자에
+ * 담았으므로 열일곱 번째 색은 갈 곳이 없었습니다. 디더링되어 64x96으로 그려지는 생물에게는
+ * 문제가 없었지만, 벽 아트는 조용히 버려지고 있었습니다. 실측하면 가져온 벽 여덟 장이 각각
+ * 15, 15, 15, 21, 22, 40, 41, 51개의 색을 지니므로 그중 다섯 장이 깎이고 있었습니다.
+ *
+ * 256인 이유는 그러면 인덱스가 한 바이트에 들어가고 `q` 형식이 하나에 두 문자를 쓰기
+ * 때문입니다. 배포 바이너리에서 끝에서 끝까지, 두 변경이 들어간 순서대로 실측한 값입니다.
+ *
+ *     357,888   이전
+ *     361,472   +3,584  중앙절단 수정 (bake.ps1 참조. cut이 Count에 놓여 상자가 자기
+ *                       자신으로 쪼개질 수 있었고, 그래서 15칸이 실제로는 여덟 색쯤만
+ *                       내놓고 있었습니다)
+ *     374,784  +13,312  벽을 255칸으로 넓힘
+ *
+ * 화가가 그린 모든 색에 13킬로바이트이고, 플로피는 여전히 4분의 3이 비어 있습니다.
+ *
+ * @note 16에 들어가는 그림은 여전히 예전 방식으로 나가므로 wall_plain, wall_stone,
+ *       wall_track은 좁은 `p` 인코딩을 유지합니다. 그러나 그것들의 *바이트*는 움직였고,
+ *       생물과 아이템도 마찬가지입니다. 중앙절단 수정이 15칸 팔레트가 담는 색을
+ *       바꾸었기 때문입니다. bake.ps1이 그룹마다 인코딩을 고릅니다. 그곳의 팔레트 예산
+ *       설명을 참조하십시오.
+ */
+#define SPR_PAL_MAX 256
+
 #define SPR_WALL 128
 
 #define PK_CW 48            ///< @brief Pickup cell width, pixels. / 아이템 셀의 너비 (픽셀).

@@ -865,12 +865,12 @@ static int b64val(char c) {
  * @return 진행된 커서. 개수를 읽지 못하면 널이며, 기존 루프의 `break`와 같이 파싱을
  *         중단시킵니다.
  */
-static const char *parse_palette(const char *p, unsigned char pal[16][3], int *n_pal) {
+static const char *parse_palette(const char *p, unsigned char pal[SPR_PAL_MAX][3], int *n_pal) {
     int len;
     int ok = 1;
     p = txt_read_int(p, n_pal, &ok);
     if (!ok) return 0;
-    if (*n_pal > 16) *n_pal = 16;
+    if (*n_pal > SPR_PAL_MAX) *n_pal = SPR_PAL_MAX;
     for (int i = 0; i < *n_pal; i++) {
         const char *h = txt_token(p, &len);
         if (!h || len < 6) { i = *n_pal; break; }
@@ -933,9 +933,12 @@ typedef struct {
  * -------
  * @param[in] data   The encoded run, base64-ish.
  * @param[in] len    Its length in characters.
- * @param[in] is_rle Non-zero for `r` (run-length), zero for `p` (packed).
+ * @param[in] is_rle Non-zero for `r` (run-length).
+ * @param[in] is_wide Non-zero for `q` (one 8-bit index per two characters).
+ *                    Neither set is `p`, three 4-bit indices per two.
+ * @param[in] n_pal  How many entries @p pal actually holds.
  * @param[in] t      Where it lands; see ::SprTarget.
- * @param[in] pal    The 16-entry table indices refer into.
+ * @param[in] pal    The table indices refer into, up to ::SPR_PAL_MAX entries.
  *
  * @note THE TWO ENCODINGS SHARE THE RUN LOOP. `r` emits a count and an index;
  *       `p` emits one pixel per turn and holds the other two of its packed
@@ -947,16 +950,21 @@ typedef struct {
  * @brief 그림 하나의 픽셀 스트림을 아틀라스로 디코드합니다.
  * @param[in] data   인코딩된 데이터. base64 계열입니다.
  * @param[in] len    문자 단위 길이.
- * @param[in] is_rle `r`(런렝스)이면 0이 아니고 `p`(패킹)이면 0입니다.
+ * @param[in] is_rle `r`(런렝스)이면 0이 아닙니다.
+ * @param[in] is_wide `q`(두 문자당 8비트 인덱스 하나)이면 0이 아닙니다.
+ *                    둘 다 아니면 `p`이며 두 문자당 4비트 인덱스 셋입니다.
+ * @param[in] n_pal  @p pal이 실제로 담고 있는 항목 수.
  * @param[in] t      놓이는 위치. ::SprTarget을 참조하십시오.
- * @param[in] pal    인덱스가 참조하는 16색 표.
+ * @param[in] pal    인덱스가 참조하는 표. 최대 ::SPR_PAL_MAX개입니다.
  *
  * @note *두 인코딩이 실행 루프를 공유합니다*. `r`은 개수와 인덱스를 내보내고, `p`는 한
  *       차례에 한 픽셀을 내보내며 패킹된 삼중항의 나머지 둘을 `pend`에 보관합니다. 패킹
  *       분기가 자체 루프를 갖지 않고 `count = 1`을 두는 이유가 그것입니다.
  */
-static void blit_pixels(const char *data, int len, int is_rle,
-                        const SprTarget *t, const unsigned char pal[16][3]) {
+static void blit_pixels(const char *data, int len, int is_rle, int is_wide,
+                        int n_pal,
+                        const SprTarget *t,
+                        const unsigned char pal[SPR_PAL_MAX][3]) {
     int px_i = 0;
     int pend[2] = {0, 0}, n_pend = 0;
 
@@ -991,7 +999,34 @@ static void blit_pixels(const char *data, int len, int is_rle,
             count = b64val(data[i]);
             index = b64val(data[i+1]);
             i += 2;
-            if (count < 0 || index < 0 || index >= 16) break;
+            /* Against the palette that was read, not against 16. The run form
+               spends one character on an index and so can only ever name the
+               first 64, which is why bake.ps1 does not choose it for a drawing
+               with a wide palette -- but the bound belongs to the data rather
+               than to a number that used to be the only palette size there was.
+               16이 아니라 *읽어 들인 팔레트*에 대해 검사합니다. 실행 형식은 인덱스에 문자
+               하나를 쓰므로 앞의 64개만 지목할 수 있고, 그래서 bake.ps1은 팔레트가 넓은
+               그림에 이 형식을 고르지 않습니다. 다만 경계는, 한때 유일한 팔레트 크기였던
+               숫자가 아니라 데이터에 속합니다. */
+            if (count < 0 || index < 0 || index >= n_pal) break;
+        } else if (is_wide) {
+            /* q: one 8-bit index in two characters, six bits each and four of
+               the twelve unused. Not packed tighter because the waste is
+               redundancy and deflate eats redundancy -- measured, the whole
+               wall set costs 13KB more than the 4-bit form, and a denser
+               packing would be arithmetic nobody can read to save a fraction
+               of that.
+               q: 8비트 인덱스 하나를 두 문자에 담으며, 문자마다 6비트에 12비트 중 4비트는
+               쓰지 않습니다. 더 조밀하게 담지 않는 이유는 그 낭비가 곧 중복이고 deflate가
+               중복을 먹기 때문입니다. 실측하면 벽 전체가 4비트 형식보다 13KB 더 들며, 더
+               조밀한 패킹은 그 일부를 아끼려고 아무도 읽을 수 없는 산술을 쓰는 일입니다. */
+            if (i + 1 >= len) break;
+            int hi = b64val(data[i]), lo = b64val(data[i+1]);
+            i += 2;
+            if (hi < 0 || lo < 0) break;
+            index = (hi << 6) | lo;
+            if (index >= n_pal) break;
+            count = 1;
         } else {
             /* p: three 4-bit indices packed into two characters. Emitted
                one pixel at a time so the run loop below is shared -- the
@@ -1235,7 +1270,7 @@ static int decode_sprites(const char *p, unsigned char *buf, int W, int H,
                      : (dest == SPR_DEST_PICKUP) ? PK_CH
                      : (dest == SPR_DEST_WALL)   ? SPR_WALL : SPR_CH;
 
-    unsigned char pal[16][3] = {{0,0,0}};
+    unsigned char pal[SPR_PAL_MAX][3] = {{0,0,0}};
     int n_pal = 0;
 
     /* "No marker" is -1, and this is the one place that can say so for every
@@ -1331,7 +1366,8 @@ static int decode_sprites(const char *p, unsigned char *buf, int W, int H,
             op = txt_token(p, &len);
             if (!op) break;
         }
-        int is_rle = txt_is(op, len, "r");
+        int is_rle  = txt_is(op, len, "r");
+        int is_wide = txt_is(op, len, "q");
         p = op + len;
 
         const char *data = txt_token(p, &len);
@@ -1413,7 +1449,7 @@ static int decode_sprites(const char *p, unsigned char *buf, int W, int H,
            모든 스프라이트가 한 픽셀씩 밀렸을 것입니다. 디코더 버그가 아니라 아트가
            잘못된 것처럼 보이는 종류의 결함입니다. */
         SprTarget tgt = { buf, W, H, ox + place_x, oy + place_y, sw, total };
-        blit_pixels(data, len, is_rle, &tgt, pal);
+        blit_pixels(data, len, is_rle, is_wide, n_pal, &tgt, pal);
     }
     return placed;
 }

@@ -551,6 +551,33 @@ function Select-Palette($frames, [int]$slots) {
             if ($acc -ge $half) { $cut = $i + 1; break }
             $cut = $i + 2
         }
+        # BOTH HALVES MUST BE NON-EMPTY, and the median pixel does not
+        # guarantee it: the scan stops one short of the end, so when the last
+        # colour alone holds more than half the pixels -- a wall's background
+        # shade, every time -- the cut lands on Count. Then the "first half" is
+        # the whole box and the "second" is PowerShell's reversed out-of-range
+        # slice, so the box is split into itself. It has the widest spread
+        # still, so the next pass picks it again, and the loop spends every
+        # remaining slot re-splitting one box while the other colours never get
+        # an entry.
+        #
+        # Measured on wall_brick: 21 distinct colours went in and 8 came out,
+        # at 15 slots and at 255 alike. This predates the wide palette -- `q`
+        # only made it visible, by asking for 255 entries and getting 255
+        # copies of eight colours.
+        #
+        # 두 조각 모두 비어 있지 않아야 하는데, 중앙 픽셀은 그것을 보장하지 않습니다.
+        # 주사가 끝에서 하나 앞서 멈추므로, 마지막 색 하나가 픽셀의 절반을 넘게 차지하면
+        # -- 벽의 배경색은 늘 그렇습니다 -- cut이 Count에 놓입니다. 그러면 "앞 조각"은
+        # 상자 전체이고 "뒤 조각"은 PowerShell이 뒤집어 주는 범위 밖 슬라이스라, 상자가
+        # 자기 자신으로 쪼개집니다. 여전히 폭이 가장 넓으니 다음 회차가 같은 상자를 다시
+        # 고르고, 루프는 남은 슬롯을 전부 한 상자를 다시 쪼개는 데 쓰며 나머지 색은
+        # 끝내 자리를 받지 못합니다.
+        #
+        # wall_brick 실측: 21색이 들어가 8색이 나왔습니다. 슬롯 15에서도 255에서도
+        # 같았습니다. 이것은 넓은 팔레트보다 앞선 결함이며, `q`는 255칸을 요청했다가
+        # 여덟 색의 사본 255개를 받아 오면서 그것을 드러냈을 뿐입니다.
+        if ($cut -ge $sorted.Count) { $cut = $sorted.Count - 1 }
         $new = @()
         for ($i = 0; $i -lt $boxes.Count; $i++) {
             if ($i -eq $bi) { $new += , @($sorted[0..($cut - 1)]); $new += , @($sorted[$cut..($sorted.Count - 1)]) }
@@ -772,7 +799,34 @@ function ConvertFrom-Png([string]$path, [string]$name, [System.Collections.Array
             [void]$packed.Append($A[$v -shr 6]).Append($A[$v -band 63])
         }
 
-        if ($rle.Length -le $packed.Length) {
+        # Wide: one 8-bit index in two characters, for a drawing whose palette
+        # will not fit in four bits. Neither of the two forms above can name a
+        # colour past 15, so this is not a contest they enter -- a group with a
+        # wide palette gets `q` and that is the whole rule.
+        #
+        # Four of the twelve bits go unused, deliberately. Packing tighter
+        # would save characters that deflate was going to remove anyway:
+        # measured over the eight walls, `q` costs 13KB more than `p` after
+        # compression while carrying every colour the artist drew, and a denser
+        # form would recover a fraction of that in exchange for arithmetic
+        # nobody can read.
+        #
+        # 넓은 형식입니다. 팔레트가 4비트에 들어가지 않는 그림을 위해 8비트 인덱스 하나를
+        # 두 문자에 담습니다. 위의 두 형식은 15를 넘는 색을 지목할 수 없으므로 애초에
+        # 경쟁 상대가 아닙니다. 팔레트가 넓은 그룹은 `q`를 쓰며 그것이 규칙의 전부입니다.
+        #
+        # 12비트 중 4비트를 일부러 쓰지 않습니다. 더 조밀하게 담아 봐야 deflate가 어차피
+        # 없앨 문자를 아끼는 것입니다. 벽 여덟 장으로 실측하면 `q`는 압축 후 `p`보다 13KB
+        # 더 들면서 화가가 그린 모든 색을 나르며, 더 조밀한 형식은 아무도 읽을 수 없는
+        # 산술과 맞바꿔 그 일부를 되찾을 뿐입니다.
+        $wide = New-Object System.Text.StringBuilder
+        foreach ($ix in $idx) {
+            [void]$wide.Append($A[$ix -shr 6]).Append($A[$ix -band 63])
+        }
+
+        if ($pal.Count -gt 16) {
+            $op = 'q'; $data = $wide.ToString()
+        } elseif ($rle.Length -le $packed.Length) {
             $op = 'r'; $data = $rle.ToString()
         } else {
             $op = 'p'; $data = $packed.ToString()
@@ -796,7 +850,13 @@ function ConvertFrom-Png([string]$path, [string]$name, [System.Collections.Array
         if ($op -eq 'r') {
             for ($k = 0; $k -lt $data.Length - 1; $k += 2) {
                 $run = $A.IndexOf($data[$k]); $val = $A.IndexOf($data[$k + 1])
-                for ($q = 0; $q -lt $run -and $n -lt $back.Length; $q++) { $back[$n++] = $val }
+                for ($qq = 0; $qq -lt $run -and $n -lt $back.Length; $qq++) { $back[$n++] = $val }
+            }
+        } elseif ($op -eq 'q') {
+            for ($k = 0; $k -lt $data.Length - 1; $k += 2) {
+                if ($n -lt $back.Length) {
+                    $back[$n++] = $A.IndexOf($data[$k]) * 64 + $A.IndexOf($data[$k + 1])
+                }
             }
         } else {
             for ($k = 0; $k -lt $data.Length - 1; $k += 2) {
@@ -1074,13 +1134,51 @@ if (Test-Path $spriteDir) {
         $frames = @()
         foreach ($m in $members) { $frames += , (Get-SpritePixels $m.Png.FullName) }
 
+        # THE PALETTE BUDGET, PER GROUP. Fifteen was the codec: three 4-bit
+        # indices in two characters left no room for a sixteenth colour. The
+        # `q` form lifted that, and the walls are what it was lifted for --
+        # measured, the eight of them carry 15, 15, 15, 21, 22, 40, 41 and 51
+        # distinct colours, so five were being crushed to fit.
+        #
+        # The creatures and pickups stay at fifteen, and that is a decision
+        # rather than an oversight: they are dithered and drawn at 64x96, no
+        # measurement here says what widening them would cost or buy, and
+        # changing their bytes without one would be changing them on a hunch.
+        #
+        # Median cut splits DISTINCT COLOURS, so a budget larger than a
+        # drawing's palette costs nothing and the cut becomes lossless -- which
+        # is why the three walls that already fit keep the narrow `p` encoding.
+        # Their bytes still moved: the cut fix above changed which colours a
+        # 15-slot palette holds, for every drawing in the project.
+        #
+        # 그룹별 팔레트 예산입니다. 15는 코덱이었습니다. 4비트 인덱스 셋을 두 문자에 담으면
+        # 열여섯 번째 색이 들어갈 자리가 없었습니다. `q` 형식이 그것을 풀었고, 그것을 푼
+        # 대상이 벽입니다. 실측하면 여덟 장이 각각 15, 15, 15, 21, 22, 40, 41, 51색을
+        # 지니므로 다섯 장이 깎이고 있었습니다.
+        #
+        # 생물과 아이템은 15에 남으며 이는 실수가 아니라 결정입니다. 그것들은 디더링되어
+        # 64x96으로 그려지고, 넓히는 비용과 이득을 말해 주는 측정이 이곳에 없으며, 측정
+        # 없이 바이트를 바꾸는 것은 짐작으로 바꾸는 일입니다.
+        #
+        # median cut은 *distinct 색*을 나누므로 그림의 팔레트보다 큰 예산은 비용이 0이고
+        # 그 컷은 무손실이 됩니다. 이미 들어맞는 벽 세 장이 좁은 `p` 인코딩을 유지하는
+        # 이유입니다. 다만 그 바이트는 움직였습니다. 위의 cut 수정이 15칸 팔레트가 담는
+        # 색을 프로젝트의 모든 그림에 대해 바꾸었기 때문입니다.
+        $slots = if ($subject -like 'wall_*') { 255 } else { 15 }
+
         $palette = New-Object System.Collections.ArrayList
         [void]$palette.Add('000000')
-        foreach ($c in (Select-Palette $frames 15)) { [void]$palette.Add($c) }
+        foreach ($c in (Select-Palette $frames $slots)) { [void]$palette.Add($c) }
         # A group with fewer than 15 distinct colours leaves the palette short.
         # Pad it: the encoder snaps to the NEAREST entry over the whole array,
         # and an entry that was never filled would be black and would pull dark
         # pixels away from the colour median cut actually chose for them.
+        # Only up to sixteen. Past that the count is carried by `pal` itself and
+        # there is no unfilled entry to guard against -- padding a wide palette
+        # would spend seven characters an entry saying nothing.
+        # 16까지만 채웁니다. 그 너머는 개수를 `pal` 자신이 나르므로 지켜야 할 빈 항목이
+        # 없으며, 넓은 팔레트를 채우는 것은 항목마다 일곱 문자를 들여 아무 말도 하지 않는
+        # 일입니다.
         while ($palette.Count -lt 16) { [void]$palette.Add($palette[$palette.Count - 1]) }
 
         $spriteText += "pal $($palette.Count) $($palette -join ' ')`n"

@@ -373,16 +373,25 @@ static unsigned char clamp8(float v) {
  *
  * ENGLISH
  * -------
- * THE MATERIAL'S OWN NAME IS THE LOOKUP KEY, which is why `image` takes a
- * repeat count and not a filename. Every other op in this file takes integers,
- * and adding string arguments to the recipe grammar for one op would be a
- * second kind of operand for every op that follows it to be parsed around. A
- * material called `wall_brick` fetches the drawing called `wall_brick`: one
- * name, one thing, and no way to write the two so they disagree.
+ * `image <drawing> <tiles>` NAMES THE DRAWING, and the name is a separate
+ * operand from the material's. It is the one op in this file that takes a
+ * string -- ::OPS carries a `takes_name` column for it alone -- and it earns
+ * that because the material and the drawing are deliberately allowed to
+ * differ: `door_red`, `door_blue` and `door_yellow` are three recipes over the
+ * one `wall_door` drawing, tinted apart. Forcing the material's own name would
+ * make those three bitmaps instead of three tints, which is the bargain the
+ * section on imported surfaces in textures.txt exists to explain.
  *
  * The repeat is why SPR_WALL divides SIZE. 128 into 256 is exactly two tiles,
  * so the wrap lands on the buffer edge where GL_REPEAT already joins it. A
  * size that did not divide would put a visible seam down every wall.
+ *
+ * THE DRAWING IS 15 COLOURS AND A TRANSPARENT ONE. sprite.c packs three 4-bit
+ * indices into two characters, so sixteen is the codec's ceiling rather than a
+ * setting -- and bake.ps1 median-cuts each drawing to its own palette, so the
+ * fifteen are spent on that drawing alone. Hand-drawn wall art survives that;
+ * a photographic texture does not, and would band. Anything imported here is
+ * subject to it.
  *
  * Returns 0 when no drawing of that name was baked, and the caller then leaves
  * the recipe's other ops to paint the surface -- so a material whose art has
@@ -390,14 +399,20 @@ static unsigned char clamp8(float v) {
  *
  * 한국어
  * ------
- * 재질 자신의 이름이 조회 키이며, 그래서 `image`는 파일명이 아니라 반복 횟수를 받습니다.
- * 이 파일의 다른 모든 연산은 정수를 받으며, 연산 하나를 위해 레시피 문법에 문자열 인자를
- * 더하면 그 뒤의 모든 연산이 우회해서 파싱해야 할 두 번째 종류의 피연산자가 생깁니다.
- * `wall_brick`이라는 재질은 `wall_brick`이라는 그림을 가져옵니다. 이름 하나에 사물 하나,
- * 그리고 둘이 어긋나게 쓸 방법이 없습니다.
+ * `image <그림> <타일 수>`는 *그림*을 지목하며, 그 이름은 재질의 이름과 별개의 피연산자입니다.
+ * 이 파일에서 문자열을 받는 유일한 연산이고(::OPS가 오직 이것을 위해 `takes_name` 열을
+ * 지닙니다) 그럴 값어치가 있는 이유는 재질과 그림이 다를 수 있도록 *일부러* 허용하기
+ * 때문입니다. `door_red`, `door_blue`, `door_yellow`는 `wall_door` 그림 하나 위의 레시피 셋이며
+ * 색조로만 갈라집니다. 재질 자신의 이름을 강제하면 그 셋이 색조 셋이 아니라 비트맵 셋이 되고,
+ * 그것이 textures.txt의 가져온 표면 절이 설명하려고 존재하는 거래입니다.
  *
  * SPR_WALL이 SIZE를 나누어떨어져야 하는 이유가 이 반복입니다. 256 안의 128은 정확히 두
  * 타일이므로 되감김이 버퍼 가장자리에 떨어지고, 그곳은 GL_REPEAT가 이미 잇는 자리입니다.
+ *
+ * 그림은 15색과 투명 하나입니다. sprite.c가 4비트 인덱스 셋을 두 문자에 담으므로 16이
+ * 설정값이 아니라 코덱의 천장이며, bake.ps1은 그림마다 자기 팔레트로 median cut을 하므로 그
+ * 15색은 그 그림에만 쓰입니다. 손으로 그린 벽 그림은 그것을 견디지만 사진 기반 텍스처는
+ * 견디지 못하고 띠가 집니다. 이곳으로 가져오는 무엇이든 그 제약을 받습니다.
  *
  * 그 이름의 그림이 구워지지 않았으면 0을 반환하고, 호출자는 레시피의 나머지 연산이 표면을
  * 칠하도록 둡니다. 아직 아트를 가져오지 않은 재질이 검은색이 아니라 적힌 레시피로

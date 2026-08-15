@@ -6,6 +6,20 @@
 @SolidClass = worldspawn : "The level itself. Every brush not owned by another entity belongs here."
 [
     message(string) : "Level title" : "" : "Not read yet."
+    next(string) : "Level the exit leads to" : "" : "Empty means this is the last one."
+]
+
+// --- Markers -------------------------------------------------------------
+//
+// Points with a radius, not volumes: these are what level_exit_at and
+// level_push_at have always asked about, and a pad you step onto is a place
+// rather than a room.
+
+@PointClass size(-12 -12 -12, 12 12 12) color(120 255 120) = info_exit : "Standing here ends the level. Where it goes is worldspawn's `next`."[]
+
+@PointClass size(-12 -12 -12, 12 12 12) color(120 200 255) = info_push : "A jump pad. Fires once per landing, while grounded."
+[
+    speed(integer) : "Launch speed, units per second" : 416
 ]
 
 // The player, as a box, so clearance can be judged against it rather than

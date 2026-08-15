@@ -39,6 +39,7 @@
 {
 "classname" "worldspawn"
 "message" "Atrium"
+"next" "vault"
 // brush 0 -- floor
 {
 ( -272 -272 0 ) ( -272 272 0 ) ( 272 272 0 ) ptile [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 0.5 0.5
@@ -210,6 +211,25 @@
 {
 "classname" "item_redkey"
 "origin" "-192 -192 24"
+}
+// The jump pad and the way out. Point markers with a radius, which is what
+// level_push_at and level_exit_at have always asked about -- the pad's `speed`
+// is in map units per second, so 416 is the 13 m/s the engine's default
+// describes. Where the exit LEADS is on worldspawn, because a level has one
+// place it goes on to and two exits must not disagree about it.
+//
+// 점프대와 나가는 길입니다. 반경을 가진 지점 표식이며, level_push_at과 level_exit_at이 늘
+// 물어 온 것이 그것입니다. 점프대의 `speed`는 초당 맵 단위이므로 416이 엔진 기본값이 말하는
+// 13 m/s입니다. 출구가 *어디로* 이어지는지는 worldspawn에 있습니다. 레벨이 이어지는 곳은
+// 하나이고 출구 둘이 그것에 대해 다른 말을 해서는 안 되기 때문입니다.
+{
+"classname" "info_push"
+"origin" "192 -192 24"
+"speed" "416"
+}
+{
+"classname" "info_exit"
+"origin" "-160 224 112"
 }
 // A trigger volume in front of the door: a brush entity, textured `trigger`,
 // whose brushes level.c marks not-solid so the player can stand in it. It is

@@ -1119,6 +1119,23 @@ static void test_trigger_and_key(void) {
     for (int i = 0; i < pickup_count(&PL); i++)
         if (pickup_at(&PL, i)->kind == PK_KEY0 + 0) reds++;
     check(reds == 1, "and the red card is somewhere to be picked up");
+
+    /* --- the exit and the jump pad ---------------------------------------
+       Neither needed a dispatch: level_exit_at and level_push_at walk
+       Level::ents and have never known which model the level is. All that was
+       missing was a classname, and the alias table is where the two of them
+       that are not families live.
+       둘 다 분기가 필요 없었습니다. level_exit_at과 level_push_at은 Level::ents를 훑으며
+       레벨이 어느 모델인지 알았던 적이 없습니다. 빠져 있던 것은 classname뿐이고, 계열이 아닌
+       그 둘이 사는 곳이 별칭 표입니다. */
+    check(txt_is(LV.next, 5, "vault"), "worldspawn's `next` says where the exit leads");
+
+    check(level_exit_at(&LV, -5.0f, -7.0f), "standing on the exit ends the level");
+    check(!level_exit_at(&LV, 0.0f, 5.0f),  "and standing anywhere else does not");
+
+    /* 416 map units per second is the 13 m/s LVL_PUSH_DEFAULT describes. */
+    checkf(level_push_at(&LV, 6.0f, 6.0f), 13.0f, 0.1f, "the pad launches at 13 m/s");
+    checkf(level_push_at(&LV, 0.0f, 0.0f), 0.0f, 0.001f, "and the floor beside it does not");
 }
 
 int main(void) {

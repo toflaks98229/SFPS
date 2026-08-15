@@ -1231,7 +1231,24 @@ static void brush_doors_of(Level *out, const BrushMap *bm, TagPool *tp) {
  *       으로도 만들면 플레이어가 스폰하는 자리에 아이템을 놓게 됩니다.
  */
 static void brush_ents_of(Level *out, const BrushMap *bm) {
+    /* PREFIXES FOR THE FAMILIES THAT GROW, an alias for the ones that do not.
+       `monster_` and `item_` are open-ended: the whole point of stripping a
+       prefix is that adding a monster never brings anybody back to this
+       function. The exit and the jump pad are not families -- there is one of
+       each idea and there always will be -- so they are two rows rather than a
+       third prefix, which would also have to explain why `info_player_start`
+       is not an entity marker when `info_exit` is.
+       자라나는 계열에는 접두사를, 그렇지 않은 것에는 별칭을 씁니다. `monster_`와 `item_`은
+       열려 있습니다. 접두사를 떼어 내는 것의 요점 자체가, 몬스터를 추가하는 일이 결코 이
+       함수로 돌아오게 하지 않는다는 것입니다. 출구와 점프대는 계열이 아닙니다. 각 개념이
+       하나씩 있고 앞으로도 그럴 것이므로, 세 번째 접두사가 아니라 두 개의 행입니다. 세 번째
+       접두사였다면 `info_exit`은 엔티티 표식인데 왜 `info_player_start`는 아닌지도 설명해야
+       했을 것입니다. */
     static const char *const PREFIX[] = { "monster_", "item_" };
+    static const struct { const char *cn; const char *kind; } ALIAS[] = {
+        { "info_exit", "exit" },
+        { "info_push", "push" },
+    };
 
     for (int i = 0; i < bm->n_ents; i++) {
         const BrushEnt *e = &bm->ents[i];
@@ -1239,7 +1256,12 @@ static void brush_ents_of(Level *out, const BrushMap *bm) {
         if (!cn) continue;
 
         const char *kind = 0;
-        for (int p = 0; p < (int)(sizeof(PREFIX) / sizeof(PREFIX[0])); p++) {
+        for (int a = 0; a < (int)(sizeof(ALIAS) / sizeof(ALIAS[0])); a++) {
+            int n = 0;
+            while (ALIAS[a].cn[n] && cn[n] == ALIAS[a].cn[n]) n++;
+            if (!ALIAS[a].cn[n] && !cn[n]) { kind = ALIAS[a].kind; break; }
+        }
+        for (int p = 0; !kind && p < (int)(sizeof(PREFIX) / sizeof(PREFIX[0])); p++) {
             int n = 0;
             while (PREFIX[p][n] && cn[n] == PREFIX[p][n]) n++;
             if (!PREFIX[p][n] && cn[n]) { kind = cn + n; break; }
@@ -1266,6 +1288,29 @@ static void brush_ents_of(Level *out, const BrushMap *bm) {
         en->p[0] = (short)clampf(brush_ent_num(e, "wait",     0.0f) * 10.0f, 0.0f, 32000.0f);
         en->p[1] = (short)clampf(brush_ent_num(e, "count",    0.0f),         0.0f, 32000.0f);
         en->p[2] = (short)clampf(brush_ent_num(e, "maxalive", 0.0f),         0.0f, 32000.0f);
+
+        /* THE PAD'S FIRST NUMBER IS A SPEED, not a wait. ::Entity::p is
+           deliberately generic -- level.h argues that naming its fields would
+           hand this file an opinion about entities it exists not to know about
+           -- but the KEYS above are named, and one entity wants a different
+           key in the same slot. Written here rather than by adding a `speed`
+           row to every entity, because a spawner has no speed and a pad has no
+           wait, and a slot that means one thing for one kind is exactly what
+           `p` was for.
+           Map units per second to the centimetres per second ::level_push_at
+           reads, so `speed 416` is the 13 m/s LVL_PUSH_DEFAULT describes.
+           점프대의 첫 숫자는 대기 시간이 아니라 *속력*입니다. ::Entity::p는 의도적으로
+           범용이며(level.h는 그 필드에 이름을 붙이면 알지 않기 위해 존재하는 이 파일에
+           엔티티에 대한 의견을 쥐여 준다고 논합니다) 위의 *키*는 이름이 있는데, 한 엔티티가
+           같은 자리에 다른 키를 원합니다. 모든 엔티티에 `speed` 행을 더하는 대신 이곳에
+           적습니다. 스포너에는 속력이 없고 점프대에는 대기 시간이 없으며, 어떤 종류에게 한
+           가지를 뜻하는 자리가 바로 `p`의 용도이기 때문입니다.
+           초당 맵 단위를 ::level_push_at이 읽는 초당 센티미터로 바꾸므로, `speed 416`이
+           LVL_PUSH_DEFAULT가 말하는 13 m/s입니다. */
+        if (en->kind[0]=='p' && en->kind[1]=='u' && en->kind[2]=='s' &&
+            en->kind[3]=='h' && en->kind[4]==0)
+            en->p[0] = (short)clampf(brush_ent_num(e, "speed", 0.0f)
+                                     * BRUSH_UNIT * 100.0f, 0.0f, 32000.0f);
     }
 }
 
@@ -1279,6 +1324,27 @@ static int load_brush_level(const char *name, Level *out) {
 
     out->brushes = bm;
     copy_name(out->name, sizeof(out->name), name, -1);
+
+    /* WHERE THE EXIT LEADS, off worldspawn. On the level and not on the exit
+       marker because ::Level::next is one string: a level has one place it goes
+       on, and putting the name on each exit would let two of them disagree
+       about where that is. Quake hangs it on a trigger_changelevel and can,
+       because its levels carry a destination per trigger; this one does not,
+       and inventing the storage to match would be inventing a feature.
+       출구가 어디로 이어지는지이며 worldspawn에서 읽습니다. 출구 표식이 아니라 레벨에 두는
+       이유는 ::Level::next가 문자열 하나이기 때문입니다. 레벨이 이어지는 곳은 하나이고, 그
+       이름을 출구마다 두면 둘이 서로 다른 말을 할 수 있게 됩니다. Quake는 그것을
+       trigger_changelevel에 겁니다. 그럴 수 있는 이유는 Quake의 레벨이 트리거마다 목적지를
+       나르기 때문입니다. 이곳은 그렇지 않으며, 맞추려고 저장 공간을 만드는 것은 기능을 만들어
+       내는 일입니다. */
+    for (int i = 0; i < bm->n_ents; i++) {
+        const char *cn = brush_ent_value(&bm->ents[i], "classname");
+        if (!cn || !txt_is(cn, 10, "worldspawn")) continue;
+        const char *nx = brush_ent_value(&bm->ents[i], "next");
+        if (nx && nx[0]) copy_name(out->next, sizeof(out->next), nx, -1);
+        break;
+    }
+
     brush_start_of(out, bm);
     brush_lights_of(out, bm);
 

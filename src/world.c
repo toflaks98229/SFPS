@@ -550,6 +550,104 @@ static void step_smoke(World *w, float dt) {
  * 검사가 없으면 점프대가 매 프레임 속도를 다시 설정해 중력을 상쇄하고, 옆으로 벗어날
  * 때까지 발사 속력으로 계속 올라갑니다. 접촉을 요구하면 착지마다 한 번 발동하며, 그것이
  * 밟는 점프대의 의미이기도 합니다. */
+/**
+ * @brief What a keypress means on the screen the player is looking at.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] w The run being acknowledged.
+ *
+ * The window procedure used to answer this, which put two rules -- and the
+ * delay that makes one of them bearable -- somewhere no test could reach. It
+ * asked the same three questions in the same order; what changed is where.
+ *
+ * @note The order is the precedence. `title` and `dead` cannot both be set,
+ *       but writing it as a chain says which would win if they ever were,
+ *       instead of leaving that to whichever `if` was typed first.
+ * @note Reports a restart rather than performing one: reloading the level
+ *       rebuilds its geometry, and the caller has a menu to close and a cursor
+ *       to re-decide once `dead` has changed. Same division ::door_update makes
+ *       when it returns "something moved".
+ *
+ * 한국어
+ * ------
+ * @brief 플레이어가 보고 있는 화면에서 키 입력이 무엇을 뜻하는지.
+ * @param[in,out] w 응답을 받는 플레이.
+ *
+ * 이전에는 창 프로시저가 이 답을 내렸고, 그것이 두 개의 규칙과 그중 하나를 견딜 만하게
+ * 만드는 지연을 어떤 테스트도 닿을 수 없는 곳에 두었습니다. 같은 세 질문을 같은 순서로
+ * 물었으며, 달라진 것은 장소입니다.
+ *
+ * @note 순서가 곧 우선순위입니다. `title`과 `dead`는 동시에 설정될 수 없지만, 사슬로 쓰면
+ *       혹시 그렇게 되더라도 어느 쪽이 이기는지를 말해 줍니다. 어느 `if`를 먼저 썼는지에
+ *       맡기지 않습니다.
+ * @note 재시작을 수행하지 않고 *보고*합니다. 레벨을 다시 로드하는 것은 지오메트리를 다시
+ *       만드는 일이고, 호출자에게는 닫을 메뉴와 `dead`가 바뀐 뒤에 다시 결정할 커서가
+ *       있습니다. ::door_update가 "무언가 움직였다"를 반환하는 것과 같은 구분입니다.
+ */
+static void step_confirm(World *w) {
+    if (w->run.title) {
+        w->run.title = 0;
+        return;
+    }
+
+    /* The grace period, and the whole reason this is not simply "any key".
+       The shot that killed the player is very often still held down, and
+       restarting on it reads as the game skipping the death screen entirely.
+       유예 시간이며, 이것이 단순한 "아무 키"가 아닌 이유 전부입니다. 플레이어를 죽인 그
+       사격은 대개 아직 눌린 상태이고, 그것으로 재시작되면 게임이 사망 화면을 통째로 건너뛴
+       것처럼 보입니다. */
+    if (w->run.dead && w->run.death_time > DEATH_INPUT_DELAY)
+        w->run.restart_wanted = 1;
+}
+
+/**
+ * @brief Puts a weapon in the player's hand, if they have it.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] w    The run whose belt is being reached into.
+ * @param[in]     want Weapon index, already converted from ::Input::want_weapon.
+ *
+ * @note Silently refuses a weapon that is not owned, and refuses the one
+ *       already in hand. An empty hand is worse than nothing happening, and
+ *       re-selecting the current weapon would restart its draw sound every
+ *       press.
+ *
+ * 한국어
+ * ------
+ * @brief 플레이어가 그 무기를 가지고 있다면 손에 쥐여 줍니다.
+ * @param[in,out] w    탄약대에 손을 뻗는 플레이.
+ * @param[in]     want 무기 인덱스이며 ::Input::want_weapon에서 이미 변환된 값입니다.
+ *
+ * @note 보유하지 않은 무기와 이미 손에 든 무기를 조용히 거절합니다. 빈손은 아무 일도
+ *       일어나지 않는 것보다 나쁘고, 이미 든 무기를 다시 고르면 누를 때마다 뽑기 사운드가
+ *       처음부터 다시 납니다.
+ */
+static void step_weapon_pick(World *w, int want) {
+    if (want < 0 || want >= WP_TYPES)  return;
+    if (!w->weapon.owned[want])        return;
+    if (w->weapon.cur == want)         return;
+
+    w->weapon.cur = want;
+
+    /* A switch cancels a swing in progress rather than carrying its timer
+       across: the axe's dash must not be inherited by the shotgun.
+       진행 중인 공격을 이월하지 않고 취소합니다. 도끼의 대쉬를 샷건이 물려받아서는
+       안 됩니다. */
+    w->weapon.cooldown = 0.0f;
+
+    /* A weapon that announces itself does so on the SWITCH rather than on the
+       first swing: the saw revving up is what tells the player the change took,
+       and hearing it only once they attack makes the switch itself feel
+       unacknowledged.
+       자기를 알리는 무기는 첫 공격이 아니라 *전환 시점*에 그렇게 합니다. 톱이 돌기 시작하는
+       소리가 전환이 먹혔다는 것을 알려 주며, 공격할 때에야 들린다면 전환 자체가 응답 없는
+       것처럼 느껴집니다. */
+    const char *dsnd = wp_stats(want)->draw_snd;
+    if (dsnd) audio_play(dsnd, 85);
+}
+
 static void step_push(World *w) {
     if (!w->player.grounded) return;
 
@@ -1069,6 +1167,39 @@ int world_step(World *w, const Input *in, float aspect, float dt) {
     /* Derived once and returned, so the renderer draws the frame the step
        actually ran. See ::world_frozen. */
     int frozen = world_frozen(w, in->paused);
+
+    /* --- the edges, before anything that could be answering them -----------
+       OUTSIDE the frozen test, all of them, and they have to be: the screens
+       these act on are exactly the screens that freeze the world. A `confirm`
+       gated on `!frozen` could never dismiss a title screen, because the title
+       screen is what made the world frozen.
+
+       `let_go` is first. It is the only one that undoes something rather than
+       starting something, and a hook released this frame must not be reeling
+       the player somewhere while the frame decides what else to do.
+
+       엣지들이며, 그것들이 답하고 있을 수 있는 무엇보다도 먼저입니다.
+       전부 frozen 검사 *바깥*이며 그래야만 합니다. 이들이 작용하는 화면이 바로 월드를
+       정지시키는 화면이기 때문입니다. `!frozen`으로 막힌 `confirm`은 타이틀 화면을 결코
+       해제할 수 없습니다. 타이틀 화면이 곧 월드를 정지시킨 장본인이기 때문입니다.
+
+       `let_go`가 먼저입니다. 무언가를 시작하는 대신 되돌리는 유일한 엣지이며, 이번 프레임에
+       놓인 훅이 프레임이 다른 무엇을 할지 결정하는 동안 플레이어를 끌어당기고 있어서는 안
+       됩니다. */
+    if (in->let_go) {
+        wp_hook_release(&w->weapon);
+        wp_hook_arm(&w->weapon);
+    }
+    if (in->confirm) step_confirm(w);
+
+    /* The one edge that IS gated, because it is the one that acts on the world
+       rather than on the screen in front of it. Switching weapons behind a
+       pause menu, on the death screen, or before the run has started are all
+       the same answer: there is no hand to put anything in yet.
+       유일하게 게이트가 걸린 엣지입니다. 눈앞의 화면이 아니라 월드에 작용하는 유일한
+       엣지이기 때문입니다. 일시정지 메뉴 뒤에서, 사망 화면에서, 또는 플레이가 시작되기 전에
+       무기를 바꾸는 것은 모두 같은 답입니다. 아직 무언가를 쥐여 줄 손이 없습니다. */
+    if (!frozen && in->want_weapon) step_weapon_pick(w, in->want_weapon - 1);
 
     /* Look, move, fire and the AI all stop. The last frame keeps being drawn
        under the overlay, which is what the caller does with the return value. */

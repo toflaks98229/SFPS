@@ -178,10 +178,24 @@
  * the mapping and ::world_step owns what the intent means. It is also what
  * makes a test able to walk a player into a wall in three lines.
  *
- * @note Every field is a HELD state, not an edge. Weapon select, the menu, the
- *       pixelise toggle and the title/death dismissals are all edges and all
- *       handled where the message arrives -- one press must be one step, and a
- *       held key polled once a frame would walk a whole menu in a frame.
+ * @note MOST fields are a HELD state; the three at the end are EDGES, latched
+ *       by the platform and consumed here. The distinction that matters is not
+ *       held-versus-edge but POLLED-versus-LATCHED: a held key read once a
+ *       frame would walk a whole menu in a frame, which is why an edge may not
+ *       be polled -- but a latch set once by the message and cleared once by
+ *       the step is still exactly one press, one step.
+ *
+ *       They used to be written straight into the ::World from the window
+ *       procedure, which meant the rules they carry -- what a number key does,
+ *       what dismisses the death screen -- lived somewhere no headless tool
+ *       could reach. Everything else worth checking in this project is
+ *       reachable from tools\steptest.c; these were the hole.
+ * @note WHAT IS DELIBERATELY NOT HERE: the menu keys and the F1 pixelise
+ *       toggle. Neither touches a ::World. The menu has its own state and its
+ *       own module, and the post-process pass is a property of the window's
+ *       render target in the same way the display mode is. An edge belongs
+ *       here when the SIMULATION is what it changes, not merely because it is
+ *       an edge.
  *
  * 한국어
  * ------
@@ -192,10 +206,20 @@
  * 무엇을 뜻하는지는 ::world_step이 소유합니다. 또한 이것이 테스트가 세 줄로 플레이어를
  * 벽에 걸어 들어가게 할 수 있는 이유입니다.
  *
- * @note 모든 필드는 *유지* 상태이며 엣지가 아닙니다. 무기 선택, 메뉴, 픽셀화 전환, 타이틀·
- *       사망 화면 해제는 모두 엣지이며 모두 메시지가 도착하는 곳에서 처리됩니다. 한 번
- *       누름은 한 단계여야 하고, 프레임마다 폴링되는 유지 키는 한 프레임에 메뉴 전체를
- *       지나가게 합니다.
+ * @note *대부분의* 필드는 유지 상태이며, 끝의 셋은 *엣지*로서 플랫폼이 래치하고 이곳이
+ *       소비합니다. 중요한 구분은 유지냐 엣지냐가 아니라 *폴링이냐 래치냐*입니다. 프레임마다
+ *       읽히는 유지 키는 한 프레임에 메뉴 전체를 지나가며, 그것이 엣지를 폴링해서는 안 되는
+ *       이유입니다. 그러나 메시지가 한 번 세우고 스텝이 한 번 지우는 래치는 여전히 정확히 한
+ *       번 누름, 한 단계입니다.
+ *
+ *       이들은 이전에 창 프로시저에서 ::World로 곧장 기록되었고, 그 말은 이들이 나르는
+ *       규칙(숫자 키가 무엇을 하는가, 무엇이 사망 화면을 해제하는가)이 어떤 헤드리스 도구도
+ *       닿을 수 없는 곳에 있었다는 뜻입니다. 이 프로젝트에서 검사할 가치가 있는 다른 모든 것은
+ *       tools\steptest.c에서 도달할 수 있었고, 이들이 그 구멍이었습니다.
+ * @note 의도적으로 이곳에 *없는* 것: 메뉴 키와 F1 픽셀화 전환입니다. 둘 다 ::World를 건드리지
+ *       않습니다. 메뉴는 자기 상태와 자기 모듈을 갖고, 포스트 프로세스 패스는 디스플레이 모드와
+ *       같은 의미에서 창의 렌더 타깃에 속한 성질입니다. 엣지가 이곳에 속하는 것은 그것이 엣지여서가
+ *       아니라 그것이 바꾸는 대상이 *시뮬레이션*일 때입니다.
  */
 typedef struct {
     /**
@@ -249,6 +273,120 @@ typedef struct {
      * 전부가 정확히 같은 것들을 정지시키기 때문입니다.
      */
     int paused;
+
+    /* --- edges: latched once by the platform, consumed once by ::world_step --
+       All three are read OUTSIDE the ::world_frozen gate, and they have to be:
+       the states they act on -- the title screen, the death screen, an open
+       menu -- are exactly the states that freeze the world. An edge gated on
+       `!frozen` would be an edge that can never fire on the screen it is for.
+       셋 모두 ::world_frozen 게이트 *바깥*에서 읽히며, 그래야만 합니다. 이들이 작용하는
+       상태(타이틀 화면, 사망 화면, 열린 메뉴)가 바로 월드를 정지시키는 상태이기 때문입니다.
+       `!frozen`으로 막힌 엣지는 정작 자신을 위한 화면에서 결코 발생할 수 없는 엣지입니다. */
+
+    /**
+     * @brief The player pressed something to acknowledge the screen in front of them.
+     *
+     * ENGLISH
+     * -------
+     * ONE FIELD FOR BOTH SCREENS, because from the platform's side they are one
+     * event: a key or a click arrived and no menu wanted it. What it MEANS is a
+     * question about the run -- the title screen starts the game, the death
+     * screen retries it -- and that is a rule, so it lives in ::world_step
+     * rather than in the window procedure that used to answer it.
+     *
+     * @note The death screen ignores this until ::DEATH_INPUT_DELAY has passed.
+     *       The shot that killed the player is very often still held, and
+     *       restarting on it reads as the game skipping the death screen
+     *       entirely. That rule was unreachable from a test until this field
+     *       existed; ::world_step is where it is now.
+     * @note NOT the menu's RESTART row. That one is unconditional and arrives
+     *       through ::RunState::restart_wanted, because a player who picked a
+     *       row from a menu has already been asked whether they meant it.
+     *
+     * 한국어
+     * ------
+     * @brief 플레이어가 눈앞의 화면에 응답하려고 무언가를 눌렀습니다.
+     *
+     * 두 화면에 대해 필드가 하나인 이유는, 플랫폼 쪽에서 보면 그것이 하나의 사건이기
+     * 때문입니다. 키나 클릭이 도착했고 어떤 메뉴도 그것을 원하지 않았습니다. 그것이 무엇을
+     * *뜻하는지*는 플레이에 대한 질문이며(타이틀 화면은 게임을 시작하고 사망 화면은 다시
+     * 시도합니다) 그것은 규칙이므로, 이전에 그 답을 내리던 창 프로시저가 아니라
+     * ::world_step에 있습니다.
+     *
+     * @note 사망 화면은 ::DEATH_INPUT_DELAY가 지나기 전까지 이것을 무시합니다. 플레이어를 죽인
+     *       그 사격은 대개 아직 눌린 상태이며, 그것으로 재시작되면 게임이 사망 화면을 통째로
+     *       건너뛴 것처럼 보입니다. 그 규칙은 이 필드가 생기기 전까지 테스트에서 도달할 수
+     *       없었습니다. 이제 그것이 있는 곳은 ::world_step입니다.
+     * @note 메뉴의 RESTART 행은 아닙니다. 그쪽은 조건이 없으며
+     *       ::RunState::restart_wanted를 통해 도착합니다. 메뉴에서 행을 고른 플레이어는 이미
+     *       그럴 의도였는지 질문을 받은 셈이기 때문입니다.
+     */
+    int confirm;
+
+    /**
+     * @brief Which weapon the player asked for. ONE-BASED; 0 means they did not.
+     *
+     * ENGLISH
+     * -------
+     * One-based so that `Input in = {0}` is "no request" rather than "select
+     * weapon 0", which is the convention ::Pools, ::RunState and ::DoorSet all
+     * keep: a zeroed struct has to be a valid empty state, or every fixture
+     * that builds one field by field has to know about this one. It also
+     * happens to be the number the player actually pressed.
+     *
+     * @note Refused silently for a weapon that is not owned. An empty hand is
+     *       worse than nothing happening, and it keeps the number keys harmless
+     *       before the roster fills out.
+     * @note The switch also cancels a swing in progress and plays the weapon's
+     *       draw sound. Both were in the window procedure, and both are rules:
+     *       the axe's dash must not be inherited by the shotgun, and the saw
+     *       revving is what tells the player the change took.
+     *
+     * 한국어
+     * ------
+     * @brief 플레이어가 요청한 무기. *1부터 시작*하며 0은 요청하지 않았음을 뜻합니다.
+     *
+     * 1부터 시작하므로 `Input in = {0}`이 "0번 무기 선택"이 아니라 "요청 없음"이 됩니다.
+     * ::Pools와 ::RunState와 ::DoorSet이 모두 지키는 관례입니다. 0으로 초기화된 구조체는
+     * 유효한 빈 상태여야 하며, 그러지 않으면 필드를 하나씩 채워 구조체를 만드는 모든 픽스처가
+     * 이 필드만은 따로 알아야 합니다. 마침 플레이어가 실제로 누른 숫자이기도 합니다.
+     *
+     * @note 보유하지 않은 무기는 조용히 거절됩니다. 빈손은 아무 일도 일어나지 않는 것보다
+     *       나쁘며, 구성이 갖춰지기 전까지 숫자 키가 무해하게 유지됩니다.
+     * @note 전환은 진행 중인 공격도 취소하고 무기의 뽑기 사운드를 재생합니다. 둘 다 창
+     *       프로시저에 있었고 둘 다 규칙입니다. 도끼의 대쉬를 샷건이 물려받아서는 안 되며,
+     *       톱이 돌기 시작하는 소리가 전환이 먹혔다는 것을 알려 줍니다.
+     */
+    int want_weapon;
+
+    /**
+     * @brief The player stopped holding things -- focus was lost, or a menu opened.
+     *
+     * ENGLISH
+     * -------
+     * The held fields above already go to zero on their own when this happens,
+     * because the platform clears its keys. What does NOT clear itself is a
+     * grapple that has already attached: it is state inside the ::Weapon, and
+     * coming back from alt-tab still roped to a wall is the same class of
+     * surprise as coming back still walking forward.
+     *
+     * @note Releasing AND rearming, in that order. The button is up by the time
+     *       this arrives, so the hook has to be made ready for the next press
+     *       rather than left waiting for a release that already happened.
+     *
+     * 한국어
+     * ------
+     * @brief 플레이어가 붙잡고 있던 것을 놓았습니다. 포커스를 잃었거나 메뉴가 열렸습니다.
+     *
+     * 위의 유지 필드들은 이 일이 일어나면 스스로 0이 됩니다. 플랫폼이 자기 키를 지우기
+     * 때문입니다. 스스로 지워지지 *않는* 것은 이미 걸린 그래플입니다. 그것은 ::Weapon 내부의
+     * 상태이며, alt-tab에서 벽에 로프가 걸린 채로 돌아오는 것은 계속 전진하는 채로 돌아오는
+     * 것과 같은 종류의 놀라움입니다.
+     *
+     * @note 해제한 뒤 재장전하며, 순서가 그렇습니다. 이것이 도착할 무렵 버튼은 이미 올라와
+     *       있으므로, 이미 일어난 해제를 기다리게 두지 않고 다음 누름에 대비시켜야 합니다.
+     */
+    int let_go;
 } Input;
 
 /* ---------------------------------------------------------------- progress */

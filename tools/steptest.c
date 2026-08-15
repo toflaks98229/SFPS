@@ -83,10 +83,11 @@ static void box(Level *l, short x0, short z0, short x1, short z1,
  * world_init은 플레이를 타이틀 화면 상태로 두며 그것은 모든 것을 정지시킵니다. 게임에는
  * 옳고 테스트에는 쓸모없으므로 픽스처가 해제합니다.
  *
- * 풀도 이곳에서 초기화하며, 그 목록은 점점 짧아지고 있습니다. 발사체와 아이템은 이제
- * World::pools에 있고 소유하는 것만으로 비워집니다. 반면 몬스터와 문은 여전히 각자 모듈 안의
- * 파일 스코프 배열이라 손으로 비워야 하며, 그러지 않으면 이전 사례의 내용물이 이번 사례에 그대로
- * 서 있게 됩니다. pools.h를 참조하십시오. */
+ * 풀도 이곳에서 초기화하며, 그 목록은 이제 비어 있습니다. 발사체·아이템·몬스터는
+ * World::pools에, 문의 움직임은 Level::door_run에 있고, 전부 소유하는 것만으로 비워집니다.
+ * 남은 두 호출은 비우는 것이 아닙니다. pickup_spawn_level은 레벨의 아이템을 *배치*하고,
+ * door_reset은 섹터가 존재한 뒤에야 가능한 "닫힘"의 스냅숏을 *포착*합니다. pools.h와
+ * DoorSet을 참조하십시오. */
 static void fixture(World *w, short hurt) {
     world_init(w);
     w->run.title = 0;
@@ -105,9 +106,10 @@ static void fixture(World *w, short hurt) {
        previous case left in them; that is what World::pools removed.
 
        The two that remain are not pool resets. pickup_spawn_level LAYS OUT the
-       level's items rather than clearing them, and the doors are still module
-       state keyed to a level -- door.c holds a DoorState array of its own, and
-       it is the one thing on this list that has not moved.
+       level's items rather than clearing them, and door_reset CAPTURES each
+       door's closed shape -- the state itself is Level::door_run now and was
+       emptied with the rest of the World, but the snapshot of what "closed"
+       means still has to be taken after the sectors exist.
 
        enemy_reset도 proj_reset도 decal_reset도 fx 정리도 없습니다. 몇 줄 위에서 world_init이
        World 전체를 비웠고 이제 풀이 그 안에 있으므로, 소유하는 것이 곧 비우는 것입니다. 그 네
@@ -1020,6 +1022,173 @@ int main(void) {
            "and a stage transition drops the cache too");
 
         mb_free(&b);
+    }
+
+    /* --- the edges the window used to answer for itself ---------------------
+       Every check below drives a rule that, until Input grew these three
+       fields, lived inside wnd_proc: which number key puts what in your hand,
+       what a keypress means on the death screen, and what happens to a rope
+       when the player alt-tabs. None of it was reachable from here, because
+       reaching it meant opening a window and pressing a key.
+
+       That is the entire argument for the change, so this is where it is
+       cashed in.
+       아래의 모든 검사는, Input이 이 세 필드를 갖기 전까지 wnd_proc 안에 살던 규칙을
+       구동합니다. 어느 숫자 키가 무엇을 손에 쥐여 주는지, 사망 화면에서의 키 입력이 무엇을
+       뜻하는지, 플레이어가 alt-tab 할 때 로프가 어떻게 되는지입니다. 그중 무엇도 이곳에서
+       도달할 수 없었습니다. 도달하려면 창을 열고 키를 눌러야 했기 때문입니다.
+
+       그것이 이번 변경의 논거 전부이며, 그래서 이곳이 그것을 회수하는 자리입니다. */
+    printf("\nedges\n");
+    {
+        /* --- weapon select ------------------------------------------------ */
+        {
+            World w;
+            fixture(&w, 0);
+
+            /* The boot belt is the shotgun and nothing else, so the axe is the
+               weapon the player does not have yet.
+               부팅 구성은 샷건뿐이므로, 도끼가 플레이어가 아직 갖지 못한 무기입니다. */
+            Input in = idle();
+            in.want_weapon = WP_AXE + 1;
+            world_step(&w, &in, 1.6f, DT);
+            ok(w.weapon.cur == WP_SHOTGUN,
+               "a weapon the player does not own is silently refused");
+
+            w.weapon.owned[WP_AXE] = 1;
+            w.weapon.cooldown      = 0.4f;   /* mid-swing */
+            in = idle();
+            in.want_weapon = WP_AXE + 1;
+            world_step(&w, &in, 1.6f, DT);
+            ok(w.weapon.cur == WP_AXE, "one they do own is put in their hand");
+            okf(w.weapon.cooldown == 0.0f,
+                "and the swing in progress is cancelled rather than inherited",
+                w.weapon.cooldown, 0.0f);
+
+            /* Zero is "no request", which is what a zeroed Input has to mean --
+               otherwise every fixture in this folder selects weapon 0 on every
+               frame without saying so.
+               0은 "요청 없음"이며, 0으로 초기화된 Input이 뜻해야 하는 바가 그것입니다.
+               그렇지 않으면 이 폴더의 모든 픽스처가 매 프레임 말없이 0번 무기를 고릅니다. */
+            w.weapon.cur = WP_AXE;
+            in = idle();
+            world_step(&w, &in, 1.6f, DT);
+            ok(w.weapon.cur == WP_AXE,
+               "a zeroed Input selects nothing rather than weapon zero");
+
+            /* Frozen: there is no hand to put anything in yet. */
+            in = idle();
+            in.paused      = 1;
+            in.want_weapon = WP_SHOTGUN + 1;
+            world_step(&w, &in, 1.6f, DT);
+            ok(w.weapon.cur == WP_AXE,
+               "and a frozen world does not change weapons at all");
+        }
+
+        /* --- confirm, on the title screen ---------------------------------- */
+        {
+            World w;
+            fixture(&w, 0);
+            w.run.title = 1;
+
+            Input in = idle();
+            world_step(&w, &in, 1.6f, DT);
+            ok(w.run.title, "the title screen stays up on a frame with no press");
+
+            in = idle();
+            in.confirm = 1;
+            world_step(&w, &in, 1.6f, DT);
+            ok(!w.run.title, "and a press starts the run");
+        }
+
+        /* --- confirm, on the death screen ---------------------------------- */
+        {
+            World w;
+            fixture(&w, 0);
+            w.run.dead       = 1;
+            w.run.death_time = 0.0f;
+
+            /* THE RULE THIS FILE EXISTS TO REACH. The shot that killed the
+               player is very often still held, so a restart on it reads as the
+               game skipping the death screen entirely -- and until now the only
+               way to check the delay was to die while holding fire.
+               이 파일이 도달하려고 존재하는 규칙입니다. 플레이어를 죽인 그 사격은 대개 아직
+               눌린 상태이므로, 그것으로 재시작되면 게임이 사망 화면을 통째로 건너뛴 것처럼
+               보입니다. 그리고 지금까지 이 지연을 검사하는 유일한 방법은 사격 버튼을 누른 채
+               죽는 것이었습니다. */
+            Input in = idle();
+            in.confirm = 1;
+            world_step(&w, &in, 1.6f, DT);
+            ok(!w.run.restart_wanted,
+               "a press during the death screen's grace period is ignored");
+
+            /* Waited out with idle frames, so the clock is advanced by the step
+               rather than by assigning to it: death_time is what the rule reads
+               and a test that sets it directly would not be checking that
+               anything advances it.
+               시계를 대입이 아니라 스텝으로 진행시키기 위해 빈 프레임으로 기다립니다.
+               death_time이 규칙이 읽는 값이며, 그것을 직접 대입하는 테스트는 무언가가 그것을
+               진행시킨다는 사실을 검사하지 않게 됩니다. */
+            for (int i = 0; i < 240 && w.run.death_time <= DEATH_INPUT_DELAY; i++) {
+                Input z = idle();
+                world_step(&w, &z, 1.6f, DT);
+            }
+            ok(!w.run.restart_wanted,
+               "and waiting alone does not restart anything");
+
+            in = idle();
+            in.confirm = 1;
+            world_step(&w, &in, 1.6f, DT);
+            ok(w.run.restart_wanted, "a press after it asks for a restart");
+        }
+
+        /* --- let_go, which is the one edge that undoes something ------------ */
+        {
+            World w;
+            fixture(&w, 0);
+
+            /* Thrown through the real call rather than by assigning a state, so
+               what is released is a hook that was genuinely in the air.
+               상태를 대입하지 않고 실제 호출로 던지므로, 해제되는 것은 정말로 공중에 있던
+               훅입니다. */
+            ok(wp_hook_fire(&w.weapon, w.player.pos, 0.0f, 0.0f),
+               "the grapple is away");
+            ok(wp_hook_locks_aim(&w.weapon), "and has the aim locked");
+
+            Input in = idle();
+            in.let_go = 1;
+            world_step(&w, &in, 1.6f, DT);
+            ok(!wp_hook_locks_aim(&w.weapon),
+               "losing focus drops it rather than leaving it attached off-screen");
+            ok(!w.weapon.hook_latched,
+               "and rearms it, because the button is already up");
+        }
+
+        /* --- an edge fires once, whatever the frame does with it ------------
+           The latch lives in main.c and is cleared there, so what is checked
+           here is the other half of the contract: world_step must not hold on
+           to an edge and act on it again on a later frame.
+           래치는 main.c에 있고 그곳에서 지워지므로, 이곳에서 검사하는 것은 계약의 나머지
+           절반입니다. world_step은 엣지를 붙들고 있다가 나중 프레임에 다시 처리해서는 안
+           됩니다. */
+        {
+            World w;
+            fixture(&w, 0);
+            w.run.title = 1;
+
+            Input in = idle();
+            in.confirm = 1;
+            world_step(&w, &in, 1.6f, DT);
+            ok(!w.run.title, "one press dismissed the title");
+
+            w.run.dead       = 1;
+            w.run.death_time = DEATH_INPUT_DELAY + 1.0f;
+
+            Input z = idle();   /* the SAME frame's edge is gone from this one */
+            world_step(&w, &z, 1.6f, DT);
+            ok(!w.run.restart_wanted,
+               "and did not carry over into the next frame");
+        }
     }
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall frame-order checks passed\n", fails);

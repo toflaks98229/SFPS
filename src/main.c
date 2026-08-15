@@ -53,9 +53,17 @@
 #include "world.h"    /* World and Input: the simulation this file drives */
 #include "render.h"   /* rd_init -- the one call that needs a context and no frame */
 #include "scene.h"    /* scene_frame: the draw order, and everything it owns */
-#include "weapon.h"       /* wp_stats and the hook's rearm: rules, no GL */
+/* WP_TYPES, and nothing else. This used to bring in wp_stats and the hook's
+   release/rearm, because ::wnd_proc switched weapons and dropped the rope
+   itself; both are ::world_step's now and what is left is the range check that
+   says which number keys are weapon keys. hook.h went with them -- it was
+   included for HOOK_* states this file no longer names.
+   WP_TYPES 하나뿐입니다. 이전에는 wp_stats와 훅의 해제·재장전을 가져왔습니다. ::wnd_proc이
+   직접 무기를 바꾸고 로프를 놓았기 때문입니다. 둘 다 이제 ::world_step의 것이고, 남은 것은
+   어느 숫자 키가 무기 키인지 말하는 범위 검사입니다. hook.h도 함께 나갔습니다. 이 파일이 더
+   이상 언급하지 않는 HOOK_* 상태 때문에 포함되어 있었습니다. */
+#include "weapon.h"
 #include "weaponview.h"   /* wpview_set_model / wpview_reload_texture: hot reload */
-#include "hook.h"
 #include "post.h"
 #include "menu.h"     /* the ESC menu: pause, settings, restart, quit */
 #include "font.h"
@@ -92,15 +100,17 @@
 
 /* PSX_SNAP_COARSE and DEATH_INPUT_DELAY used to be here as well, and followed
    the drawing out. The first is read only by ::scene_frame now, and a window
-   has no opinion about how coarse a snap grid is. The second is read by
-   ::wnd_proc here AND by the death overlay there, so it went to player.h beside
-   the collapse it delays: a constant two files read belongs to neither of them,
-   and of the two the death sequence is the one that owns the number.
+   has no opinion about how coarse a snap grid is. The second went to player.h
+   beside the collapse it delays, and this file no longer reads it at all:
+   ::wnd_proc used to apply the grace period before setting the restart flag,
+   which is a rule about the run and is ::step_confirm's now. A window has no
+   opinion about how long a death screen has to be looked at either.
    PSX_SNAP_COARSE와 DEATH_INPUT_DELAY도 이곳에 있었고, 그리기를 따라 나갔습니다. 앞의
    것은 이제 ::scene_frame만 읽으며, 창은 스냅 격자가 얼마나 성긴지에 대해 아무 견해도 갖지
-   않습니다. 뒤의 것은 이곳의 ::wnd_proc과 저곳의 사망 오버레이가 *함께* 읽으므로, 그것이
-   지연시키는 쓰러짐 연출 곁인 player.h로 갔습니다. 두 파일이 읽는 상수는 어느 쪽에도 속하지
-   않으며, 둘 중 그 값을 소유하는 쪽은 사망 연출입니다. */
+   않습니다. 뒤의 것은 그것이 지연시키는 쓰러짐 연출 곁인 player.h로 갔으며, 이 파일은 이제
+   그것을 전혀 읽지 않습니다. ::wnd_proc이 재시작 플래그를 세우기 전에 유예 시간을
+   적용했었는데, 그것은 플레이에 대한 규칙이며 이제 ::step_confirm의 것입니다. 창은 사망
+   화면을 얼마나 오래 봐야 하는지에 대해서도 아무 견해를 갖지 않습니다. */
 
 /* ------------------------------------------------------------------- state */
 
@@ -108,6 +118,55 @@
 
 /** @brief Key-down flags indexed by virtual key code. / 가상 키 코드로 인덱싱되는 키 눌림 플래그. */
 static int  g_keys[256];
+
+/**
+ * @struct EdgeLatch
+ * @brief Edges the window has seen and the frame has not consumed yet.
+ *
+ * ENGLISH
+ * -------
+ * These used to be written straight into ::g_world from ::wnd_proc, which is
+ * how weapon selection, the hook's release and the death screen's restart rule
+ * came to live inside a Win32 message handler -- unreachable from
+ * tools\steptest.c, and contradicting this file's own claim that nothing here
+ * decides what a frame means.
+ *
+ * A latch keeps what was true about the edge: the message sets it once and
+ * ::input_gather clears it once, so one press is still one step. What it stops
+ * being is a decision. ::wnd_proc still decides which KEY means which edge --
+ * that is a keyboard question and it belongs here -- and ::world_step decides
+ * what the edge DOES.
+ *
+ * @note One struct rather than three globals, for the reason ::RunState is one:
+ *       draining it is one assignment, and a fourth edge is a field here rather
+ *       than a line that has to be added to two places and will be added to
+ *       one.
+ *
+ * 한국어
+ * ------
+ * @brief 창이 관측했지만 프레임이 아직 소비하지 않은 엣지들.
+ *
+ * 이들은 이전에 ::wnd_proc에서 ::g_world로 곧장 기록되었고, 그래서 무기 선택과 훅 해제와
+ * 사망 화면의 재시작 규칙이 Win32 메시지 핸들러 안에 살게 되었습니다. tools\steptest.c에서
+ * 도달할 수 없었고, 이곳의 무엇도 한 프레임이 무엇을 뜻하는지 결정하지 않는다는 이 파일
+ * 자신의 주장과 모순되었습니다.
+ *
+ * 래치는 엣지에 대해 참이던 것을 지킵니다. 메시지가 한 번 세우고 ::input_gather가 한 번
+ * 지우므로, 한 번 누름은 여전히 한 단계입니다. 더 이상 아닌 것은 *판단*입니다. ::wnd_proc은
+ * 여전히 어느 *키*가 어느 엣지인지 결정하며(그것은 키보드에 관한 질문이고 이곳에 속합니다),
+ * ::world_step이 그 엣지가 무엇을 *하는지* 결정합니다.
+ *
+ * @note 전역 셋이 아니라 구조체 하나인 이유는 ::RunState가 하나인 이유와 같습니다. 비우는 것이
+ *       대입 한 번이고, 네 번째 엣지는 두 곳에 추가해야 하며 그중 한 곳에만 추가될 줄이
+ *       아니라 이곳의 필드 하나가 됩니다.
+ */
+typedef struct {
+    int confirm;   /**< A key or click answered the screen that is up. / 키나 클릭이 떠 있는 화면에 응답했습니다. */
+    int weapon;    /**< One-based weapon request; 0 is none. See ::Input::want_weapon. / 1부터 시작하는 무기 요청. 0이면 없음. */
+    int let_go;    /**< Focus was lost, or the menu opened. / 포커스를 잃었거나 메뉴가 열렸습니다. */
+} EdgeLatch;
+
+static EdgeLatch g_edge;
 /** @brief Left mouse button held: the fire trigger. / 좌클릭 유지 상태. 발사 트리거입니다. */
 static int  g_mouse_down;
 /** @brief Right mouse button held: the grapple is a hold, not a toggle. / 우클릭 유지 상태. 그래플은 토글이 아닌 홀드 방식입니다. */
@@ -272,13 +331,24 @@ static void cursor_update(void) {
  * @return 0 for handled messages, otherwise the default window procedure's result.
  * @note Only records state; all gameplay happens in ::world_step. Acting on
  *       input here would run at message rate rather than frame rate.
+ *
+ *       THIS NOTE USED TO BE FALSE. The block below switched weapons, cancelled
+ *       a swing, played the draw sound, dropped the grapple and applied the
+ *       death screen's grace period -- five rules, in a Win32 message handler,
+ *       unreachable from tools\steptest.c. They are ::step_weapon_pick and
+ *       ::step_confirm now, and what is left here really is only recording.
  * @note What IS handled here is every EDGE -- one press must be one step. A
  *       held key polled once a frame would walk a whole menu in a frame, toggle
  *       the pixelise pass every frame, and skip the death screen on the shot
- *       that caused it. Held state goes into ::g_keys and is read by
- *       ::input_gather instead.
- * @note Losing focus clears every key and releases the grapple, so the player
- *       does not return from alt-tab still holding a rope or walking forward.
+ *       that caused it. Held state goes into ::g_keys; edges that the SIMULATION
+ *       has to answer go into ::g_edge, and ::input_gather delivers both.
+ * @note The edges that stay here in full are the ones that touch no ::World:
+ *       the menu keys, which drive a module with its own state, and F1, which
+ *       is a property of the render target in the same way the display mode is.
+ * @note Losing focus clears every key and asks for the grapple to be released,
+ *       so the player does not return from alt-tab still holding a rope or
+ *       walking forward. The keys clear here because they are this file's; the
+ *       rope is released by the step, because it is not.
  *
  * 한국어
  * ------
@@ -290,12 +360,21 @@ static void cursor_update(void) {
  * @return 처리한 메시지에 대해서는 0, 그 외에는 기본 창 프로시저의 반환값.
  * @note 상태를 기록하기만 합니다. 모든 게임 로직은 ::world_step에서 처리됩니다. 여기서
  *       입력에 반응하면 프레임 단위가 아닌 메시지 단위로 실행되기 때문입니다.
+ *
+ *       이 참고 사항은 *거짓이었습니다*. 아래 블록은 무기를 바꾸고, 진행 중인 공격을 취소하고,
+ *       뽑기 사운드를 재생하고, 그래플을 놓고, 사망 화면의 유예 시간을 적용했습니다. 다섯 개의
+ *       규칙이 Win32 메시지 핸들러 안에 있었고 tools\steptest.c에서 도달할 수 없었습니다.
+ *       이제 그것들은 ::step_weapon_pick과 ::step_confirm이며, 이곳에 남은 것은 정말로 기록뿐입니다.
  * @note 이곳에서 처리하는 것은 모든 *엣지*입니다. 한 번 누름은 한 단계여야 합니다. 프레임마다
  *       폴링되는 유지 키는 한 프레임에 메뉴 전체를 지나가고, 매 프레임 픽셀화 패스를
- *       전환하며, 사망을 유발한 그 사격으로 사망 화면을 건너뜁니다. 유지 상태는 ::g_keys에
- *       들어가고 ::input_gather가 대신 읽습니다.
- * @note 포커스를 잃으면 모든 키를 해제하고 그래플을 놓습니다. 그래야 alt-tab에서
- *       돌아왔을 때 로프를 잡은 채이거나 계속 전진하는 상태가 되지 않습니다.
+ *       전환하며, 사망을 유발한 그 사격으로 사망 화면을 건너뜁니다. 유지 상태는 ::g_keys로,
+ *       *시뮬레이션*이 답해야 하는 엣지는 ::g_edge로 들어가며, ::input_gather가 둘 다
+ *       전달합니다.
+ * @note 이곳에 온전히 남는 엣지는 ::World를 건드리지 않는 것들입니다. 자기 상태를 가진 모듈을
+ *       조작하는 메뉴 키, 그리고 디스플레이 모드와 같은 의미에서 렌더 타깃의 성질인 F1입니다.
+ * @note 포커스를 잃으면 모든 키를 해제하고 그래플을 놓아 달라고 *요청*합니다. 그래야 alt-tab에서
+ *       돌아왔을 때 로프를 잡은 채이거나 계속 전진하는 상태가 되지 않습니다. 키는 이 파일의
+ *       것이므로 이곳에서 지우고, 로프는 그렇지 않으므로 스텝이 놓습니다.
  */
 static LRESULT CALLBACK wnd_proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
@@ -309,9 +388,16 @@ static LRESULT CALLBACK wnd_proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
            타이틀 화면은 ESC를 제외한 모든 키를 받습니다. ESC는 여전히 메뉴를 열어,
            시작 전에 설정을 바꾸거나 종료할 수 있게 합니다. */
         if (g_world.run.title && !menu_is_open() && wp != VK_ESCAPE) {
-            g_world.run.title = 0;
-            g_warp_mouse = 1;
-            cursor_update();
+            /* Latched, not acted on. Which key dismisses a title screen is a
+               keyboard question and stays here; what dismissing it MEANS is a
+               rule, and it is ::step_confirm's. The cursor and the discarded
+               mouse delta follow in the frame loop, once the step has actually
+               cleared `title`.
+               행동이 아니라 래치입니다. 어느 키가 타이틀 화면을 해제하는지는 키보드에 대한
+               질문이며 이곳에 남습니다. 해제가 무엇을 *뜻하는지*는 규칙이고 ::step_confirm의
+               것입니다. 커서와 버려지는 마우스 변화량은 스텝이 실제로 `title`을 지운 뒤
+               프레임 루프에서 따라옵니다. */
+            g_edge.confirm = 1;
             return 0;
         }
 
@@ -333,8 +419,7 @@ static LRESULT CALLBACK wnd_proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
                    방지하는 것과 같은 종류의 놀라움입니다. */
                 g_mouse_down = 0;
                 g_hook_down  = 0;
-                wp_hook_release(&g_world.weapon);
-                wp_hook_arm(&g_world.weapon);
+                g_edge.let_go = 1;   /* the rope, which does not clear itself */
                 for (int i = 0; i < 256; i++) g_keys[i] = 0;
             } else {
                 /* Closing: the cursor was parked wherever the player left it,
@@ -347,17 +432,19 @@ static LRESULT CALLBACK wnd_proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
 
-        /* Dead: any key restarts, once the grace period has passed. The delay
-           is why this is not simply "any key" -- the shot that killed you is
-           very often still held down, and restarting on it reads as the game
-           skipping the death screen entirely.
-           사망 상태에서는 유예 시간이 지난 뒤 아무 키나 누르면 재시작합니다. 이 지연이
-           단순한 "아무 키"가 아닌 이유입니다. 당신을 죽인 그 사격은 대개 아직 눌린
-           상태이며, 그것으로 재시작되면 게임이 사망 화면을 통째로 건너뛴 것처럼
-           보입니다. */
-        if (g_world.run.dead && !menu_is_open()
-            && g_world.run.death_time > DEATH_INPUT_DELAY) {
-            g_world.run.restart_wanted = 1;
+        /* Dead: any key restarts. THE GRACE PERIOD IS NOT TESTED HERE any
+           more -- whether enough of the death screen has passed is a rule about
+           the run, so ::step_confirm owns it. A key pressed too early latches
+           an edge the step then declines to act on, which is the same swallowed
+           keypress it always was, and the rule is now something a headless test
+           can drive.
+           사망 상태에서는 아무 키나 누르면 재시작합니다. 유예 시간을 더 이상 이곳에서
+           검사하지 않습니다. 사망 화면이 충분히 지났는지는 플레이에 대한 규칙이므로
+           ::step_confirm이 소유합니다. 너무 일찍 누른 키는 스텝이 행동하지 않기로 하는 엣지를
+           래치하며, 그것은 언제나 그러했던 것과 같이 삼켜진 키 입력입니다. 그리고 그 규칙은
+           이제 헤드리스 테스트가 구동할 수 있는 것이 되었습니다. */
+        if (g_world.run.dead && !menu_is_open()) {
+            g_edge.confirm = 1;
             return 0;
         }
 
@@ -388,34 +475,28 @@ static LRESULT CALLBACK wnd_proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
         if (wp == VK_F1) { post_set_enabled(!post_enabled()); return 0; }
 
         /* --- weapon select ---------------------------------------------
-           On the message edge like the toggles above, so one press is one
-           switch. A weapon that is not owned is not selected: silently
-           refusing is better than an empty hand, and the number keys stay
-           harmless before the roster fills out.
-           위의 토글들과 마찬가지로 메시지 시점에 처리하므로 한 번 누르면 한 번
-           전환됩니다. 보유하지 않은 무기는 선택되지 않습니다. 빈손보다는 조용히
-           거절하는 편이 낫고, 구성이 갖춰지기 전까지 숫자 키가 무해하게 유지됩니다. */
-        if (wp >= '1' && wp < '1' + WP_TYPES) {
-            int want = (int)(wp - '1');
-            if (g_world.weapon.owned[want] && g_world.weapon.cur != want) {
-                g_world.weapon.cur = want;
-                /* A switch cancels a swing in progress rather than carrying
-                   its timer across: the axe's dash must not be inherited by
-                   the shotgun.
-                   진행 중인 공격을 이월하지 않고 취소합니다. 도끼의 대쉬를 샷건이
-                   물려받아서는 안 됩니다. */
-                g_world.weapon.cooldown = 0.0f;
+           WHICH KEYS ARE WEAPON KEYS, and nothing else. This block used to
+           reach into `g_world.weapon`, cancel a swing and play a sound, which
+           put three rules inside a Win32 message handler where no headless
+           test could see them -- and left this file, whose whole claim is that
+           it decides nothing about what a frame means, deciding what a number
+           key means.
 
-                /* A weapon that announces itself does so here, on the switch
-                   rather than on the first swing: the saw revving up is what
-                   tells the player the change took, and hearing it only once
-                   they attack makes the switch itself feel unacknowledged.
-                   자기를 알리는 무기는 첫 공격이 아니라 *전환 시점*인 이곳에서 그렇게
-                   합니다. 톱이 돌기 시작하는 소리가 전환이 먹혔다는 것을 알려 주며, 공격할
-                   때에야 들린다면 전환 자체가 응답 없는 것처럼 느껴집니다. */
-                const char *dsnd = wp_stats(want)->draw_snd;
-                if (dsnd) audio_play(dsnd, 85);
-            }
+           ONE-BASED, so a frame with no request is a zeroed field rather than a
+           sentinel every fixture has to know about. See ::Input::want_weapon,
+           and ::step_weapon_pick for what now happens.
+
+           어느 키가 무기 키인지이며, 그 외에는 아무것도 아닙니다. 이 블록은 이전에
+           `g_world.weapon`에 손을 뻗어 진행 중인 공격을 취소하고 소리를 재생했습니다. 세 개의
+           규칙을 어떤 헤드리스 테스트도 볼 수 없는 Win32 메시지 핸들러 안에 두었고, 한 프레임이
+           무엇을 뜻하는지 아무것도 결정하지 않는다는 것이 존재 주장인 이 파일이 숫자 키의
+           의미를 결정하게 했습니다.
+
+           1부터 시작하므로 요청이 없는 프레임은 모든 픽스처가 알아야 하는 특별한 값이 아니라
+           0으로 초기화된 필드가 됩니다. ::Input::want_weapon을 참조하고, 이제 무슨 일이
+           일어나는지는 ::step_weapon_pick을 보십시오. */
+        if (wp >= '1' && wp < '1' + WP_TYPES) {
+            g_edge.weapon = (int)(wp - '1') + 1;
             return 0;
         }
         g_keys[wp & 0xff] = 1;
@@ -447,15 +528,14 @@ static LRESULT CALLBACK wnd_proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
            cursor is visible on both, so clicking is what a player reaches for.
            타이틀 화면과 사망 화면은 키만큼이나 클릭도 받아들입니다. 양쪽 모두 커서가
            보이므로 플레이어가 손을 뻗는 것은 클릭입니다. */
-        if (g_world.run.title && !menu_is_open()) {
-            g_world.run.title = 0;
-            g_warp_mouse = 1;
-            cursor_update();
-            return 0;
-        }
-        if (g_world.run.dead && !menu_is_open()
-            && g_world.run.death_time > DEATH_INPUT_DELAY) {
-            g_world.run.restart_wanted = 1;
+        if ((g_world.run.title || g_world.run.dead) && !menu_is_open()) {
+            /* One latch for both, exactly as the keyboard path above: a click
+               on either screen is the same event, and which screen it answers
+               is ::step_confirm's question.
+               위의 키보드 경로와 정확히 같이 둘에 대해 하나의 래치입니다. 어느 화면에서의
+               클릭이든 같은 사건이며, 그것이 어느 화면에 답하는지는 ::step_confirm의
+               질문입니다. */
+            g_edge.confirm = 1;
             return 0;
         }
         if (menu_is_open()) {
@@ -504,8 +584,7 @@ static LRESULT CALLBACK wnd_proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
         g_focused = 0;
         g_mouse_down = 0;
         g_hook_down = 0;
-        wp_hook_release(&g_world.weapon);   /* do not leave it attached off-screen */
-        wp_hook_arm(&g_world.weapon);       /* the button is up now, so rearm with it */
+        g_edge.let_go = 1;   /* do not come back still roped to a wall */
         cursor_update();
         for (int i = 0; i < 256; i++) g_keys[i] = 0;
         return 0;
@@ -590,6 +669,33 @@ static void input_gather(Input *in, const World *w) {
        fired in this one. */
     in->fire = g_focused && g_mouse_down;
     in->hook = g_hook_down;
+
+    /* --- the edges, drained ------------------------------------------------
+       Taken and cleared in one place, so an edge the window saw is delivered to
+       exactly one frame. Clearing by assigning a zeroed struct rather than by
+       naming each field is the same reason ::run_reset does: a fourth edge is
+       reset by construction instead of by somebody remembering to extend a
+       list.
+
+       NOT gated on focus, unlike `fire` above. A window that has just lost
+       focus is precisely when ::EdgeLatch::let_go is set, and dropping it
+       because the window is no longer focused would drop the one edge that
+       exists to be handled at that moment.
+
+       엣지를 한 곳에서 가져오고 지우므로, 창이 관측한 엣지는 정확히 한 프레임에 전달됩니다.
+       필드를 하나씩 지우지 않고 0으로 초기화된 구조체를 대입하는 것은 ::run_reset과 같은
+       이유입니다. 네 번째 엣지는 누군가 목록을 늘려 주기를 기다리지 않고 구조적으로
+       초기화됩니다.
+
+       위의 `fire`와 달리 포커스로 거르지 *않습니다*. 창이 방금 포커스를 잃은 순간이 바로
+       ::EdgeLatch::let_go가 설정되는 때이며, 창이 더 이상 포커스를 갖지 않는다는 이유로
+       그것을 버리면 정확히 그 순간에 처리되려고 존재하는 엣지를 버리게 됩니다. */
+    in->confirm     = g_edge.confirm;
+    in->want_weapon = g_edge.weapon;
+    in->let_go      = g_edge.let_go;
+
+    EdgeLatch none = {0};
+    g_edge = none;
 }
 
 /* ------------------------------------------------------ graphics settings */
@@ -1006,23 +1112,6 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
         }
         if (!g_running) break;
 
-        /* --- restart -------------------------------------------------------
-           Three ways in -- the menu's RESTART row, a key on the death screen,
-           and a click on it -- and all three set the same flag, so there is one
-           implementation. What is left here is the part that belongs to the
-           window: the menu has to close, the next mouse delta has to be thrown
-           away, and the cursor has to be re-decided AFTER `dead` has changed.
-           진입로는 셋(메뉴의 RESTART 행, 사망 화면에서의 키, 그곳에서의 클릭)이며 셋 모두
-           같은 플래그를 설정하므로 구현은 하나입니다. 이곳에 남은 것은 창에 속한 부분입니다.
-           메뉴를 닫고, 다음 마우스 변화량을 버리고, `dead`가 바뀐 *뒤에* 커서를 다시
-           결정해야 합니다. */
-        if (g_world.run.restart_wanted) {
-            world_restart(&g_world);
-            menu_close();
-            g_warp_mouse = 1;
-            cursor_update();
-        }
-
         apply_live_settings();
 
         RECT cr; GetClientRect(g_wnd, &cr);
@@ -1038,7 +1127,64 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
            종횡비입니다. ::world_step의 참고 사항을 확인하십시오. */
         Input in;
         input_gather(&in, &g_world);
+
+        /* Read before the step, because the step is what clears it and the
+           window has to notice the transition to hand the cursor back and throw
+           away one mouse delta. Dismissing the title used to happen inside
+           ::wnd_proc, which could do both on the spot; the rule moved to
+           ::step_confirm and only this half stayed behind.
+           스텝 이전에 읽습니다. 그것을 지우는 것이 스텝이고, 창은 커서를 돌려주고 마우스
+           변화량 하나를 버리기 위해 그 전이를 알아채야 하기 때문입니다. 타이틀 해제는 이전에
+           ::wnd_proc 안에서 일어났고 그곳에서 둘 다 즉시 할 수 있었습니다. 규칙은
+           ::step_confirm으로 옮겨 갔고 이 절반만 남았습니다. */
+        int was_title = g_world.run.title;
+
         int frozen = world_step(&g_world, &in, (float)vw / (float)vh, dt);
+
+        if (was_title && !g_world.run.title) {
+            g_warp_mouse = 1;
+            cursor_update();
+        }
+
+        /* --- restart -------------------------------------------------------
+           Three ways in -- the menu's RESTART row, a key on the death screen,
+           and a click on it -- and all three arrive as the same flag, so there
+           is one implementation. What is left here is the part that belongs to
+           the window: the menu has to close, the next mouse delta has to be
+           thrown away, and the cursor has to be re-decided AFTER `dead` has
+           changed.
+
+           AFTER the step rather than before it, which is where this used to be.
+           The flag is now raised BY the step -- ::step_confirm is what applies
+           the death screen's grace period -- so reading it first would act on
+           the request a frame late. The menu's own RESTART row sets it above
+           and is picked up here in the same frame it was chosen.
+
+           진입로는 셋(메뉴의 RESTART 행, 사망 화면에서의 키, 그곳에서의 클릭)이며 셋 모두 같은
+           플래그로 도착하므로 구현은 하나입니다. 이곳에 남은 것은 창에 속한 부분입니다. 메뉴를
+           닫고, 다음 마우스 변화량을 버리고, `dead`가 바뀐 *뒤에* 커서를 다시 결정해야 합니다.
+
+           이전에 있던 자리인 스텝 *이전*이 아니라 스텝 *이후*입니다. 이제 그 플래그를 세우는
+           것이 스텝이므로(사망 화면의 유예 시간을 적용하는 것이 ::step_confirm입니다) 먼저
+           읽으면 요청을 한 프레임 늦게 처리하게 됩니다. 메뉴의 RESTART 행은 위에서 플래그를
+           세우며 고른 바로 그 프레임에 이곳에서 처리됩니다. */
+        if (g_world.run.restart_wanted) {
+            world_restart(&g_world);
+            menu_close();
+            g_warp_mouse = 1;
+            cursor_update();
+
+            /* Re-derived, because the frame about to be DRAWN is the restarted
+               one and `frozen` describes the world the step ran against -- a
+               world that was dead or paused, which is how the restart was asked
+               for in the first place. Drawing it frozen would put the death
+               screen's overlay over a run that has already begun again.
+               다시 유도합니다. 이제 *그려질* 프레임은 재시작된 것이고 `frozen`은 스텝이
+               대상으로 삼았던 월드, 즉 죽었거나 일시정지된 월드를 서술하기 때문입니다.
+               애초에 재시작이 요청된 방식이 그것입니다. 정지 상태로 그리면 이미 다시 시작된
+               플레이 위에 사망 화면의 오버레이가 놓입니다. */
+            frozen = world_frozen(&g_world, menu_is_open());
+        }
 
         /* Hot reload: in a HOT_RELOAD build this notices an edit under the
            assets directory and rebuilds whatever came out of it, so a

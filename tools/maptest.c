@@ -673,7 +673,21 @@ static void test_atrium(void) {
 
     const char *cn = brush_ent_value(&M2.ents[0], "classname");
     check(cn && txt_is(cn, 10, "worldspawn"), "entity 0 is worldspawn");
-    checki(M2.ents[0].n_brushes, 10, "worldspawn owns the room");
+
+    /* THE SAME LESSON A THIRD TIME. This named ten, and then the floor was cut
+       into four pieces to make a hole for the lava -- the level doing an
+       ordinary thing, and the assertion breaking for it. What is actually
+       being claimed is that the world holds the world: everything nobody else
+       claimed. So count that instead, and let the room grow.
+       같은 교훈이 세 번째입니다. 이곳은 10을 명시했고, 그다음 용암을 놓을 구멍을 내려고
+       바닥이 네 조각으로 잘렸습니다. 레벨이 평범한 일을 했고 단언이 그것 때문에 깨졌습니다.
+       실제로 주장하는 바는 세계가 세계를 담는다는 것, 즉 아무도 가져가지 않은 전부입니다.
+       그러니 그것을 세고 방은 자라게 둡니다. */
+    int claimed = 0;
+    for (int i = 1; i < M2.n_ents; i++) claimed += M2.ents[i].n_brushes;
+    checki(M2.ents[0].n_brushes, M2.n_brushes - claimed,
+           "worldspawn owns every brush no other entity claimed");
+    check(M2.ents[0].n_brushes >= 10, "and that is the room, not a corner of it");
 
     int door = -1, lights = 0;
     for (int i = 0; i < M2.n_ents; i++) {

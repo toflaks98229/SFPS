@@ -18,6 +18,12 @@
 //   THE BALCONY. Standing under it and standing on it are the same x,z at two
 //   different heights. Last-declared-wins gave a sector one of them.
 //
+//   THE LAVA. A sector's hazard is a property of its floor, so a safe dais in
+//   a lava moat had to be a second sector declared over the first and the rule
+//   "last one wins" had to exist to read it back. Here the lava is a volume and
+//   the plinth is a solid brush standing in it; nothing resolves anything,
+//   because your feet are above the lava or they are not.
+//
 // The door's inner face carries UV axes fitted to it -- one 128px texture over
 // the whole 4m leaf, which is the thing planar projection could not express.
 //
@@ -30,7 +36,11 @@
 // 이 레벨이 존재하는 이유 두 가지: 경사로(섹터는 평면상의 한 점에 바닥 높이가 하나뿐이라
 // 올라가는 면을 계단으로 근사하거나 아예 만들 수 없습니다. 이곳에서는 평면 다섯 개입니다)와
 // 발코니(그 아래 서는 것과 그 위에 서는 것이 같은 x,z의 서로 다른 두 높이입니다. 마지막 선언
-// 우선 규칙은 섹터에게 둘 중 하나만 주었습니다).
+// 우선 규칙은 섹터에게 둘 중 하나만 주었습니다). 그리고 용암입니다. 섹터의 위험 지형은 바닥의
+// 속성이므로 용암 해자 속 안전한 단상은 첫 섹터 위에 선언된 두 번째 섹터여야 했고, 그것을 다시
+// 읽어 내기 위해 "마지막이 우선"이라는 규칙이 존재해야 했습니다. 이곳에서 용암은 부피이고
+// 받침대는 그 안에 선 고체 브러시입니다. 무엇도 무엇을 해석하지 않습니다. 발이 용암 위에 있거나
+// 없거나 둘 중 하나이기 때문입니다.
 //
 // 문의 안쪽 면은 그 면에 맞춘 UV 축을 지닙니다. 4m 문짝 전체에 128px 텍스처 한 장이며,
 // 평면 투영이 표현할 수 없던 바로 그것입니다.
@@ -40,14 +50,61 @@
 "classname" "worldspawn"
 "message" "Atrium"
 "next" "vault"
-// brush 0 -- floor
+// brushes 0-3 -- the floor, in four pieces because of the hole in it. The
+// basin is 144 units square at x 96..240, y -240..-96, and a hole in a floor
+// is the floor being four brushes rather than one with a property.
 {
-( -272 -272 0 ) ( -272 272 0 ) ( 272 272 0 ) ptile [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 0.5 0.5
-( -272 -272 -16 ) ( 272 -272 -16 ) ( 272 272 -16 ) ptile [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 0.5 0.5
-( -272 272 0 ) ( -272 -272 0 ) ( -272 -272 -16 ) ptile [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 0.5 0.5
-( 272 -272 0 ) ( 272 272 0 ) ( 272 272 -16 ) ptile [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 0.5 0.5
-( 272 -272 -16 ) ( -272 -272 -16 ) ( -272 -272 0 ) ptile [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 0.5 0.5
-( -272 272 -16 ) ( 272 272 -16 ) ( 272 272 0 ) ptile [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 0.5 0.5
+( -272 -272 0 ) ( -272 272 0 ) ( 96 272 0 ) ptile [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 0.5 0.5
+( -272 -272 -32 ) ( 96 -272 -32 ) ( 96 272 -32 ) ptile [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 0.5 0.5
+( -272 272 0 ) ( -272 -272 0 ) ( -272 -272 -32 ) ptile [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 0.5 0.5
+( 96 -272 0 ) ( 96 272 0 ) ( 96 272 -32 ) ptile [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 0.5 0.5
+( 96 -272 -32 ) ( -272 -272 -32 ) ( -272 -272 0 ) ptile [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 0.5 0.5
+( -272 272 -32 ) ( 96 272 -32 ) ( 96 272 0 ) ptile [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 0.5 0.5
+}
+{
+( 240 -272 0 ) ( 240 272 0 ) ( 272 272 0 ) ptile [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 0.5 0.5
+( 240 -272 -32 ) ( 272 -272 -32 ) ( 272 272 -32 ) ptile [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 0.5 0.5
+( 240 272 0 ) ( 240 -272 0 ) ( 240 -272 -32 ) ptile [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 0.5 0.5
+( 272 -272 0 ) ( 272 272 0 ) ( 272 272 -32 ) ptile [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 0.5 0.5
+( 272 -272 -32 ) ( 240 -272 -32 ) ( 240 -272 0 ) ptile [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 0.5 0.5
+( 240 272 -32 ) ( 272 272 -32 ) ( 272 272 0 ) ptile [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 0.5 0.5
+}
+{
+( 96 -272 0 ) ( 96 -240 0 ) ( 240 -240 0 ) ptile [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 0.5 0.5
+( 96 -272 -32 ) ( 240 -272 -32 ) ( 240 -240 -32 ) ptile [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 0.5 0.5
+( 96 -240 0 ) ( 96 -272 0 ) ( 96 -272 -32 ) ptile [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 0.5 0.5
+( 240 -272 0 ) ( 240 -240 0 ) ( 240 -240 -32 ) ptile [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 0.5 0.5
+( 240 -272 -32 ) ( 96 -272 -32 ) ( 96 -272 0 ) ptile [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 0.5 0.5
+( 96 -240 -32 ) ( 240 -240 -32 ) ( 240 -240 0 ) ptile [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 0.5 0.5
+}
+{
+( 96 -96 0 ) ( 96 272 0 ) ( 240 272 0 ) ptile [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 0.5 0.5
+( 96 -96 -32 ) ( 240 -96 -32 ) ( 240 272 -32 ) ptile [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 0.5 0.5
+( 96 272 0 ) ( 96 -96 0 ) ( 96 -96 -32 ) ptile [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 0.5 0.5
+( 240 -96 0 ) ( 240 272 0 ) ( 240 272 -32 ) ptile [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 0.5 0.5
+( 240 -96 -32 ) ( 96 -96 -32 ) ( 96 -96 0 ) ptile [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 0.5 0.5
+( 96 272 -32 ) ( 240 272 -32 ) ( 240 272 0 ) ptile [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 0.5 0.5
+}
+// brush 4 -- the basin floor, 16 units down. Half a metre, which is under
+// PLAYER_STEP: you can walk into the lava and you can walk back out.
+{
+( 96 -240 -16 ) ( 96 -96 -16 ) ( 240 -96 -16 ) prust [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 0.5 0.5
+( 96 -240 -32 ) ( 240 -240 -32 ) ( 240 -96 -32 ) prust [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 0.5 0.5
+( 96 -96 -16 ) ( 96 -240 -16 ) ( 96 -240 -32 ) prust [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 0.5 0.5
+( 240 -240 -16 ) ( 240 -96 -16 ) ( 240 -96 -32 ) prust [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 0.5 0.5
+( 240 -240 -32 ) ( 96 -240 -32 ) ( 96 -240 -16 ) prust [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 0.5 0.5
+( 96 -96 -32 ) ( 240 -96 -32 ) ( 240 -96 -16 ) prust [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 0.5 0.5
+}
+// brush 5 -- the plinth standing in the lava, top at 16. This is the dais the
+// sector model needed a precedence rule for: here it is just a solid brush,
+// and standing on it puts your feet above the lava because they are.
+{
+( 144 -192 16 ) ( 144 -144 16 ) ( 192 -144 16 ) pmarble [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 0.5 0.5
+( 144 -192 -16 ) ( 192 -192 -16 ) ( 192 -144 -16 ) pmarble [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 0.5 0.5
+( 144 -144 16 ) ( 144 -192 16 ) ( 144 -192 -16 ) pmarble [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 0.5 0.5
+( 192 -192 16 ) ( 192 -144 16 ) ( 192 -144 -16 ) pmarble [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 0.5 0.5
+( 192 -192 -16 ) ( 144 -192 -16 ) ( 144 -192 16 ) pmarble [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 0.5 0.5
+( 144 -144 -16 ) ( 192 -144 -16 ) ( 192 -144 16 ) pmarble [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 0.5 0.5
 }
 // brush 1 -- ceiling
 {
@@ -250,6 +307,28 @@
 ( 96 160 96 ) ( 96 256 96 ) ( 96 256 0 ) trigger [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
 ( 96 160 0 ) ( -96 160 0 ) ( -96 160 96 ) trigger [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
 ( -96 256 0 ) ( 96 256 0 ) ( 96 256 96 ) trigger [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1 1
+}
+}
+// THE LAVA. Textured rather than `trigger`, because this one is meant to be
+// seen: a trigger_hurt's brushes stop being solid but they still draw, which
+// is the same arrangement Quake uses for a liquid. Its top sits 8 units below
+// the room's floor, so standing at the edge is safe and stepping in is not --
+// the volume decides, not the floor under it.
+//
+// 용암입니다. `trigger`가 아니라 재질로 칠했습니다. 이것은 보여야 하기 때문입니다.
+// trigger_hurt의 브러시는 고체이기를 멈추지만 여전히 그려지며, Quake가 액체에 쓰는 것과 같은
+// 배치입니다. 윗면이 방 바닥보다 8유닛 아래에 있으므로 가장자리에 서는 것은 안전하고 발을
+// 들이는 것은 그렇지 않습니다. 그 아래의 바닥이 아니라 부피가 결정합니다.
+{
+"classname" "trigger_hurt"
+"dmg" "12"
+{
+( 96 -240 -8 ) ( 96 -96 -8 ) ( 240 -96 -8 ) plava [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 0.5 0.5
+( 96 -240 -16 ) ( 240 -240 -16 ) ( 240 -96 -16 ) plava [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 0.5 0.5
+( 96 -96 -8 ) ( 96 -240 -8 ) ( 96 -240 -16 ) plava [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 0.5 0.5
+( 240 -240 -8 ) ( 240 -96 -8 ) ( 240 -96 -16 ) plava [ 0 1 0 0 ] [ 0 0 -1 0 ] 0 0.5 0.5
+( 240 -240 -16 ) ( 96 -240 -16 ) ( 96 -240 -8 ) plava [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 0.5 0.5
+( 96 -96 -16 ) ( 240 -96 -16 ) ( 240 -96 -8 ) plava [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 0.5 0.5
 }
 }
 {

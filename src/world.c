@@ -24,6 +24,7 @@
 #include "proj.h"
 #include "decal.h"
 #include "door.h"
+#include "brush.h"
 #include "fx.h"
 #include "audio.h"
 #include "txt.h"
@@ -52,6 +53,25 @@
 #define LAVA_SMOKE_INTERVAL  0.16f  ///< @brief Seconds between batches. / 묶음 사이의 간격 (초).
 #define LAVA_SMOKE_PER_TICK  2      ///< @brief Puffs attempted per batch. / 묶음당 시도하는 연기 수.
 #define LAVA_SMOKE_RANGE     22.0f  ///< @brief Metres beyond which no smoke spawns. / 이 거리를 넘으면 연기를 생성하지 않습니다 (미터).
+
+/**
+ * @def LAVA_SMOKE_LIP
+ * @brief How far off a hazard's top face the sampling happens, metres.
+ *
+ * Used three ways and deliberately one number: a puff starts this far ABOVE the
+ * surface so it is not born inside it, the "am I really in the volume" probe
+ * sits this far BELOW it for the same reason, and a floor within this much of
+ * the surface counts as the surface rather than as something covering it. They
+ * are the same tolerance -- how thick the skin of a lava pool is -- and giving
+ * them three names would invite three different answers.
+ *
+ * 위험 지형 윗면에서 얼마나 떨어진 곳을 표본으로 삼는지입니다 (미터). 세 가지로 쓰이며 일부러
+ * 하나의 숫자입니다. 연기는 표면 안에서 태어나지 않도록 이만큼 *위에서* 시작하고, "정말 부피
+ * 안인가" 탐침은 같은 이유로 이만큼 *아래에* 놓이며, 표면에서 이 거리 안의 바닥은 그것을 덮는
+ * 무언가가 아니라 표면 자체로 셉니다. 셋은 같은 허용 오차, 즉 용암 웅덩이 표피의 두께이며,
+ * 이름을 셋으로 나누면 답도 셋으로 갈라지기를 청하는 일입니다.
+ */
+#define LAVA_SMOKE_LIP       0.05f
 
 /* ------------------------------------------------------- look, move, weapon */
 
@@ -259,8 +279,15 @@ static void step_damage(World *w, float dt) {
        비율은 초당이며 dt를 곱하므로 어떤 기기에서도 피해량이 같고, 모서리를 스쳐 가는 것이
        한가운데 서 있는 것보다 덜 듭니다. float로 누적하는 이유는, 프레임당 1점 미만인
        비율이 그렇지 않으면 0으로 잘려 느린 지형이 완전히 무해해지기 때문입니다. */
+    /* THE FEET, and Player::pos is the eye. A sector level ignores the height
+       and would not have caught this; a brush level would have measured the
+       player's head against a knee-deep pool and found the lava harmless.
+       *발*입니다. Player::pos는 눈입니다. 섹터 레벨은 높이를 무시하므로 이것을 잡아내지
+       못했을 것이고, 브러시 레벨은 무릎 깊이 웅덩이에 대해 플레이어의 머리를 재고서 용암이
+       무해하다고 판정했을 것입니다. */
     int dps = w->player.grounded
-            ? level_hazard_at(&w->level, w->player.pos.x, w->player.pos.z)
+            ? level_hazard_at(&w->level, w->player.pos.x,
+                              w->player.pos.y - PLAYER_EYE, w->player.pos.z)
             : 0;
     if (dps > 0 && w->player.health > 0) {
         w->run.hazard_accum += dps * dt;
@@ -321,24 +348,22 @@ static void step_damage(World *w, float dt) {
  * @param[in,out] w  The world.
  * @param[in]     dt Timestep in seconds.
  *
- * The "actually exposed" part is the whole difficulty. A hazard sector may be
- * covered by a later sector -- the safe dais in `vault` sits in the middle of
- * the lava moat -- and smoke must not rise through a floor the player is
- * standing on. The test for that already exists and is the same one the damage
- * uses: ::level_hazard_at resolves the last-declared-wins rule, so a point
- * under the dais reports 0 even though the lava sector's own polygon contains
- * it. Sampling a random point inside the sector's bounds and asking that
- * question is therefore correct by construction -- there is no second rule to
- * keep in step, and a platform added later is automatically smoke-free.
+ * The "actually exposed" part is the whole difficulty -- the safe dais in
+ * `vault` sits in the middle of the lava moat, and smoke must not rise through
+ * a floor the player is standing on. Both models answer it, by different means
+ * and in their own dart function; see ::smoke_dart_sector and
+ * ::smoke_dart_brush. What is shared, and all that is shared, is the shape of
+ * the loop: throw a few darts, keep the first that lands somewhere visible.
  *
- * Rejection sampling rather than walking the polygon: a sector is an arbitrary
- * concave outline, and picking a uniformly distributed point inside one
- * properly means triangulating it. Throwing darts at its bounding box and
- * keeping the hits costs a few wasted samples on an L-shaped room and no code
- * at all.
+ * Rejection sampling rather than walking the geometry, in both models. A sector
+ * is an arbitrary concave outline and a brush is an arbitrary convex solid;
+ * picking a uniformly distributed point inside either one properly means
+ * triangulating it. Throwing darts at a bounding box and keeping the hits costs
+ * a few wasted samples on an L-shaped room and no code at all.
  *
- * The height comes from the sector's floor rather than from the hit point, so a
- * puff starts ON the lava rather than at eye level above it.
+ * @note Giving up after four darts is a budget, not a failure. A puff that
+ *       cannot find open lava in four tries is one the player would barely
+ *       have seen.
  *
  * 한국어
  * ------
@@ -346,21 +371,111 @@ static void step_damage(World *w, float dt) {
  * @param[in,out] w  월드.
  * @param[in]     dt 시간 간격 (초).
  *
- * "실제로 노출된"이 어려움의 전부입니다. 위험 지형 섹터는 나중에 선언된 섹터에 덮일 수
- * 있고(`vault`의 안전한 단상이 용암 해자 한가운데 있습니다), 연기가 플레이어가 서 있는
- * 바닥을 뚫고 올라와서는 안 됩니다. 그 판정은 이미 존재하며 피해가 쓰는 것과 동일합니다.
- * ::level_hazard_at이 마지막 선언 우선 규칙을 해석하므로, 단상 아래의 지점은 용암 섹터의
- * 다각형이 그것을 포함하더라도 0을 보고합니다. 따라서 섹터 경계 안의 임의의 점을 뽑아 그
- * 질문을 던지는 것은 구조적으로 올바릅니다. 동기화를 유지할 두 번째 규칙이 없으며, 나중에
- * 추가되는 발판은 자동으로 연기가 나지 않습니다.
+ * "실제로 노출된"이 어려움의 전부입니다. `vault`의 안전한 단상이 용암 해자 한가운데 있고,
+ * 연기가 플레이어가 서 있는 바닥을 뚫고 올라와서는 안 됩니다. 두 모델 모두 이에 답하되 방법이
+ * 다르며 각자의 다트 함수에 있습니다. ::smoke_dart_sector와 ::smoke_dart_brush를 참조하십시오.
+ * 공유되는 것은, 그리고 공유되는 것의 전부는 루프의 형태입니다. 다트를 몇 개 던지고, 보이는
+ * 곳에 떨어진 첫 번째를 취합니다.
  *
- * 다각형을 순회하지 않고 기각 표본 추출을 씁니다. 섹터는 임의의 오목한 외곽선이며, 그
- * 내부의 균일 분포 점을 제대로 뽑으려면 삼각분할이 필요합니다. 바운딩 박스에 다트를 던져
- * 맞은 것만 취하면 L자 방에서 표본 몇 개를 낭비할 뿐 코드는 전혀 들지 않습니다.
+ * 두 모델 모두 지오메트리를 순회하지 않고 기각 표본 추출을 씁니다. 섹터는 임의의 오목한
+ * 외곽선이고 브러시는 임의의 볼록한 고체입니다. 그 어느 쪽이든 내부의 균일 분포 점을 제대로
+ * 뽑으려면 삼각분할이 필요합니다. 바운딩 박스에 다트를 던져 맞은 것만 취하면 L자 방에서 표본
+ * 몇 개를 낭비할 뿐 코드는 전혀 들지 않습니다.
  *
- * 높이는 충돌 지점이 아니라 섹터의 바닥에서 가져오므로, 연기가 용암 위쪽 눈높이가 아니라
- * 용암 *위에서* 시작합니다.
+ * @note 다트 네 개 후에 포기하는 것은 실패가 아니라 예산입니다. 네 번 안에 열린 용암을 찾지
+ *       못한 연기는 플레이어가 거의 보지도 못했을 연기입니다.
  */
+static float smoke_rand(World *w) {
+    w->run.smoke_rng = w->run.smoke_rng * 1664525u + 1013904223u;
+    return (w->run.smoke_rng >> 8) * (1.0f / 16777216.0f);
+}
+
+static unsigned smoke_pick(World *w, int n) {
+    w->run.smoke_rng = w->run.smoke_rng * 1664525u + 1013904223u;
+    return (w->run.smoke_rng >> 16) % (unsigned)(n > 0 ? n : 1);
+}
+
+/* One dart at a sector level's lava: a point in some hazard sector's bounds,
+   kept only if the hazard test still answers there. */
+static int smoke_dart_sector(World *w, v3 *out) {
+    int si = (int)smoke_pick(w, w->level.n_sectors);
+    const Sector *sec = &w->level.sectors[si];
+    if (sec->hurt <= 0 || !sec->has_bounds) return 0;
+
+    float fx_ = smoke_rand(w), fz_ = smoke_rand(w);
+    float x = (sec->min_x + (sec->max_x - sec->min_x) * fx_) * 0.01f;
+    float z = (sec->min_z + (sec->max_z - sec->min_z) * fz_) * 0.01f;
+
+    /* The one question that matters, and it is the same one the damage asks.
+       A covered point answers 0.
+       중요한 유일한 질문이며 피해가 묻는 것과 같습니다. 덮인 지점은 0을 답합니다. */
+    if (level_hazard_at(&w->level, x, 0.0f, z) <= 0) return 0;
+
+    /* The height comes from the sector's floor rather than from the dart, so a
+       puff starts ON the lava rather than at eye level above it.
+       높이는 다트가 아니라 섹터의 바닥에서 가져오므로, 연기가 용암 위쪽 눈높이가 아니라
+       용암 *위에서* 시작합니다. */
+    *out = v3f(x, sec->floor * 0.01f + 0.05f, z);
+    return 1;
+}
+
+/* The same dart at a brush level, where the surface is a face rather than a
+ * number and "covered" is a thing you can trace for.
+ *
+ * ENGLISH: A ::HazardDef's brushes are not solid, so a downward probe passes
+ * straight through the lava and stops on whatever is genuinely underfoot: the
+ * pit floor where the lava is open, and the dais where a dais covers it. That
+ * comparison IS the exposure test, and it needs no second rule to keep in step
+ * with the damage -- which is what the sector model's last-declared-wins was
+ * doing the hard way.
+ *
+ * The dart is thrown at the brush's bounding box and then asked whether it is
+ * really inside, for the same reason the sector path throws at a bounding box:
+ * a lava surface may be sloped or clipped, and rejection costs a few samples
+ * where getting it exactly right costs a face walk.
+ *
+ * 한국어: ::HazardDef의 브러시는 고체가 아니므로 하강 탐침이 용암을 그대로 통과해 실제로
+ * 발밑에 있는 것에서 멈춥니다. 용암이 열려 있으면 구덩이 바닥이고, 단상이 덮고 있으면
+ * 단상입니다. 그 비교가 곧 노출 판정이며, 피해와 동기화를 유지할 두 번째 규칙이 필요 없습니다.
+ * 섹터 모델의 "마지막 선언 우선"이 어렵게 하고 있던 일이 그것입니다.
+ *
+ * 다트를 브러시의 바운딩 박스에 던진 뒤 실제로 안에 있는지 묻는 이유는 섹터 경로가 바운딩
+ * 박스에 던지는 이유와 같습니다. 용암 표면은 기울어 있거나 잘려 있을 수 있고, 기각은 표본
+ * 몇 개를 들이는 반면 정확히 맞히려면 면을 순회해야 합니다.
+ */
+static int smoke_dart_brush(World *w, v3 *out) {
+    const Level *l = &w->level;
+    if (l->n_hazards <= 0) return 0;
+
+    const HazardDef *h = &l->hazards[smoke_pick(w, l->n_hazards)];
+    if (h->n_brushes < 1) return 0;
+    const Brush *b = &l->brushes->brushes[h->first_brush +
+                                          (int)smoke_pick(w, h->n_brushes)];
+    if (b->min.x > b->max.x) return 0;       /* a brush with no volume */
+
+    float fx_ = smoke_rand(w), fz_ = smoke_rand(w);
+    float x = b->min.x + (b->max.x - b->min.x) * fx_;
+    float z = b->min.z + (b->max.z - b->min.z) * fz_;
+    float top = b->max.y;
+
+    /* Just under the top face, so a sloped or clipped surface rejects the darts
+       that missed it.
+       윗면 바로 아래입니다. 기울거나 잘린 표면은 빗나간 다트를 기각합니다. */
+    if (level_hazard_at(l, x, top - LAVA_SMOKE_LIP, z) <= 0) return 0;
+
+    /* What is actually underfoot here. Higher than the lava means something
+       solid is standing on it, and smoke must not rise through a floor the
+       player is standing on.
+       이곳의 발밑에 실제로 있는 것입니다. 용암보다 높다면 고체가 그 위에 서 있는 것이고,
+       연기는 플레이어가 딛고 선 바닥을 뚫고 올라와서는 안 됩니다. */
+    float floor_y, ceil_y;
+    if (!level_ground(l, x, z, top, 1e9f, &floor_y, &ceil_y)) return 0;
+    if (floor_y > top + LAVA_SMOKE_LIP) return 0;
+
+    *out = v3f(x, top + LAVA_SMOKE_LIP, z);
+    return 1;
+}
+
 static void step_smoke(World *w, float dt) {
     w->run.smoke_timer -= dt;
     if (w->run.smoke_timer > 0.0f) return;
@@ -368,40 +483,23 @@ static void step_smoke(World *w, float dt) {
 
     for (int s = 0; s < LAVA_SMOKE_PER_TICK; s++) {
         /* One dart per attempt, a few attempts per puff. Giving up is correct:
-           a level with no lava should cost nothing here, and a sector that is
+           a level with no lava should cost nothing here, and a hazard that is
            almost entirely covered should emit almost nothing.
            시도마다 다트 하나, 연기 하나당 몇 번의 시도입니다. 포기하는 것이 옳습니다.
-           용암이 없는 레벨은 이곳에서 비용이 들지 않아야 하고, 거의 전부 덮인 섹터는 거의
-           아무것도 내뿜지 않아야 합니다. */
+           용암이 없는 레벨은 이곳에서 비용이 들지 않아야 하고, 거의 전부 덮인 위험 지형은
+           거의 아무것도 내뿜지 않아야 합니다. */
         for (int tries = 0; tries < 4; tries++) {
-            w->run.smoke_rng = w->run.smoke_rng * 1664525u + 1013904223u;
-            int si = (int)((w->run.smoke_rng >> 16) % (unsigned)
-                           (w->level.n_sectors > 0 ? w->level.n_sectors : 1));
-            const Sector *sec = &w->level.sectors[si];
-            if (sec->hurt <= 0 || !sec->has_bounds) continue;
-
-            w->run.smoke_rng = w->run.smoke_rng * 1664525u + 1013904223u;
-            float fx_ = (w->run.smoke_rng >> 8) * (1.0f / 16777216.0f);
-            w->run.smoke_rng = w->run.smoke_rng * 1664525u + 1013904223u;
-            float fz_ = (w->run.smoke_rng >> 8) * (1.0f / 16777216.0f);
-
-            float x = (sec->min_x + (sec->max_x - sec->min_x) * fx_) * 0.01f;
-            float z = (sec->min_z + (sec->max_z - sec->min_z) * fz_) * 0.01f;
-
-            /* The one question that matters, and it is the same one the damage
-               asks. A covered point answers 0.
-               중요한 유일한 질문이며 피해가 묻는 것과 같습니다. 덮인 지점은 0을
-               답합니다. */
-            if (level_hazard_at(&w->level, x, z) <= 0) continue;
+            v3 at;
+            if (!(w->level.brushes ? smoke_dart_brush(w, &at)
+                                   : smoke_dart_sector(w, &at))) continue;
 
             /* Far-off smoke is invisible and still costs a slot in a shared
                pool, so it is not spawned at all.
                먼 곳의 연기는 보이지 않으면서 공유 풀의 슬롯을 차지하므로 아예 생성하지
                않습니다. */
-            float dx = x - w->player.pos.x, dz = z - w->player.pos.z;
+            float dx = at.x - w->player.pos.x, dz = at.z - w->player.pos.z;
             if (dx*dx + dz*dz > LAVA_SMOKE_RANGE * LAVA_SMOKE_RANGE) continue;
 
-            v3 at = v3f(x, sec->floor * 0.01f + 0.05f, z);
             fx_spawn(&w->pools, "lavasmoke", at, v3f(0.0f, 1.0f, 0.0f));
             break;
         }

@@ -1138,6 +1138,97 @@ static void test_trigger_and_key(void) {
     checkf(level_push_at(&LV, 0.0f, 0.0f), 0.0f, 0.001f, "and the floor beside it does not");
 }
 
+/* --- the lava, as a volume ------------------------------------------------
+ *
+ * ENGLISH
+ * -------
+ * What the sector model could not say. `Sector::hurt` is a property of a floor,
+ * so the question had two coordinates and the height was whatever the floor
+ * happened to be; a safe dais in a moat had to be a SECOND SECTOR declared over
+ * the lava, and a precedence rule had to exist to read that back.
+ *
+ * The assertions below are the same room asked in three dimensions. Standing at
+ * the lip is safe, one step down is not, and the plinth in the middle is safe
+ * again -- and no rule resolves the last one, because the feet on the plinth
+ * are 0.75m above the lava's top face and the volume simply does not contain
+ * them.
+ *
+ * atrium's basin, in engine units: x 3..7.5, z 3..7.5, the lava filling
+ * y -0.5..-0.25 and the plinth's top at 0.5.
+ *
+ * 한국어
+ * ------
+ * 섹터 모델이 말할 수 없던 것입니다. `Sector::hurt`는 바닥의 속성이므로 질문에는 좌표가 두
+ * 개뿐이었고 높이는 그 바닥이 놓인 곳이었습니다. 해자 속 안전한 단상은 용암 위에 선언된 *두
+ * 번째 섹터*여야 했고, 그것을 다시 읽어 내려면 우선순위 규칙이 존재해야 했습니다.
+ *
+ * 아래의 단언은 같은 방을 3차원으로 묻습니다. 가장자리에 서는 것은 안전하고, 한 걸음 내려서는
+ * 것은 그렇지 않으며, 한가운데의 받침대는 다시 안전합니다. 마지막 것을 해석하는 규칙은 없습니다.
+ * 받침대 위의 발이 용암 윗면보다 0.75m 위에 있고 부피가 그것을 담고 있지 않을 뿐입니다.
+ */
+static void test_hazard(void) {
+    printf("\nlava that is a volume rather than a floor\n");
+
+    if (!level_load("atrium", &LV) || !LV.brushes) {
+        printf("  no atrium.map\n"); fails++; return;
+    }
+
+    check(LV.n_hazards == 1, "atrium declares one trigger_hurt");
+    if (LV.n_hazards != 1) return;
+    const HazardDef *h = &LV.hazards[0];
+    checkf((float)h->dps, 12.0f, 0.5f, "and its `dmg` came through as the rate");
+
+    /* NOT A DOOR SWITCH. `trigger_hurt` shares the prefix the trigger scan
+       reads, so the thing this guards is the version where it is swept up as a
+       nameless trigger_multiple and the lava silently opens doors.
+       문 스위치가 아닙니다. `trigger_hurt`는 트리거 주사가 읽는 접두사를 공유하므로, 이것이
+       지키는 것은 이름 없는 trigger_multiple로 쓸려 들어가 용암이 조용히 문을 여는 판본입니다. */
+    check(LV.n_triggers == 1, "and it did not also become a trigger volume");
+
+    for (int k = 0; k < h->n_brushes; k++)
+        check(!LV.brushes->brushes[h->first_brush + k].solid,
+              "the lava's brushes are not solid");
+
+    /* The three heights over one point on the plan, which is the whole claim. */
+    check(level_hazard_at(&LV, 3.5f, -0.5f, 3.5f) == 12,
+          "feet in the basin burn");
+    check(level_hazard_at(&LV, 3.5f,  0.0f, 3.5f) == 0,
+          "the same x,z at the room's floor height does not");
+    check(level_hazard_at(&LV, 3.5f,  1.2f, 3.5f) == 0,
+          "and jumping over it is a way across");
+
+    check(level_hazard_at(&LV, 0.0f, 0.0f, 5.0f) == 0,
+          "the floor beside the basin is safe");
+    check(level_hazard_at(&LV, 5.25f, 0.5f, 5.25f) == 0,
+          "and so is the plinth standing in the middle of it");
+
+    /* The dais case with no precedence rule in sight: the plinth's own x,z is
+       inside the lava's box, and only the height keeps it safe. */
+    check(level_hazard_at(&LV, 5.25f, -0.4f, 5.25f) == 12,
+          "though the lava is still there beside the plinth's foot");
+
+    /* AND YOU CAN GET OUT. A hazard you cannot leave is a death animation.
+       The basin floor is 0.5m down, inside PLAYER_STEP.
+       그리고 나올 수 있습니다. 떠날 수 없는 위험 지형은 죽는 연출입니다. 웅덩이 바닥은
+       0.5m 아래이며 PLAYER_STEP 안입니다. */
+    float f = 0.0f, c = 0.0f;
+    check(level_ground(&LV, 3.5f, 3.5f, -0.5f, PLAYER_STEP, &f, &c),
+          "there is a floor under the lava");
+    checkf(f, -0.5f, 0.02f, "half a metre down");
+    check(0.0f - f <= PLAYER_STEP, "which is a step you can climb back out of");
+
+    /* What the smoke sampler asks: is this bit of surface covered? Probing down
+       from the lava's top finds the basin where the lava is open and the plinth
+       where it is not, and that comparison is the whole exposure test.
+       연기 샘플러가 묻는 것입니다. 이 표면 조각이 덮여 있는가? 용암 윗면에서 아래로
+       탐침하면 열린 곳에서는 웅덩이 바닥을, 아닌 곳에서는 받침대를 찾습니다. 그 비교가
+       노출 판정의 전부입니다. */
+    check(level_ground(&LV, 3.5f, 3.5f, -0.25f, 1e9f, &f, &c) && f < -0.25f,
+          "open lava has nothing standing on it");
+    check(level_ground(&LV, 5.25f, 5.25f, -0.25f, 1e9f, &f, &c) && f > -0.25f,
+          "and the plinth reads as something that does");
+}
+
 int main(void) {
     printf("tracetest\n");
     build();
@@ -1162,6 +1253,7 @@ int main(void) {
     test_door();
     test_entities();
     test_trigger_and_key();
+    test_hazard();
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall trace checks passed\n", fails);
     return fails != 0;

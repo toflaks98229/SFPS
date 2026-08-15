@@ -75,6 +75,16 @@
     target(target_destination) : "What it opens"
 ]
 
+// Lava, acid, a burning grate. Shares the trigger_ prefix and nothing else:
+// it fires no target and it never stops. Its brushes are not solid but they
+// ARE drawn, so give them a material and the volume is the liquid -- the same
+// arrangement Quake uses. Damage is per SECOND, and the whole box counts, so
+// standing beside a knee-deep pool is safe and wading in is not.
+@SolidClass color(255 90 40) = trigger_hurt : "Hurts whatever stands in it. Per second."
+[
+    dmg(integer) : "Damage per second" : 5
+]
+
 // A point light. `light` is Quake's brightness and this engine reads it as
 // reach, because it separates reach from brightness and Quake does not.
 // Baked into the vertices when the level loads, shadowed against the brushes.

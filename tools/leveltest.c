@@ -1118,21 +1118,21 @@ int main(void) {
         for (int i = 0; i < h.n_sectors; i++) level_bounds(&h.sectors[i]);
         level_grid_build(&h);
 
-        okf(level_hazard_at(&h, 0.0f, 0.0f) == 0,
+        okf(level_hazard_at(&h, 0.0f, 0.0f, 0.0f) == 0,
             "the safe island in the lava hurts nothing",
-            (float)level_hazard_at(&h, 0.0f, 0.0f), 0.0f);
+            (float)level_hazard_at(&h, 0.0f, 0.0f, 0.0f), 0.0f);
 
-        okf(level_hazard_at(&h, 3.5f, 0.0f) == 20,
+        okf(level_hazard_at(&h, 3.5f, 0.0f, 0.0f) == 20,
             "the lava around it does",
-            (float)level_hazard_at(&h, 3.5f, 0.0f), 20.0f);
+            (float)level_hazard_at(&h, 3.5f, 0.0f, 0.0f), 20.0f);
 
-        okf(level_hazard_at(&h, 8.0f, 8.0f) == 0,
+        okf(level_hazard_at(&h, 8.0f, 0.0f, 8.0f) == 0,
             "and the room outside the lava does not",
-            (float)level_hazard_at(&h, 8.0f, 8.0f), 0.0f);
+            (float)level_hazard_at(&h, 8.0f, 0.0f, 8.0f), 0.0f);
 
-        okf(level_hazard_at(&h, 500.0f, 500.0f) == 0,
+        okf(level_hazard_at(&h, 500.0f, 0.0f, 500.0f) == 0,
             "a point outside the map is not a hazard either",
-            (float)level_hazard_at(&h, 500.0f, 500.0f), 0.0f);
+            (float)level_hazard_at(&h, 500.0f, 0.0f, 500.0f), 0.0f);
 
         /* A level parsed with no `hurt` anywhere must be entirely safe. This
            is the check that would catch the field being left uninitialised by

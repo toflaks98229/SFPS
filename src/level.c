@@ -290,6 +290,7 @@ static void level_clear(Level *out) {
     out->n_lights   = 0;
     out->n_doors    = 0;
     out->n_triggers = 0;
+    out->n_hazards  = 0;
     out->name[0]    = 0;
     out->next[0]    = 0;
     out->start[0]   = out->start[1] = out->start[2] = 0;
@@ -1097,6 +1098,13 @@ static int key_for(const BrushEnt *e) {
  * 한국어: classname 접두사만 읽으므로 `trigger_multiple`과 `trigger_once`가 모두 이곳에
  * 도착합니다. 이 엔진에는 한 번만 발동하는 트리거라는 개념이 없으며, 다시 열리는 문이
  * `trigger_once`라는 이름이 약속하는 것에 더 가깝습니다. 로드를 거부하는 것보다는 그렇습니다.
+ *
+ * EXCEPT `trigger_hurt`, which shares the prefix and nothing else: it fires no
+ * target and it never stops firing. ::brush_hazards_of takes it. Reading the
+ * prefix alone would have made every lava pit a nameless door switch.
+ * 다만 `trigger_hurt`는 예외입니다. 접두사만 공유할 뿐 나머지는 다릅니다. 그것은 target을
+ * 발동시키지 않고 발동을 멈추지도 않습니다. ::brush_hazards_of가 가져갑니다. 접두사만
+ * 읽었다면 모든 용암 구덩이가 이름 없는 문 스위치가 되었을 것입니다.
  */
 static void brush_triggers_of(Level *out, BrushMap *bm, TagPool *tp) {
     for (int i = 0; i < bm->n_ents; i++) {
@@ -1108,6 +1116,7 @@ static void brush_triggers_of(Level *out, BrushMap *bm, TagPool *tp) {
         int n = 0;
         while (PRE[n] && cn[n] == PRE[n]) n++;
         if (PRE[n]) continue;
+        if (txt_is(cn, 12, "trigger_hurt")) continue;
         if (e->n_brushes < 1) continue;
 
         /* Walked into, not bumped into. Cleared before anything can trace
@@ -1122,6 +1131,51 @@ static void brush_triggers_of(Level *out, BrushMap *bm, TagPool *tp) {
         t->first_brush = (short)e->first_brush;
         t->n_brushes   = (short)e->n_brushes;
         t->tag         = (short)tag_for(tp, brush_ent_value(e, "target"));
+    }
+}
+
+/**
+ * `trigger_hurt`: the lava, as a volume rather than as a floor.
+ *
+ * ENGLISH: Same two moves as a trigger -- the brushes stop being solid and
+ * become a region -- and then the difference. A trigger asks "who do I tell";
+ * this asks "how much, per second". Quake spells that `dmg` and so does this,
+ * because an author who has read any Quake tutorial has already typed it.
+ *
+ * The rate is stored as a short and clamped to one: `dmg 0` on a volume the
+ * author bothered to draw is a mistake in the file rather than a request for a
+ * harmless pool, and a hazard that does nothing is the kind of thing nobody
+ * notices until they wonder why the lava is safe. A pool that should not hurt
+ * is a pool with no trigger_hurt in it.
+ *
+ * 한국어: 트리거와 같은 두 동작입니다. 브러시가 고체이기를 멈추고 영역이 됩니다. 그다음이
+ * 차이입니다. 트리거는 "누구에게 알리는가"를 묻고, 이것은 "초당 얼마인가"를 묻습니다.
+ * Quake가 그것을 `dmg`라 쓰고 이곳도 그렇게 씁니다. Quake 강좌를 하나라도 읽은 제작자는
+ * 이미 그것을 입력해 보았기 때문입니다.
+ *
+ * 비율은 short로 저장하고 1로 하한을 둡니다. 제작자가 굳이 그려 놓은 부피의 `dmg 0`은
+ * 무해한 웅덩이를 요청한 것이 아니라 파일의 실수이며, 아무 일도 하지 않는 위험 지형은 용암이
+ * 왜 안전한지 의아해지기 전까지 아무도 알아채지 못하는 종류의 것입니다. 아프지 않아야 할
+ * 웅덩이는 trigger_hurt가 들어 있지 않은 웅덩이입니다.
+ */
+static void brush_hazards_of(Level *out, BrushMap *bm) {
+    for (int i = 0; i < bm->n_ents; i++) {
+        const BrushEnt *e = &bm->ents[i];
+        const char *cn = brush_ent_value(e, "classname");
+        if (!cn || !txt_is(cn, 12, "trigger_hurt")) continue;
+        if (e->n_brushes < 1) continue;
+
+        for (int k = 0; k < e->n_brushes; k++)
+            bm->brushes[e->first_brush + k].solid = 0;
+
+        if (out->n_hazards >= LVL_MAX_HAZARDS) { DIAG(DIAG_ENT_CAP); continue; }
+        HazardDef *h = &out->hazards[out->n_hazards++];
+        h->first_brush = (short)e->first_brush;
+        h->n_brushes   = (short)e->n_brushes;
+
+        float dps = brush_ent_num(e, "dmg", (float)LVL_HURT_DEFAULT);
+        if (dps < 1.0f) dps = 1.0f;
+        h->dps = (short)dps;
     }
 }
 
@@ -1359,6 +1413,7 @@ static int load_brush_level(const char *name, Level *out) {
        읽는 것이 그 연결을 따라가는 사람이 택할 순서입니다. */
     TagPool tags = {0};
     brush_triggers_of(out, bm, &tags);
+    brush_hazards_of(out, bm);
     brush_doors_of(out, bm, &tags);
     brush_ents_of(out, bm);
     return 1;
@@ -2572,7 +2627,28 @@ int level_ground(const Level *l, float x, float z, float feet, float step,
     return 1;
 }
 
-int level_hazard_at(const Level *l, float x, float z) {
+int level_hazard_at(const Level *l, float x, float y, float z) {
+    if (l->brushes) {
+        /* The worst of them, not the first. Volumes are allowed to overlap --
+           an author who floods a room and then drops a hotter pool in one
+           corner has written exactly that -- and taking the first match would
+           make the answer depend on the order the entities happen to sit in
+           the file.
+           첫 번째가 아니라 가장 심한 것입니다. 부피는 겹칠 수 있으며, 방을 채운 뒤 한쪽
+           구석에 더 뜨거운 웅덩이를 놓은 제작자는 정확히 그것을 기록한 것입니다. 첫 일치를
+           취하면 답이 파일 안 엔티티의 배치 순서에 좌우됩니다. */
+        int worst = 0;
+        v3 p = v3f(x, y, z);
+        for (int i = 0; i < l->n_hazards; i++) {
+            const HazardDef *h = &l->hazards[i];
+            if (h->dps <= worst) continue;
+            if (brush_point_in(l->brushes, h->first_brush, h->n_brushes, p))
+                worst = h->dps;
+        }
+        return worst;
+    }
+
+    (void)y;                                 /* a sector's hazard IS its floor */
     const Sector *s = sector_at(l, x, z);
     return s ? s->hurt : 0;
 }

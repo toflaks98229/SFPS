@@ -770,6 +770,70 @@ typedef struct {
     short tag;                     /**< What it fires; matches ::DoorDef::tag. / 발동시키는 대상. ::DoorDef::tag와 대응합니다. */
 } TriggerDef;
 
+#define LVL_MAX_HAZARDS 8     ///< @brief Hurting volumes per level. / 레벨당 피해 부피 수.
+
+/**
+ * @def LVL_HURT_DEFAULT
+ * @brief Damage per second for a `trigger_hurt` that names no `dmg`.
+ *
+ * Quake's own default, and the reason to keep it is that an author who drew a
+ * lava pit and typed nothing should get lava rather than a decorative pool.
+ * The sector model has the same rule for `hurt` with no number.
+ *
+ * `dmg`를 적지 않은 `trigger_hurt`의 초당 피해량입니다. Quake의 기본값이며, 유지하는 이유는
+ * 용암 웅덩이를 그려 놓고 아무것도 입력하지 않은 제작자가 장식용 웅덩이가 아니라 용암을 얻어야
+ * 하기 때문입니다.
+ */
+#define LVL_HURT_DEFAULT 5
+
+/**
+ * @struct HazardDef
+ * @brief A volume that burns whatever stands in it.
+ *
+ * ENGLISH
+ * -------
+ * The brush model's answer to ::Sector::hurt, and as with ::TriggerDef the
+ * difference is the shape -- but here it is also the DIMENSION. A sector's
+ * hazard is a property of a floor, so the question "is this point hurting?" had
+ * only x and z to work with and the height was implied. A volume has a top and
+ * a bottom, so ::level_hazard_at takes a y, and lava you can stand beside
+ * without burning is expressible for the first time.
+ *
+ * ITS BRUSHES ARE NOT SOLID, for the same reason a trigger's are not: a pit you
+ * fall into is not a pit if it holds you up. Author them with a liquid or lava
+ * material and let the surface be the surface.
+ *
+ * @note There is no "last declared wins" here, and none is needed. The sector
+ *       model needed that rule because a safe dais had to be drawn as a second
+ *       sector OVER the lava; a brush author draws the dais as a solid brush
+ *       inside the pit, and the lava volume simply does not contain the points
+ *       the dais occupies -- or rather it does, and the player standing on the
+ *       dais is above it. Geometry answers what a precedence rule had to.
+ *
+ * 한국어
+ * ------
+ * @brief 그 안에 서 있는 것을 태우는 부피입니다.
+ *
+ * ::Sector::hurt에 대한 브러시 모델의 답이며, ::TriggerDef와 마찬가지로 차이는 형태입니다.
+ * 다만 이곳에서는 *차원*이기도 합니다. 섹터의 위험 지형은 바닥의 속성이므로 "이 지점이
+ * 아픈가"라는 질문에는 x와 z만 있었고 높이는 암묵적이었습니다. 부피에는 위와 아래가 있으므로
+ * ::level_hazard_at은 y를 받으며, 타지 않고 옆에 설 수 있는 용암을 처음으로 표현할 수
+ * 있습니다.
+ *
+ * 그 브러시는 고체가 아니며, 트리거의 것이 아닌 이유와 같습니다. 빠지는 구덩이가 떠받쳐 준다면
+ * 그것은 구덩이가 아닙니다. 액체나 용암 재질로 제작하고 표면이 표면이도록 두십시오.
+ *
+ * @note 이곳에는 "마지막 선언 우선"이 없고, 필요하지도 않습니다. 섹터 모델이 그 규칙을 필요로
+ *       했던 것은 안전한 단상을 용암 *위에* 덮는 두 번째 섹터로 그려야 했기 때문입니다. 브러시
+ *       제작자는 단상을 구덩이 안의 고체 브러시로 그리고, 용암 부피는 단상이 차지한 지점을
+ *       포함하지 않습니다. 더 정확히는 포함하더라도, 단상 위에 선 플레이어가 그 위에 있습니다.
+ *       우선순위 규칙이 해야 했던 답을 지오메트리가 합니다.
+ */
+typedef struct {
+    short first_brush, n_brushes;  /**< The volume, in ::BrushMap::brushes. / ::BrushMap::brushes 안의 부피. */
+    short dps;                     /**< Damage per second while inside. / 안에 있는 동안의 초당 피해량. */
+} HazardDef;
+
 /**
  * @struct Entity
  * @brief A point marker placed in the level: a spawn, a pickup, a monster, an exit.
@@ -932,6 +996,8 @@ typedef struct {
     int     n_doors;                      /**< Number of doors in use. / 사용 중인 문의 수. */
     TriggerDef triggers[LVL_MAX_TRIGGERS];/**< Volumes that fire tags. / 태그를 발동시키는 부피. */
     int     n_triggers;                   /**< Number of triggers in use. / 사용 중인 트리거의 수. */
+    HazardDef hazards[LVL_MAX_HAZARDS];   /**< Volumes that burn. / 태우는 부피. */
+    int     n_hazards;                    /**< Number of hazards in use. / 사용 중인 위험 부피의 수. */
     short   start[3];                     /**< x, z, and yaw in millidegrees. / x, z 좌표와 밀리도 단위의 yaw. */
 
     /**
@@ -988,9 +1054,17 @@ typedef struct {
      * ENGLISH
      * -------
      * THE ONE FIELD THAT DECIDES WHICH MODEL ANSWERS. ::level_ground,
-     * ::level_trace, ::level_blocked and ::level_geometry all branch on it:
-     * non-NULL and they ask the brushes, NULL and they walk the sectors exactly
-     * as they always did.
+     * ::level_trace, ::level_blocked, ::level_geometry and ::level_hazard_at
+     * all branch on it: non-NULL and they ask the brushes, NULL and they walk
+     * the sectors exactly as they always did. ::level_exit_at and
+     * ::level_push_at need no branch, because they read ::Level::ents and both
+     * models fill that.
+     *
+     * THAT IS NOW EVERY QUESTION THE RUNNING GAME ASKS. ::level_sector_at,
+     * ::level_edge_normal and ::level_edge_spans have no brush answer and need
+     * none: outside level.c's own sector geometry, their only callers are the
+     * sector editor in tools/mapedit.c and the tests. Nothing on the frame path
+     * reaches them.
      *
      * That is what lets a .map be used without a converter AND without
      * rewriting the eight modules that hold a `const Level *` -- player, enemy,
@@ -1025,8 +1099,15 @@ typedef struct {
      * @brief 이 레벨을 이루는 브러시이며, 섹터 레벨이면 NULL입니다.
      *
      * 어느 모델이 답할지를 결정하는 단 하나의 필드입니다. ::level_ground, ::level_trace,
-     * ::level_blocked, ::level_geometry가 모두 이것으로 분기합니다. NULL이 아니면 브러시에
-     * 묻고, NULL이면 늘 그랬듯 섹터를 순회합니다.
+     * ::level_blocked, ::level_geometry, ::level_hazard_at이 모두 이것으로 분기합니다. NULL이
+     * 아니면 브러시에 묻고, NULL이면 늘 그랬듯 섹터를 순회합니다. ::level_exit_at과
+     * ::level_push_at은 분기가 필요 없습니다. ::Level::ents를 읽고 두 모델 모두 그것을 채우기
+     * 때문입니다.
+     *
+     * 이것이 이제 실행 중인 게임이 던지는 질문의 전부입니다. ::level_sector_at,
+     * ::level_edge_normal, ::level_edge_spans에는 브러시 쪽 답이 없고 필요하지도 않습니다.
+     * level.c 자신의 섹터 지오메트리 바깥에서 그것들의 호출자는 tools/mapedit.c의 섹터 에디터와
+     * 테스트뿐입니다. 프레임 경로의 무엇도 그것들에 닿지 않습니다.
      *
      * 이것이 변환기 없이, 그리고 `const Level *`를 들고 있는 여덟 모듈(player, enemy, pickup,
      * proj, weapon, hook, world, scene)을 다시 쓰지 않고도 .map을 쓸 수 있게 하는 장치입니다.
@@ -1481,38 +1562,65 @@ int level_blocked(const Level *l, v3 origin, v3 dir, float max_dist);
 int level_sector_at(const Level *l, float x, float z);
 
 /**
- * @brief Damage per second the floor at a point deals.
+ * @brief Damage per second a point takes.
  *
  * ENGLISH
  * -------
  * @param[in] l Level to query.
  * @param[in] x X coordinate in world units.
+ * @param[in] y Y coordinate in world units. A brush level tests it; a sector
+ *              level cannot and ignores it. Pass the FEET, not the eye.
  * @param[in] z Z coordinate in world units.
- * @return The governing sector's ::Sector::hurt, or 0 outside the map and on
- *         any safe floor.
- * @note Uses the same last-declared-wins rule as ::level_ground, so a safe
- *       platform laid over a lava pit is safe to stand on -- which is what
- *       makes a lava room playable rather than merely lethal.
- * @note Answers only "how dangerous is the floor here". Whether the player is
+ * @return The hurt rate at that point, or 0 outside the map and anywhere safe.
+ *
+ * TWO MODELS, TWO SHAPES OF ANSWER.
+ *
+ * A sector level answers from the governing ::Sector::hurt under the same
+ * last-declared-wins rule as ::level_ground, so a safe platform laid over a
+ * lava pit is safe to stand on -- which is what makes a lava room playable
+ * rather than merely lethal. The height is ignored because a sector has no way
+ * to use it: its hazard is a property of the floor, and a plan point has
+ * exactly one floor.
+ *
+ * A brush level answers from the ::HazardDef volumes, and the point is simply
+ * in one or it is not. No precedence rule, because a dais in a lava pit is a
+ * solid brush that the player stands ON TOP OF -- their feet end up above the
+ * lava rather than inside it, and geometry has already given the answer that
+ * "last declared wins" had to be invented for.
+ *
+ * @note Answers only "how dangerous is this point". Whether the player is
  *       actually touching it is the caller's question, because the answer
  *       differs for a player standing on it, a monster wading through it and
  *       a projectile passing over it.
  *
  * 한국어
  * ------
- * @brief 특정 지점의 바닥이 가하는 초당 피해량입니다.
+ * @brief 특정 지점이 받는 초당 피해량입니다.
  * @param[in] l 조회할 레벨.
  * @param[in] x 월드 단위의 X 좌표.
+ * @param[in] y 월드 단위의 Y 좌표. 브러시 레벨은 이것을 판정하고, 섹터 레벨은 판정할 수
+ *              없으므로 무시합니다. 눈이 아니라 *발*을 넘기십시오.
  * @param[in] z 월드 단위의 Z 좌표.
- * @return 해당 지점을 지배하는 섹터의 ::Sector::hurt. 맵 바깥이거나 안전한 바닥이면 0.
- * @note ::level_ground와 동일한 "마지막 선언 우선" 규칙을 사용하므로, 용암 구덩이 위에
- *       놓인 안전한 발판은 밟고 설 수 있습니다. 그것이 용암 방을 단순히 치명적인 곳이
- *       아니라 플레이 가능한 곳으로 만듭니다.
- * @note "이곳의 바닥이 얼마나 위험한가"에만 답합니다. 플레이어가 실제로 닿아 있는지는
- *       호출자의 질문입니다. 그 답이 바닥에 선 플레이어, 그곳을 지나는 몬스터, 위를
- *       스치는 발사체마다 다르기 때문입니다.
+ * @return 그 지점의 피해율. 맵 바깥이거나 안전한 곳이면 0.
+ *
+ * 두 모델, 두 가지 형태의 답입니다.
+ *
+ * 섹터 레벨은 ::level_ground와 동일한 "마지막 선언 우선" 규칙 아래 그 지점을 지배하는
+ * ::Sector::hurt로 답합니다. 그래서 용암 구덩이 위에 놓인 안전한 발판은 밟고 설 수 있고,
+ * 그것이 용암 방을 단순히 치명적인 곳이 아니라 플레이 가능한 곳으로 만듭니다. 높이를 무시하는
+ * 이유는 섹터가 그것을 쓸 방법이 없기 때문입니다. 섹터의 위험 지형은 바닥의 속성이고, 평면상의
+ * 한 점에는 바닥이 정확히 하나뿐입니다.
+ *
+ * 브러시 레벨은 ::HazardDef 부피로 답하며, 지점은 그 안에 있거나 없거나 둘 중 하나입니다.
+ * 우선순위 규칙이 없는 이유는 용암 구덩이 속의 단상이 플레이어가 그 *위에* 서는 고체
+ * 브러시이기 때문입니다. 발은 용암 안이 아니라 그 위에 놓이며, "마지막 선언 우선"이 발명되어야
+ * 했던 답을 지오메트리가 이미 내놓습니다.
+ *
+ * @note "이 지점이 얼마나 위험한가"에만 답합니다. 플레이어가 실제로 닿아 있는지는 호출자의
+ *       질문입니다. 그 답이 그 위에 선 플레이어, 그곳을 헤치는 몬스터, 위를 스치는 발사체마다
+ *       다르기 때문입니다.
  */
-int level_hazard_at(const Level *l, float x, float z);
+int level_hazard_at(const Level *l, float x, float y, float z);
 
 /**
  * @brief Tests whether a point is within ::LVL_EXIT_RADIUS of an `exit` entity.

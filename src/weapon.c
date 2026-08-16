@@ -329,7 +329,7 @@ void wp_start_belt(Weapon *w) {
     w->ammo[WP_SHOTGUN]  = WEAPON_START_AMMO;
 }
 
-void wp_init(Weapon *w, const Level *level) {
+void wp_init(Weapon *w) {
     Weapon zero = {0};
     *w = zero;
     w->rng = 0x2545f491u;
@@ -344,8 +344,6 @@ void wp_init(Weapon *w, const Level *level) {
        몬스터에 걸림"으로 읽혀 첫 도달 시 무관한 대상에게 피해를 줄 수 있습니다.
        HOOK_IDLE이 이를 도달 불가능하게 만들지만, 필드 자체가 의미를 말해야 합니다. */
     w->hook_enemy = -1;
-
-    w->level  = level;
 
     /* The muzzle a model has not been loaded for yet. wpview_set_model
        overwrites it with the real one the moment there is a context to load a
@@ -508,7 +506,8 @@ v3 wp_hook_muzzle(const Weapon *w) {
  *       명중 대상에 대해 정직하게 유지되면서도, 효과는 총열에서 나온 것처럼
  *       보입니다.
  */
-static void fire_hitscan(Weapon *w, Pools *pl, v3 eye, float yaw, float pitch,
+static void fire_hitscan(Weapon *w, Pools *pl, const Level *l,
+                         v3 eye, float yaw, float pitch,
                          v3 *player_vel, int player_grounded) {
     float cy = cosf(yaw), sy = sinf(yaw);
     float cp = cosf(pitch), sp = sinf(pitch);
@@ -543,7 +542,7 @@ static void fire_hitscan(Weapon *w, Pools *pl, v3 eye, float yaw, float pitch,
                           v3scale(up,    frand_signed(w) * PELLET_SPREAD))));
 
         float t; v3 n;
-        int hit = trace(w->level, eye, dir, &t, &n);
+        int hit = trace(l, eye, dir, &t, &n);
 
         /* A monster nearer than the wall stops the pellet. The trace above
            gives the wall distance (or RANGE on a miss); anything the enemy
@@ -827,11 +826,12 @@ static void fire_melee(Weapon *w, Pools *pl, const WeaponType *S,
  * @note 표의 행마다 `pellets`, `proj_speed`, `melee_range` 중 정확히 하나만 0이 아니므로
  *       검사 순서는 중요하지 않습니다. tools/weapontest.c가 그것이 유지되도록 단언합니다.
  */
-static void attack(Weapon *w, Pools *pl, v3 eye, float yaw, float pitch,
+static void attack(Weapon *w, Pools *pl, const Level *l,
+                   v3 eye, float yaw, float pitch,
                    v3 *player_vel, int player_grounded) {
     const WeaponType *S = wp_stats(w->cur);
 
-    if (S->pellets > 0)          fire_hitscan(w, pl, eye, yaw, pitch, player_vel, player_grounded);
+    if (S->pellets > 0)          fire_hitscan(w, pl, l, eye, yaw, pitch, player_vel, player_grounded);
     else if (S->proj_speed > 0)  fire_projectile(w, pl, S, eye, yaw, pitch);
     else if (S->melee_range > 0) fire_melee(w, pl, S, eye, yaw, pitch, player_vel);
 
@@ -839,7 +839,8 @@ static void attack(Weapon *w, Pools *pl, v3 eye, float yaw, float pitch,
 }
 
 
-void wp_update(Weapon *w, Pools *pl, float dt, int firing, v3 eye, float yaw, float pitch,
+void wp_update(Weapon *w, Pools *pl, const Level *l,
+               float dt, int firing, v3 eye, float yaw, float pitch,
                float move_speed, float mouse_dx, float mouse_dy,
                float world_fov, float aspect, v3 *player_vel, int player_grounded) {
     w->world_fov = world_fov;
@@ -868,7 +869,7 @@ void wp_update(Weapon *w, Pools *pl, float dt, int firing, v3 eye, float yaw, fl
     if (firing && w->cooldown <= 0.0f) {
         if (w->ammo[w->cur] > 0) {
             w->ammo[w->cur]--;
-            attack(w, pl, eye, yaw, pitch + w->recoil, player_vel, player_grounded);
+            attack(w, pl, l, eye, yaw, pitch + w->recoil, player_vel, player_grounded);
         } else if (w->dry_timer <= 0.0f) {
             /* Empty: a click, and a short lockout so holding the trigger does
                not machine-gun the click sound. No cooldown is spent, so the

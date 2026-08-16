@@ -217,7 +217,7 @@ static void step_look_move(World *w, const Input *in, float aspect, float dt) {
     wp_axe_land(&w->weapon, &w->pools, w->player.pos, w->player.grounded, dt);
 
     /* Last, so its timers see the movement that actually happened. */
-    wp_update(&w->weapon, &w->pools, dt, in->fire,
+    wp_update(&w->weapon, &w->pools, &w->level, dt, in->fire,
               w->player.pos, w->yaw, w->pitch, move_speed,
               in->look_dx, in->look_dy,
               WORLD_FOV, aspect, &w->player.vel, w->player.grounded);
@@ -842,7 +842,7 @@ void world_init(World *w) {
        ::WeaponView입니다) World가 자기 자신 전부를 준비하며, 세 개의 파일이 반복하던
        "컨텍스트 이후, 첫 로드 이전에 wp_init을 호출하라"는 규칙은 경고할 대상이
        없어졌습니다. */
-    wp_init(&w->weapon, &w->level);
+    wp_init(&w->weapon);
 
 }
 

@@ -274,9 +274,9 @@ static DemoDrive g_demo;
  * the run. It is otherwise passed by pointer everywhere, which is what lets
  * tools\steptest.c own one of its own.
  *
- * @warning Never copied or moved. ::wp_init records the address of
- *          `g_world.level` inside the weapon module, and that is what hitscans
- *          trace against. See ::World.
+ * @note Not copied or moved, but no longer because it CANNOT be: the weapon
+ *       used to hold the address of `g_world.level` and does not any more. It
+ *       simply has no reason to be anywhere but here. See ::World.
  *
  * 한국어
  * ------
@@ -287,8 +287,9 @@ static DemoDrive g_demo;
  * 기록하는 일입니다. 그 밖의 모든 곳에서는 포인터로 전달되며, 그것이 tools\steptest.c가
  * 자신만의 World를 가질 수 있게 하는 이유입니다.
  *
- * @warning 결코 복사하거나 옮기지 않습니다. ::wp_init이 `g_world.level`의 주소를 무기 모듈
- *          안에 기록하며, 히트스캔이 그것을 대상으로 탐색합니다. ::World를 참조하십시오.
+ * @note 복사하거나 옮기지 않지만, 더 이상 그럴 *수 없어서*가 아닙니다. 무기가
+ *       `g_world.level`의 주소를 쥐고 있었고 이제 그러지 않습니다. 그저 이곳 외의 어디에
+ *       있을 이유가 없을 뿐입니다. ::World를 참조하십시오.
  */
 static World g_world;
 

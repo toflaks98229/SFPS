@@ -608,18 +608,19 @@ typedef struct {
        것입니다. 이곳으로 오지 *않은* 것은 그려지는 뷰 모델입니다. 메시와 그 재질, 그리고
        그것들을 만드는 버퍼는 GL 컨텍스트당 총 하나이며 이제 ::WeaponView에 있습니다. */
 
-    /**
-     * @brief The level this weapon's shots are traced against. Borrowed, not owned.
-     *
-     * ENGLISH: Set by ::wp_init and by ::world_load_level when the level
-     * changes. Null is a valid state and means every trace misses -- which is
-     * what a headless fixture that never loaded a level should see.
-     *
-     * 한국어: ::wp_init과, 레벨이 바뀔 때 ::world_load_level이 설정합니다. 널도 유효한
-     * 상태이며 모든 판정이 빗나감을 뜻합니다. 레벨을 로드한 적 없는 헤드리스 픽스처가
-     * 보아야 할 값이 바로 그것입니다.
-     */
-    const Level *level;
+    /* A `const Level *level` used to sit here, set by ::wp_init to the address
+       of the ::World's own level -- a field of a struct pointing at another
+       field of the same struct. It made `World a = b;` produce a weapon firing
+       into the geometry of the struct it was copied FROM, and C offers no way
+       to prevent that, so ::World carried a @warning saying not to. A warning
+       is not a mechanism. The level arrives as a parameter now, which is what
+       ::wp_hook_update and ::wp_hook_in_range already did.
+       이곳에 `const Level *level`이 있었고 ::wp_init이 ::World 자신의 레벨 주소로
+       설정했습니다. 어떤 구조체의 필드가 같은 구조체의 다른 필드를 가리키는 것입니다.
+       그 때문에 `World a = b;`는 자신이 복사되어 나온 구조체의 지오메트리를 향해 사격하는
+       무기를 만들었고, C에는 그것을 막을 방법이 없으므로 ::World가 그러지 말라는 @warning을
+       달고 있었습니다. 경고는 기구가 아닙니다. 이제 레벨은 인자로 도착하며,
+       ::wp_hook_update와 ::wp_hook_in_range가 이미 그렇게 하고 있었습니다. */
 
     /**
      * @brief Barrel tip in gun-local units, where muzzle effects leave from.
@@ -741,27 +742,26 @@ int wp_axe_leaping(const Weapon *w);
 /* --- Public function prototypes: lifecycle / 공개 함수 프로토타입: 수명 주기 --- */
 
 /**
- * @brief Builds the gun mesh and materials, and records the level shots trace against.
+ * @brief Resets a weapon to the belt a run starts with.
  *
  * ENGLISH
  * -------
- * @param[out] w     Weapon to initialise. Fully reset, including ammo.
- * @param[in]  level Level that shots and the hook are traced against.
- * @warning `level` must outlive the weapon: only the pointer is stored.
- * @warning Touches GL, unlike the wp_hook_* family. Requires a current
- *          context, which is why headless tests drive the hook functions
- *          directly instead of calling this.
+ * @param[out] w Weapon to initialise. Fully reset, including ammo.
+ *
+ * @note TAKES NO LEVEL any more. It used to store one, which is how a field of
+ *       ::World came to point at another field of the same ::World; the level a
+ *       shot is traced against arrives with the shot instead. See the note where
+ *       that field used to be.
  *
  * 한국어
  * ------
- * @param[out] w     초기화할 무기. 탄약을 포함하여 완전히 재설정됩니다.
- * @param[in]  level 사격과 훅의 판정 대상이 되는 레벨.
- * @warning `level`은 무기보다 오래 유지되어야 합니다. 포인터만 저장되기 때문입니다.
- * @warning wp_hook_* 계열과 달리 GL을 사용합니다. 활성 컨텍스트가 필요하며,
- *          헤드리스 테스트가 이 함수를 호출하지 않고 훅 함수를 직접 구동하는
- *          이유이기도 합니다.
+ * @param[out] w 초기화할 무기. 탄약을 포함하여 완전히 재설정됩니다.
+ *
+ * @note 더 이상 레벨을 받지 *않습니다*. 이전에는 그것을 저장했고, 그것이 ::World의 한 필드가
+ *       같은 ::World의 다른 필드를 가리키게 된 경위입니다. 사격이 판정하는 레벨은 이제 그
+ *       사격과 함께 도착합니다. 그 필드가 있던 자리의 설명을 참조하십시오.
  */
-void wp_init(Weapon *w, const Level *level);
+void wp_init(Weapon *w);
 
 /**
  * @brief Sets the belt to what a fresh run starts with: a shotgun and shells.
@@ -853,7 +853,8 @@ void wp_start_belt(Weapon *w);
  * @note 월드 카메라의 시야각과 종횡비는 다른 투영 아래에 존재하는, 화면에 그려진
  *       총구 위치에 예광탄의 시작점을 맞추는 데 필요합니다.
  */
-void wp_update(Weapon *w, Pools *pl, float dt, int firing, v3 eye, float yaw, float pitch,
+void wp_update(Weapon *w, Pools *pl, const Level *l,
+               float dt, int firing, v3 eye, float yaw, float pitch,
                float move_speed, float mouse_dx, float mouse_dy,
                float world_fov, float aspect, v3 *player_vel, int player_grounded);
 

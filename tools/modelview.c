@@ -213,7 +213,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
        wpview_set_model이 그로부터 원하는 전부이기 때문입니다. */
     static Level level;
     level_load("arena", &level);
-    wp_init(&g_weapon, &level);
+    wp_init(&g_weapon);
 
     static WeaponView view;
     wpview_init(&view, &g_weapon);

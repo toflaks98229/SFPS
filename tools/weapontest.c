@@ -375,11 +375,16 @@ int main(void) {
        결코 만들지 않는 무기(탄약대 없음, 난수 시드 없음, hook_enemy가 -1이 아니라 0)를
        대상으로 돌았다는 뜻입니다. */
     {
-        Level lv = {0};
         Weapon w;
-        wp_init(&w, &lv);
+        wp_init(&w);
 
-        ok(w.level == &lv, "wp_init records the level with no GL context in the process");
+        /* `wp_init records the level` used to be the first check here, and it
+           is gone with the field it checked: a weapon does not hold a level any
+           more, it is handed one with the shot. What is left is what wp_init is
+           actually for.
+           이곳의 첫 검사는 `wp_init이 레벨을 기록한다`였고, 그것이 검사하던 필드와 함께
+           사라졌습니다. 무기는 더 이상 레벨을 쥐지 않으며 사격과 함께 건네받습니다. 남은 것은
+           wp_init이 실제로 하는 일입니다. */
         ok(w.owned[WP_SHOTGUN] && w.ammo[WP_SHOTGUN] == WEAPON_START_AMMO,
            "and hands over the boot belt");
         ok(w.hook_enemy == -1, "and marks the hook as attached to nothing");

@@ -861,13 +861,22 @@ int main(void) {
     {
         Weapon w = {0}; w.ammo[WP_SHOTGUN] = 5;
         v3 eye = v3f(0, PLAYER_EYE, 0);
-        /* Facing -z (yaw 0, pitch 0): the kick should push +z (backward). */
+        /* Facing -z (yaw 0, pitch 0): the kick should push +z (backward).
+           NO LEVEL, which is what these fixtures always had: `Weapon w = {0}`
+           left the stored level null and every pellet missed. The level is a
+           parameter now, so the same fixture says so out loud -- what is being
+           measured is the kick, and a wall for the pellets to hit would only
+           add a variable to it.
+           레벨이 없으며, 이 픽스처들이 언제나 그러했습니다. `Weapon w = {0}`은 저장된 레벨을
+           널로 두었고 모든 산탄이 빗나갔습니다. 이제 레벨이 인자이므로 같은 픽스처가 그것을
+           소리 내어 말합니다. 여기서 재는 것은 반동이며, 산탄이 맞을 벽은 변수를 하나 더할
+           뿐입니다. */
         v3 vel_ground = v3f(0,0,0), vel_air = v3f(0,0,0);
 
-        wp_update(&w, &g_pools, DT, 1, eye, 0.0f, 0.0f, 0.0f, 0, 0, 1.4f, 1.6f,
+        wp_update(&w, &g_pools, 0, DT, 1, eye, 0.0f, 0.0f, 0.0f, 0, 0, 1.4f, 1.6f,
                  &vel_ground, 1);
         Weapon w2 = {0}; w2.ammo[WP_SHOTGUN] = 5;
-        wp_update(&w2, &g_pools, DT, 1, eye, 0.0f, 0.0f, 0.0f, 0, 0, 1.4f, 1.6f,
+        wp_update(&w2, &g_pools, 0, DT, 1, eye, 0.0f, 0.0f, 0.0f, 0, 0, 1.4f, 1.6f,
                  &vel_air, 0);
 
         ok(vel_ground.z > 0.01f, "a grounded shot still kicks you back a little");
@@ -884,7 +893,7 @@ int main(void) {
         v3 eye = v3f(0, PLAYER_EYE, 0);
         v3 vel = v3f(0,0,0);
         float look_down = -0.8f;   /* radians; negative is down in this engine */
-        wp_update(&w, &g_pools, DT, 1, eye, 0.0f, look_down, 0.0f, 0, 0, 1.4f, 1.6f,
+        wp_update(&w, &g_pools, 0, DT, 1, eye, 0.0f, look_down, 0.0f, 0, 0, 1.4f, 1.6f,
                  &vel, 0);
         ok(vel.y > 0.0f, "shooting while aiming down launches you upward");
     }

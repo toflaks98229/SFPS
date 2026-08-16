@@ -472,10 +472,16 @@ typedef struct {
  * handed a stale half of it, and there is exactly one place to look for what a
  * frame owns.
  *
- * @warning Do not copy or move a ::World after ::world_init. ::wp_init records
- *          the address of ::World::level inside the weapon module -- that is
- *          what hitscans trace against -- so a relocated World leaves the gun
- *          shooting at the geometry of a struct that no longer exists.
+ * @note A ::World IS copyable, and it was not always. ::wp_init used to record
+ *       the address of ::World::level inside the weapon, so a field of this
+ *       struct pointed at another field of the same struct and a copy left the
+ *       gun firing into the geometry of the original. This carried a @warning
+ *       saying not to do that, which is the weakest kind of invariant: one the
+ *       compiler cannot check and the next reader may not find. The level is a
+ *       parameter to ::wp_update now and nothing in here points into here.
+ *
+ *       It is 122KB, so copying one is still a thing to do on purpose rather
+ *       than by accident -- but that is a size, not a trap.
  *
  * 한국어
  * ------
@@ -485,10 +491,15 @@ typedef struct {
  * 구조체인 이유와 같습니다. 전부를 함께만 건네받을 수 있는 호출자는 그중 낡은 절반을
  * 건네받을 수 없으며, 한 프레임이 무엇을 소유하는지 찾아볼 곳이 정확히 한 군데입니다.
  *
- * @warning ::world_init 이후에 ::World를 복사하거나 옮기지 마십시오. ::wp_init이
- *          ::World::level의 주소를 무기 모듈 안에 기록하며 히트스캔이 그것을 대상으로
- *          탐색합니다. 따라서 위치가 바뀐 World는 더 이상 존재하지 않는 구조체의
- *          지오메트리를 향해 총을 쏘게 만듭니다.
+ * @note ::World는 복사할 수 *있습니다*. 언제나 그랬던 것은 아닙니다. ::wp_init이
+ *       ::World::level의 주소를 무기 안에 기록했으므로 이 구조체의 한 필드가 같은 구조체의
+ *       다른 필드를 가리켰고, 복사본은 총이 원본의 지오메트리를 향해 쏘게 만들었습니다.
+ *       그래서 그러지 말라는 @warning이 붙어 있었는데, 그것은 가장 약한 종류의 불변식입니다.
+ *       컴파일러가 검사할 수 없고 다음 독자가 찾지 못할 수도 있는 불변식입니다. 레벨은 이제
+ *       ::wp_update의 인자이며, 이 안의 무엇도 이 안을 가리키지 않습니다.
+ *
+ *       122KB이므로 복사는 여전히 실수로가 아니라 의도적으로 할 일입니다. 그러나 그것은
+ *       크기이지 함정이 아닙니다.
  */
 typedef struct {
     Level    level;   /**< The level currently loaded. / 현재 로드된 레벨. */

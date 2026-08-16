@@ -2204,6 +2204,45 @@ int level_sector_at(const Level *l, float x, float z) {
     return s ? (int)(s - l->sectors) : -1;
 }
 
+/* How far inside a surface to step before asking what is there. Small enough
+   that a wall a few centimetres thick is not stepped through, large enough to
+   clear the float slop on a trace that reports a hit exactly on a plane.
+   무엇이 있는지 묻기 전에 표면 안쪽으로 얼마나 들어갈지입니다. 몇 센티미터 두께의 벽을 통과해
+   버리지 않을 만큼 작고, 평면 위에서 정확히 충돌을 보고한 판정의 부동소수점 오차를 벗어날 만큼
+   큽니다. */
+#define DOOR_PROBE 0.02f
+
+int level_door_at(const Level *l, v3 p, v3 n) {
+    if (!l || l->door_run.count <= 0) return -1;
+
+    /* Into the solid, away from the ray that found it. */
+    v3 in = v3sub(p, v3scale(n, DOOR_PROBE));
+
+    if (l->brushes) {
+        for (int i = 0; i < l->door_run.count; i++) {
+            const DoorDef *d = &l->doors[i];
+            if (d->n_brushes <= 0) continue;
+            if (brush_point_in(l->brushes, d->first_brush, d->n_brushes, in))
+                return i;
+        }
+        return -1;
+    }
+
+    /* A sector door's leaf stands on that sector's own footprint, so the point
+       just inside it lands there -- and last-wins means the door, declared
+       after the room it sits in, is what sector_at returns.
+       섹터 문의 문짝은 그 섹터 자신의 발자국 위에 서 있으므로, 그 안쪽의 점은 그곳에
+       떨어집니다. 그리고 마지막 선언 우선 규칙에 따라, 자신이 놓인 방보다 뒤에 선언된 문이
+       sector_at이 반환하는 것입니다. */
+    int si = level_sector_at(l, in.x, in.z);
+    if (si < 0) return -1;
+
+    for (int i = 0; i < l->door_run.count; i++)
+        if (l->doors[i].sector == si) return i;
+
+    return -1;
+}
+
 int level_exit_at(const Level *l, float x, float z) {
     for (int i = 0; i < l->n_ents; i++) {
         const char *k = l->ents[i].kind;

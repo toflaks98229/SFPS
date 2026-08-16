@@ -1979,6 +1979,55 @@ int level_blocked(const Level *l, v3 origin, v3 dir, float max_dist);
 int level_sector_at(const Level *l, float x, float z);
 
 /**
+ * @brief Which door owns the surface at `p`, or -1.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] l Level to ask.
+ * @param[in] p A point ON a surface -- a trace's hit point.
+ * @param[in] n That surface's outward normal, facing the ray that found it.
+ * @return A door index into ::Level::doors, or -1 for a surface no door moves.
+ *
+ * ONE QUESTION, BOTH MODELS, and the same trick answers it for each: step a
+ * little way INTO the surface and ask what is there. A hit point sits exactly
+ * on a boundary, where every lookup is a coin toss; a point just inside the
+ * solid is unambiguously part of whatever the solid is. For a sector door that
+ * is a ::sector_at landing in the door's own footprint; for a brush door it is
+ * ::brush_point_in on the run of brushes the door owns.
+ *
+ * @note Exists because a bullet hole has to know what it is stuck to. A decal
+ *       is a world position and nothing else, which is right for a wall and
+ *       wrong for a door -- shoot one and open it and the mark hangs in the
+ *       air behind it. ::decal_hit asks this once, at the moment of impact.
+ * @note Cheap enough to ask per shot and nowhere near cheap enough to ask per
+ *       frame: it walks every door. The answer is recorded when the mark is
+ *       made rather than re-derived, which is also the only correct thing --
+ *       a mark belongs to the door it was made on even after that door has
+ *       moved out from under the point it was made at.
+ *
+ * 한국어
+ * ------
+ * @brief `p`의 표면을 소유한 문의 인덱스, 없으면 -1.
+ * @param[in] p 표면 *위의* 점. 판정의 충돌 지점입니다.
+ * @param[in] n 그 표면의 바깥 법선. 그것을 찾아낸 광선을 향합니다.
+ *
+ * 하나의 질문, 두 모델, 그리고 각각에 같은 요령으로 답합니다. 표면 *안쪽으로* 조금 들어가 그곳에
+ * 무엇이 있는지 묻는 것입니다. 충돌 지점은 정확히 경계 위에 있고 그곳에서는 모든 조회가 동전
+ * 던지기입니다. 고체 안쪽으로 조금 들어간 점은 명백히 그 고체의 일부입니다. 섹터 문에서는 그것이
+ * 문 자신의 발자국 안에 떨어지는 ::sector_at이고, 브러시 문에서는 문이 소유한 브러시 구간에 대한
+ * ::brush_point_in입니다.
+ *
+ * @note 탄흔이 자기가 무엇에 붙어 있는지 알아야 해서 존재합니다. 데칼은 월드 좌표일 뿐이며 벽에는
+ *       맞고 문에는 틀립니다. 문을 쏘고 열면 자국이 그 뒤 허공에 남습니다. ::decal_hit이 충돌
+ *       순간에 이것을 한 번 묻습니다.
+ * @note 사격마다 물을 만큼은 싸고 프레임마다 물기에는 전혀 싸지 않습니다. 모든 문을 순회합니다.
+ *       답은 다시 유도하지 않고 자국을 만들 때 기록하며, 그것이 유일하게 옳기도 합니다. 자국은
+ *       그것이 만들어진 문에 속하며, 그 문이 자국이 만들어진 지점 아래에서 빠져나간 뒤에도
+ *       그렇습니다.
+ */
+int level_door_at(const Level *l, v3 p, v3 n);
+
+/**
  * @brief Damage per second a point takes.
  *
  * ENGLISH

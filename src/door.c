@@ -253,15 +253,30 @@ static int inside_outline(const DoorState *st, float x, float z) {
  * 전체가 미끄러집니다. func_door를 놓는 제작자가 기대하는 동작이며, 지오메트리가 표현할 수
  * 있는 동작입니다.
  */
+/* WHICH WAY EACH AXIS TRAVELS. One table, because a leaf goes the same way
+   whichever model it is made of -- ::apply_brush slides brushes along it,
+   ::door_travel reports it, and anything stuck to a door follows it.
+   각 축이 어느 방향으로 이동하는가. 표가 하나인 이유는 문짝이 어느 모델로 만들어졌든 같은
+   방향으로 가기 때문입니다. ::apply_brush가 그 방향으로 브러시를 밀고, ::door_travel이 그것을
+   보고하며, 문에 붙은 것은 무엇이든 그것을 따라갑니다. */
+static const v3 DOOR_DIR[DOOR_AXES] = {
+    { 0.0f,  1.0f, 0.0f },   /* DOOR_UP   */
+    { 0.0f, -1.0f, 0.0f },   /* DOOR_DOWN */
+    { 1.0f,  0.0f, 0.0f },   /* DOOR_X    */
+    { 0.0f,  0.0f, 1.0f }    /* DOOR_Z    */
+};
+
+v3 door_travel(const Level *l, int i, float t) {
+    if (!l || i < 0 || i >= l->door_run.count) return v3f(0, 0, 0);
+
+    const DoorDef *d = &l->doors[i];
+    if (d->axis < 0 || d->axis >= DOOR_AXES) return v3f(0, 0, 0);
+
+    return v3scale(DOOR_DIR[d->axis], d->amount * 0.01f * t);
+}
+
 static void apply_brush(Level *l, const DoorDef *d, DoorState *st) {
     if (!l->brushes) return;
-
-    static const v3 DIR[DOOR_AXES] = {
-        { 0.0f,  1.0f, 0.0f },   /* DOOR_UP   */
-        { 0.0f, -1.0f, 0.0f },   /* DOOR_DOWN */
-        { 1.0f,  0.0f, 0.0f },   /* DOOR_X    */
-        { 0.0f,  0.0f, 1.0f }    /* DOOR_Z    */
-    };
     if (d->axis < 0 || d->axis >= DOOR_AXES) return;
 
     float want  = d->amount * 0.01f * st->t;    /* file units -> metres */
@@ -269,7 +284,7 @@ static void apply_brush(Level *l, const DoorDef *d, DoorState *st) {
     if (delta == 0.0f) return;
 
     brush_translate(l->brushes, d->first_brush, d->n_brushes,
-                    v3scale(DIR[d->axis], delta));
+                    v3scale(DOOR_DIR[d->axis], delta));
     st->applied = want;
 }
 

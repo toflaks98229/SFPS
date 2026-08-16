@@ -48,7 +48,7 @@
 #ifndef DECAL_H
 #define DECAL_H
 
-#include "m.h"
+#include "level.h"   /* Level: a mark asks which door it landed on */
 
 /* --- Capacities / 용량 --- */
 
@@ -158,7 +158,48 @@ typedef struct {
  *       *수명*도 결정하며, 이 필드를 그리는 시점에 다시 유도하지 않고 저장해 두는 이유가
  *       그것입니다. 아래의 페이드를 참조하십시오.
  */
-typedef struct { v3 p, n; float life; int blood; } Mark;
+typedef struct {
+    v3    p;       /**< Where the mark sits, moved when the door under it moves. / 자국이 놓인 자리. 그 아래의 문이 움직이면 함께 옮겨집니다. */
+    v3    n;       /**< Which way it faces. / 자국이 향하는 방향. */
+    float life;    /**< Seconds left. / 남은 시간(초). */
+    int   blood;   /**< Non-zero for a hit on a monster. / 몬스터 명중이면 0이 아닙니다. */
+
+    /**
+     * @brief The door this mark is stuck to, or -1 for a surface that stays put.
+     *
+     * ENGLISH
+     * -------
+     * A decal used to be a world position and nothing else. That is right for a
+     * wall and wrong for a door: shoot one, open it, and the mark hangs in the
+     * air where the door used to be. The note on ::DECAL_BLOOD_LIFE already
+     * says as much about monsters and answers it by making blood last barely
+     * half a second -- an answer a bullet hole cannot take, because
+     * ::DECAL_WALL_LIFE is six seconds and a door opens in under one.
+     *
+     * @note Asked once, at the moment of impact, through ::level_door_at.
+     *       Re-deriving it per frame would be wrong as well as slow: the mark
+     *       belongs to the door it was made ON, and once that door has moved
+     *       out from under the point it was made AT, the position no longer
+     *       identifies it.
+     *
+     * 한국어
+     * ------
+     * @brief 이 자국이 붙어 있는 문. 제자리에 있는 표면이면 -1입니다.
+     *
+     * 데칼은 이전에 월드 좌표일 뿐이었습니다. 벽에는 맞고 문에는 틀립니다. 쏘고 열면 자국이 문이
+     * 있던 자리의 허공에 남습니다. ::DECAL_BLOOD_LIFE의 설명이 몬스터에 대해 이미 같은 말을 하며,
+     * 혈흔을 반 초 남짓만 남겨 두는 것으로 답합니다. 탄흔은 그 답을 쓸 수 없습니다.
+     * ::DECAL_WALL_LIFE가 6초이고 문은 1초 안에 열리기 때문입니다.
+     *
+     * @note 충돌 순간에 ::level_door_at으로 한 번만 묻습니다. 프레임마다 다시 유도하는 것은 느릴
+     *       뿐 아니라 틀립니다. 자국은 자신이 만들어진 문에 속하며, 그 문이 자국이 만들어진 지점
+     *       아래에서 빠져나가고 나면 위치가 더 이상 그것을 식별하지 못합니다.
+     */
+    short door;
+
+    /** @brief The door's travel when the mark was made, so only the change since moves it. / 자국이 생겼을 때 문의 이동량. 그 이후의 변화만이 자국을 옮깁니다. */
+    float door_t;
+} Mark;
 
 /**
  * @struct Tracer
@@ -266,7 +307,8 @@ void decal_reset(Pools *pl);
  * @param[in] blood  맞은 대상이 몬스터이면 0이 아닙니다.
  * @return 자국이 놓인 자리. 그것과 일치해야 하는 이펙트를 위한 값입니다.
  */
-DecalPlace decal_hit(Pools *pl, v3 end, v3 dir, v3 surf_n, int blood);
+DecalPlace decal_hit(Pools *pl, const Level *l, v3 end, v3 dir, v3 surf_n,
+                     int blood);
 
 /**
  * @brief Leaves a tracer line from a muzzle to where the shot ended.
@@ -301,7 +343,7 @@ void decal_tracer(Pools *pl, v3 from, v3 to);
  * @note 월드의 dt로 호출되므로 월드가 멈추면 자국도 멈춥니다. 일시정지 메뉴 뒤에 공중에 멈춘
  *       예광탄은 게임이 멈춰 있는데도 돌아가고 있다고 말하는 셈입니다.
  */
-void decal_update(Pools *pl, float dt);
+void decal_update(Pools *pl, const Level *l, float dt);
 
 /**
  * @brief Draws the marks, their sparks and the tracers.

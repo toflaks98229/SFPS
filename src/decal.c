@@ -6,6 +6,7 @@
 #include "decal.h"
 #include "pools.h"
 #include "render.h"
+#include "door.h"     /* door_openness, door_travel: what a mark stuck to a door rides */
 #include <math.h>
 
 /* --- File-local types / 파일 지역 타입 --- */
@@ -83,7 +84,8 @@ void decal_reset(Pools *pl) {
     pl->decal.mark_next = pl->decal.tracer_next = 0;
 }
 
-DecalPlace decal_hit(Pools *pl, v3 end, v3 dir, v3 surf_n, int blood) {
+DecalPlace decal_hit(Pools *pl, const Level *l, v3 end, v3 dir, v3 surf_n,
+                     int blood) {
     Mark *m = &pl->decal.marks[pl->decal.mark_next];
     pl->decal.mark_next = (pl->decal.mark_next + 1) % DECAL_MAX_MARKS;
 
@@ -96,6 +98,36 @@ DecalPlace decal_hit(Pools *pl, v3 end, v3 dir, v3 surf_n, int blood) {
     m->n     = blood ? v3scale(dir, -1.0f) : surf_n;
     m->life  = blood ? DECAL_BLOOD_LIFE : DECAL_WALL_LIFE;
     m->blood = blood;
+
+    /* --- what it is stuck to -------------------------------------------
+       Asked here and never again. A mark on a wall is a world position and
+       stays one; a mark on a door has to travel with the door, and the only
+       moment the door can be identified from the position is this one --
+       afterwards the door has moved out from under it.
+
+       BLOOD IS NEVER ATTACHED. It marks a monster rather than a surface, it
+       already does not follow what it hit, and ::DECAL_BLOOD_LIFE is half a
+       second precisely so that it does not have to. Asking anyway would be a
+       ::level_door_at per pellet that hits flesh, for an answer nothing reads.
+
+       무엇에 붙어 있는지입니다. 이곳에서 묻고 다시는 묻지 않습니다. 벽의 자국은 월드
+       좌표이고 계속 그렇습니다. 문의 자국은 문과 함께 이동해야 하며, 위치로부터 그 문을
+       식별할 수 있는 유일한 순간이 바로 지금입니다. 그 뒤에는 문이 자국 아래에서
+       빠져나간 뒤입니다.
+
+       혈흔은 결코 붙이지 않습니다. 표면이 아니라 몬스터를 표시하고, 이미 맞은 대상을
+       따라가지 않으며, ::DECAL_BLOOD_LIFE가 반 초인 이유가 정확히 그래도 되게 하기
+       위함입니다. 그런데도 묻는다면 살에 맞은 산탄마다 ::level_door_at을 부르는 것이고,
+       그 답은 아무도 읽지 않습니다. */
+    m->door   = -1;
+    m->door_t = 0.0f;
+    if (!blood && l) {
+        int di = level_door_at(l, end, surf_n);
+        if (di >= 0) {
+            m->door   = (short)di;
+            m->door_t = door_openness(l, di);
+        }
+    }
 
     DecalPlace at = { m->p, m->n };
     return at;
@@ -123,9 +155,34 @@ int decal_live_tracers(const Pools *pl) {
     return n;
 }
 
-void decal_update(Pools *pl, float dt) {
-    for (int i = 0; i < DECAL_MAX_MARKS; i++)
-        if (pl->decal.marks[i].life > 0.0f) pl->decal.marks[i].life -= dt;
+void decal_update(Pools *pl, const Level *l, float dt) {
+    for (int i = 0; i < DECAL_MAX_MARKS; i++) {
+        Mark *m = &pl->decal.marks[i];
+        if (m->life <= 0.0f) continue;
+        m->life -= dt;
+
+        /* --- and it rides whatever it is stuck to --------------------
+           The door's travel is authoritative, so this asks how far the door
+           has moved SINCE the mark last looked and moves it by exactly that.
+           Adding the whole travel every frame would walk the mark out of the
+           level; recomputing an absolute position from a stored origin would
+           work too and would need a second copy of the mark's position to
+           compute it from. One number, moved by its own change.
+
+           문의 이동량이 권위 있는 값이므로, 자국이 마지막으로 본 이후 문이 얼마나
+           움직였는지를 묻고 정확히 그만큼 옮깁니다. 매 프레임 전체 이동량을 더하면 자국이
+           레벨 밖으로 걸어 나갑니다. 저장된 원점에서 절대 위치를 다시 계산하는 것도
+           동작하지만, 그것을 계산할 자국 위치의 사본이 하나 더 필요합니다. 숫자 하나를,
+           그 자신의 변화량만큼 옮깁니다. */
+        if (m->door < 0 || !l) continue;
+
+        float now = door_openness(l, m->door);
+        if (now == m->door_t) continue;
+
+        m->p = v3add(m->p, v3sub(door_travel(l, m->door, now),
+                                 door_travel(l, m->door, m->door_t)));
+        m->door_t = now;
+    }
     for (int i = 0; i < DECAL_MAX_TRACERS; i++)
         if (pl->decal.tracers[i].life > 0.0f) pl->decal.tracers[i].life -= dt;
 }

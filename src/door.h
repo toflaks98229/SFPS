@@ -134,6 +134,58 @@ int door_update(Level *l, v3 player_pos, int keys, float dt);
 /* --- Read-back / 조회 --- */
 
 /**
+ * @brief Where door `i` stands at travel `t`, relative to where it was closed.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] l Level the door belongs to.
+ * @param[in] i Door index.
+ * @param[in] t Travel fraction, 0 closed to 1 open. Pass ::door_openness for
+ *              where the door is now, or a remembered value for where it was.
+ * @return Displacement in world metres; the zero vector at t of 0, for a door
+ *         that does not exist, or for one whose axis is not a ::DOOR_* value.
+ *
+ * TAKES THE FRACTION rather than reading it, because the callers that need this
+ * mostly need the DIFFERENCE between two of them: a bullet hole stuck to a door
+ * moves by where the door is now minus where it was when the mark last looked.
+ * A function that only answered for `now` would leave every such caller
+ * reconstructing `then` by scaling, which divides by a travel that is zero
+ * exactly when the door is shut.
+ *
+ * WHAT MOVED, rather than where it is. ::door_openness gives the fraction and
+ * every caller that wanted the vector was deriving it again from ::DoorDef::axis
+ * and ::DoorDef::amount -- ::apply_brush had the direction table and so, for a
+ * while, did anything else that needed it.
+ *
+ * @note The same number a sector door writes into ::Sector::uv_y and a brush
+ *       door hands to ::brush_translate, which is what makes this one function
+ *       rather than two: a leaf travels the same way whichever model it is
+ *       made of, and only the thing being translated differs.
+ *
+ * 한국어
+ * ------
+ * @brief 문 `i`가 이동 비율 `t`에서 어디에 서는지, 닫혀 있던 자리를 기준으로.
+ * @param[in] t 이동 비율. 0이면 닫힘, 1이면 열림입니다. 지금 위치를 원하면 ::door_openness를,
+ *              과거 위치를 원하면 기억해 둔 값을 넘기십시오.
+ * @return 월드 미터 단위의 변위. t가 0이거나, 존재하지 않는 문이거나, ::DOOR_* 값이 아닌 축을
+ *         가진 문에 대해서는 영벡터입니다.
+ *
+ * 값을 읽지 않고 *비율을 받는* 이유는, 이것을 필요로 하는 호출자 대부분이 두 값의 *차이*를
+ * 필요로 하기 때문입니다. 문에 붙은 탄흔은 문이 지금 있는 자리에서 자국이 마지막으로 본 자리를
+ * 뺀 만큼 움직입니다. `지금`에 대해서만 답하는 함수는 그런 호출자 모두가 배율로 `그때`를
+ * 복원하게 만들며, 그 나눗셈은 문이 닫혀 있을 때 정확히 0으로 나누게 됩니다.
+ *
+ * 어디에 *있는지*가 아니라 *무엇이 움직였는지*입니다. ::door_openness는 비율을 주며, 벡터를
+ * 원하던 모든 호출자는 그것을 ::DoorDef::axis와 ::DoorDef::amount에서 다시 유도하고 있었습니다.
+ * ::apply_brush가 방향 표를 가지고 있었고, 한동안 그것을 필요로 하는 다른 무엇도 그러했습니다.
+ *
+ * @note 섹터 문이 ::Sector::uv_y에 기록하는 값이자 브러시 문이 ::brush_translate에 건네는 값과
+ *       같습니다. 그것이 이것을 둘이 아닌 하나의 함수로 만드는 이유입니다. 문짝은 어느 모델로
+ *       만들어졌든 같은 방식으로 이동하며, 다른 것은 무엇이 옮겨지는가뿐입니다.
+ */
+v3 door_travel(const Level *l, int i, float t);
+
+/**
  * @brief How far door `i` has travelled, 0 closed to 1 open.
  * @return 0..1, or 0 for an index with no door.
  *

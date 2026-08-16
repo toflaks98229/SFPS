@@ -240,6 +240,62 @@ typedef enum {
 } MonBehaviour;
 
 /**
+ * @brief Per-kind switches, one bit each, for things every monster did the same way.
+ *
+ * ENGLISH
+ * -------
+ * SEPARATE FROM ::MonBehaviour ON PURPOSE, and the difference is what each is
+ * for. A behaviour is a whole way of fighting and exactly one applies, which is
+ * why it is an enum and a switch. A flag is one assumption the code makes about
+ * every monster, made per kind instead -- and any number of them can be true at
+ * once, which is what makes a bitfield the shape rather than a second enum.
+ *
+ * @note Adding one costs a bit here, a column entry in the table, and ONE
+ *       condition where that assumption currently lives. If it costs more than
+ *       that, it is a behaviour rather than a flag and belongs above.
+ *
+ * 한국어
+ * ------
+ * @brief 종류별 스위치. 모든 몬스터가 같은 방식으로 하던 것들에 대해 비트 하나씩.
+ *
+ * ::MonBehaviour와 의도적으로 분리되어 있으며, 그 차이가 각자의 용도입니다. behaviour는 싸우는
+ * 방식 전체이고 정확히 하나만 적용되므로 enum이자 switch입니다. 플래그는 코드가 *모든* 몬스터에
+ * 대해 하던 가정 하나를 종류별로 정하는 것이며, 몇 개든 동시에 참일 수 있습니다. 그것이 두 번째
+ * enum이 아니라 비트필드가 형태인 이유입니다.
+ *
+ * @note 하나를 추가하는 비용은 이곳의 비트 하나, 표의 열 항목 하나, 그리고 그 가정이 현재 사는
+ *       곳의 조건 *하나*입니다. 그보다 비싸다면 그것은 플래그가 아니라 behaviour이며 위쪽에
+ *       속합니다.
+ */
+enum {
+    /**
+     * @brief Holds the height it was spawned at instead of falling to the floor.
+     *
+     * ENGLISH: Everything in this world falls, and until now that was written
+     * into ::enemy_update rather than decided per kind. A flyer is what the
+     * vertical arena on the roadmap wants -- floating platforms and a chasm are
+     * only a threat if something can be out over them.
+     *
+     * @warning NO SHIPPED MONSTER CARRIES THIS YET. The mechanism is here and
+     *          checked; the creature that uses it is a design decision and a
+     *          sprite, neither of which belongs in the same change as the bit.
+     *
+     * 한국어: 바닥으로 떨어지는 대신 생성된 높이를 유지합니다. 이 세계의 모든 것은 떨어지며,
+     * 지금까지 그것은 종류별로 정해진 것이 아니라 ::enemy_update 안에 적혀 있었습니다. 비행체는
+     * 로드맵의 수직 아레나가 원하는 것입니다. 떠 있는 발판과 협곡은 그 위로 나올 수 있는 무언가가
+     * 있어야만 위협이 됩니다.
+     *
+     * @warning 아직 어떤 배포 몬스터도 이 비트를 갖고 있지 않습니다. 기구는 이곳에 있고 검사도
+     *          됩니다. 그것을 쓰는 크리처는 설계 결정과 스프라이트이며, 둘 다 이 비트와 같은
+     *          변경에 속하지 않습니다.
+     */
+    MON_FLIES = 1 << 0
+};
+
+/** @brief Every bit above, for ::types_check to object to anything else. / 위의 모든 비트. ::types_check가 그 외의 것에 이의를 제기하기 위한 것입니다. */
+#define MON_FLAGS_ALL (MON_FLIES)
+
+/**
  * @struct MonType
  * @brief 한 종류의 몬스터를 다른 몬스터와 다르게 만드는 모든 특성을 정의합니다.
  *
@@ -322,6 +378,19 @@ typedef struct {
      * 것과 같은 조절 수단이기 때문입니다. 오우거의 5초가 오우거를 무섭게 만듭니다.
      */
     float pain_lock;
+
+    /**
+     * @brief ::MON_FLIES and whatever joins it. Zero is the ordinary monster.
+     *
+     * ENGLISH: Zero means every assumption the code makes applies, which is what
+     * every kind shipped so far wants -- so a row written before this column
+     * existed means exactly what it meant.
+     *
+     * 한국어: ::MON_FLIES와 이후에 합류할 것들입니다. 0은 평범한 몬스터입니다. 0은 코드가 하는
+     * 모든 가정이 적용된다는 뜻이며, 지금까지 배포된 모든 종류가 원하는 바입니다. 따라서 이 열이
+     * 생기기 전에 작성된 행은 그것이 뜻하던 바를 정확히 그대로 뜻합니다.
+     */
+    int flags;
 } MonType;
 
 /**
@@ -539,6 +608,7 @@ const MonType *mon_stats(int type);
  * @return 해당 몬스터 타입 ID, 없으면 -1.
  */
 int mon_type_for(const char *kind);
+
 
 /**
  * @brief 현재 활성화된 발사체의 수를 반환합니다 (비활성 슬롯 포함).

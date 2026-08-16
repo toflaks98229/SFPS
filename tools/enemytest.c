@@ -493,6 +493,65 @@ int main(void) {
             sideways, 2.0f);
     }
 
+    /* --- the flags column --------------------------------------------------
+       MON_FLIES is capacity rather than a feature: it varies the one assumption
+       enemy_update makes about every monster, and no shipped kind carries it,
+       because the creature that would is a design decision and a sprite. What
+       IS checkable is that the column is sound and that adding it did not
+       disturb the fall it gates -- which is the whole risk of a `continue`
+       placed in a loop somebody else wrote.
+
+       MON_FLIES는 기능이 아니라 여지입니다. enemy_update가 모든 몬스터에 대해 하는 단 하나의
+       가정을 달리하며, 배포되는 어떤 종류도 그것을 갖고 있지 않습니다. 그것을 가질 크리처가
+       설계 결정이자 스프라이트이기 때문입니다. 검사할 수 있는 것은 그 열이 온전한지, 그리고
+       그것을 추가한 일이 그것이 관장하는 낙하를 흐트러뜨리지 않았는지입니다. 남이 쓴 루프에
+       `continue`를 넣는 일의 위험 전부가 그것입니다. */
+    printf("\nthe flags column\n");
+    {
+        int flying = 0, stray = 0;
+        for (int t = 0; t < MON_TYPES; t++) {
+            const MonType *S = mon_stats(t);
+            if (S->flags & MON_FLIES)   flying++;
+            if (S->flags & ~MON_FLAGS_ALL) stray++;
+        }
+        okf(stray == 0, "no row carries a bit this build does not define",
+            (float)stray, 0.0f);
+        okf(flying == 0,
+            "and nothing ships flying yet, which is why the branch is untested",
+            (float)flying, 0.0f);
+
+        ok((MON_FLAGS_ALL & MON_FLIES) != 0,
+           "MON_FLAGS_ALL covers every bit there is");
+    }
+
+    /* --- and an ordinary monster still falls -------------------------------
+       The gate is a `continue` before the ground snap, so the way to get it
+       wrong is to skip more than the fall. Dropped from well above the floor
+       and given time to land.
+       그 관문은 지면 스냅 앞의 `continue`이므로, 잘못되는 방식은 낙하보다 많은 것을 건너뛰는
+       것입니다. 바닥에서 한참 위에서 떨어뜨리고 착지할 시간을 줍니다. */
+    printf("\ngravity still applies to everything that has it\n");
+    {
+        build();
+        enemy_reset(&g_pools);
+        enemy_spawn_level(&g_pools, &L);
+        ok(enemy_count(&g_pools) == 1, "one monster to drop");
+
+        /* Lifted off the floor it spawned on, and left alone: the player is far
+           enough away that nothing but the fall is acting on it.
+           생성된 바닥에서 들어 올리고 내버려 둡니다. 플레이어가 충분히 멀어서 낙하 외에는
+           아무것도 작용하지 않습니다. */
+        g_pools.enemy.m[0].pos.y = 6.0f;
+        g_pools.enemy.m[0].vel_y = 0.0f;
+
+        for (int i = 0; i < 240; i++)
+            enemy_update(&g_pools, &L, v3f(0.0f, PLAYER_EYE, 300.0f), DT);
+
+        okf(fabsf(g_pools.enemy.m[0].pos.y) < 0.05f,
+            "and it is on the floor four seconds later",
+            g_pools.enemy.m[0].pos.y, 0.0f);
+    }
+
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall enemy checks passed\n", fails);
     return fails != 0;
 }

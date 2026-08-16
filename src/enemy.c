@@ -52,13 +52,13 @@
 /*         name     behaviour     hp  spd   rad    hgt    eye   sight  atk  dmg  wind   cool  aspct shot   yaw    pain */
 static const MonType TYPES[MON_TYPES] = {
     /* IMP: 기준선. 충분히 빠르며, 근접 샷건 한 방에 죽습니다. */
-    {"imp", AI_BRAWLER, 40, 3.0f, 0.40f, 1.70f, 1.30f, 34.0f, 1.8f, 9, 0.35f, 1.10f, 0.70f, 0.0f, 220.0f, 0.6f},
+    {"imp", AI_BRAWLER, 40, 3.0f, 0.40f, 1.70f, 1.30f, 34.0f, 1.8f, 9, 0.35f, 1.10f, 0.70f, 0.0f, 220.0f, 0.6f, 0},
     /* BRUTE: 체력이 높은 벽. 느리게 다가오지만 강력한 공격을 하므로, 피하기보다 계획적으로 대처해야 하는 위협입니다. */
-    {"brute", AI_BRAWLER, 120, 1.9f, 0.62f, 2.35f, 1.80f, 34.0f, 2.3f, 24, 0.55f, 1.50f, 0.85f, 0.0f, 130.0f, 2.2f},
+    {"brute", AI_BRAWLER, 120, 1.9f, 0.62f, 2.35f, 1.80f, 34.0f, 2.3f, 24, 0.55f, 1.50f, 0.85f, 0.0f, 130.0f, 2.2f, 0},
     /* HOUND: 빠르고 약한 야수. 가만히 있는 것을 응징합니다. 한 번의 공격 피해는 적지만, 경고를 알아차리기 전에 덮칩니다. */
-    {"hound", AI_BRAWLER, 18, 5.3f, 0.38f, 1.25f, 0.70f, 40.0f, 1.5f, 5, 0.18f, 0.65f, 1.00f, 0.0f, 400.0f, 0.3f},
+    {"hound", AI_BRAWLER, 18, 5.3f, 0.38f, 1.25f, 0.70f, 40.0f, 1.5f, 5, 0.18f, 0.65f, 1.00f, 0.0f, 400.0f, 0.3f, 0},
     /* CASTER: 계속 움직여야 하는 이유. 접근하지 않고 사정거리를 유지하며 주문을 시전하므로, 발놀림 대신 엄폐와 각도가 중요합니다. */
-    {"caster", AI_CASTER, 26, 2.4f, 0.42f, 1.90f, 1.45f, 40.0f, 13.0f, 12, 0.85f, 1.40f, 0.80f, 11.0f, 180.0f, 0.9f},
+    {"caster", AI_CASTER, 26, 2.4f, 0.42f, 1.90f, 1.45f, 40.0f, 13.0f, 12, 0.85f, 1.40f, 0.80f, 11.0f, 180.0f, 0.9f, 0},
 };
 
 /* A caster that cannot throw anything stands in its band and does nothing, and
@@ -76,6 +76,16 @@ static void types_check(void)
     {
         int caster = TYPES[i].behaviour == AI_CASTER;
         if (caster != (TYPES[i].shot_speed > 0.0f))
+            DIAG(DIAG_MON_TABLE);
+
+        /* A bit nobody defined is a row that was written against a different
+           version of this header -- a typo in a hand-edited table, or a column
+           shifted by an insertion. Neither shows up in play: the monster simply
+           behaves normally and the intent is lost.
+           정의되지 않은 비트는 이 헤더의 다른 판본을 기준으로 작성된 행입니다. 손으로 편집한
+           표의 오타이거나, 삽입으로 열이 밀린 것입니다. 어느 쪽도 플레이에서 드러나지
+           않습니다. 그 몬스터는 그냥 평범하게 행동하고 의도만 사라집니다. */
+        if (TYPES[i].flags & ~MON_FLAGS_ALL)
             DIAG(DIAG_MON_TABLE);
     }
 }
@@ -1226,12 +1236,35 @@ int enemy_update(Pools *pl, const Level *l, v3 player_eye, float dt)
             break;
         }
 
+        /* --- what holds it up ---------------------------------------------
+           THE FALL, and the one assumption ::MON_FLIES exists to vary. A flyer
+           keeps the height it was spawned at and never asks the floor about it;
+           everything else is pulled down to whatever is under it.
+
+           The rate is ::PLAYER_GRAVITY rather than a literal, which it was --
+           a bare 22.0f here, the same number player.h names, with nothing
+           tying them together. Retune the player's snappier-than-real fall and
+           the monsters would have kept the old one, silently. They fall the
+           same way because they are in the same world; if a kind ever needs its
+           own rate, that is a column and not a second literal.
+
+           무엇이 그것을 떠받치는가. *낙하*이며, ::MON_FLIES가 달리하려고 존재하는 단 하나의
+           가정입니다. 비행체는 생성된 높이를 유지하며 바닥에 그것을 묻지 않습니다. 그 외의
+           모든 것은 아래에 있는 것으로 끌어내려집니다.
+
+           비율은 리터럴이 아니라 ::PLAYER_GRAVITY입니다. 이전에는 리터럴이었습니다. 이곳의 맨
+           22.0f였고, player.h가 이름 붙인 것과 같은 숫자였으며, 둘을 묶는 것이 없었습니다.
+           플레이어의 현실보다 경쾌한 낙하를 조정하면 몬스터는 조용히 옛 값을 유지했을 것입니다.
+           그들이 같은 방식으로 떨어지는 이유는 같은 세계에 있기 때문입니다. 어떤 종류가 자기
+           비율을 필요로 하게 된다면 그것은 열이지 두 번째 리터럴이 아닙니다. */
+        if (S->flags & MON_FLIES) continue;
+
         float f, c;
         if (level_ground(l, m->pos.x, m->pos.z, m->pos.y, S->height / 3.0f, &f, &c))
         {
             if (m->pos.y > f + 0.01f)
             {
-                m->vel_y -= 22.0f * dt;
+                m->vel_y -= PLAYER_GRAVITY * dt;
                 m->pos.y += m->vel_y * dt;
                 if (m->pos.y <= f)
                 {

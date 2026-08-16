@@ -2900,22 +2900,340 @@ static v3 nearest_edge_normal(const Level *l, v3 p) {
  * 어긋나는데, "샘플 간격을 얼마로 하는가"는 묻는 쪽의 성질이 아니라 레벨 지오메트리의
  * 성질이기 때문입니다.
  */
-static int march(const Level *l, v3 origin, v3 dir, float max_dist,
-                 float *out_last) {
-    float t = 0.0f, last = 0.0f;
+/**
+ * @brief Where openness can change along a ray -- and nowhere else can.
+ *
+ * ENGLISH
+ * -------
+ * THE WHOLE ARGUMENT FOR THIS FILE'S TRACE, in one paragraph. ::open_at asks
+ * two questions: is there a sector under (x,z), and is y between that sector's
+ * floor and ceiling. The first answer can only change where the ray crosses
+ * some sector's OUTLINE in plan; the second only where it crosses that sector's
+ * floor or ceiling HEIGHT. Between two consecutive such crossings the answer is
+ * therefore constant, whatever the sectors are doing -- overlapping, nested,
+ * last-wins, all of it. So one sample inside each piece is not an
+ * approximation of the answer. It is the answer.
+ *
+ * That is what replaced a fixed 5cm march. The march was not wrong, it was
+ * uninformed: it sampled every 5cm whether or not anything could have changed,
+ * which on a 40m ray is 800 ::sector_at calls to discover a handful of
+ * crossings. levelbench measured one trace at 10.8us on the arena and 16.7us
+ * on the converted Doom map, and the capped frame budget -- every monster and
+ * every projectile tracing at once -- at 7.3% and 11.3% of a 60fps frame.
+ *
+ * It also removes the approximation's one real defect: geometry thinner than
+ * the step could be stepped clean over. Nothing in the shipped maps is that
+ * thin, which is why it never showed, but "no wall is under 5cm" was a
+ * constraint on level authors that nobody had written down.
+ *
+ * @param[in]  l        Level whose sectors are consulted.
+ * @param[in]  o        Ray origin.
+ * @param[in]  d        Ray direction; assumed unit length.
+ * @param[in]  max_dist How far to look, in metres.
+ * @param[out] ev       Crossing parameters, unsorted.
+ * @return How many were written, or -1 if there were more than ::TRACE_MAX_EVENTS.
+ *
+ * @note Gathers from every sector the ray's segment could reach, rejected by
+ *       the cached bounding box with a slab test. A false positive costs a few
+ *       edge intersections; a false negative would lose a wall, so the test is
+ *       skipped entirely for a sector whose bounds were never computed -- the
+ *       state every hand-assembled fixture in tools/ is in.
+ * @note Height crossings are gathered for every candidate sector rather than
+ *       only the governing one. Sampling an extra point costs one ::open_at
+ *       and working out which sector governs where is the question the samples
+ *       are being taken to answer.
+ *
+ * 한국어
+ * ------
+ * @brief 광선을 따라 개방 여부가 바뀔 수 있는 지점. 그 외에는 바뀔 수 없습니다.
+ *
+ * 이 파일의 판정에 대한 논거 전부입니다. ::open_at은 두 가지를 묻습니다. (x,z) 아래에 섹터가
+ * 있는가, 그리고 y가 그 섹터의 바닥과 천장 사이인가. 첫 번째 답은 광선이 어떤 섹터의
+ * *외곽선*을 평면상에서 넘을 때만 바뀔 수 있고, 두 번째는 그 섹터의 바닥이나 천장 *높이*를
+ * 넘을 때만 바뀔 수 있습니다. 따라서 연속된 두 교차 사이에서는 섹터들이 무엇을 하고
+ * 있든(겹침, 포개짐, 마지막 선언 우선) 답이 일정합니다. 그러므로 각 조각 안에서의 샘플 하나는
+ * 답의 근사가 아닙니다. 그것이 답입니다.
+ *
+ * 그것이 고정 5cm 마칭을 대체한 것입니다. 마칭은 틀린 것이 아니라 아는 바가 없었습니다.
+ * 무언가 바뀔 수 있는지와 무관하게 5cm마다 샘플링했고, 40m 광선에서는 한 줌의 교차를 찾자고
+ * ::sector_at을 800번 부르는 일입니다. levelbench는 판정 한 번을 아레나에서 10.8us, 변환된
+ * Doom 맵에서 16.7us로 측정했고, 모든 몬스터와 모든 발사체가 동시에 판정하는 상한 프레임
+ * 예산을 60fps 프레임의 7.3%와 11.3%로 측정했습니다.
+ *
+ * 또한 그 근사가 지닌 단 하나의 실제 결함을 없앱니다. 보폭보다 얇은 지오메트리는 그대로 타고
+ * 넘을 수 있었습니다. 배포되는 맵에 그렇게 얇은 것이 없어서 드러나지 않았을 뿐이며, "어떤 벽도
+ * 5cm 미만이어서는 안 된다"는 아무도 적어 두지 않은 레벨 제작자에 대한 제약이었습니다.
+ *
+ * @return 기록된 개수. ::TRACE_MAX_EVENTS를 넘으면 -1.
+ * @note 광선의 선분이 닿을 수 있는 모든 섹터에서 수집하며, 캐시된 바운딩 박스에 대한 슬랩
+ *       판정으로 기각합니다. 잘못된 통과는 모서리 교차 몇 번을 낭비할 뿐이고 잘못된 기각은 벽을
+ *       잃으므로, 경계값이 계산된 적 없는 섹터에 대해서는 판정을 통째로 건너뜁니다. tools/의 손으로
+ *       조립한 모든 픽스처가 그 상태입니다.
+ * @note 높이 교차는 지배하는 섹터만이 아니라 후보 섹터 전부에 대해 수집합니다. 추가 지점 하나를
+ *       샘플링하는 비용은 ::open_at 한 번이고, 어디서 어느 섹터가 지배하는지가 바로 그 샘플들이
+ *       답하려는 질문입니다.
+ */
+#define TRACE_MAX_EVENTS 192
 
-    /* Marching rather than intersecting every wall quad: with overlapping
-       sectors the solid set is awkward to express as surfaces, but trivial to
-       sample. */
-    while (t < max_dist) {
-        float next = t + TRACE_STEP;
-        if (next > max_dist) next = max_dist;
-        if (!open_at(l, v3add(origin, v3scale(dir, next)))) {
-            *out_last = last;
+/**
+ * @brief The narrowest piece worth sampling, in metres.
+ *
+ * ENGLISH
+ * -------
+ * BOUNDED FROM BOTH SIDES, which is what makes 1mm a choice rather than a
+ * tuning constant.
+ *
+ * From below: sector coordinates are shorts in CENTIMETRES, so the thinnest
+ * solid the format can express is 1cm and this is a tenth of that. A ray meets
+ * a thin wall in `thickness / |d . n|` metres, which is longest at a grazing
+ * angle and never shorter than the thickness -- so no real wall can produce a
+ * piece this narrow, whatever direction it is crossed from.
+ *
+ * From above: the float noise on a 40m ray in single precision is about 5e-6 m,
+ * so this sits two hundred times above the point where the crossings stop being
+ * distinguishable at all.
+ *
+ * What lands in between is the thing this exists for: two outlines that share
+ * an edge report the same crossing twice, and a ray through a shared vertex
+ * reports several. The piece between them has no inside, so the samples that
+ * would decide whether it is solid land on the boundary instead. Measured over
+ * 180,000 rays against a 1mm reference march, a floor of 0.1mm still let two of
+ * them through; at 1mm none do.
+ *
+ * 한국어
+ * ------
+ * @brief 샘플링할 가치가 있는 가장 좁은 조각이며 미터 단위입니다.
+ *
+ * 양쪽에서 경계가 지어지며, 그것이 1mm를 조정값이 아니라 *선택*으로 만듭니다.
+ *
+ * 아래쪽에서: 섹터 좌표는 *센티미터* 단위의 short이므로 이 형식이 표현할 수 있는 가장 얇은
+ * 고체는 1cm이고 이 값은 그것의 10분의 1입니다. 광선은 얇은 벽을
+ * `두께 / |d . n|` 미터에 걸쳐 통과하며, 그 값은 스치는 각도에서 가장 길고 결코 두께보다
+ * 짧아지지 않습니다. 따라서 어느 방향에서 지나가든 실제 벽은 이보다 좁은 조각을 만들 수
+ * 없습니다.
+ *
+ * 위쪽에서: 단정밀도에서 40m 광선의 부동소수점 잡음은 약 5e-6 m이므로, 이 값은 교차를 애초에
+ * 구별할 수 없게 되는 지점보다 200배 위에 있습니다.
+ *
+ * 그 사이에 떨어지는 것이 이 상수가 존재하는 이유입니다. 모서리를 공유하는 두 외곽선은 같은
+ * 교차를 두 번 보고하고, 공유된 정점을 지나는 광선은 여러 번 보고합니다. 그 사이의 조각에는
+ * 안쪽이랄 것이 없으므로, 그것이 막혔는지 판단할 표본이 대신 경계 위에 놓입니다. 1mm 기준
+ * 마칭에 대해 광선 180,000개로 측정했을 때 0.1mm 하한에서는 두 건이 여전히 빠져나갔고,
+ * 1mm에서는 하나도 빠져나가지 않습니다.
+ */
+#define TRACE_MIN_SPAN 1e-3f
+
+/* 2D ray-versus-box, in the file units the sector bounds are kept in. Returns
+   whether the ray's [0,tmax] span meets the box at all.
+   섹터 경계가 보관된 파일 단위에서의 2D 광선-박스 판정입니다. 광선의 [0,tmax] 구간이 박스와
+   만나는지 여부를 반환합니다. */
+static int ray_hits_box(float ox, float oz, float dx, float dz, float tmax,
+                        float bx0, float bz0, float bx1, float bz1) {
+    float t0 = 0.0f, t1 = tmax;
+
+    if (dx > -1e-9f && dx < 1e-9f) {
+        if (ox < bx0 || ox > bx1) return 0;
+    } else {
+        float ta = (bx0 - ox) / dx, tb = (bx1 - ox) / dx;
+        if (ta > tb) { float s = ta; ta = tb; tb = s; }
+        if (ta > t0) t0 = ta;
+        if (tb < t1) t1 = tb;
+        if (t0 > t1) return 0;
+    }
+
+    if (dz > -1e-9f && dz < 1e-9f) {
+        if (oz < bz0 || oz > bz1) return 0;
+    } else {
+        float ta = (bz0 - oz) / dz, tb = (bz1 - oz) / dz;
+        if (ta > tb) { float s = ta; ta = tb; tb = s; }
+        if (ta > t0) t0 = ta;
+        if (tb < t1) t1 = tb;
+        if (t0 > t1) return 0;
+    }
+    return 1;
+}
+
+static int trace_events(const Level *l, v3 o, v3 d, float max_dist, float *ev) {
+    int n = 0;
+
+    /* The ray in FILE units for the box test, so the comparison is against the
+       shorts the sector already stores. U is positive, so the answer is the
+       same and there is no multiply per bound.
+       박스 판정을 위해 광선을 파일 단위로 둡니다. 섹터가 이미 보관하는 short와 직접
+       비교하기 위함입니다. U가 양수이므로 결과는 같고 경계마다 곱셈이 없습니다. */
+    float fox = o.x / U, foz = o.z / U;
+    float fdx = d.x / U, fdz = d.z / U;
+
+    for (int i = 0; i < l->n_sectors; i++) {
+        const Sector *s = &l->sectors[i];
+        if (s->n < 3) continue;
+
+        if (s->has_bounds &&
+            !ray_hits_box(fox, foz, fdx, fdz, max_dist,
+                          s->min_x, s->min_z, s->max_x, s->max_z))
+            continue;
+
+        /* --- where the ray crosses this outline, in plan ------------------ */
+        for (int e = 0, j = s->n - 1; e < s->n; j = e++) {
+            float ax = s->pts[j*2] * U, az = s->pts[j*2+1] * U;
+            float bx = s->pts[e*2] * U, bz = s->pts[e*2+1] * U;
+            float ex = bx - ax,  ez = bz - az;
+
+            float den = d.x * ez - d.z * ex;
+            if (den > -1e-12f && den < 1e-12f) continue;   /* parallel */
+
+            float rx = ax - o.x, rz = az - o.z;
+            float t = (rx * ez - rz * ex) / den;
+            float u = (rx * d.z - rz * d.x) / den;
+
+            if (u < 0.0f || u > 1.0f)    continue;
+            if (t <= 0.0f || t > max_dist) continue;
+
+            if (n >= TRACE_MAX_EVENTS) return -1;
+            ev[n++] = t;
+        }
+
+        /* --- and where it crosses this sector's floor or ceiling ---------- */
+        if (d.y > 1e-9f || d.y < -1e-9f) {
+            float h[2] = { s->floor * U, s->ceil * U };
+            for (int k = 0; k < 2; k++) {
+                float t = (h[k] - o.y) / d.y;
+                if (t <= 0.0f || t > max_dist) continue;
+                if (n >= TRACE_MAX_EVENTS) return -1;
+                ev[n++] = t;
+            }
+        }
+    }
+    return n;
+}
+
+static int march(const Level *l, v3 origin, v3 dir, float max_dist,
+                 float *out_last, float *out_solid, float *out_open) {
+    float ev[TRACE_MAX_EVENTS];
+    int n = trace_events(l, origin, dir, max_dist, ev);
+
+    if (n < 0) {
+        /* MORE CROSSINGS THAN THE TABLE HOLDS, so fall back to the sampler this
+           replaced rather than answering from a partial list. A dropped
+           crossing is a wall that is not there, which is the one failure this
+           whole function exists to avoid -- and the fallback is slower, not
+           wrong.
+           테이블이 담을 수 있는 것보다 교차가 많으므로, 부분 목록으로 답하는 대신 이것이
+           대체한 샘플러로 되돌아갑니다. 버려진 교차는 존재하지 않는 벽이며, 이 함수 전체가
+           피하려는 단 하나의 고장입니다. 폴백은 느릴 뿐 틀리지 않습니다. */
+        DIAG(DIAG_TRACE_EVENTS);
+
+        float t = 0.0f, last = 0.0f;
+        while (t < max_dist) {
+            float next = t + TRACE_STEP;
+            if (next > max_dist) next = max_dist;
+            if (!open_at(l, v3add(origin, v3scale(dir, next)))) {
+                *out_last = last;
+                if (out_solid) *out_solid = next;
+                if (out_open)  *out_open  = last;
+                return 1;
+            }
+            last = next;
+            t = next;
+        }
+        return 0;
+    }
+
+    /* Insertion sort. n is a few dozen for any real ray and the list is nearly
+       sorted already -- sectors are visited roughly in order along the ray --
+       which is the case insertion sort is best at and qsort's call overhead is
+       worst at.
+       삽입 정렬입니다. 실제 광선에서 n은 수십 개이고 목록은 이미 거의 정렬되어 있습니다.
+       섹터가 광선을 따라 대체로 순서대로 방문되기 때문이며, 그것이 삽입 정렬이 가장 잘하는
+       경우이자 qsort의 호출 비용이 가장 손해인 경우입니다. */
+    for (int i = 1; i < n; i++) {
+        float v = ev[i];
+        int j = i - 1;
+        while (j >= 0 && ev[j] > v) { ev[j + 1] = ev[j]; j--; }
+        ev[j + 1] = v;
+    }
+
+    /* TWO samples strictly inside each piece, and they have to agree.
+       ---------------------------------------------------------------
+       One would be enough if the geometry were exact. It is not: two sectors
+       that share an edge are two independent outlines that happen to have equal
+       coordinates, and ::point_in_sector's crossing test is half-open, so along
+       the seam there are points that read as inside NEITHER. That is a hairline
+       crack in the sector model rather than in this function -- but sampling
+       at a fixed fraction of an interval whose ENDS are geometry puts the
+       samples where cracks are, which uniform 5cm sampling did only by luck.
+       Measured: a differential run against a 1mm reference march over 180,000
+       rays found 95 answers that differed from the old sampler, 90 of them the
+       new one getting it right and 5 of them phantom walls from exactly this.
+
+       Two samples, and a piece counts as solid only if both say so. A piece is
+       constant in openness by construction, so two readings that disagree are
+       not a thin wall -- they are the crack. Reporting open there is the answer
+       that does not invent geometry, and it is what the old sampler produced
+       almost every time.
+
+       각 조각 안쪽에서 *두 번* 샘플링하며, 둘이 일치해야 합니다.
+       지오메트리가 정확하다면 한 번으로 충분합니다. 그렇지 않습니다. 모서리를 공유하는 두
+       섹터는 좌표가 우연히 같은 두 개의 독립적인 외곽선이고 ::point_in_sector의 교차 판정은
+       반열린 구간이므로, 이음매를 따라 *어느 쪽에도* 속하지 않는 것으로 읽히는 점들이
+       있습니다. 이는 이 함수가 아니라 섹터 모델의 실금입니다. 그러나 양 끝이 지오메트리인
+       구간의 고정된 비율 지점에서 샘플링하면 표본이 실금이 있는 자리에 놓이며, 균일한 5cm
+       샘플링은 그것을 운으로만 피했습니다. 측정하면, 1mm 기준 마칭에 대한 차등 실행에서 광선
+       180,000개 중 옛 샘플러와 다른 답이 95개였고 그중 90개는 새 쪽이 옳았으며 5개가 바로
+       이것에서 비롯한 유령 벽이었습니다.
+
+       두 번 샘플링하고, 둘 다 막혔다고 할 때만 그 조각을 막힌 것으로 셉니다. 조각은 구성상
+       개방 여부가 일정하므로, 서로 다른 두 판독은 얇은 벽이 아니라 실금입니다. 그곳을 열린
+       것으로 보고하는 것이 지오메트리를 지어내지 않는 답이며, 옛 샘플러가 거의 언제나 내던
+       답이기도 합니다. */
+    float prev = 0.0f;
+
+    /* The origin. ::level_trace has already established it is open, and
+       ::level_blocked returns before it gets here if it is not.
+       시작점입니다. ::level_trace가 이미 그것이 열려 있음을 확인했고,
+       ::level_blocked는 그렇지 않으면 이곳에 도달하기 전에 반환합니다. */
+    float open_t = 0.0f;
+
+    for (int i = 0; i <= n; i++) {
+        float e = (i < n) ? ev[i] : max_dist;
+
+        /* Coincident crossings -- a shared edge is two outlines reporting the
+           same t -- leave a piece with no inside to sample. Skipped rather than
+           sampled, because the midpoint of a zero-width piece IS the boundary.
+           겹치는 교차(공유 모서리는 두 외곽선이 같은 t를 보고합니다)는 안쪽이랄 것이 없는
+           조각을 남깁니다. 샘플링하지 않고 건너뜁니다. 폭이 0인 조각의 중점은 곧
+           경계이기 때문입니다. */
+        if (e < prev + TRACE_MIN_SPAN) {
+            if (e > prev) prev = e;
+            continue;
+        }
+
+        float a = prev + (e - prev) * 0.3f;
+        float b = prev + (e - prev) * 0.7f;
+        int oa = open_at(l, v3add(origin, v3scale(dir, a)));
+        int ob = open_at(l, v3add(origin, v3scale(dir, b)));
+
+        if (!oa && !ob) {
+            *out_last = prev;
+            if (out_solid) *out_solid = a;
+            if (out_open)  *out_open  = open_t;
             return 1;
         }
-        last = next;
-        t = next;
+
+        /* WHERE THE RAY WAS LAST KNOWN OPEN, which is not `prev`. `prev` is the
+           crossing itself -- exactly on a wall -- and a caller that asks what
+           the surface there is like has to ask from a point that is definitely
+           inside the room. ::level_trace does exactly that: it decides floor
+           versus wall by moving only the height and asking again, and asking it
+           AT the wall makes the plan position ambiguous and every wall answer
+           come back as a floor.
+           광선이 마지막으로 열려 있다고 확인된 지점이며 `prev`가 아닙니다. `prev`는 교차 그
+           자체, 즉 벽 위이고, 그곳의 표면이 어떤지 묻는 호출자는 확실히 방 안쪽인 지점에서
+           물어야 합니다. ::level_trace가 바로 그렇게 합니다. 높이만 옮겨 다시 물어 바닥인지
+           벽인지 판단하는데, 그것을 *벽 위에서* 물으면 평면 위치가 모호해지고 모든 벽이
+           바닥이라는 답으로 돌아옵니다. */
+        open_t = ob ? b : a;
+        prev = e;
     }
     return 0;
 }
@@ -2933,7 +3251,7 @@ int level_blocked(const Level *l, v3 origin, v3 dir, float max_dist) {
     if (!open_at(l, origin)) return 1;
 
     float last;
-    return march(l, origin, dir, max_dist, &last);
+    return march(l, origin, dir, max_dist, &last, 0, 0);
 }
 
 int level_trace(const Level *l, v3 origin, v3 dir, float max_dist,
@@ -2957,26 +3275,41 @@ int level_trace(const Level *l, v3 origin, v3 dir, float max_dist,
         return 1;
     }
 
-    const float STEP = TRACE_STEP;
-
     if (!open_at(l, origin)) { *out_t = 0.0f; *out_normal = v3f(0,1,0); return 1; }
 
-    float last;
-    if (!march(l, origin, dir, max_dist, &last)) return 0;
-
-    /* Bisect the last open/solid interval down to well under a millimetre. */
-    float lo = last, hi = last + STEP;
-    for (int i = 0; i < 10; i++) {
-        float mid = (lo + hi) * 0.5f;
-        if (open_at(l, v3add(origin, v3scale(dir, mid)))) lo = mid; else hi = mid;
-    }
+    /* THE BISECTION THAT USED TO BE HERE IS GONE, and with it the last of the
+       approximation. ::march sampled every ::TRACE_STEP and could only say
+       "somewhere in the last 5cm", so ten halvings brought that down to well
+       under a millimetre. It now returns the crossing itself -- an exact
+       intersection with an edge or a height plane -- and `solid` is a point
+       known to be on the far side of it. There is nothing left to narrow.
+       이곳에 있던 이분 탐색이 사라졌고, 그와 함께 근사의 마지막 조각도 사라졌습니다.
+       ::march는 ::TRACE_STEP마다 샘플링했으므로 "마지막 5cm 어딘가"라고밖에 말할 수 없었고,
+       그래서 열 번의 반분으로 그것을 1밀리미터 아래까지 좁혔습니다. 이제는 교차 자체를
+       반환합니다. 모서리 또는 높이 평면과의 정확한 교차이며, `solid`는 그 반대편에 있음이
+       알려진 지점입니다. 좁힐 것이 남아 있지 않습니다. */
+    float lo, hi, in_open;
+    if (!march(l, origin, dir, max_dist, &lo, &hi, &in_open)) return 0;
 
     v3 p = v3add(origin, v3scale(dir, lo));
     v3 q = v3add(origin, v3scale(dir, hi));
 
+    /* ASKED FROM INSIDE THE ROOM, not from the wall. `p` is the crossing and is
+       therefore exactly on the surface, where sector_at is a coin toss; `probe`
+       is the last point the march knew to be open. The old sampler had no such
+       distinction to draw -- its `lo` was a sample it had SEEN open -- and
+       handing the exact answer to the same two lines turned every wall into a
+       floor. See ::march.
+       벽이 아니라 방 안쪽에서 묻습니다. `p`는 교차 지점이므로 표면 위에 정확히 놓이며 그곳에서
+       sector_at은 동전 던지기입니다. `probe`는 마칭이 열려 있다고 확인한 마지막 지점입니다.
+       옛 샘플러에는 이 구분을 그을 일이 없었습니다. 그쪽의 `lo`는 열린 것을 *본* 표본이었기
+       때문입니다. 정확한 답을 같은 두 줄에 그대로 건네자 모든 벽이 바닥이 되었습니다.
+       ::march를 참조하십시오. */
+    v3 probe = v3add(origin, v3scale(dir, in_open));
+
     /* Was it the height that changed, or the plan position? Moving only y to
        the far side tells us which. */
-    v3 vert = v3f(p.x, q.y, p.z);
+    v3 vert = v3f(probe.x, q.y, probe.z);
     if (!open_at(l, vert)) *out_normal = v3f(0.0f, dir.y < 0.0f ? 1.0f : -1.0f, 0.0f);
     else                   *out_normal = nearest_edge_normal(l, p);
 

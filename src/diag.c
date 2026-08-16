@@ -98,6 +98,7 @@ static const char *const DIAG_NAMES[DIAG_COUNT] = {
     "mapent",   /* DIAG_MAPENT_CAP   */
     "unclosed", /* DIAG_BRUSH_OPEN   */
     "lvlslot",  /* DIAG_LEVEL_SLOTS  */
+    "traceev",  /* DIAG_TRACE_EVENTS */
     "ent"       /* DIAG_ENT_CAP      */
 };
 

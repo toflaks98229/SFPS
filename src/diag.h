@@ -291,6 +291,26 @@ typedef enum {
      * 모두 읽혔고 그것이 생성해 넣는 풀이 고갈되었을 때 발생합니다. 증상은 같고 올려야 할
      * 숫자가 다릅니다.
      */
+    /**
+     * @brief A ray met more openness changes than the trace's table holds.
+     *
+     * ENGLISH: ::level_trace works by finding every point along a ray where
+     * open and solid could swap -- a sector outline crossed in plan, a floor or
+     * ceiling crossed in height -- and sampling between them. That list has a
+     * fixed cap. Over it, the trace falls back to the fixed-step sampler it
+     * replaced: slower, and not wrong, which is why this is a counter rather
+     * than a failure. A level that raises it is one with an unusual number of
+     * overlapping sectors along one line, and the number to raise is
+     * TRACE_MAX_EVENTS in level.c.
+     *
+     * 한국어: ::level_trace는 광선을 따라 개방과 폐쇄가 뒤바뀔 수 있는 모든 지점(평면에서
+     * 넘는 섹터 외곽선, 높이에서 넘는 바닥이나 천장)을 찾아 그 사이를 샘플링하는 방식으로
+     * 동작합니다. 그 목록에는 고정된 상한이 있습니다. 넘으면 판정은 자신이 대체한 고정 보폭
+     * 샘플러로 되돌아갑니다. 느릴 뿐 틀리지 않으며, 그래서 이것이 실패가 아니라 카운터인
+     * 이유입니다. 이것을 발생시키는 레벨은 한 직선 위에 겹치는 섹터가 유난히 많은 레벨이고,
+     * 올려야 할 값은 level.c의 TRACE_MAX_EVENTS입니다.
+     */
+    DIAG_TRACE_EVENTS,
     DIAG_ENT_CAP,
 
     DIAG_COUNT          /**< Number of counters. / 카운터의 개수. */

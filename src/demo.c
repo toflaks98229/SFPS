@@ -156,6 +156,45 @@ int demo_write(const Demo *d, char *buf, int cap) {
     return p;
 }
 
+/* ------------------------------------------------------------------ driving */
+
+int demo_take(DemoDrive *dr, Input *in, float *aspect, float *dt) {
+    if (dr->mode != DEMO_PLAY) return 0;
+
+    /* Into locals first, so a recording that has run out leaves the caller's
+       own aspect and dt exactly as it found them. ::demo_replay writes both
+       before it can know whether the frame exists, and the caller's values are
+       the live ones it is about to fall back to.
+       먼저 지역 변수로 받습니다. 그래야 다 떨어진 기록이 호출자 자신의 종횡비와 dt를 찾은
+       그대로 남깁니다. ::demo_replay는 프레임의 존재 여부를 알기 전에 둘 다 쓰며, 호출자의
+       값은 곧 되돌아갈 라이브 값입니다. */
+    Input got;
+    float got_aspect = 0.0f, got_dt = 0.0f;
+
+    if (!demo_replay(&dr->d, dr->frame, &got, &got_aspect, &got_dt)) {
+        /* Played out. Control goes back to the player rather than the process
+           ending: a demo is a thing to watch, and what somebody does when one
+           finishes is play. That is also what makes this an attract mode with
+           nothing added.
+           다 재생되었습니다. 프로세스가 끝나는 것이 아니라 조작권이 플레이어에게 돌아갑니다.
+           데모는 보는 것이고, 그것이 끝났을 때 사람이 하는 일은 플레이입니다. 그 덕분에
+           아무것도 더하지 않고 이것이 어트랙트 모드가 됩니다. */
+        dr->mode = DEMO_OFF;
+        return 0;
+    }
+
+    dr->frame++;
+    *in     = got;
+    *aspect = got_aspect;
+    *dt     = got_dt;
+    return 1;
+}
+
+void demo_put(DemoDrive *dr, const Input *in, int vw, int vh, float dt) {
+    if (dr->mode != DEMO_RECORD) return;
+    demo_record(&dr->d, in, vw, vh, dt);
+}
+
 int demo_read(Demo *d, const char *text, int len) {
     const char *p   = text;
     const char *end = text + len;

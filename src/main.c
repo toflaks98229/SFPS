@@ -224,29 +224,43 @@ static HWND g_wnd;
  * ::demo_write가 기록을 바이트로 바꾸고, 바이트를 디스크에 올리는 것은 플랫폼만이 할 수 있는
  * 일입니다.
  */
-enum { DEMO_OFF, DEMO_RECORDING, DEMO_PLAYING };
-
-static int  g_demo_mode;
 static char g_demo_path[MAX_PATH];
-static int  g_demo_frame;
 
 /**
- * @brief The recording itself. 144KB, so file scope rather than a local.
+ * @brief The recording and where playback has got to. 144KB; file scope.
  *
- * 한국어: 기록 자체입니다. 144KB이므로 지역 변수가 아니라 파일 스코프입니다.
+ * 한국어: 기록과 재생 진행 위치입니다. 144KB이므로 파일 스코프입니다.
  */
-static Demo g_demo;
+static DemoDrive g_demo;
 
 /**
- * @brief Scratch for the demo's text form, sized for a full recording.
+ * @brief How much text a full recording comes to.
  *
- * ::DEMO_MAX_FRAMES frames at about seventeen bytes a line, with room for the
- * header and for a frame that needs every digit.
+ * ENGLISH
+ * -------
+ * ::DEMO_MAX_FRAMES lines at 24 bytes, against a measured 16.8 -- a frame that
+ * needs every digit of every field is longer than a typical one, and the header
+ * is on top.
  *
- * ::DEMO_MAX_FRAMES 프레임에 한 줄당 약 17바이트이며, 헤더와 모든 자릿수를 쓰는 프레임을 위한
- * 여유를 둡니다.
+ * @note Not a resident buffer. It was one, and that was 432KB of `.bss` alive
+ *       for the whole process to serve two calls: one at startup and one at
+ *       exit. It is heap now, taken and given back inside each. The project's
+ *       rule is that a FRAME never allocates, which this keeps -- neither call
+ *       is in one.
+ *
+ * 한국어
+ * ------
+ * @brief 기록 하나가 가득 찼을 때의 텍스트 크기입니다.
+ *
+ * ::DEMO_MAX_FRAMES 줄에 줄당 24바이트이며, 실측은 16.8입니다. 모든 필드가 모든 자릿수를 쓰는
+ * 프레임은 평범한 프레임보다 길고 그 위에 헤더가 얹힙니다.
+ *
+ * @note 상주 버퍼가 아닙니다. 이전에는 그러했고, 그것은 호출 두 번(시작 시 하나, 종료 시
+ *       하나)을 위해 프로세스 내내 살아 있는 432KB의 `.bss`였습니다. 이제 힙이며 각 호출
+ *       안에서 잡고 돌려줍니다. 이 프로젝트의 규칙은 *프레임*이 결코 할당하지 않는다는
+ *       것이고 이것은 그 규칙을 지킵니다. 두 호출 중 어느 것도 프레임 안에 있지 않습니다.
  */
-static char g_demo_text[DEMO_MAX_FRAMES * 24 + 256];
+#define DEMO_TEXT_MAX (DEMO_MAX_FRAMES * 24 + 256)
 
 /* --- The simulation / 시뮬레이션 --- */
 
@@ -808,8 +822,8 @@ static void demo_parse_cmdline(const char *cmd) {
         if (!*cmd) break;
 
         int want = DEMO_OFF;
-        if (txt_is(cmd, 7, "-record")) { want = DEMO_RECORDING; cmd += 7; }
-        else if (txt_is(cmd, 5, "-play")) { want = DEMO_PLAYING; cmd += 5; }
+        if (txt_is(cmd, 7, "-record")) { want = DEMO_RECORD; cmd += 7; }
+        else if (txt_is(cmd, 5, "-play")) { want = DEMO_PLAY; cmd += 5; }
         else { while (*cmd && *cmd != ' ' && *cmd != '\t') cmd++; continue; }
 
         while (*cmd == ' ' || *cmd == '\t') cmd++;
@@ -828,8 +842,89 @@ static void demo_parse_cmdline(const char *cmd) {
            the game starts normally rather than failing on a typo.
            경로 없는 플래그는 ""에 기록하라는 요청이 아닙니다. 무시하므로, 오타에 실패하는
            대신 게임이 평소대로 시작합니다. */
-        if (n > 0) g_demo_mode = want;
+        if (n > 0) g_demo.mode = want;
     }
+}
+
+/**
+ * @brief Loads a recording to play, or begins one, and says where to start.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] w World whose ::World::cur_level a playback overrides.
+ *
+ * THE FILE HALF, and only that. Which frame comes next and what happens when a
+ * recording runs out are ::demo_take's; this reads bytes off a disk and hands
+ * them to ::demo_read, because reading a disk is the one part of it that needs
+ * an operating system.
+ *
+ * @note A recording that will not load is reported and then ignored, and the
+ *       game starts normally. A demo is not a reason to refuse to run.
+ *
+ * 한국어
+ * ------
+ * @brief 재생할 기록을 불러오거나 새 기록을 시작하고, 어디서 시작할지 알려 줍니다.
+ *
+ * *파일 쪽 절반*이며 그것뿐입니다. 다음 프레임이 무엇인지, 기록이 다 떨어지면 어떻게 되는지는
+ * ::demo_take의 것입니다. 이 함수는 디스크에서 바이트를 읽어 ::demo_read에 건넵니다. 그중
+ * 운영체제가 필요한 부분이 디스크를 읽는 것뿐이기 때문입니다.
+ *
+ * @note 불러오지 못하는 기록은 알린 뒤 무시하고 게임은 평소대로 시작합니다. 데모는 실행을
+ *       거부할 이유가 아닙니다.
+ */
+static void demo_open(World *w) {
+    if (g_demo.mode == DEMO_PLAY) {
+        char *text = HeapAlloc(GetProcessHeap(), 0, DEMO_TEXT_MAX);
+        if (!text) { g_demo.mode = DEMO_OFF; return; }
+
+        int len = file_read_all(g_demo_path, text, DEMO_TEXT_MAX);
+        int got = len && demo_read(&g_demo.d, text, len);
+        HeapFree(GetProcessHeap(), 0, text);
+
+        if (!got) {
+            MessageBoxA(0, "That demo could not be read.", "SFPS", MB_ICONERROR);
+            g_demo.mode = DEMO_OFF;
+            return;
+        }
+        /* A recording carries a level name and nothing else, so playback enters
+           it exactly as a new game does -- see the load below. Carrying world
+           state is precisely what would make a demo unable to disagree with the
+           game. See demo.h.
+           기록은 레벨 이름만 나르므로 재생은 새 게임과 정확히 같은 방식으로 진입합니다.
+           아래의 로드를 참조하십시오. 월드 상태를 나르는 것이야말로 데모가 게임과 어긋날 수
+           없게 만드는 바로 그것입니다. demo.h를 참조하십시오. */
+        txt_copy(w->cur_level, sizeof(w->cur_level), g_demo.d.level, -1);
+        g_demo.frame = 0;
+
+    } else if (g_demo.mode == DEMO_RECORD) {
+        demo_begin(&g_demo.d, w->cur_level);
+    }
+}
+
+/**
+ * @brief Writes the recording out, if one was being made.
+ *
+ * @note On the way out rather than as it goes: a recording is one file, and
+ *       appending every frame would put a disk write in the frame loop to save
+ *       a crash that would have taken the world state with it anyway.
+ *
+ * @brief 기록 중이었다면 그것을 기록해 내보냅니다.
+ * @note 진행하며 쓰지 않고 나갈 때 씁니다. 기록은 파일 하나이고 매 프레임 덧붙이면 프레임
+ *       루프에 디스크 쓰기를 두게 되는데, 그것이 구해 낼 크래시는 어차피 월드 상태를 함께
+ *       가져갑니다.
+ */
+static void demo_close(void) {
+    if (g_demo.mode != DEMO_RECORD || g_demo.d.n <= 0) return;
+
+    char *text = HeapAlloc(GetProcessHeap(), 0, DEMO_TEXT_MAX);
+    if (!text) return;
+
+    int len = demo_write(&g_demo.d, text, DEMO_TEXT_MAX);
+    int put = len && file_write_all(g_demo_path, text, len);
+    HeapFree(GetProcessHeap(), 0, text);
+
+    if (!put)
+        MessageBoxA(0, "The demo could not be written.", "SFPS", MB_ICONERROR);
 }
 
 /* ------------------------------------------------------ graphics settings */
@@ -1097,10 +1192,36 @@ static void set_title(const World *w, int fps) {
 
 /* ------------------------------------------------------------------- main */
 
-int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
-    (void)prev;
-    demo_parse_cmdline(cmd);
-
+/**
+ * @brief Brings up the window, the context and everything drawn with them.
+ *
+ * ENGLISH
+ * -------
+ * @param[in]  inst The instance `WinMain` was handed.
+ * @param[in]  show The show command `WinMain` was handed.
+ * @param[out] dc   The device context the frame loop swaps.
+ * @return Non-zero when the game can run; zero when it cannot, having already
+ *         said why.
+ *
+ * THE ORDER IS THE CONTENT. Each step needs the one before it: there is no
+ * context without a window, no shader without a context, no offscreen target
+ * without a preset to size it from, and no scene without a weapon to hang the
+ * gun on. Pulled out of `WinMain` because a startup sequence and a frame loop
+ * are two different things that were sharing a function, and the one that grew
+ * was neither of them -- it was the demo plumbing between them.
+ *
+ * 한국어
+ * ------
+ * @brief 창과 컨텍스트, 그리고 그것으로 그려지는 모든 것을 준비합니다.
+ * @return 게임을 실행할 수 있으면 0이 아닌 값. 없으면 이미 이유를 말한 뒤 0.
+ *
+ * 순서가 곧 내용입니다. 각 단계는 그 앞의 것을 필요로 합니다. 창 없이 컨텍스트가 없고,
+ * 컨텍스트 없이 셰이더가 없고, 크기를 정할 프리셋 없이 오프스크린 타깃이 없으며, 총을 걸
+ * 무기 없이 장면이 없습니다. `WinMain`에서 꺼낸 이유는 시작 절차와 프레임 루프가 한 함수를
+ * 나눠 쓰던 서로 다른 두 가지이고, 정작 커진 것은 그 둘 중 어느 쪽도 아닌 사이에 낀 데모
+ * 배관이었기 때문입니다.
+ */
+static int app_start(HINSTANCE inst, int show, HDC *dc, Scene *scene) {
     if (!gl_bootstrap(inst)) {
         MessageBoxA(0, "OpenGL 3.3 is not available on this machine.",
                     "SFPS", MB_ICONERROR);
@@ -1123,9 +1244,9 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
                             CW_USEDEFAULT, CW_USEDEFAULT,
                             r.right - r.left, r.bottom - r.top,
                             0, 0, inst, 0);
-    HDC dc = GetDC(g_wnd);
+    *dc = GetDC(g_wnd);
 
-    if (!gl_make_context(dc)) {
+    if (!gl_make_context(*dc)) {
         MessageBoxA(0, "Failed to create a 3.3 core context.",
                     "SFPS", MB_ICONERROR);
         return 1;
@@ -1184,42 +1305,45 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
        무기를 받는 이유는 총기 모델을 로드하는 것이 곧 무기가 자기 총열이 어디서 끝나는지
        알게 되는 경로이기 때문입니다. weapon/weaponview 이음매를 넘는 단 하나의 사실입니다.
        weaponview.h를 참조하십시오. */
+    scene_init(scene, &g_world.weapon);
+
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
+    glClearColor(0.05f, 0.06f, 0.09f, 1.0f);
+    return 1;
+}
+
+/* ------------------------------------------------------------------- main */
+
+int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
+    (void)prev;
+
+    /* Before anything is built, because a playback overrides which level is
+       loaded and that load is the last thing app_start's successor does.
+       무엇이 만들어지기도 전입니다. 재생이 어느 레벨을 로드할지 덮어쓰며, 그 로드는 app_start
+       다음에 오는 것이 하는 마지막 일이기 때문입니다. */
+    demo_parse_cmdline(cmd);
+
+    HDC   dc;
     Scene scene;
-    scene_init(&scene, &g_world.weapon);
+    if (!app_start(inst, show, &dc, &scene)) return 1;
+
+    demo_open(&g_world);
 
     /* WORLD_ENTER_NEW: a fresh start begins at full health with the boot belt,
        which is what wp_init just set. It also leaves the stage checkpoint a
        restart replays, so restarting the first stage lands exactly here. The
        geometry this makes stale is uploaded by the world_take_geometry in the
        loop below, on the first frame. */
-    /* --- what a demo starts from ----------------------------------------
-       A recording carries a level name and nothing else, so playback enters it
-       exactly as a new game does: WORLD_ENTER_NEW, the boot belt, the declared
-       spawn. That is the one entry a recording can reproduce without carrying
-       world state -- and carrying world state is precisely what would make a
-       demo unable to disagree with the game. See demo.h.
-       기록은 레벨 이름만 나르므로, 재생은 새 게임과 정확히 같은 방식으로 진입합니다.
-       WORLD_ENTER_NEW, 부팅 구성, 선언된 스폰입니다. 월드 상태를 나르지 않고 기록이 재현할 수
-       있는 유일한 진입이며, 월드 상태를 나르는 것이야말로 데모가 게임과 어긋날 수 없게 만드는
-       바로 그것입니다. demo.h를 참조하십시오. */
-    if (g_demo_mode == DEMO_PLAYING) {
-        int len = file_read_all(g_demo_path, g_demo_text, (int)sizeof(g_demo_text));
-        if (!len || !demo_read(&g_demo, g_demo_text, len)) {
-            MessageBoxA(0, "That demo could not be read.", "SFPS", MB_ICONERROR);
-            g_demo_mode = DEMO_OFF;
-        } else {
-            txt_copy(g_world.cur_level, sizeof(g_world.cur_level), g_demo.level, -1);
-        }
-    } else if (g_demo_mode == DEMO_RECORDING) {
-        demo_begin(&g_demo, g_world.cur_level);
-    }
-
+    /* WORLD_ENTER_NEW whichever this is: a fresh start begins at full health
+       with the boot belt, and a playback enters its recorded level the same way
+       -- which is the one entry a recording can reproduce without carrying
+       world state. See demo.h.
+       어느 쪽이든 WORLD_ENTER_NEW입니다. 새 시작은 체력이 가득한 부팅 구성으로 시작하고,
+       재생도 기록된 레벨에 같은 방식으로 진입합니다. 월드 상태를 나르지 않고 기록이 재현할 수
+       있는 유일한 진입입니다. demo.h를 참조하십시오. */
     world_load_level(&g_world, g_world.cur_level, WORLD_ENTER_NEW);
-
-    glEnable(GL_DEPTH_TEST);
-    glEnable(GL_CULL_FACE);
-    glCullFace(GL_BACK);
-    glClearColor(0.05f, 0.06f, 0.09f, 1.0f);
 
     LARGE_INTEGER freq, prev_t;
     QueryPerformanceFrequency(&freq);
@@ -1241,12 +1365,6 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
                          / (double)freq.QuadPart);
         prev_t = now;
         if (dt > 0.1f) dt = 0.1f;
-
-        /* Set only while a demo is driving, and read only by the step. Zero
-           means "use the window", which is every frame that is not a replay.
-           데모가 구동 중일 때만 설정되고 스텝만 읽습니다. 0이면 "창을 쓰라"는 뜻이며, 재생이
-           아닌 모든 프레임이 그렇습니다. */
-        float demo_ar = 0.0f;
 
         /* --- menu actions, before anything else this frame ------------------
            Taken once per frame and acted on immediately, so a restart happens
@@ -1288,30 +1406,21 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
            게임이 자기 자신에게 하는 모든 일이 한 번의 호출 안에, 테스트가 도달할 수 있는
            순서로 있습니다. world.c를 참조하십시오. 총구 계산이 언제나 사용해 온 값은 창의
            종횡비입니다. ::world_step의 참고 사항을 확인하십시오. */
+        /* --- where this frame's intent comes from ---------------------------
+           A replay supplies the intent AND the clock AND the viewport shape,
+           because the same inputs over different intervals is not the same run
+           and the muzzle solve reads the aspect. The window is still drawn at
+           whatever size it happens to be; only the SIMULATION is handed the
+           recorded one. ::demo_take writes nothing when it has nothing, so the
+           two lines below are the whole of the fork.
+           재생은 의도와 시계와 뷰포트 형태를 함께 공급합니다. 같은 입력을 다른 간격에
+           적용하는 것은 같은 플레이가 아니고, 총구 계산이 종횡비를 읽기 때문입니다. 창은
+           여전히 그때그때의 크기로 그려집니다. 기록된 값을 건네받는 것은 *시뮬레이션*뿐입니다.
+           ::demo_take는 줄 것이 없으면 아무것도 쓰지 않으므로, 아래 두 줄이 분기의 전부입니다. */
         Input in;
-        if (g_demo_mode == DEMO_PLAYING) {
-            /* dt AND the aspect come from the recording, not from this
-               machine's clock or this window's shape. A replay driven by the
-               local frame time is not the same run -- it is the same inputs
-               applied over different intervals, which diverges immediately.
-               The window is still drawn at whatever size it happens to be;
-               only the SIMULATION is handed the recorded shape.
-               dt와 종횡비 모두 이 기계의 시계나 이 창의 형태가 아니라 기록에서 옵니다.
-               로컬 프레임 시간으로 구동되는 재생은 같은 플레이가 아닙니다. 같은 입력을 다른
-               간격에 적용하는 것이며 즉시 갈라집니다. 창은 여전히 그때그때의 크기로
-               그려집니다. 기록된 형태를 건네받는 것은 *시뮬레이션*뿐입니다. */
-            float demo_aspect = 0.0f, demo_dt = 0.0f;
-            if (!demo_replay(&g_demo, g_demo_frame, &in, &demo_aspect, &demo_dt)) {
-                g_demo_mode = DEMO_OFF;      /* played out; hand control back */
-                input_gather(&in, &g_world);
-            } else {
-                g_demo_frame++;
-                dt = demo_dt;
-                demo_ar = demo_aspect;
-            }
-        } else {
+        float sim_aspect = (float)vw / (float)vh;
+        if (!demo_take(&g_demo, &in, &sim_aspect, &dt))
             input_gather(&in, &g_world);
-        }
 
         /* Read before the step, because the step is what clears it and the
            window has to notice the transition to hand the cursor back and throw
@@ -1324,11 +1433,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
            ::step_confirm으로 옮겨 갔고 이 절반만 남았습니다. */
         int was_title = g_world.run.title;
 
-        float sim_aspect = (g_demo_mode == DEMO_PLAYING && demo_ar > 0.0f)
-                         ? demo_ar : (float)vw / (float)vh;
-
-        if (g_demo_mode == DEMO_RECORDING)
-            demo_record(&g_demo, &in, vw, vh, dt);
+        demo_put(&g_demo, &in, vw, vh, dt);
 
         int frozen = world_step(&g_world, &in, sim_aspect, dt);
 
@@ -1453,16 +1558,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
        종료되므로 OS가 어차피 전부 회수하지만, render.h가 계약을 명시하고 있으며 새
        버퍼를 추가하는 사람이 참고하는 파일이 바로 이 파일입니다. 이곳에서 짝을 맞추지
        않으면 그 계약은 어디에서도 지켜지지 않게 됩니다. */
-    /* Written on the way out rather than as it goes: a recording is one file
-       and appending to it every frame would put a disk write in the frame loop
-       to save a crash that would have taken the world state with it anyway.
-       진행하며 쓰지 않고 나갈 때 씁니다. 기록은 파일 하나이고 매 프레임 덧붙이면 프레임 루프에
-       디스크 쓰기를 두게 되는데, 그것이 구해 낼 크래시는 어차피 월드 상태를 함께 가져갑니다. */
-    if (g_demo_mode == DEMO_RECORDING && g_demo.n > 0) {
-        int len = demo_write(&g_demo, g_demo_text, (int)sizeof(g_demo_text));
-        if (!len || !file_write_all(g_demo_path, g_demo_text, len))
-            MessageBoxA(0, "The demo could not be written.", "SFPS", MB_ICONERROR);
-    }
+    demo_close();
 
     scene_free(&scene);
     decal_free();

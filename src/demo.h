@@ -293,4 +293,97 @@ int demo_write(const Demo *d, char *buf, int cap);
  */
 int demo_read(Demo *d, const char *text, int len);
 
+/* --- driving a frame from one / 데모로 한 프레임을 구동하기 --- */
+
+/**
+ * @brief Which of the three things this process is doing about a demo.
+ *
+ * 한국어: 이 프로세스가 데모에 대해 하고 있는 세 가지 중 무엇인가.
+ */
+enum { DEMO_OFF, DEMO_RECORD, DEMO_PLAY };
+
+/**
+ * @struct DemoDrive
+ * @brief A recording plus where the frame loop has got to in it.
+ *
+ * ENGLISH
+ * -------
+ * THE CURSOR IS THE POINT. A ::Demo is inert data; what the frame loop needs is
+ * "give me this frame's intent, and tell me when you have run out". That is a
+ * rule -- when a replay ends, control goes back to the player -- and it lived in
+ * the body of `WinMain`, which is the one place in this project no test can
+ * reach.
+ *
+ * @note Holds the ::Demo by value, so this is 144KB and follows the same rule:
+ *       a static or a heap block, never a stack local.
+ *
+ * 한국어
+ * ------
+ * @brief 기록과, 프레임 루프가 그 안에서 어디까지 왔는가.
+ *
+ * 커서가 요점입니다. ::Demo는 움직이지 않는 데이터이고, 프레임 루프가 필요로 하는 것은 "이번
+ * 프레임의 의도를 달라, 그리고 다 떨어지면 알려 달라"입니다. 그것은 규칙이며(재생이 끝나면
+ * 조작권이 플레이어에게 돌아간다) `WinMain`의 본문에 있었습니다. 이 프로젝트에서 어떤 테스트도
+ * 닿을 수 없는 유일한 곳입니다.
+ *
+ * @note ::Demo를 값으로 담으므로 144KB이며 같은 규칙을 따릅니다. static이거나 힙 블록이고,
+ *       결코 스택 지역 변수가 아닙니다.
+ */
+typedef struct {
+    Demo d;      /**< The recording. / 기록. */
+    int  mode;   /**< DEMO_OFF, DEMO_RECORD or DEMO_PLAY. / 셋 중 하나. */
+    int  frame;  /**< Playback cursor. / 재생 커서. */
+} DemoDrive;
+
+/**
+ * @brief Takes this frame's intent from the recording, if one is playing.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] dr     The drive; its cursor advances, and its mode is cleared
+ *                       when the recording runs out.
+ * @param[out]    in     Filled only when 1 is returned.
+ * @param[out]    aspect Written only when 1 is returned.
+ * @param[out]    dt     Written only when 1 is returned.
+ * @return 1 when the recording supplied the frame; 0 when the caller must
+ *         gather it from the hardware.
+ *
+ * @note Writes NOTHING on a zero return, so the caller's own aspect and dt
+ *       survive. A function that clobbered them on the way to saying "not mine"
+ *       would make the live path depend on whether a demo had ever been loaded.
+ * @note THE END OF A RECORDING HANDS CONTROL BACK rather than quitting. A demo
+ *       is a thing to watch, and what a player does when it finishes is play --
+ *       which also makes it an attract mode without anything being added.
+ *
+ * 한국어
+ * ------
+ * @brief 재생 중인 기록이 있으면 이번 프레임의 의도를 그것에서 가져옵니다.
+ * @return 기록이 이번 프레임을 공급했으면 1, 호출자가 하드웨어에서 모아야 하면 0.
+ *
+ * @note 0을 반환할 때는 아무것도 쓰지 않으므로 호출자 자신의 종횡비와 dt가 보존됩니다.
+ *       "내 것이 아니다"라고 말하러 가는 길에 그것들을 덮어쓰는 함수는, 라이브 경로가 데모를
+ *       한 번이라도 로드했는지에 의존하게 만듭니다.
+ * @note 기록의 끝은 종료가 아니라 *조작권 반환*입니다. 데모는 보는 것이고, 그것이 끝났을 때
+ *       플레이어가 하는 일은 플레이입니다. 덕분에 아무것도 더하지 않고도 어트랙트 모드가
+ *       됩니다.
+ */
+int demo_take(DemoDrive *dr, Input *in, float *aspect, float *dt);
+
+/**
+ * @brief Appends this frame to the recording, if one is being made.
+ *
+ * @param[in,out] dr    The drive. A no-op unless its mode is ::DEMO_RECORD.
+ * @param[in]     in    The intent handed to ::world_step this frame.
+ * @param[in]     vw,vh Viewport in pixels.
+ * @param[in]     dt    Seconds this frame covered.
+ *
+ * @note A no-op rather than something the caller guards, so the frame loop has
+ *       no branch and no opinion about whether a recording is being made.
+ *
+ * @brief 기록 중이면 이번 프레임을 덧붙입니다.
+ * @note 호출자가 감싸는 것이 아니라 스스로 아무 일도 하지 않으므로, 프레임 루프에는 분기도
+ *       기록 여부에 대한 견해도 없습니다.
+ */
+void demo_put(DemoDrive *dr, const Input *in, int vw, int vh, float dt);
+
 #endif

@@ -310,6 +310,73 @@ int main(void) {
     ok(!demo_read(&g_back, NO_TAG, (int)sizeof(NO_TAG) - 1),
        "and so is text with no tag at all");
 
+    /* --- driving a frame from one ----------------------------------------
+       These are the rules that lived in the body of WinMain, which is the one
+       place in this project no test can reach. Moving them into demo.c is what
+       this block exists to check -- not that they are new, but that they are
+       now somewhere they can be asked about.
+       이것들은 WinMain의 본문에 살던 규칙입니다. 이 프로젝트에서 어떤 테스트도 닿을 수 없는
+       유일한 곳입니다. 그것을 demo.c로 옮긴 것이 이 블록이 존재하는 이유이며, 규칙이 새롭다는
+       것이 아니라 이제 물어볼 수 있는 곳에 있다는 것이 요점입니다. */
+    printf("\ndriving\n");
+    {
+        static DemoDrive dr;
+
+        /* Three frames is enough to have a beginning, a middle and an end. */
+        demo_begin(&dr.d, "fixture");
+        for (int i = 0; i < 3; i++) {
+            Input in = {0};
+            in.forward = 1;
+            demo_record(&dr.d, &in, VW, VH, DT_US * 0.000001f);
+        }
+        dr.mode  = DEMO_PLAY;
+        dr.frame = 0;
+
+        int supplied = 0;
+        for (int i = 0; i < 10; i++) {
+            Input in;
+            float a = 0.0f, d = 0.0f;
+            if (!demo_take(&dr, &in, &a, &d)) break;
+            supplied++;
+        }
+        ok(supplied == 3, "a playing demo supplies exactly the frames it holds");
+        ok(dr.mode == DEMO_OFF, "and switches itself off when it runs out");
+
+        /* THE CONTRACT THAT MATTERS. On a zero return the caller's own aspect
+           and dt have to survive, because the caller is about to use them for a
+           live frame. A demo_take that wrote to them on its way to saying "not
+           mine" would make the live path depend on whether a demo had ever been
+           loaded -- which is the kind of coupling that shows up as the game
+           running at the wrong speed after a demo ends.
+           중요한 계약입니다. 0을 반환할 때 호출자 자신의 종횡비와 dt가 살아남아야 합니다.
+           호출자가 곧 그것으로 라이브 프레임을 진행시키기 때문입니다. "내 것이 아니다"라고
+           말하러 가는 길에 그것들에 기록하는 demo_take는, 라이브 경로가 데모를 한 번이라도
+           로드했는지에 의존하게 만듭니다. 데모가 끝난 뒤 게임이 엉뚱한 속도로 도는 형태로
+           드러나는 종류의 결합입니다. */
+        {
+            Input in;
+            float a = 1.25f, d = 0.5f;
+            ok(!demo_take(&dr, &in, &a, &d), "a demo that is over supplies nothing");
+            ok(a == 1.25f && d == 0.5f,
+               "and leaves the caller's own aspect and dt untouched");
+        }
+
+        /* Not recording: demo_put has to do nothing rather than the caller
+           having to remember to guard it.
+           기록 중이 아니면 demo_put은 아무것도 하지 않아야 합니다. 호출자가 감싸는 것을
+           기억해야 하는 것이 아니라. */
+        {
+            int before = dr.d.n;
+            Input in = {0};
+            demo_put(&dr, &in, VW, VH, DT_US * 0.000001f);
+            ok(dr.d.n == before, "demo_put adds nothing when nothing is recording");
+
+            dr.mode = DEMO_RECORD;
+            demo_put(&dr, &in, VW, VH, DT_US * 0.000001f);
+            ok(dr.d.n == before + 1, "and appends when something is");
+        }
+    }
+
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall demo checks passed\n", fails);
     return fails != 0;
 }

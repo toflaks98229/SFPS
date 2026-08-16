@@ -91,6 +91,21 @@
 #define WIN_W 1280           ///< @brief Initial window width, pixels. / 초기 창 너비 (픽셀).
 #define WIN_H 720            ///< @brief Initial window height, pixels. / 초기 창 높이 (픽셀).
 
+/**
+ * @brief How many ShowCursor steps to take before giving up.
+ *
+ * ENGLISH: ShowCursor is a counter rather than a flag, so driving it to a state
+ * is a loop. The bound is not a guess at how far it can drift -- the loop stops
+ * as soon as ShowCursor reports the state it was asked for, and this only stops
+ * a loop that can never get there from being infinite.
+ *
+ * 한국어: ShowCursor는 플래그가 아니라 카운터이므로 원하는 상태로 몰아가려면 루프가 필요합니다.
+ * 이 상한은 카운터가 얼마나 어긋날 수 있는지에 대한 추측이 아닙니다. ShowCursor가 요청받은
+ * 상태를 보고하는 즉시 루프가 끝나며, 이 값은 결코 도달할 수 없는 루프가 무한해지는 것만
+ * 막습니다.
+ */
+#define CURSOR_DRIVE_MAX 16
+
 /* WORLD_FOV and MOUSE_SENS used to be here. The first moved to world.h because
    the simulation and the renderer both need the same value; the second moved
    into world.c entirely, because pixels-to-radians is what the world does with
@@ -118,8 +133,30 @@
 
 /* --- Input state / 입력 상태 --- */
 
+/**
+ * @brief How many virtual key codes there are.
+ *
+ * ENGLISH: A Win32 virtual key code is one byte, so 256 is the whole space and
+ * not a guess at how many keys anyone uses. It appeared as a bare 256 in the
+ * array and in two clearing loops, and as a bare 0xff in the two places a
+ * WPARAM was masked down to an index -- four literals for one fact, and the
+ * mask silently has to be one less than the size.
+ *
+ * 한국어: Win32 가상 키 코드는 1바이트이므로 256은 공간 전체이지 누군가 몇 개의 키를 쓸지에
+ * 대한 추측이 아닙니다. 배열과 두 개의 초기화 루프에 맨 256으로, WPARAM을 인덱스로 좁히는 두
+ * 곳에 맨 0xff로 나타났습니다. 하나의 사실에 네 개의 리터럴이며, 마스크는 크기보다 정확히 1
+ * 작아야 한다는 조건이 말없이 걸려 있습니다.
+ */
+#define VK_TABLE_SIZE 256
+
+/** @brief Masks a WPARAM into ::VK_TABLE_SIZE. Derived, never written out. / WPARAM을 ::VK_TABLE_SIZE 안으로 좁힙니다. 직접 쓰지 않고 유도합니다. */
+#define VK_TABLE_MASK (VK_TABLE_SIZE - 1)
+
+_Static_assert((VK_TABLE_SIZE & VK_TABLE_MASK) == 0,
+               "VK_TABLE_MASK is only the right mask for a power of two");
+
 /** @brief Key-down flags indexed by virtual key code. / 가상 키 코드로 인덱싱되는 키 눌림 플래그. */
-static int  g_keys[256];
+static int  g_keys[VK_TABLE_SIZE];
 
 /**
  * @struct EdgeLatch
@@ -260,7 +297,9 @@ static DemoDrive g_demo;
  *       안에서 잡고 돌려줍니다. 이 프로젝트의 규칙은 *프레임*이 결코 할당하지 않는다는
  *       것이고 이것은 그 규칙을 지킵니다. 두 호출 중 어느 것도 프레임 안에 있지 않습니다.
  */
-#define DEMO_TEXT_MAX (DEMO_MAX_FRAMES * 24 + 256)
+#define DEMO_TEXT_BYTES_PER_FRAME 24
+#define DEMO_TEXT_HEADER_MAX      256
+#define DEMO_TEXT_MAX (DEMO_MAX_FRAMES * DEMO_TEXT_BYTES_PER_FRAME                        + DEMO_TEXT_HEADER_MAX)
 
 /* --- The simulation / 시뮬레이션 --- */
 
@@ -339,7 +378,7 @@ static void cursor_show(int show) {
        카운터가 우리가 둔 자리에 있다고 가정하지 않고 목표까지 몰아갑니다. ShowCursor가
        새 카운트를 반환하므로 각 단계를 확인할 수 있으며, 그래서 루프에 상한이
        있습니다. */
-    for (int i = 0; i < 16; i++) {
+    for (int i = 0; i < CURSOR_DRIVE_MAX; i++) {
         int c = ShowCursor(show ? TRUE : FALSE);
         if (show ? (c >= 0) : (c < 0)) break;
     }
@@ -383,8 +422,260 @@ static void cursor_update(void) {
 
 /* ------------------------------------------------------------------ window */
 
+/* ------------------------------------------------------- message handlers */
+
 /**
- * @brief Window procedure: records input edges and focus changes into globals.
+ * @brief Lets go of every key the player was holding.
+ *
+ * ENGLISH: Two things need this and they are not near each other -- losing
+ * focus, and opening the menu. Both are "the player stopped touching the
+ * keyboard and does not know it", and a second copy of the loop is how one of
+ * them ends up clearing a different range.
+ *
+ * 한국어: 두 곳이 이것을 필요로 하며 서로 가깝지 않습니다. 포커스를 잃는 것과 메뉴를 여는
+ * 것입니다. 둘 다 "플레이어가 키보드에서 손을 뗐는데 본인은 모른다"이며, 루프의 사본이 두 개면
+ * 그중 하나가 다른 범위를 지우게 됩니다.
+ */
+static void keys_release_all(void) {
+    for (int i = 0; i < VK_TABLE_SIZE; i++) g_keys[i] = 0;
+}
+
+/**
+ * @brief ESC: opens the pause menu, or closes it.
+ *
+ * ENGLISH
+ * -------
+ * ESC no longer quits. One mistaken keypress used to end a run outright with no
+ * confirmation, which is the behaviour this menu exists to replace; leaving is
+ * now a row the player picks.
+ *
+ * @note Opening lets go of everything the player was holding. Returning to a
+ *       game still walking forward, still firing, or still attached to a hook is
+ *       the same class of surprise losing focus guards against.
+ * @note Closing discards the next mouse delta the way taking focus does: the
+ *       cursor was parked wherever the player left it.
+ *
+ * 한국어
+ * ------
+ * @brief ESC. 일시정지 메뉴를 열거나 닫습니다.
+ *
+ * ESC는 더 이상 종료하지 않습니다. 예전에는 잘못 누른 키 하나가 확인 없이 진행 중인 플레이를
+ * 그대로 끝냈으며, 그것이 이 메뉴가 대체하려는 동작입니다. 이제 나가는 것은 플레이어가 직접
+ * 고르는 행입니다.
+ *
+ * @note 열 때는 플레이어가 누르고 있던 것을 전부 놓습니다. 계속 전진하거나 사격 중이거나 훅에
+ *       걸린 채로 게임에 돌아오는 것은, 포커스를 잃는 경우가 방지하는 것과 같은 종류의
+ *       놀라움입니다.
+ * @note 닫을 때는 포커스를 얻을 때와 마찬가지로 다음 마우스 변화량을 버립니다. 커서가
+ *       플레이어가 둔 자리에 그대로 있기 때문입니다.
+ */
+static void menu_toggle_from_escape(void) {
+    menu_escape();
+
+    if (menu_is_open()) {
+        g_mouse_down  = 0;
+        g_hook_down   = 0;
+        g_edge.let_go = 1;   /* the rope, which does not clear itself */
+        keys_release_all();
+    } else {
+        g_warp_mouse = 1;
+    }
+    cursor_update();
+}
+
+/**
+ * @brief Is a press right now an answer to the screen in front of the player?
+ *
+ * ENGLISH: The title and death screens both take a press as an acknowledgement,
+ * and from here they are one event -- what it MEANS is ::step_confirm's, which
+ * is why this only asks whether one of them is up. A menu over either takes the
+ * press instead.
+ *
+ * 한국어: 타이틀 화면과 사망 화면 모두 누름을 응답으로 받아들이며, 이곳에서 보면 둘은 하나의
+ * 사건입니다. 그것이 무엇을 *뜻하는지*는 ::step_confirm의 것이고, 그래서 이 함수는 둘 중
+ * 하나가 떠 있는지만 묻습니다. 그 위에 메뉴가 있으면 누름은 메뉴가 가져갑니다.
+ */
+static int screen_takes_press(void) {
+    return (g_world.run.title || g_world.run.dead) && !menu_is_open();
+}
+
+/**
+ * @brief Drives the open menu with one key.
+ *
+ * @note Swallows what it does not recognise. While the menu is up the world is
+ *       frozen, so there is no second meaning for any key to have.
+ *
+ * @brief 열려 있는 메뉴를 키 하나로 조작합니다.
+ * @note 인식하지 못하는 키는 삼킵니다. 메뉴가 떠 있는 동안 월드는 정지해 있으므로 어떤 키도
+ *       다른 의미를 가질 여지가 없습니다.
+ */
+static void menu_take_key(WPARAM wp) {
+    switch (wp) {
+    case 'W': case VK_UP:          menu_move(-1);   break;
+    case 'S': case VK_DOWN:        menu_move(+1);   break;
+    case 'A': case VK_LEFT:        menu_adjust(-1); break;
+    case 'D': case VK_RIGHT:       menu_adjust(+1); break;
+    case VK_RETURN: case VK_SPACE: menu_activate(); break;
+    default: break;
+    }
+}
+
+/**
+ * @brief Latches a weapon request if this key is a weapon key.
+ *
+ * ENGLISH
+ * -------
+ * @return Non-zero when the key was a weapon key, whatever came of it.
+ *
+ * WHICH KEYS ARE WEAPON KEYS, and nothing else. This block used to reach into
+ * `g_world.weapon`, cancel a swing and play a sound, which put three rules
+ * inside a Win32 message handler where no headless test could see them.
+ *
+ * @note One-based, so a frame with no request is a zeroed field rather than a
+ *       sentinel every fixture has to know about. See ::Input::want_weapon, and
+ *       ::step_weapon_pick for what now happens.
+ *
+ * 한국어
+ * ------
+ * @brief 이 키가 무기 키라면 무기 요청을 래치합니다.
+ * @return 결과가 무엇이든, 그 키가 무기 키였으면 0이 아닌 값.
+ *
+ * 어느 키가 무기 키인지이며 그 외에는 아무것도 아닙니다. 이 블록은 이전에 `g_world.weapon`에
+ * 손을 뻗어 진행 중인 공격을 취소하고 소리를 재생했습니다. 세 개의 규칙을 어떤 헤드리스
+ * 테스트도 볼 수 없는 Win32 메시지 핸들러 안에 둔 것입니다.
+ *
+ * @note 1부터 시작하므로 요청이 없는 프레임은 모든 픽스처가 알아야 하는 특별한 값이 아니라
+ *       0으로 초기화된 필드가 됩니다. ::Input::want_weapon을 참조하고, 이제 무슨 일이
+ *       일어나는지는 ::step_weapon_pick을 보십시오.
+ */
+static int key_picks_weapon(WPARAM wp) {
+    if (wp < '1' || wp >= '1' + WP_TYPES) return 0;
+    g_edge.weapon = (int)(wp - '1') + 1;
+    return 1;
+}
+
+/**
+ * @brief What one key press means, in the order the meanings take precedence.
+ *
+ * ENGLISH
+ * -------
+ * @return Non-zero when the press was claimed; zero to record it as held state.
+ *
+ * THE ORDER IS THE CONTENT, and it is the only thing this function holds. Each
+ * line is a claim on the key by one owner, and the first owner to want it gets
+ * it: the menu key opens the menu even on the title screen, a screen in front
+ * of the player takes anything else, an open menu takes everything, and only a
+ * key none of them wanted reaches the world as held state.
+ *
+ * @note The title and death screens used to be two separate rungs with ESC
+ *       excluded from the first. Asking about ESC first is the same chain with
+ *       the exception removed, which is what let the two merge -- and it is
+ *       what the mouse path had already done.
+ *
+ * 한국어
+ * ------
+ * @brief 키 한 번의 의미를, 그 의미들이 우선하는 순서대로.
+ * @return 그 누름을 가져갔으면 0이 아닌 값. 유지 상태로 기록해야 하면 0.
+ *
+ * 순서가 곧 내용이며, 이 함수가 담은 것은 그것뿐입니다. 각 줄은 한 주인이 그 키에 대해 거는
+ * 주장이고, 원하는 첫 번째 주인이 가져갑니다. 메뉴 키는 타이틀 화면에서도 메뉴를 열고, 눈앞의
+ * 화면이 그 외의 모든 것을 가져가고, 열린 메뉴는 전부를 가져가며, 그중 누구도 원하지 않은
+ * 키만이 유지 상태로 월드에 도달합니다.
+ *
+ * @note 타이틀 화면과 사망 화면은 이전에 두 개의 별도 단이었고 첫 번째에서 ESC가 제외되어
+ *       있었습니다. ESC를 먼저 묻는 것은 그 예외를 없앤 같은 사슬이며, 그것이 둘을 합칠 수 있게
+ *       한 것입니다. 마우스 경로는 이미 그렇게 하고 있었습니다.
+ */
+static int on_key_down(WPARAM wp) {
+    if (wp == VK_ESCAPE)      { menu_toggle_from_escape(); return 1; }
+    if (screen_takes_press()) { g_edge.confirm = 1;        return 1; }
+    if (menu_is_open())       { menu_take_key(wp);         return 1; }
+
+    /* F1 toggles the pixelise/dither pass. On the message edge rather than
+       polled, so one press is one toggle -- a held key would otherwise flip it
+       every frame. Comparing the two looks side by side is most of how the
+       effect gets tuned.
+       F1은 픽셀화/디더 패스를 전환합니다. 폴링하지 않고 메시지 시점에 처리하므로 한 번 누르면
+       한 번 전환됩니다. 그렇지 않으면 키를 누르고 있는 동안 매 프레임 전환됩니다. 두 화면을
+       나란히 비교하는 것이 이 효과를 조정하는 주된 방법입니다. */
+    if (wp == VK_F1)          { post_set_enabled(!post_enabled()); return 1; }
+
+    return key_picks_weapon(wp);
+}
+
+/**
+ * @brief Hands a click to the open menu, if one is open.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] w     Window, for its client rectangle.
+ * @param[in] lp    The message's packed cursor position.
+ * @param[in] right Non-zero for the right button.
+ * @return Non-zero when the menu took the click.
+ *
+ * @note Activating RESUME closes the menu, so the cursor has to follow it back
+ *       out on this very message -- waiting for the next focus change would
+ *       leave a pointer floating over the game.
+ *
+ * 한국어
+ * ------
+ * @brief 메뉴가 열려 있으면 클릭을 그것에 건넵니다.
+ * @return 메뉴가 클릭을 가져갔으면 0이 아닌 값.
+ * @note RESUME를 실행하면 메뉴가 닫히므로 커서도 바로 이 메시지에서 따라 나가야 합니다. 다음
+ *       포커스 변경을 기다리면 게임 위에 포인터가 떠 있게 됩니다.
+ */
+static int menu_takes_click(HWND w, LPARAM lp, int right) {
+    if (!menu_is_open()) return 0;
+
+    RECT rc; GetClientRect(w, &rc);
+    menu_click((float)GET_X_LPARAM(lp), (float)GET_Y_LPARAM(lp),
+               rc.right - rc.left, rc.bottom - rc.top, right);
+
+    if (!menu_is_open()) g_warp_mouse = 1;
+    cursor_update();
+    return 1;
+}
+
+/**
+ * @brief Gaining or losing the window's keyboard focus.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] gained Non-zero when focus arrived, zero when it left.
+ *
+ * @note Not an unconditional hide on the way in: returning to a PAUSED game has
+ *       to keep the pointer, or the player is left operating a menu they cannot
+ *       see. ::cursor_update is the one place that decides.
+ * @note On the way out the keys are cleared here, because they are this file's,
+ *       and the grapple is asked for by the step, because it is not.
+ *
+ * 한국어
+ * ------
+ * @brief 창의 키보드 포커스를 얻거나 잃는 것.
+ * @param[in] gained 포커스가 도착했으면 0이 아니고, 떠났으면 0.
+ *
+ * @note 들어올 때 무조건 숨기지 않습니다. *일시정지된* 게임으로 돌아올 때는 포인터를 유지해야
+ *       하며, 그렇지 않으면 플레이어가 보이지 않는 메뉴를 조작하게 됩니다. 결정하는 곳은
+ *       ::cursor_update 한 군데입니다.
+ * @note 나갈 때 키는 이 파일의 것이므로 이곳에서 지우고, 그래플은 이 파일의 것이 아니므로
+ *       스텝에게 요청합니다.
+ */
+static void on_focus_change(int gained) {
+    g_focused = gained ? 1 : 0;
+
+    if (gained) {
+        g_warp_mouse = 1;
+    } else {
+        g_mouse_down  = 0;
+        g_hook_down   = 0;
+        g_edge.let_go = 1;   /* do not come back still roped to a wall */
+        keys_release_all();
+    }
+    cursor_update();
+}
+
+/**
+ * @brief Window procedure: turns messages into held state and latched edges.
  *
  * ENGLISH
  * -------
@@ -393,52 +684,35 @@ static void cursor_update(void) {
  * @param[in] wp  Message-specific parameter.
  * @param[in] lp  Message-specific parameter.
  * @return 0 for handled messages, otherwise the default window procedure's result.
+ *
  * @note Only records state; all gameplay happens in ::world_step. Acting on
  *       input here would run at message rate rather than frame rate.
- *
- *       THIS NOTE USED TO BE FALSE. The block below switched weapons, cancelled
- *       a swing, played the draw sound, dropped the grapple and applied the
- *       death screen's grace period -- five rules, in a Win32 message handler,
- *       unreachable from tools\steptest.c. They are ::step_weapon_pick and
- *       ::step_confirm now, and what is left here really is only recording.
  * @note What IS handled here is every EDGE -- one press must be one step. A
  *       held key polled once a frame would walk a whole menu in a frame, toggle
  *       the pixelise pass every frame, and skip the death screen on the shot
- *       that caused it. Held state goes into ::g_keys; edges that the SIMULATION
- *       has to answer go into ::g_edge, and ::input_gather delivers both.
- * @note The edges that stay here in full are the ones that touch no ::World:
- *       the menu keys, which drive a module with its own state, and F1, which
- *       is a property of the render target in the same way the display mode is.
- * @note Losing focus clears every key and asks for the grapple to be released,
- *       so the player does not return from alt-tab still holding a rope or
- *       walking forward. The keys clear here because they are this file's; the
- *       rope is released by the step, because it is not.
+ *       that caused it. Held state goes into ::g_keys; edges the SIMULATION has
+ *       to answer go into ::g_edge, and ::input_gather delivers both.
+ * @note ONE CASE, ONE CALL. Each case used to carry its own body, and
+ *       WM_KEYDOWN's was a six-rung precedence chain sixty lines long. The
+ *       chain still exists -- it is ::on_key_down -- but a `switch` over
+ *       messages now reads as a list of which message means what, which is the
+ *       only thing a window procedure is.
  *
  * 한국어
  * ------
- * @brief 창 프로시저입니다. 입력의 변화 시점과 포커스 변경을 전역 변수에 기록합니다.
- * @param[in] w   창 핸들.
- * @param[in] msg 메시지 식별자.
- * @param[in] wp  메시지별 매개변수.
- * @param[in] lp  메시지별 매개변수.
+ * @brief 창 프로시저입니다. 메시지를 유지 상태와 래치된 엣지로 바꿉니다.
  * @return 처리한 메시지에 대해서는 0, 그 외에는 기본 창 프로시저의 반환값.
- * @note 상태를 기록하기만 합니다. 모든 게임 로직은 ::world_step에서 처리됩니다. 여기서
- *       입력에 반응하면 프레임 단위가 아닌 메시지 단위로 실행되기 때문입니다.
  *
- *       이 참고 사항은 *거짓이었습니다*. 아래 블록은 무기를 바꾸고, 진행 중인 공격을 취소하고,
- *       뽑기 사운드를 재생하고, 그래플을 놓고, 사망 화면의 유예 시간을 적용했습니다. 다섯 개의
- *       규칙이 Win32 메시지 핸들러 안에 있었고 tools\steptest.c에서 도달할 수 없었습니다.
- *       이제 그것들은 ::step_weapon_pick과 ::step_confirm이며, 이곳에 남은 것은 정말로 기록뿐입니다.
+ * @note 상태를 기록하기만 합니다. 모든 게임 로직은 ::world_step에서 처리됩니다. 여기서 입력에
+ *       반응하면 프레임 단위가 아닌 메시지 단위로 실행되기 때문입니다.
  * @note 이곳에서 처리하는 것은 모든 *엣지*입니다. 한 번 누름은 한 단계여야 합니다. 프레임마다
- *       폴링되는 유지 키는 한 프레임에 메뉴 전체를 지나가고, 매 프레임 픽셀화 패스를
- *       전환하며, 사망을 유발한 그 사격으로 사망 화면을 건너뜁니다. 유지 상태는 ::g_keys로,
- *       *시뮬레이션*이 답해야 하는 엣지는 ::g_edge로 들어가며, ::input_gather가 둘 다
- *       전달합니다.
- * @note 이곳에 온전히 남는 엣지는 ::World를 건드리지 않는 것들입니다. 자기 상태를 가진 모듈을
- *       조작하는 메뉴 키, 그리고 디스플레이 모드와 같은 의미에서 렌더 타깃의 성질인 F1입니다.
- * @note 포커스를 잃으면 모든 키를 해제하고 그래플을 놓아 달라고 *요청*합니다. 그래야 alt-tab에서
- *       돌아왔을 때 로프를 잡은 채이거나 계속 전진하는 상태가 되지 않습니다. 키는 이 파일의
- *       것이므로 이곳에서 지우고, 로프는 그렇지 않으므로 스텝이 놓습니다.
+ *       폴링되는 유지 키는 한 프레임에 메뉴 전체를 지나가고, 매 프레임 픽셀화 패스를 전환하며,
+ *       사망을 유발한 그 사격으로 사망 화면을 건너뜁니다. 유지 상태는 ::g_keys로, *시뮬레이션*이
+ *       답해야 하는 엣지는 ::g_edge로 들어가며 ::input_gather가 둘 다 전달합니다.
+ * @note 케이스 하나에 호출 하나. 이전에는 각 케이스가 자기 본문을 지니고 있었고 WM_KEYDOWN의
+ *       것은 예순 줄짜리 여섯 단 우선순위 사슬이었습니다. 그 사슬은 여전히 존재하며
+ *       ::on_key_down입니다. 다만 메시지에 대한 `switch`가 이제 어느 메시지가 무엇을 뜻하는지의
+ *       목록으로 읽히며, 창 프로시저란 그것뿐입니다.
  */
 static LRESULT CALLBACK wnd_proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
@@ -446,211 +720,59 @@ static LRESULT CALLBACK wnd_proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_DESTROY:
         g_running = 0;
         return 0;
+
     case WM_KEYDOWN:
-        /* The title screen takes any key but ESC, which still opens the menu
-           so the player can change settings or quit before starting.
-           타이틀 화면은 ESC를 제외한 모든 키를 받습니다. ESC는 여전히 메뉴를 열어,
-           시작 전에 설정을 바꾸거나 종료할 수 있게 합니다. */
-        if (g_world.run.title && !menu_is_open() && wp != VK_ESCAPE) {
-            /* Latched, not acted on. Which key dismisses a title screen is a
-               keyboard question and stays here; what dismissing it MEANS is a
-               rule, and it is ::step_confirm's. The cursor and the discarded
-               mouse delta follow in the frame loop, once the step has actually
-               cleared `title`.
-               행동이 아니라 래치입니다. 어느 키가 타이틀 화면을 해제하는지는 키보드에 대한
-               질문이며 이곳에 남습니다. 해제가 무엇을 *뜻하는지*는 규칙이고 ::step_confirm의
-               것입니다. 커서와 버려지는 마우스 변화량은 스텝이 실제로 `title`을 지운 뒤
-               프레임 루프에서 따라옵니다. */
-            g_edge.confirm = 1;
-            return 0;
-        }
-
-        /* ESC opens the menu; it no longer quits. One mistaken keypress used
-           to end a run outright with no confirmation, which is the behaviour
-           this menu exists to replace. Leaving is now a row the player picks.
-           ESC는 메뉴를 열며 더 이상 종료하지 않습니다. 예전에는 잘못 누른 키 하나가
-           확인 없이 진행 중인 플레이를 그대로 끝냈으며, 그것이 이 메뉴가 대체하려는
-           동작입니다. 이제 나가는 것은 플레이어가 직접 고르는 행입니다. */
-        if (wp == VK_ESCAPE) {
-            menu_escape();
-            if (menu_is_open()) {
-                /* Let go of everything the player was holding. Returning to a
-                   game still walking forward, still firing, or still attached
-                   to a hook is the same class of surprise WM_KILLFOCUS below
-                   guards against.
-                   플레이어가 누르고 있던 것을 전부 놓습니다. 계속 전진하거나 사격
-                   중이거나 훅에 걸린 채로 게임에 돌아오는 것은, 아래 WM_KILLFOCUS가
-                   방지하는 것과 같은 종류의 놀라움입니다. */
-                g_mouse_down = 0;
-                g_hook_down  = 0;
-                g_edge.let_go = 1;   /* the rope, which does not clear itself */
-                for (int i = 0; i < 256; i++) g_keys[i] = 0;
-            } else {
-                /* Closing: the cursor was parked wherever the player left it,
-                   so discard the first delta the way taking focus does.
-                   닫는 경우: 커서가 플레이어가 둔 자리에 그대로 있으므로, 포커스를
-                   얻을 때와 마찬가지로 첫 변화량을 버립니다. */
-                g_warp_mouse = 1;
-            }
-            cursor_update();
-            return 0;
-        }
-
-        /* Dead: any key restarts. THE GRACE PERIOD IS NOT TESTED HERE any
-           more -- whether enough of the death screen has passed is a rule about
-           the run, so ::step_confirm owns it. A key pressed too early latches
-           an edge the step then declines to act on, which is the same swallowed
-           keypress it always was, and the rule is now something a headless test
-           can drive.
-           사망 상태에서는 아무 키나 누르면 재시작합니다. 유예 시간을 더 이상 이곳에서
-           검사하지 않습니다. 사망 화면이 충분히 지났는지는 플레이에 대한 규칙이므로
-           ::step_confirm이 소유합니다. 너무 일찍 누른 키는 스텝이 행동하지 않기로 하는 엣지를
-           래치하며, 그것은 언제나 그러했던 것과 같이 삼켜진 키 입력입니다. 그리고 그 규칙은
-           이제 헤드리스 테스트가 구동할 수 있는 것이 되었습니다. */
-        if (g_world.run.dead && !menu_is_open()) {
-            g_edge.confirm = 1;
-            return 0;
-        }
-
-        /* Menu navigation, also on the edge. While the menu is up these keys
-           drive it and nothing else -- the world is frozen, so there is no
-           second meaning for them to have.
-           메뉴 탐색이며 역시 엣지에서 처리합니다. 메뉴가 열려 있는 동안 이 키들은
-           메뉴만 조작합니다. 월드가 정지해 있으므로 다른 의미를 가질 여지가 없습니다. */
-        if (menu_is_open()) {
-            switch (wp) {
-            case 'W': case VK_UP:    menu_move(-1);   return 0;
-            case 'S': case VK_DOWN:  menu_move(+1);   return 0;
-            case 'A': case VK_LEFT:  menu_adjust(-1); return 0;
-            case 'D': case VK_RIGHT: menu_adjust(+1); return 0;
-            case VK_RETURN: case VK_SPACE: menu_activate(); return 0;
-            }
-            return 0;   /* swallow everything else while paused */
-        }
-
-        /* F1 toggles the pixelise/dither pass. Handled on the message edge
-           rather than polled, so one press is one toggle -- a held key would
-           otherwise flip it every frame. Comparing the two looks side by side
-           is most of how the effect gets tuned.
-           F1은 픽셀화/디더 패스를 전환합니다. 폴링하지 않고 메시지 시점에 처리하므로 한
-           번 누르면 한 번 전환됩니다. 그렇지 않으면 키를 누르고 있는 동안 매 프레임
-           전환됩니다. 두 화면을 나란히 비교하는 것이 이 효과를 조정하는 주된
-           방법입니다. */
-        if (wp == VK_F1) { post_set_enabled(!post_enabled()); return 0; }
-
-        /* --- weapon select ---------------------------------------------
-           WHICH KEYS ARE WEAPON KEYS, and nothing else. This block used to
-           reach into `g_world.weapon`, cancel a swing and play a sound, which
-           put three rules inside a Win32 message handler where no headless
-           test could see them -- and left this file, whose whole claim is that
-           it decides nothing about what a frame means, deciding what a number
-           key means.
-
-           ONE-BASED, so a frame with no request is a zeroed field rather than a
-           sentinel every fixture has to know about. See ::Input::want_weapon,
-           and ::step_weapon_pick for what now happens.
-
-           어느 키가 무기 키인지이며, 그 외에는 아무것도 아닙니다. 이 블록은 이전에
-           `g_world.weapon`에 손을 뻗어 진행 중인 공격을 취소하고 소리를 재생했습니다. 세 개의
-           규칙을 어떤 헤드리스 테스트도 볼 수 없는 Win32 메시지 핸들러 안에 두었고, 한 프레임이
-           무엇을 뜻하는지 아무것도 결정하지 않는다는 것이 존재 주장인 이 파일이 숫자 키의
-           의미를 결정하게 했습니다.
-
-           1부터 시작하므로 요청이 없는 프레임은 모든 픽스처가 알아야 하는 특별한 값이 아니라
-           0으로 초기화된 필드가 됩니다. ::Input::want_weapon을 참조하고, 이제 무슨 일이
-           일어나는지는 ::step_weapon_pick을 보십시오. */
-        if (wp >= '1' && wp < '1' + WP_TYPES) {
-            g_edge.weapon = (int)(wp - '1') + 1;
-            return 0;
-        }
-        g_keys[wp & 0xff] = 1;
+        if (!on_key_down(wp)) g_keys[wp & VK_TABLE_MASK] = 1;
         return 0;
+
     case WM_KEYUP:
-        g_keys[wp & 0xff] = 0;
+        g_keys[wp & VK_TABLE_MASK] = 0;
         return 0;
-    /* Cursor motion drives the highlight while the menu is up, so the mouse
-       and the keyboard are one menu rather than two: whichever the player last
+
+    /* Cursor motion drives the highlight while the menu is up, so the mouse and
+       the keyboard are one menu rather than two: whichever the player last
        touched, the highlight shows where a press would land.
-       메뉴가 열려 있는 동안 커서 이동이 강조 표시를 조작하므로, 마우스와 키보드가 두
-       개의 메뉴가 아닌 하나가 됩니다. 플레이어가 마지막으로 무엇을 만졌든 강조 표시가
-       지금 누르면 어디에 닿을지를 보여 줍니다. */
+       메뉴가 열려 있는 동안 커서 이동이 강조 표시를 조작하므로, 마우스와 키보드가 두 개의
+       메뉴가 아닌 하나가 됩니다. 플레이어가 마지막으로 무엇을 만졌든 강조 표시가 지금 누르면
+       어디에 닿을지를 보여 줍니다. */
     case WM_MOUSEMOVE:
         if (menu_is_open()) {
-            RECT mc; GetClientRect(w, &mc);
+            RECT rc; GetClientRect(w, &rc);
             menu_hover((float)GET_X_LPARAM(lp), (float)GET_Y_LPARAM(lp),
-                       mc.right - mc.left, mc.bottom - mc.top);
+                       rc.right - rc.left, rc.bottom - rc.top);
         }
         return 0;
 
-    /* While the menu is up the buttons operate it and never reach the gun. The
-       press that picks a row must not also be the press that fires on the
-       frame the game resumes.
-       메뉴가 열려 있는 동안 버튼은 메뉴를 조작하며 총에 도달하지 않습니다. 행을 고르는
-       그 누름이, 게임이 재개되는 프레임에 사격하는 누름이 되어서는 안 됩니다. */
+    /* The title and death screens take a click as readily as a key: the cursor
+       is visible on both, so clicking is what a player reaches for. The RIGHT
+       button does not, and that asymmetry is deliberate -- left is the answer
+       to a screen, right is the grapple.
+       타이틀 화면과 사망 화면은 키만큼이나 클릭도 받아들입니다. 양쪽 모두 커서가 보이므로
+       플레이어가 손을 뻗는 것은 클릭입니다. *오른쪽* 버튼은 그렇지 않으며 그 비대칭은
+       의도적입니다. 왼쪽은 화면에 대한 답이고 오른쪽은 그래플입니다. */
     case WM_LBUTTONDOWN:
-        /* The title and death screens take a click as readily as a key: the
-           cursor is visible on both, so clicking is what a player reaches for.
-           타이틀 화면과 사망 화면은 키만큼이나 클릭도 받아들입니다. 양쪽 모두 커서가
-           보이므로 플레이어가 손을 뻗는 것은 클릭입니다. */
-        if ((g_world.run.title || g_world.run.dead) && !menu_is_open()) {
-            /* One latch for both, exactly as the keyboard path above: a click
-               on either screen is the same event, and which screen it answers
-               is ::step_confirm's question.
-               위의 키보드 경로와 정확히 같이 둘에 대해 하나의 래치입니다. 어느 화면에서의
-               클릭이든 같은 사건이며, 그것이 어느 화면에 답하는지는 ::step_confirm의
-               질문입니다. */
-            g_edge.confirm = 1;
-            return 0;
-        }
-        if (menu_is_open()) {
-            RECT mc; GetClientRect(w, &mc);
-            menu_click((float)GET_X_LPARAM(lp), (float)GET_Y_LPARAM(lp),
-                       mc.right - mc.left, mc.bottom - mc.top, 0);
-            /* Activating RESUME closes the menu, so the cursor has to follow
-               it back out on this very message -- waiting for the next focus
-               change would leave a pointer floating over the game.
-               RESUME를 실행하면 메뉴가 닫히므로 커서도 바로 이 메시지에서 따라
-               나가야 합니다. 다음 포커스 변경을 기다리면 게임 위에 포인터가 떠 있게
-               됩니다. */
-            if (!menu_is_open()) g_warp_mouse = 1;
-            cursor_update();
-        } else {
-            g_mouse_down = 1;
-        }
+        if (screen_takes_press()) { g_edge.confirm = 1; return 0; }
+        if (!menu_takes_click(w, lp, 0)) g_mouse_down = 1;
         return 0;
+
     case WM_LBUTTONUP:
         g_mouse_down = 0;
         return 0;
+
     case WM_RBUTTONDOWN:
-        if (menu_is_open()) {
-            RECT mc; GetClientRect(w, &mc);
-            menu_click((float)GET_X_LPARAM(lp), (float)GET_Y_LPARAM(lp),
-                       mc.right - mc.left, mc.bottom - mc.top, 1);
-            if (!menu_is_open()) g_warp_mouse = 1;
-            cursor_update();
-        } else {
-            g_hook_down = 1;
-        }
+        if (!menu_takes_click(w, lp, 1)) g_hook_down = 1;
         return 0;
+
     case WM_RBUTTONUP:
         g_hook_down = 0;
         return 0;
+
     case WM_SETFOCUS:
-        g_focused = 1;
-        g_warp_mouse = 1;
-        /* Not an unconditional hide: returning to a PAUSED game has to keep
-           the pointer, or the player is left operating a menu they cannot see.
-           무조건 숨기지 않습니다. *일시정지된* 게임으로 돌아올 때는 포인터를 유지해야
-           하며, 그렇지 않으면 플레이어가 보이지 않는 메뉴를 조작하게 됩니다. */
-        cursor_update();
+        on_focus_change(1);
         return 0;
+
     case WM_KILLFOCUS:
-        g_focused = 0;
-        g_mouse_down = 0;
-        g_hook_down = 0;
-        g_edge.let_go = 1;   /* do not come back still roped to a wall */
-        cursor_update();
-        for (int i = 0; i < 256; i++) g_keys[i] = 0;
+        on_focus_change(0);
         return 0;
     }
     return DefWindowProcA(w, msg, wp, lp);
@@ -1326,7 +1448,13 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
        다음에 오는 것이 하는 마지막 일이기 때문입니다. */
     demo_parse_cmdline(cmd);
 
-    HDC   dc;
+    /* Initialised because ::app_start writes it only once the window exists,
+       and the compiler cannot see that a non-zero return implies it did. A
+       zeroed handle is also the honest value for "no window was made".
+       ::app_start가 창이 생긴 뒤에야 이 값을 쓰며, 0이 아닌 반환이 그것을 뜻한다는 것을
+       컴파일러는 알 수 없으므로 초기화합니다. 0인 핸들은 "창이 만들어지지 않았다"에 대한
+       정직한 값이기도 합니다. */
+    HDC   dc = 0;
     Scene scene;
     if (!app_start(inst, show, &dc, &scene)) return 1;
 

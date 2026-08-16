@@ -212,7 +212,160 @@ static Demo    g_rec, g_back;
 static World   g_live, g_play;
 static char    g_text[1 << 20];
 
-int main(void) {
+/* ------------------------------------------------------------- the golden */
+
+/**
+ * @struct Digest
+ * @brief What a run comes to, in the few numbers worth pinning.
+ *
+ * ENGLISH
+ * -------
+ * THE QUESTION THIS ANSWERS is "did this commit change the simulation" -- which
+ * nothing else here can. Every other check in this folder asserts a RULE: a door
+ * opens when touched, a trace stops at the first solid, a replay matches its
+ * recording. All of them keep passing when a constant is retuned, which is
+ * correct: they are about behaviour, not about this week's numbers. A golden is
+ * the opposite and is the only thing that notices a change nobody meant.
+ *
+ * @note Compared EXACTLY, not within a tolerance. The reason is measured rather
+ *       than hoped for: the same thirty seconds built at -O0, -O1, -O2, -O3 and
+ *       -Os land on the same bits, because this is SSE2 with no fast-math and
+ *       no contraction, and every random source in the World is an integer LCG.
+ *       Measured the other way too -- nudging PLAYER_GRAVITY from 22.0 to
+ *       22.001, a change of five thousandths of a percent, moves pos.z by a
+ *       centimetre after thirty seconds and this says which field and by how
+ *       much.
+ *       A tolerance would only decide how much silent drift is acceptable, and
+ *       the answer to that is none -- a simulation that carries its own state
+ *       forward turns any drift at all into a different run within seconds.
+ * @note A FAILURE HERE IS NOT A BUG. It is a diff. Read what moved, decide
+ *       whether you meant it, and if you did, run `demotest -bless` and paste.
+ *
+ * 한국어
+ * ------
+ * @brief 한 플레이가 도달한 결과를, 못 박을 가치가 있는 몇 개의 숫자로.
+ *
+ * 이것이 답하는 질문은 "이 커밋이 시뮬레이션을 바꿨는가"이며, 이 폴더의 다른 무엇도 그것에
+ * 답할 수 없습니다. 다른 모든 검사는 *규칙*을 단언합니다. 문은 닿으면 열린다, 판정은 첫 고체에서
+ * 멈춘다, 재생은 기록과 일치한다. 그 전부는 상수를 조정해도 계속 통과하며 그것이 옳습니다. 그들이
+ * 다루는 것은 동작이지 이번 주의 숫자가 아닙니다. 골든은 그 반대이며, 아무도 의도하지 않은 변화를
+ * 알아채는 유일한 것입니다.
+ *
+ * @note 허용 오차가 아니라 *정확히* 비교합니다. 그 근거는 희망이 아니라 측정입니다. 같은 30초를
+ *       -O0, -O1, -O2, -O3, -Os로 빌드해도 같은 비트에 도달합니다. fast-math도 축약도 없는
+ *       SSE2이고 World의 모든 난수원이 정수 LCG이기 때문입니다. 반대 방향으로도 측정했습니다.
+ *       PLAYER_GRAVITY를 22.0에서 22.001로, 십만분의 오만큼 밀면 30초 뒤 pos.z가 1센티미터
+ *       움직이고 이것이 어느 필드가 얼마나 움직였는지 말해 줍니다. 허용 오차는 얼마만큼의 조용한 어긋남을
+ *       받아들일지 정하는 것일 뿐이고, 그 답은 "없음"입니다. 자기 상태를 앞으로 나르는
+ *       시뮬레이션은 어떤 어긋남이든 몇 초 만에 다른 플레이로 바꿉니다.
+ * @note 이곳의 실패는 *버그가 아닙니다*. diff입니다. 무엇이 움직였는지 읽고, 의도한 것인지
+ *       판단하고, 의도한 것이라면 `demotest -bless`를 실행해 붙여 넣으십시오.
+ */
+typedef struct {
+    float    px, py, pz;
+    float    vx, vy, vz;
+    float    yaw, pitch;
+    int      health, keys, grounded;
+    int      cur, ammo_shotgun;
+    unsigned wrng, srng, erng, frng;
+    int      enemies_alive, enemy_hp;
+    int      proj_live, marks_live;
+    float    world_time;
+} Digest;
+
+/* A field added above without a value below would compare against a zero
+   nobody chose. The size is what ties the two together, the way ::PlayerProgress
+   ties its three lists.
+   위에 필드를 추가하고 아래에 값을 넣지 않으면 아무도 고르지 않은 0과 비교하게 됩니다. 둘을
+   묶는 것은 크기이며, ::PlayerProgress가 자기 세 목록을 묶는 방식과 같습니다. */
+_Static_assert(sizeof(Digest) == 22 * 4, "a field added to Digest needs a golden value beside it");
+
+static Digest digest_of(const World *w) {
+    Digest d = {0};
+    d.px = w->player.pos.x; d.py = w->player.pos.y; d.pz = w->player.pos.z;
+    d.vx = w->player.vel.x; d.vy = w->player.vel.y; d.vz = w->player.vel.z;
+    d.yaw = w->yaw;         d.pitch = w->pitch;
+
+    d.health   = w->player.health;
+    d.keys     = w->player.keys;
+    d.grounded = w->player.grounded;
+
+    d.cur           = w->weapon.cur;
+    d.ammo_shotgun  = w->weapon.ammo[WP_SHOTGUN];
+
+    d.wrng = w->weapon.rng;
+    d.srng = w->run.smoke_rng;
+    d.erng = w->pools.enemy.rng;
+    d.frng = w->pools.fx.rng;
+
+    for (int i = 0; i < w->pools.enemy.count; i++) {
+        if (!w->pools.enemy.m[i].active) continue;
+        d.enemies_alive++;
+        d.enemy_hp += w->pools.enemy.m[i].health;
+    }
+    for (int i = 0; i < PROJ_MAX; i++)
+        if (w->pools.proj.p[i].active) d.proj_live++;
+
+    d.marks_live = decal_live_marks(&w->pools);
+    d.world_time = w->run.world_time;
+    return d;
+}
+
+static void digest_print(const Digest *d) {
+    printf("static const Digest GOLDEN = {\n");
+    printf("    /* px py pz */ %.9gf, %.9gf, %.9gf,\n", d->px, d->py, d->pz);
+    printf("    /* vx vy vz */ %.9gf, %.9gf, %.9gf,\n", d->vx, d->vy, d->vz);
+    printf("    /* yaw pitch */ %.9gf, %.9gf,\n", d->yaw, d->pitch);
+    printf("    /* health keys grounded */ %d, %d, %d,\n",
+           d->health, d->keys, d->grounded);
+    printf("    /* cur ammo */ %d, %d,\n", d->cur, d->ammo_shotgun);
+    printf("    /* wrng srng erng frng */ %uu, %uu, %uu, %uu,\n",
+           d->wrng, d->srng, d->erng, d->frng);
+    printf("    /* enemies hp */ %d, %d,\n", d->enemies_alive, d->enemy_hp);
+    printf("    /* proj marks */ %d, %d,\n", d->proj_live, d->marks_live);
+    printf("    /* world_time */ %.9gf\n", d->world_time);
+    printf("};\n");
+}
+
+/* Filled by `demotest -bless`. Every number here was produced by the run below
+   and nothing else; none of them was chosen.
+   `demotest -bless`가 채웁니다. 이곳의 모든 숫자는 아래의 실행이 만들어 낸 것이며 그 외에는
+   없습니다. 어느 것도 사람이 고르지 않았습니다. */
+static const Digest GOLDEN = {
+    /* px py pz */ -12.2013168f, 2.84367466f, -14.8857975f,
+    /* vx vy vz */ -0.312936455f, 1.9998908f, 0.38904506f,
+    /* yaw pitch */ 0.382800102f, 0.534599602f,
+    /* health keys grounded */ 73, 0, 0,
+    /* cur ammo */ 0, 0,
+    /* wrng srng erng frng */ 2972006077u, 3707978689u, 2180890343u, 805981011u,
+    /* enemies hp */ 1, 40,
+    /* proj marks */ 0, 0,
+    /* world_time */ 29.9002438f
+};
+
+static int golden_bad;
+
+static void same_exact_f(const char *name, float got, float want) {
+    if (got == want) return;
+    golden_bad++;
+    printf("      %-18s %.9g   golden %.9g\n", name, got, want);
+}
+static void same_exact_i(const char *name, long got, long want) {
+    if (got == want) return;
+    golden_bad++;
+    printf("      %-18s %ld   golden %ld\n", name, got, want);
+}
+
+int main(int argc, char **argv) {
+    /* `-bless` prints the digest this build produces, in a form to paste over
+       ::GOLDEN. It is the only supported way to change that table: a golden
+       somebody typed is a golden that records what they expected rather than
+       what the simulation does.
+       `-bless`는 이 빌드가 만들어 내는 다이제스트를 ::GOLDEN 위에 붙여 넣을 수 있는 형태로
+       출력합니다. 그 표를 바꾸는 유일한 지원 방법입니다. 사람이 타이핑한 골든은 시뮬레이션이
+       하는 일이 아니라 그 사람이 기대한 것을 기록한 골든입니다. */
+    int bless = (argc > 1 && argv[1][0] == '-' && argv[1][1] == 'b');
+
     printf("demotest\n\n");
 
     /* --- one loop, two worlds, in lockstep -------------------------------
@@ -375,6 +528,53 @@ int main(void) {
             demo_put(&dr, &in, VW, VH, DT_US * 0.000001f);
             ok(dr.d.n == before + 1, "and appends when something is");
         }
+    }
+
+    /* --- the golden ------------------------------------------------------
+       Everything above asserts a RULE and keeps passing when a constant is
+       retuned. This asserts the OUTCOME, which is the only way to notice that a
+       change nobody meant reached the simulation. See ::Digest.
+       위의 모든 것은 *규칙*을 단언하며 상수를 조정해도 계속 통과합니다. 이것은 *결과*를
+       단언하며, 아무도 의도하지 않은 변화가 시뮬레이션에 닿았다는 것을 알아채는 유일한
+       방법입니다. ::Digest를 참조하십시오. */
+    printf("\nthe golden\n");
+    {
+        Digest d = digest_of(&g_live);
+
+        if (bless) {
+            printf("\n");
+            digest_print(&d);
+            printf("\n");
+            return 0;
+        }
+
+        same_exact_f("pos.x",       d.px,    GOLDEN.px);
+        same_exact_f("pos.y",       d.py,    GOLDEN.py);
+        same_exact_f("pos.z",       d.pz,    GOLDEN.pz);
+        same_exact_f("vel.x",       d.vx,    GOLDEN.vx);
+        same_exact_f("vel.y",       d.vy,    GOLDEN.vy);
+        same_exact_f("vel.z",       d.vz,    GOLDEN.vz);
+        same_exact_f("yaw",         d.yaw,   GOLDEN.yaw);
+        same_exact_f("pitch",       d.pitch, GOLDEN.pitch);
+        same_exact_i("health",      d.health,       GOLDEN.health);
+        same_exact_i("keys",        d.keys,         GOLDEN.keys);
+        same_exact_i("grounded",    d.grounded,     GOLDEN.grounded);
+        same_exact_i("weapon.cur",  d.cur,          GOLDEN.cur);
+        same_exact_i("ammo",        d.ammo_shotgun, GOLDEN.ammo_shotgun);
+        same_exact_i("weapon.rng",  (long)d.wrng, (long)GOLDEN.wrng);
+        same_exact_i("smoke.rng",   (long)d.srng, (long)GOLDEN.srng);
+        same_exact_i("enemy.rng",   (long)d.erng, (long)GOLDEN.erng);
+        same_exact_i("fx.rng",      (long)d.frng, (long)GOLDEN.frng);
+        same_exact_i("enemies",     d.enemies_alive, GOLDEN.enemies_alive);
+        same_exact_i("enemy hp",    d.enemy_hp,      GOLDEN.enemy_hp);
+        same_exact_i("projectiles", d.proj_live,     GOLDEN.proj_live);
+        same_exact_i("marks",       d.marks_live,    GOLDEN.marks_live);
+        same_exact_f("world_time",  d.world_time,    GOLDEN.world_time);
+
+        ok(golden_bad == 0,
+           "thirty seconds of input lands exactly where it landed before");
+        if (golden_bad)
+            printf("      -> read the diff above; if you meant it, run with -bless\n");
     }
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall demo checks passed\n", fails);

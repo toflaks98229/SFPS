@@ -310,6 +310,76 @@ static void test_uv(void) {
     check(n == 4 && inside, "every vertex of the face lands within one tile");
 }
 
+/* --- a moving brush takes its texture with it --------------------------------
+ *
+ * Reported against a func_door: the leaf goes up, but the texture does not go
+ * with it. ::brush_face_uv is a world-space projection -- `u` is
+ * dot(p, uaxis) -- so translating the planes and leaving the offsets alone
+ * pins the texture in space and slides the solid through it. The sector path
+ * had the same failure for the same reason; this is the other half of it.
+ *
+ * TWO CHECKS, and the second is what stops the first being vacuous. A material
+ * point of the door must keep its texture coordinate wherever the door is, AND
+ * a fixed point in the WORLD must not -- because the texture is supposed to
+ * have moved past it. A brush_translate that did nothing at all would pass the
+ * first check and fail the second.
+ *
+ * 한국어
+ * ------
+ * func_door에 대한 신고: 문짝은 올라가는데 텍스처가 따라가지 않는다. ::brush_face_uv는
+ * 월드 공간 투영이며 `u`가 dot(p, uaxis)입니다. 따라서 평면만 옮기고 오프셋을 그대로 두면
+ * 텍스처가 공간에 박히고 고체가 그 사이로 미끄러집니다. 섹터 경로가 같은 이유로 같은 고장을
+ * 겪었으며, 이것이 그 나머지 절반입니다.
+ *
+ * 검사가 둘이고, 두 번째가 첫 번째를 공허하지 않게 만듭니다. 문의 한 물질 점은 문이 어디에
+ * 있든 자기 텍스처 좌표를 유지해야 하고, 월드의 한 고정된 점은 *유지해서는 안 됩니다*.
+ * 텍스처가 그 점을 지나 이동했어야 하기 때문입니다. 아무 일도 하지 않는 brush_translate는
+ * 첫 번째를 통과하고 두 번째에서 실패합니다.
+ */
+static void test_uv_travels(void) {
+    printf("\na moving brush takes its texture with it\n");
+
+    checki(brush_parse(DOOR_FACE, -1, &M2), 1, "parses");
+
+    int f = face_facing(&M2, 0, v3f(0, 0, -1));
+    check(f >= 0, "found the wall facing -z");
+    if (f < 0) return;
+
+    const BrushFace *face = &M2.faces[M2.brushes[0].first_face + f];
+
+    const v3    ON_DOOR = { -2.0f, 0.0f, -2.0f };   /* the wall's west bottom */
+    const float LIFT    = 1.5f;                     /* metres, as a door rises */
+
+    float u0, v0;
+    brush_face_uv(face, ON_DOOR, 128.0f, 128.0f, &u0, &v0);
+
+    float u_fixed_before, v_fixed_before;
+    brush_face_uv(face, ON_DOOR, 128.0f, 128.0f, &u_fixed_before, &v_fixed_before);
+
+    brush_translate(&M2, 0, 1, v3f(0.0f, LIFT, 0.0f));
+
+    /* The same piece of door, now higher up. */
+    v3 moved = v3f(ON_DOOR.x, ON_DOOR.y + LIFT, ON_DOOR.z);
+    float u1, v1;
+    brush_face_uv(face, moved, 128.0f, 128.0f, &u1, &v1);
+
+    checkf(u1, u0, 0.0005f, "a point of the door keeps its u as the door rises");
+    checkf(v1, v0, 0.0005f, "and its v");
+
+    /* The same place in the world, which the texture has travelled past. */
+    float u_fixed_after, v_fixed_after;
+    brush_face_uv(face, ON_DOOR, 128.0f, 128.0f, &u_fixed_after, &v_fixed_after);
+
+    check(fabsf(v_fixed_after - v_fixed_before) > 0.01f,
+          "and a fixed point in the world does NOT, so the texture really moved");
+
+    /* Back down: the door closes and the texture is where it started. */
+    brush_translate(&M2, 0, 1, v3f(0.0f, -LIFT, 0.0f));
+    float u2, v2;
+    brush_face_uv(face, ON_DOOR, 128.0f, 128.0f, &u2, &v2);
+    checkf(v2, v0, 0.0005f, "a door that closes again lands on the v it opened from");
+}
+
 /* --- the slope -----------------------------------------------------------
    A ramp climbing from x=-64 at floor level to x=64 at 128 units. This is the
    shape the sector model could not hold at all: one x,z has one floor there,
@@ -1008,6 +1078,7 @@ int main(void) {
     test_formats_agree();
     test_trenchbroom_form();
     test_uv();
+    test_uv_travels();
     test_slope();
     test_entities();
     test_unbounded();

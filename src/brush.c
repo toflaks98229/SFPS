@@ -1368,6 +1368,33 @@ void brush_translate(BrushMap *m, int first, int count, v3 delta) {
                평면을 옮깁니다. 옛 평면 위의 점 p는 dot(n,p) == dist를 만족하고, delta만큼
                옮겨진 같은 점은 dot(n, p+delta) == dist + dot(n,delta)를 만족합니다. */
             fc->dist += v3dot(fc->normal, delta);
+
+            /* AND THE TEXTURE COMES WITH IT. ::brush_face_uv is a world-space
+               projection -- `u` is dot(p, uaxis) -- so moving the plane without
+               moving the offsets leaves the texture pinned in space while the
+               solid slides through it. On a func_door that reads as the leaf
+               being erased rather than rising, which is the same failure the
+               sector path had for the same reason.
+
+               The compensation is exact rather than approximate: a point p that
+               lands at p+delta must come out with the u it had, so
+               `uoff -= dot(delta, uaxis) / (BRUSH_UNIT * uscale)` is what
+               cancels the projection's own shift. `uscale` cannot be zero --
+               ::parse_face forces 1 for an unscaled face -- so there is nothing
+               to guard here.
+
+               그리고 텍스처가 함께 옵니다. ::brush_face_uv는 월드 공간 투영이며 `u`가
+               dot(p, uaxis)입니다. 따라서 오프셋을 옮기지 않고 평면만 옮기면 텍스처는 공간에
+               박힌 채 고체가 그 사이로 미끄러집니다. func_door에서는 그것이 문짝이 올라가는
+               것이 아니라 지워지는 것으로 읽히며, 섹터 경로가 같은 이유로 겪던 것과 같은
+               고장입니다.
+
+               보정은 근사가 아니라 정확합니다. p+delta에 놓이는 점 p가 원래 가지고 있던 u로
+               나와야 하므로, `uoff -= dot(delta, uaxis) / (BRUSH_UNIT * uscale)`가 투영 자신의
+               이동을 상쇄합니다. `uscale`은 0이 될 수 없습니다. ::parse_face가 배율 없는 면에
+               1을 강제하므로 이곳에서 방어할 것이 없습니다. */
+            fc->uoff -= v3dot(delta, fc->uaxis) / (BRUSH_UNIT * fc->uscale);
+            fc->voff -= v3dot(delta, fc->vaxis) / (BRUSH_UNIT * fc->vscale);
         }
 
         /* Invalid boxes are left alone: an unclosed brush has no box to move

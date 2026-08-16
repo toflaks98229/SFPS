@@ -412,6 +412,40 @@ int main(void) {
             "the leaf keeps its texture coordinate as it rises",
             v_open, v_closed);
 
+        /* --- and it holds for the WHOLE travel, not one instant ------------
+           Reported as "the uv does go up, but not in step with the animation",
+           which a single sample cannot tell apart from a texture that moves at
+           the wrong rate or in jumps. Sampled every few frames across the rest
+           of the opening: the bottom edge's coordinate has to be the same
+           number at every one of them.
+           "uv가 올라가긴 하는데 애니메이션과 맞지 않는다"는 신고였고, 표본 하나로는 그것을
+           엉뚱한 속도로 움직이거나 튀는 텍스처와 구별할 수 없습니다. 열리는 나머지 구간에서
+           몇 프레임마다 표본을 뽑습니다. 아래 모서리의 좌표는 그 전부에서 같은 숫자여야
+           합니다. */
+        int  samples = 0, off_step = 0;
+        float worst = 0.0f;
+        for (int k = 0; k < 24 && door_openness(&L, 0) < 0.999f; k++) {
+            run(0.05f, 0.0f, 2.6f, KEY_NONE);
+
+            float up = door_openness(&L, 0) * 300.0f * 0.01f;
+            mb_reset(&b);
+            level_geometry(&b, &L, 0, 0);
+
+            float vk = wall_v_at(&b, 0.20f + up);
+            if (vk < -1e29f) continue;      /* the leaf has closed up entirely */
+
+            samples++;
+            float d = fabsf(vk - v_closed);
+            if (d > worst) worst = d;
+            if (d > 0.002f) off_step++;
+        }
+        ok(samples >= 5, "the travel was sampled at several points");
+        okf(off_step == 0,
+            "and the texture is in step at every one of them",
+            (float)off_step, 0.0f);
+        printf("  %-58s %d sample(s), worst drift %.4f\n",
+               "(across the opening)", samples, worst);
+
         mb_free(&b);
     }
 

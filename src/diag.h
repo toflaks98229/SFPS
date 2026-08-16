@@ -310,6 +310,19 @@ typedef enum {
      * 이유입니다. 이것을 발생시키는 레벨은 한 직선 위에 겹치는 섹터가 유난히 많은 레벨이고,
      * 올려야 할 값은 level.c의 TRACE_MAX_EVENTS입니다.
      */
+    /**
+     * @brief A recording ran out of frames, and stopped growing rather than wrapping.
+     *
+     * ENGLISH: ::DEMO_MAX_FRAMES is five minutes at 60fps and a recording that
+     * reaches it keeps what it has. A demo that ends early is a shorter demo; a
+     * demo that overwrote its own start would be one that replays into a
+     * different run and looks like the simulation having drifted.
+     *
+     * 한국어: ::DEMO_MAX_FRAMES는 60fps에서 5분이며 그에 도달한 기록은 가진 것을 유지합니다.
+     * 일찍 끝나는 데모는 짧은 데모이지만, 자기 시작을 덮어쓴 데모는 다른 플레이로 재생되면서
+     * 시뮬레이션이 어긋난 것처럼 보이게 됩니다.
+     */
+    DIAG_DEMO_FULL,
     DIAG_TRACE_EVENTS,
     DIAG_ENT_CAP,
 

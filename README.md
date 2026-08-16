@@ -20,7 +20,7 @@ Models, materials, sounds and levels are all authored as text and hot-reload
 into the running game.
 
 ```
-378,368 / 1,474,560 bytes   (25.66% used)
+381,440 / 1,474,560 bytes   (25.87% used)
 ```
 
 ## Build
@@ -486,6 +486,50 @@ being the same value when it became exact.
 The old sampler survives as the fallback for a ray that meets more crossings
 than the table holds, counted by `DIAG_TRACE_EVENTS`. Slower, not wrong, and
 better than answering from a partial list.
+
+## Recording a run
+
+```powershell
+.\build\game.exe -record bug.dem     # play; the input stream is written on exit
+.\build\game.exe -play bug.dem       # watch it happen again
+```
+
+A demo holds a level name and a list of intents — one line per frame, four
+integers on it — and **no world state at all**. Replaying it recomputes
+everything. That is the whole reason it is worth having: a demo that disagrees
+with the game has found a bug, and a save can never disagree with anything.
+
+It works because `world_step` is a function of `(World, Input, aspect, dt)` and
+of nothing else. Every random state it consumes — the weapon's spread, the
+monsters' fight rolls, the particles, the lava smoke — is a field inside the
+`World` seeded from a constant. There is no `rand()`, no clock read and no
+file-scope state on the simulation path.
+
+**That was not true recently, and the work that made it true was not done for
+this.** The monsters, items, projectiles, particles and bullet holes were
+file-scope arrays in five modules; the doors were a sixth; weapon switching, the
+grapple's release and the death screen's grace period lived inside a Win32
+message handler. Each was a piece of the run somewhere a second `World` could
+not reach and a recording could not describe. Moving them is what left `World`
+holding all of the state and `Input` carrying all of the intent — and record and
+replay then cost one module and one test.
+
+`demotest` is that test, and it is worth being precise about what it proves. It
+does not compare a demo against a stored expectation; that would only say the
+format round-trips. It drives **two** worlds in lockstep from one loop — the
+live one from the raw `Input`, the replay one from whatever survived the round
+trip through the recording — and compares them field by field **every frame**,
+on exact equality rather than a tolerance. Thirty seconds of pseudo-random
+input: walking into walls, firing at nothing, throwing the hook at the ceiling,
+opening the menu mid-jump.
+
+It earned its keep on the first run. The format stored the viewport aspect as
+thousandths, which is lossy — 1280/720 quantises to 1.778 and the recording was
+made at 1.7777778. The muzzle solve reads the aspect, so shots landed a hair
+elsewhere and the two runs had visibly diverged within a second. A `Demo` stores
+the viewport's **width and height** now and divides them again on the way out,
+which is exact by construction. Comparing per frame is what made that a
+one-line diagnosis instead of "the demo doesn't work".
 
 ### Tests must not name the map
 
@@ -2340,7 +2384,5 @@ frames that pack, with the decoded atlas bit-identical to before.
       replaced
 - [ ] A vertical arena built around the hook — floating platforms, chasms, an
       anchor point you cannot reach on foot
-- [ ] **Input record and replay** — `world_step` is already a function of
-      `(World, Input, dt)`, so serialising the `Input` stream turns a bug report
-      into a reproducible test case and gives demo playback for free
+- [x] **Input record and replay** — `game.exe -record foo.dem` / `-play foo.dem`
 - [ ] Final packing pass (`kkrunchy` / UPX) if the budget ever gets tight

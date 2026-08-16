@@ -61,6 +61,42 @@
 static int g_counts[DIAG_COUNT];
 
 /**
+ * @brief The frame each counter first and last fired on.
+ *
+ * ENGLISH
+ * -------
+ * Meaningful only where the matching `g_counts` entry is non-zero, which is
+ * why neither needs a sentinel value or a run-time initialiser: zero-filled
+ * .bss plus "the count says whether to look" is enough. ::diag_first returns
+ * -1 for a counter that never fired by asking the count, not by storing -1.
+ *
+ * 한국어
+ * ------
+ * 대응하는 `g_counts` 항목이 0이 아닐 때만 의미가 있으며, 그래서 둘 다 감시 값이나
+ * 런타임 초기화가 필요 없습니다. 0으로 채워진 .bss와 "횟수가 볼지 말지를 알려 준다"는
+ * 규칙이면 충분합니다. ::diag_first는 한 번도 발생하지 않은 카운터에 대해 -1을 저장해
+ * 두는 것이 아니라 횟수에 물어서 -1을 반환합니다.
+ */
+static int g_first[DIAG_COUNT];
+static int g_last[DIAG_COUNT];
+
+/**
+ * @brief The frame clock, advanced by ::diag_tick.
+ *
+ * ENGLISH
+ * -------
+ * Starts at 0 and stays there until something steps a world, so a report
+ * made during a level load carries frame 0 -- which is exactly right, since
+ * no frame has run.
+ *
+ * 한국어
+ * ------
+ * 0에서 시작하여 무언가 월드를 단계시킬 때까지 그대로이므로, 레벨 로드 중에 이루어진
+ * 보고는 프레임 0을 갖습니다. 아직 어떤 프레임도 실행되지 않았으니 정확히 맞는 값입니다.
+ */
+static int g_frame;
+
+/**
  * @brief Short display labels, indexed by ::DiagKind.
  *
  * ENGLISH
@@ -135,12 +171,43 @@ void diag_report(DiagKind kind) {
        being hit millions of times.
        순환하지 않고 포화시킵니다. 카운터가 0으로 되돌아가면 최악의 상황, 즉 한계가 수백만
        번 초과되는 동안 "문제 없음"으로 보고하게 됩니다. */
+    /* Before the increment, because "is this the first" is a question about
+       the count as it stands. After it, every report looks like a repeat.
+       증가 이전입니다. "이것이 처음인가"는 현재 상태의 횟수에 대한 질문이기 때문입니다.
+       증가 이후라면 모든 보고가 반복처럼 보입니다. */
+    if (!g_counts[kind]) g_first[kind] = g_frame;
+
+    /* Outside the saturation check on purpose. A counter pinned at INT_MAX
+       has stopped being able to say how many, but it can still say whether it
+       is still going, and that is the more useful of the two by then.
+       포화 검사 바깥에 둔 것은 의도적입니다. INT_MAX에 고정된 카운터는 몇 번인지 말할 수
+       없게 되었지만 여전히 진행 중인지는 말할 수 있으며, 그 시점에는 그쪽이 더 유용합니다. */
+    g_last[kind] = g_frame;
+
     if (g_counts[kind] < 0x7fffffff) g_counts[kind]++;
+}
+
+void diag_tick(void) {
+    if (g_frame < 0x7fffffff) g_frame++;
+}
+
+int diag_frame(void) {
+    return g_frame;
 }
 
 int diag_count(DiagKind kind) {
     if ((unsigned)kind >= (unsigned)DIAG_COUNT) return 0;
     return g_counts[kind];
+}
+
+int diag_first(DiagKind kind) {
+    if ((unsigned)kind >= (unsigned)DIAG_COUNT) return -1;
+    return g_counts[kind] ? g_first[kind] : -1;
+}
+
+int diag_last(DiagKind kind) {
+    if ((unsigned)kind >= (unsigned)DIAG_COUNT) return -1;
+    return g_counts[kind] ? g_last[kind] : -1;
 }
 
 const char *diag_name(DiagKind kind) {
@@ -167,6 +234,19 @@ int diag_summary(char *out, int cap) {
         pos = txt_append_str(out, cap, pos, DIAG_NAMES[i]);
         pos = txt_append_str(out, cap, pos, "=");
         pos = txt_append_int(out, cap, pos, g_counts[i]);
+
+        /* When it happened, not just how often. A burst gets one frame and a
+           span gets two, so the shape of the entry answers "is this still
+           going" before the digits are read.
+           얼마나 자주인지만이 아니라 언제인지를 함께 씁니다. 한 번의 폭발은 프레임 하나를,
+           지속되는 것은 둘을 얻으므로, 숫자를 읽기 전에 항목의 모양이 "지금도 진행
+           중인가"에 답합니다. */
+        pos = txt_append_str(out, cap, pos, "@");
+        pos = txt_append_int(out, cap, pos, g_first[i]);
+        if (g_last[i] != g_first[i]) {
+            pos = txt_append_str(out, cap, pos, "..");
+            pos = txt_append_int(out, cap, pos, g_last[i]);
+        }
         any = 1;
     }
 

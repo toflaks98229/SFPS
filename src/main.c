@@ -1279,12 +1279,18 @@ static void set_title(const World *w, int fps) {
        용량 초과가 있으면 표시합니다. "!"를 붙여 제목 맨 앞에 배치합니다. 이곳의 정보 중
        실제로 무언가 잘못되었음을 뜻하는 것은 절단뿐이며, 긴 제목 표시줄에서 Windows가 가장
        먼저 생략하는 부분이 뒤쪽이기 때문입니다. */
-    char over[96];
+       Sized for the frame stamps each entry now carries. A truncated
+       diagnostic is a diagnostic that lies by omission, and this buffer is a
+       debug-build stack local -- there is no reason to be thrifty with it.
+       각 항목이 이제 지니는 프레임 각인에 맞춰 크기를 잡았습니다. 잘린 진단은 누락으로
+       거짓말하는 진단이며, 이 버퍼는 디버그 빌드의 스택 지역 변수이므로 아낄 이유가
+       없습니다. */
+    char over[256];
     int  any_over = diag_summary(over, sizeof(over));
 
     /* wsprintfA has no %f, so angles are printed in millidegrees and
        positions in centimetres -- integers all the way down. */
-    char title[320];
+    char title[512];
     wsprintfA(title,
         "%s%s%sSFPS %dfps | %s | assets: %s | pos %d,%d,%d cm | "
         "yaw %d pitch %d recoil %d mdeg",

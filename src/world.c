@@ -28,6 +28,7 @@
 #include "fx.h"
 #include "audio.h"
 #include "txt.h"
+#include "diag.h"
 
 /* ------------------------------------------------------------------ config */
 
@@ -1164,6 +1165,24 @@ int world_frozen(const World *w, int paused) {
 }
 
 int world_step(World *w, const Input *in, float aspect, float dt) {
+    /* The frame clock, first and unconditionally -- BEFORE the frozen test,
+       because a paused world still draws, still rebuilds geometry, and can
+       still overflow something. A clock that stopped while the pause menu was
+       up would stamp those reports with the frame the pause began on and make
+       a fault that happens only while paused look like one that happened just
+       before it.
+       This is the only site that advances it, and it is here rather than in
+       the render loop so that a headless tool gets real frame numbers without
+       knowing diag exists.
+
+       프레임 시계이며, 가장 먼저 무조건 진행합니다. frozen 검사보다 *앞*인 것은, 정지된
+       월드도 여전히 그려지고 지오메트리를 다시 만들며 무언가를 초과할 수 있기 때문입니다.
+       일시정지 메뉴가 떠 있는 동안 멈추는 시계는 그런 보고들에 일시정지가 시작된 프레임을
+       찍어, 정지 중에만 발생하는 결함을 그 직전에 발생한 것처럼 보이게 만듭니다.
+       시계를 진행시키는 유일한 지점이며, 렌더 루프가 아니라 이곳에 둔 덕분에 헤드리스
+       툴은 diag의 존재를 몰라도 실제 프레임 번호를 얻습니다. */
+    DIAG_TICK();
+
     /* Derived once and returned, so the renderer draws the frame the step
        actually ran. See ::world_frozen. */
     int frozen = world_frozen(w, in->paused);

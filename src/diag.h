@@ -368,6 +368,112 @@ void diag_report(DiagKind kind);
 int diag_count(DiagKind kind);
 
 /**
+ * @brief Advances the frame clock that stamps every report.
+ *
+ * ENGLISH
+ * -------
+ * Called once per simulation step, from ::world_step -- not from the render
+ * loop. That choice makes the number mean the same thing everywhere: the game
+ * steps once per frame, and so does every headless tool that drives a world,
+ * so a counter's stamp is comparable between a play session and a replay.
+ *
+ * A tool that never steps a world leaves the clock at 0, and its reports are
+ * stamped 0. That is not a missing value -- it is the true answer to "when",
+ * which for a level loaded and measured without ever being played is "before
+ * anything ran".
+ *
+ * @note Saturates rather than wrapping, for the same reason the counters do.
+ * @warning Game thread only. See the file-level warning.
+ *
+ * 한국어
+ * ------
+ * @brief 모든 보고에 찍히는 프레임 시계를 진행시킵니다.
+ *
+ * 렌더 루프가 아니라 ::world_step에서 시뮬레이션 단계마다 한 번 호출됩니다. 이 선택
+ * 덕분에 번호가 어디서나 같은 것을 뜻합니다. 게임은 프레임당 한 번 단계를 밟고, 월드를
+ * 구동하는 모든 헤드리스 툴도 마찬가지이므로, 카운터의 각인은 플레이 세션과 리플레이
+ * 사이에서 비교할 수 있습니다.
+ *
+ * 월드를 전혀 단계시키지 않는 툴은 시계를 0에 둔 채로 두며, 그 보고에는 0이 찍힙니다.
+ * 이는 값이 없는 것이 아니라 "언제"에 대한 참된 답입니다. 한 번도 플레이되지 않은 채
+ * 로드되어 측정된 레벨에게 그 답은 "무엇이든 실행되기 전"이기 때문입니다.
+ *
+ * @note 카운터와 같은 이유로 순환하지 않고 포화됩니다.
+ * @warning 게임 스레드 전용입니다. 파일 수준의 경고를 참조하십시오.
+ */
+void diag_tick(void);
+
+/**
+ * @brief Returns the current frame number.
+ *
+ * ENGLISH
+ * -------
+ * @return How many times ::diag_tick has been called.
+ *
+ * 한국어
+ * ------
+ * @brief 현재 프레임 번호를 반환합니다.
+ * @return ::diag_tick이 호출된 횟수.
+ */
+int diag_frame(void);
+
+/**
+ * @brief Returns the frame on which a counter first fired.
+ *
+ * ENGLISH
+ * -------
+ * A count alone cannot tell two very different faults apart. `meshpts=4000`
+ * is either one level that will not fit -- thousands of reports in a single
+ * frame during a load -- or a mesh that overflows a little every frame for
+ * twenty minutes. The first is a content problem and the second is a leak,
+ * they want opposite fixes, and the number is identical.
+ *
+ * Paired with ::diag_last this separates them: `first == last` is a burst,
+ * a `last` near ::diag_frame is still happening now.
+ *
+ * @param[in] kind Counter to read.
+ * @return The frame of the first report, or -1 if it has never fired or
+ *         `kind` is out of range.
+ *
+ * 한국어
+ * ------
+ * @brief 카운터가 처음 발생한 프레임을 반환합니다.
+ *
+ * 횟수만으로는 전혀 다른 두 결함을 구분할 수 없습니다. `meshpts=4000`은 들어가지 않는
+ * 레벨 하나(로드 중 한 프레임에 수천 건)일 수도 있고, 20분 동안 매 프레임 조금씩
+ * 넘치는 메시일 수도 있습니다. 앞은 콘텐츠 문제이고 뒤는 누수이며, 서로 반대되는 수정을
+ * 원하는데, 숫자는 똑같습니다.
+ *
+ * ::diag_last와 짝을 이루면 둘이 갈라집니다. `first == last`는 한 번의 폭발이고,
+ * `last`가 ::diag_frame에 가까우면 지금도 일어나고 있는 것입니다.
+ *
+ * @param[in] kind 읽을 카운터.
+ * @return 첫 보고의 프레임. 한 번도 발생하지 않았거나 `kind`가 범위를 벗어나면 -1.
+ */
+int diag_first(DiagKind kind);
+
+/**
+ * @brief Returns the frame on which a counter most recently fired.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] kind Counter to read.
+ * @return The frame of the latest report, or -1 if it has never fired or
+ *         `kind` is out of range.
+ * @note Keeps updating after the count saturates, so a counter pinned at
+ *       INT_MAX can still be seen to be ongoing.
+ *
+ * 한국어
+ * ------
+ * @brief 카운터가 가장 최근에 발생한 프레임을 반환합니다.
+ * @param[in] kind 읽을 카운터.
+ * @return 최신 보고의 프레임. 한 번도 발생하지 않았거나 `kind`가 범위를 벗어나면 -1.
+ * @note 횟수가 포화된 뒤에도 계속 갱신되므로, INT_MAX에 고정된 카운터도 여전히 진행
+ *       중임을 확인할 수 있습니다.
+ */
+int diag_last(DiagKind kind);
+
+/**
  * @brief Returns the short name of a counter, for display.
  *
  * ENGLISH
@@ -395,6 +501,12 @@ const char *diag_name(DiagKind kind);
  * @param[out] out Destination buffer; always null-terminated on return.
  * @param[in]  cap Capacity of `out` in bytes. Must be at least 1.
  * @return 1 when at least one counter was non-zero, 0 when all were clear.
+ * @note The format is `name=count@frame` for a counter that fired on one
+ *       frame only, and `name=count@first..last` for one that spans several.
+ *       The single-frame form is not an abbreviation for its own sake: a
+ *       burst and an ongoing leak are the two things worth telling apart at a
+ *       glance, and giving them different shapes does that without reading
+ *       the numbers.
  * @note Writes nothing but the terminator when everything is clear, so the
  *       caller can append it to a HUD string unconditionally.
  * @note Truncates rather than overflowing if `cap` is too small -- which
@@ -429,6 +541,22 @@ int diag_summary(char *out, int cap);
  * 별도의 `#ifdef`가 필요 없습니다.
  */
 #define DIAG(kind) diag_report(kind)
+
+/**
+ * @brief Advances the frame clock. Compiles to nothing in release.
+ *
+ * ENGLISH
+ * -------
+ * Use this rather than calling ::diag_tick directly, so the one site that
+ * advances the clock needs no `#ifdef` around it -- the same bargain ::DIAG
+ * makes at the several hundred sites that report.
+ *
+ * ------
+ * ::diag_tick을 직접 호출하는 대신 이 매크로를 사용하십시오. 그래야 시계를 진행시키는
+ * 유일한 지점에 `#ifdef`를 두를 필요가 없습니다. 보고하는 수백 개 지점에서 ::DIAG가
+ * 맺는 것과 같은 거래입니다.
+ */
+#define DIAG_TICK() diag_tick()
 
 /**
  * @brief Records a misplaced draw: one made on the wrong side of the pass boundary.
@@ -475,6 +603,10 @@ int diag_summary(char *out, int cap);
    코드를 전혀 생성하지 않습니다. 인자는 평가되지 않으므로, 보고 지점이 해당 빌드에
    존재하지 않는 DiagKind 상수를 참조해도 무방합니다. */
 #define DIAG(kind) ((void)0)
+
+/* The frame clock, likewise. Nothing counts, so nothing needs stamping.
+   프레임 시계도 마찬가지입니다. 세는 것이 없으므로 각인할 것도 없습니다. */
+#define DIAG_TICK() ((void)0)
 
 /* The pass-boundary guards, likewise. The argument is a function call at the
    call sites, so it is cast to void rather than dropped -- that keeps it from

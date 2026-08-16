@@ -1480,11 +1480,35 @@ one thing up there that means something is actually wrong, and the tail of a
 long title is the first thing Windows elides:
 
 ```
-! DROPPED vtx=177 | SFPS 60fps | assets: LIVE assets\ | pos 0,50,1200 cm | …
+! DROPPED vtx=177@0 traceev=12@430..1187 | SFPS 60fps | assets: LIVE assets\ | …
 ```
 
 Nothing changes about the truncation itself. The game still degrades
 gracefully; it just stops doing so in silence.
+
+**The `@` is the second axis, and it is what makes the first one usable.** A
+count on its own cannot separate two faults that want opposite fixes.
+`vtx=4000` is either one level that does not fit — four thousand drops in a
+single frame while it loads — or a mesh that leaks a handful every frame for
+twenty minutes. Identical number, and the first is a content problem while the
+second is a bug. So each entry carries the frame it first fired on, and the
+frame it last fired on when those differ. Above, `vtx=177@0` is a burst during
+load and is over; `traceev=12@430..1187` started seven seconds in and is still
+going. The two shapes are distinguishable before a single digit is compared.
+
+The clock is advanced in `world_step` rather than in the render loop, which
+costs nothing and buys two things: the number means *simulation frame*, the
+unit a demo replay and a golden digest already reason in, and every headless
+tool that drives a world gets real frame numbers without knowing `diag`
+exists. It ticks *before* the frozen test on purpose — a paused world still
+draws and can still overflow something, and a clock that stopped with the
+simulation would stamp those reports with the frame the pause began on.
+`diagtest` steps a frozen title-screen world and asserts the clock moved,
+which is the case that fails if anyone ever gates the tick on `!frozen`.
+
+A counter that has never fired reports `-1`, not `0`. Frame 0 is a real frame —
+the one levels load on, where most reports come from — so "never happened" had
+to be given a value it could not be confused with.
 
 **It costs zero bytes in release, and that is verified rather than assumed.**
 `DIAG()` expands to `((void)0)` and the whole of `diag.c` compiles away, so

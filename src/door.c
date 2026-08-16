@@ -283,9 +283,15 @@ static void apply(Level *l, const DoorDef *d, DoorState *st) {
     switch (d->axis) {
     case DOOR_UP:
         s->ceil = (short)(st->ceil0 + moved);
+        /* What the wall builder needs and the height above cannot say: not
+           where the surface IS, but how far it came. See ::Sector::uv_y.
+           벽 생성기가 필요로 하는 것이자 위의 높이가 말할 수 없는 것입니다. 면이 어디에
+           *있는지*가 아니라 얼마나 왔는지입니다. ::Sector::uv_y를 참조하십시오. */
+        s->uv_y = (short)moved;
         break;
     case DOOR_DOWN:
         s->floor = (short)(st->floor0 - moved);
+        s->uv_y  = (short)(-moved);
         break;
     case DOOR_X:
     case DOOR_Z: {

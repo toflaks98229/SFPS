@@ -26,6 +26,11 @@
 #include <math.h>
 #include "door.h"
 #include "player.h"
+/* level_geometry, to look at the texture coordinates a moving door produces.
+   CPU side only: mb_init/mb_free need no GL context and only mesh_upload would.
+   움직이는 문이 만들어 내는 텍스처 좌표를 보기 위한 level_geometry입니다. CPU 측뿐이며
+   mb_init/mb_free는 GL 컨텍스트가 필요 없고 mesh_upload만이 필요로 합니다. */
+#include "render.h"
 
 static int fails;
 
@@ -90,6 +95,27 @@ static void build(int axis, int amount, int tag, int key) {
  * (센티미터)이고 플레이어 위치가 닿는 모든 것은 미터이므로, +/-200으로 기록된 문 외곽선은
  * +/-2m에 있습니다. 초안은 플레이어를 300, 즉 300미터 밖에 세웠고, 정상 동작하는 문을
  * 상대로 접촉 관련 단언이 전부 실패했습니다. */
+/* The `v` of a WALL vertex standing at world height `y`, or a sentinel.
+ *
+ * The normal is what separates a wall from a cap: a wall's is horizontal and a
+ * floor or ceiling's is not. Without that test the door sector's own ceiling
+ * cap sits at exactly the height being asked about and answers first, with a
+ * `v` derived from x/z that has nothing to do with the question.
+ *
+ * 월드 높이 `y`에 서 있는 *벽* 정점의 `v`, 또는 감시값입니다.
+ * 벽과 캡을 가르는 것은 법선입니다. 벽의 법선은 수평이고 바닥이나 천장의 법선은 그렇지
+ * 않습니다. 그 검사가 없으면 문 섹터 자신의 천장 캡이 바로 그 높이에 있어서 먼저 답하며,
+ * 그 `v`는 x/z에서 유도된 것이라 질문과 아무 관계가 없습니다. */
+static float wall_v_at(const MeshBuf *b, float y) {
+    for (int i = 0; i < b->count; i++) {
+        const Vtx *vx = &b->v[i];
+        if (fabsf(vx->ny) > 0.01f)      continue;   /* a cap, not a wall */
+        if (fabsf(vx->py - y) > 0.002f) continue;
+        return vx->v;
+    }
+    return -1e30f;
+}
+
 static void run(float secs, float x, float z, int keys) {
     const float DT = 1.0f / 60.0f;
     for (float t = 0; t < secs; t += DT)
@@ -304,6 +330,89 @@ int main(void) {
         door_reset(&L);
         run(1.0f, 0.0f, 0.0f, KEY_NONE);
         ok(1, "a door naming a sector that does not exist is ignored");
+    }
+
+    /* --- the texture rides the door up ------------------------------------
+       Reported as: the door goes up, but it looks like it is being erased from
+       the bottom rather than rising. The geometry was right and the texture was
+       not -- `v` was anchored to world height, so the quad's bottom edge climbed
+       with the ceiling while the texture stayed pinned in space.
+
+       THE CLAIM, stated so it can fail: the BOTTOM EDGE of the leaf is the same
+       part of the door wherever the door is, so it keeps its texture
+       coordinate. Anything else means the texture is sliding against the thing
+       it is painted on.
+
+       신고 내용: 문이 올라가는데, 올라가는 것이 아니라 아래에서 지워지는 것처럼 보인다.
+       기하는 맞고 텍스처가 틀렸습니다. `v`가 월드 높이에 고정되어 있어, 사각형의 아래
+       모서리는 천장을 따라 올라가는데 텍스처는 공간에 박혀 있었습니다.
+
+       실패할 수 있는 형태로 진술한 주장: 문짝의 *아래 모서리*는 문이 어디에 있든 문의 같은
+       부분이므로 자기 텍스처 좌표를 유지합니다. 그렇지 않다면 텍스처가 자신이 칠해진 대상
+       위에서 미끄러지고 있는 것입니다. */
+    printf("\ntexture on a rising door\n");
+    {
+        Level zero = {0};
+        L = zero;
+
+        Sector *room = &L.sectors[L.n_sectors++];
+        short rp[8] = { -2000, -2000,  2000, -2000,  2000, 2000,  -2000, 2000 };
+        for (int i = 0; i < 8; i++) room->pts[i] = rp[i];
+        room->n = 4; room->floor = 0; room->ceil = 600;
+        level_bounds(room);
+
+        /* Declared SECOND, so it owns the step between the two -- see
+           level_edge_spans. A closed ceiling at 20cm is too low to walk under
+           and, more to the point here, is a height nothing else in the fixture
+           shares.
+           *두 번째로* 선언하므로 둘 사이의 단차를 이 섹터가 소유합니다. level_edge_spans를
+           참조하십시오. 20cm의 닫힌 천장은 지나갈 수 없을 만큼 낮으며, 이곳에서 더 중요하게는
+           픽스처의 다른 무엇도 공유하지 않는 높이입니다. */
+        Sector *d = &L.sectors[L.n_sectors++];
+        short dp[8] = { -200, -200,  200, -200,  200, 200,  -200, 200 };
+        for (int i = 0; i < 8; i++) d->pts[i] = dp[i];
+        d->n = 4; d->floor = 0; d->ceil = 20;
+        level_bounds(d);
+
+        DoorDef *def = &L.doors[L.n_doors++];
+        def->sector = 1; def->axis = DOOR_UP;
+        def->amount = 300; def->speed = 400;
+
+        level_grid_build(&L);
+        door_reset(&L);
+
+        MeshBuf b;
+        mb_init(&b, 1 << 15);
+
+        level_geometry(&b, &L, 0, 0);
+        float v_closed = wall_v_at(&b, 0.20f);
+        ok(v_closed > -1e29f, "the closed leaf has a bottom edge to look at");
+
+        /* 0.6 m from the door's edge, the way every other case here stands.
+           dist_to_outline measures to the nearest EDGE, so standing at the
+           centre of a 4 m outline is 2 m away from it and does not touch --
+           which is how the first draft of this case watched a door that never
+           moved and passed every texture assertion vacuously.
+           다른 모든 케이스가 서는 방식대로 문 모서리에서 0.6m입니다. dist_to_outline은 가장
+           가까운 *모서리*까지를 재므로, 4m 외곽선의 한가운데에 서는 것은 그것에서 2m 떨어진
+           것이고 접촉이 아닙니다. 이 케이스의 초안이 결코 움직이지 않는 문을 지켜보면서 모든
+           텍스처 단언을 공허하게 통과시킨 경위입니다. */
+        run(0.35f, 0.0f, 2.6f, KEY_NONE);
+
+        float lifted = door_openness(&L, 0) * 300.0f * 0.01f;   /* metres */
+        ok(lifted > 0.05f && door_openness(&L, 0) < 0.999f,
+           "the door is part way up, which is where the bug is visible");
+
+        mb_reset(&b);
+        level_geometry(&b, &L, 0, 0);
+        float v_open = wall_v_at(&b, 0.20f + lifted);
+        ok(v_open > -1e29f, "and the leaf's bottom edge has risen with it");
+
+        okf(fabsf(v_open - v_closed) < 0.002f,
+            "the leaf keeps its texture coordinate as it rises",
+            v_open, v_closed);
+
+        mb_free(&b);
     }
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall door checks passed\n", fails);

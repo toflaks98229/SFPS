@@ -669,10 +669,22 @@ static int level_parse_text(const char *name, Level *out) {
             cur = 0;
             if (found && out->n_sectors < LVL_MAX_SECTORS) {
                 cur = &out->sectors[out->n_sectors++];
-                cur->n = 0;
-                cur->floor = 0;
-                cur->ceil = 300;
-                cur->hurt = 0;      /* safe unless the file says otherwise */
+
+                /* ZEROED WHOLE, then given the defaults that are not zero. The
+                   fields used to be cleared one at a time, which meant a field
+                   added later inherited whatever the previous level left in
+                   this slot -- ::level_clear resets the COUNT, not the array.
+                   A zeroed struct is reset by construction rather than by
+                   somebody remembering to extend a list, which is the argument
+                   ::run_reset is built on.
+                   통째로 0으로 만든 뒤 0이 아닌 기본값만 부여합니다. 이전에는 필드를 하나씩
+                   지웠고, 그 말은 나중에 추가된 필드가 이 슬롯에 이전 레벨이 남긴 값을
+                   물려받는다는 뜻입니다. ::level_clear가 초기화하는 것은 배열이 아니라
+                   *개수*입니다. 0으로 초기화된 구조체는 누군가 목록을 늘려 주기를 기다리지
+                   않고 구조적으로 초기화되며, ::run_reset이 딛고 선 논거가 그것입니다. */
+                Sector fresh = {0};
+                *cur = fresh;
+                cur->ceil = 300;    /* safe unless the file says otherwise */
                 copy_name(cur->mat_floor, LVL_MAT, "brick", 5);
                 copy_name(cur->mat_wall,  LVL_MAT, "brick", 5);
                 copy_name(cur->mat_ceil,  LVL_MAT, "brick", 5);
@@ -2114,6 +2126,40 @@ static void add_wall(MeshBuf *b, const Sector *s, int i, const EdgeSpan *sp) {
     /* v grows downward so the texture is not mirrored between the two sides
        of a step. */
     float v0 = -y1 * LEVEL_UV, v1 = -y0 * LEVEL_UV;
+
+    /* --- and it travels with a surface that has moved ---------------------
+       Anchoring v to world height is right for a wall that stays put and wrong
+       for a door: the quad's bottom edge rises with the ceiling while the
+       texture stays pinned in space, so the leaf reads as being erased from
+       below instead of rising. The point of the leaf now at world `y` was at
+       `y - uv_y` before it moved, and that is the height its texture belongs to.
+
+       ONLY THE WALL THE MOVED SURFACE BOUNDS. A rising ceiling lifts the leaf
+       above it and leaves a jamb standing on the unmoved floor beside it;
+       offsetting that one would slide its texture off the floor it is still
+       resting on. Positive means the ceiling rose, so the wall is the one whose
+       BOTTOM is that ceiling; negative means the floor sank, so it is the one
+       whose TOP is that floor. Both comparisons are against the same
+       `short * U` the span was built from, so they are exact rather than
+       nearly equal.
+
+       움직인 면과 함께 이동합니다. v를 월드 높이에 고정하는 것은 제자리에 있는 벽에는 맞고
+       문에는 틀립니다. 사각형의 아래 모서리는 천장과 함께 올라가는데 텍스처는 공간에 박혀
+       있으므로, 문짝이 올라가는 것이 아니라 아래에서 지워지는 것으로 읽힙니다. 지금 월드 `y`에
+       있는 문짝의 그 지점은 움직이기 전에 `y - uv_y`에 있었고, 그것이 그 지점의 텍스처가 속한
+       높이입니다.
+
+       움직인 면이 경계를 이루는 벽에만 적용합니다. 올라가는 천장은 그 위의 문짝을 들어 올리고,
+       그 옆에는 움직이지 않은 바닥 위에 선 문설주를 남깁니다. 그것까지 오프셋하면 텍스처가 아직
+       딛고 있는 바닥에서 미끄러집니다. 양수는 천장이 올라갔다는 뜻이므로 그 벽은 *아래*가 그
+       천장인 벽이고, 음수는 바닥이 내려갔다는 뜻이므로 *위*가 그 바닥인 벽입니다. 두 비교 모두
+       그 구간을 만든 것과 같은 `short * U`에 대한 것이므로 근사가 아니라 정확합니다. */
+    if ((s->uv_y > 0 && y0 == s->ceil  * U) ||
+        (s->uv_y < 0 && y1 == s->floor * U)) {
+        float d = s->uv_y * U * LEVEL_UV;
+        v0 += d;
+        v1 += d;
+    }
 
     v3 p00 = v3f(ax, y0, az), p10 = v3f(bx, y0, bz);
     v3 p11 = v3f(bx, y1, bz), p01 = v3f(ax, y1, az);

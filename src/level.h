@@ -975,6 +975,50 @@ typedef struct {
      *       부동소수점 처리가 필요 없습니다.
      */
     short hurt;
+
+    /**
+     * @brief How far this sector's moved surface has travelled, in file units.
+     *
+     * ENGLISH
+     * -------
+     * A TEXTURING FACT, not a geometric one. The geometry is already in
+     * ::Sector::floor and ::Sector::ceil and everything that collides reads it
+     * there without knowing a door exists. What those two numbers cannot say is
+     * where a surface came FROM, and a wall's texture needs that: `v` is
+     * anchored to world height, so a door whose ceiling rises leaves its
+     * texture pinned in space while the quad's bottom edge eats upward into it.
+     * The leaf reads as being erased from below rather than as rising.
+     *
+     * Written by ::door_update, read only by the wall builder. Zero for
+     * everything that has not moved, which is every sector of a level with no
+     * doors and every sector of one that has not been stepped yet.
+     *
+     * @note Signed. Positive is the CEILING having risen, negative is the FLOOR
+     *       having sunk, and which one it is decides which of the sector's walls
+     *       the offset belongs to -- see ::add_wall. A SLIDING door needs
+     *       nothing here: `u` is measured from the edge's own start vertex,
+     *       which travels with the wall, so its texture already follows.
+     *
+     * 한국어
+     * ------
+     * @brief 이 섹터의 움직인 면이 이동한 거리(파일 단위).
+     *
+     * *텍스처링에 관한 사실*이며 기하에 관한 것이 아닙니다. 기하는 이미 ::Sector::floor와
+     * ::Sector::ceil에 있고 충돌하는 모든 것이 문의 존재를 모른 채 그것을 읽습니다. 그 두
+     * 숫자가 말할 수 없는 것은 어떤 면이 *어디에서 왔는가*이며, 벽의 텍스처는 그것을
+     * 필요로 합니다. `v`가 월드 높이에 고정되어 있으므로, 천장이 올라가는 문은 텍스처를
+     * 공간에 박아 둔 채 사각형의 아래 모서리가 위로 파고들게 만듭니다. 문짝이 올라가는 것이
+     * 아니라 아래에서 지워지는 것으로 읽힙니다.
+     *
+     * ::door_update가 기록하고 벽 생성기만 읽습니다. 움직이지 않은 모든 것에 대해 0이며,
+     * 문이 없는 레벨의 모든 섹터와 아직 진행되지 않은 레벨의 모든 섹터가 그렇습니다.
+     *
+     * @note 부호가 있습니다. 양수는 *천장*이 올라간 것, 음수는 *바닥*이 내려간 것이며, 어느
+     *       쪽인지가 그 오프셋이 섹터의 어느 벽에 속하는지를 결정합니다. ::add_wall을
+     *       참조하십시오. *미닫이* 문에는 이곳의 값이 필요 없습니다. `u`는 모서리 자신의 시작
+     *       정점에서부터 재는데 그 정점이 벽과 함께 이동하므로 텍스처가 이미 따라갑니다.
+     */
+    short uv_y;
 } Sector;
 
 #define LVL_MAX_TRIGGERS 16   ///< @brief Trigger volumes per level. / 레벨당 트리거 부피 수.

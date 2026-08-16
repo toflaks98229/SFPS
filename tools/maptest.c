@@ -378,6 +378,31 @@ static void test_uv_travels(void) {
     float u2, v2;
     brush_face_uv(face, ON_DOOR, 128.0f, 128.0f, &u2, &v2);
     checkf(v2, v0, 0.0005f, "a door that closes again lands on the v it opened from");
+
+    /* SIDEWAYS TOO, because a func_door slides as readily as it rises and the
+       compensation is not per-axis -- it is dot(delta, axis) for whatever delta
+       is. The sector model never needed this: its `u` is parametric, measured
+       as a fraction along the edge's own length, so a translated outline gives
+       the same numbers by construction. A world-space projection has no such
+       property, which is the whole difference between the two paths.
+       옆으로도 마찬가지입니다. func_door는 올라가는 만큼이나 미끄러지며, 보정은 축별이
+       아니라 delta가 무엇이든 dot(delta, axis)이기 때문입니다. 섹터 모델에는 이것이 필요한 적이
+       없었습니다. 그쪽의 `u`는 매개변수적이며 모서리 자신의 길이에 대한 비율로 재므로, 평행이동된
+       외곽선은 구성상 같은 숫자를 냅니다. 월드 공간 투영에는 그런 성질이 없고, 그것이 두 경로의
+       차이 전부입니다. */
+    const float SLIDE = 1.25f;
+    float u3, v3_;
+    brush_translate(&M2, 0, 1, v3f(SLIDE, 0.0f, 0.0f));
+    brush_face_uv(face, v3f(ON_DOOR.x + SLIDE, ON_DOOR.y, ON_DOOR.z),
+                  128.0f, 128.0f, &u3, &v3_);
+    checkf(u3, u0, 0.0005f, "a point of a SLIDING door keeps its u as well");
+
+    float u_fixed_slid, v_fixed_slid;
+    brush_face_uv(face, ON_DOOR, 128.0f, 128.0f, &u_fixed_slid, &v_fixed_slid);
+    check(fabsf(u_fixed_slid - u_fixed_before) > 0.01f,
+          "and a fixed point in the world does not, sideways either");
+
+    brush_translate(&M2, 0, 1, v3f(-SLIDE, 0.0f, 0.0f));
 }
 
 /* --- the slope -----------------------------------------------------------

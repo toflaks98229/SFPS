@@ -617,6 +617,29 @@ int main(void) {
        first stage grants nothing at all. */
     printf("\nstarting from a cleared stage\n");
     {
+        /* ONE scratch level for all three chain walks below, and released after
+           each of them. It used to be a `Level scan = {0}` declared inside each
+           loop, which is the natural way to write it and now leaks: a brush
+           level takes one of ::LVL_BRUSH_SLOTS, there are two, and a fresh
+           Level per iteration claims a new one every hop. Before the pool was
+           keyed by serial it got away with that -- each iteration's Level
+           landed on the same stack address, so the pool handed back the slot it
+           had given the last one, which is precisely the mistaken identity
+           Level::brush_key exists to stop.
+           It reads better hoisted anyway. world.c's own walk keeps one scratch
+           level for the same reason, and says so.
+
+           아래 세 번의 체인 순회 전부에 임시 레벨 *하나*를 쓰고 각각 뒤에 반납합니다.
+           이전에는 루프마다 `Level scan = {0}`을 선언했고, 그것이 자연스러운 작성 방식이지만
+           이제는 슬롯을 흘립니다. 브러시 레벨은 ::LVL_BRUSH_SLOTS 중 하나를 차지하는데 슬롯은
+           둘이고, 반복마다 새 Level은 구간마다 새 슬롯을 요구합니다. 풀이 일련번호로 키잉되기
+           전에는 그냥 넘어갔습니다. 각 반복의 Level이 같은 스택 주소에 놓였으므로 풀이 직전
+           것에게 준 슬롯을 그대로 돌려주었기 때문이며, 그것이 바로 Level::brush_key가 막으려는
+           신원 오인입니다.
+           어차피 밖으로 빼는 편이 읽기에도 낫습니다. world.c 자신의 순회도 같은 이유로 임시
+           레벨 하나를 두며 그렇게 적어 두었습니다. */
+        static Level walk;
+
         PlayerProgress first;
         ok(world_progress_for_stage(WORLD_START_LEVEL, &first),
            "the first stage is reachable from itself");
@@ -655,11 +678,11 @@ int main(void) {
             }
             prev = p;
 
-            Level scan = {0};
-            if (!level_load(at, &scan)) break;
-            if (!scan.next[0]) break;
-            txt_copy(at, sizeof(at), scan.next, -1);
+            if (!level_load(at, &walk)) break;
+            if (!walk.next[0]) break;
+            txt_copy(at, sizeof(at), walk.next, -1);
         }
+        level_release(&walk);
 
         okf(stages >= 2, "the shipped chain has stages to walk",
             (float)stages, 2.0f);
@@ -688,10 +711,10 @@ int main(void) {
             char deep[WORLD_LEVEL_MAX];
             txt_copy(deep, sizeof(deep), WORLD_START_LEVEL, -1);
             for (int hop = 0; hop < 8; hop++) {
-                Level scan = {0};
-                if (!level_load(deep, &scan) || !scan.next[0]) break;
-                txt_copy(deep, sizeof(deep), scan.next, -1);
+                if (!level_load(deep, &walk) || !walk.next[0]) break;
+                txt_copy(deep, sizeof(deep), walk.next, -1);
             }
+            level_release(&walk);
 
             /* The union of everything strictly before it. */
             int want[WP_TYPES];
@@ -701,13 +724,13 @@ int main(void) {
             txt_copy(cur, sizeof(cur), WORLD_START_LEVEL, -1);
             int before = 0;
             for (int hop = 0; hop < 8 && !same_name(cur, deep); hop++) {
-                Level scan = {0};
-                if (!level_load(cur, &scan)) break;
-                weapons_in(&scan, want);
+                if (!level_load(cur, &walk)) break;
+                weapons_in(&walk, want);
                 before++;
-                if (!scan.next[0]) break;
-                txt_copy(cur, sizeof(cur), scan.next, -1);
+                if (!walk.next[0]) break;
+                txt_copy(cur, sizeof(cur), walk.next, -1);
             }
+            level_release(&walk);
 
             PlayerProgress d;
             ok(world_progress_for_stage(deep, &d), "the deepest stage is reachable");

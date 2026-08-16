@@ -84,7 +84,47 @@ rebuilds when TrenchBroom saves, so the loop is save → look, with no compile i
 between. A save caught half-written leaves the last good map on screen rather
 than blanking it.
 
-`mapview` flies; it does not collide. Brush collision does not exist yet.
+`mapview` flies rather than walks. That is the viewer's own choice, not a
+missing feature — brushes collide in the game. To play the map instead of
+looking at it, put it in the campaign (below) and run `game_dev.exe`.
+
+## Getting a map into the build
+
+Two separate things, and only the first is automatic.
+
+**Baking is automatic.** `bake.ps1` sweeps `assets\maps\*.map` on every build,
+deflates each one and writes it into `src\gen_assets.h`, so `.\build.ps1` is the
+whole of it. `game.exe` then carries the map with nothing beside it to load —
+the size report names each map and what it cost:
+
+```text
+maps\atrium.map               17961  10654 41%
+```
+
+**Reaching it is not.** A baked map that nothing names is in the binary and
+unreachable in play. Levels are a chain: each names the next, and the one with
+no `next` ends the game on its exit. `level_load` looks for a `.map` **before**
+it looks in `assets\levels.txt`, so a name resolves to your brush level if one
+exists and to a sector level if one does not — which is what lets a `.map`
+replace a sector level by taking its name.
+
+Three ways to be on the chain, in the order you will want them:
+
+| Route | How | Use it when |
+| --- | --- | --- |
+| Link it in | set some level's `next` to your map's name, and your map's `worldspawn` `next` to whatever follows | the normal case |
+| Make it first | change `WORLD_START_LEVEL` in `src\world.h` | a map is the only thing you are testing |
+| Take a name | call the file `arena.map` and it wins over `levels.txt`'s `arena` | replacing a sector level in place |
+
+`atrium` is linked in as the second stage: `assets\levels.txt` gives `arena` a
+`next atrium`, and atrium's own worldspawn carries `next vault`. Nothing else
+had to change.
+
+`build\leveltrans.exe` walks the whole chain from the start level and checks
+each hop — that it loads, that it has geometry, that it has an exit, that the
+exit is clear of the spawn, and that the chain ends rather than loops. Run it
+after editing `next` anywhere; a typo'd name is otherwise a level that loads a
+void, and it looks exactly like an exit that does not work.
 
 ## What works today, and what does not
 
@@ -93,10 +133,19 @@ than blanking it.
 | Brushes, planes, face polygons | yes |
 | Valve 220 per-face UV axes | yes — this is the reason for the whole format change |
 | Standard-format faces | read correctly, but the config will not let you save them |
-| `worldspawn`, `info_player_start`, `func_door` | parsed; `func_door` does not move yet |
-| Monsters, pickups, lights | not read from `.map` at all yet |
-| Collision against brushes | not yet |
-| Static light baked into brushes | not yet — `mapview` shows ambient plus the shader's key light, so it is flatter than the game will be |
+| Collision against brushes | yes — `brush_trace` sweeps the player box, and the same call answers hitscans and the hook |
+| `worldspawn` (`next`), `info_player_start` | yes |
+| `func_door` | yes, and it moves: the leaf slides on `angle`/`speed`, and `key` locks it |
+| `trigger_multiple` / `trigger_once` (`target`) | yes — a volume you walk into, which fires the door naming it |
+| `trigger_hurt` | yes |
+| `light` (`light`, `_color`) | yes, and baked per vertex against the brushes it stands among |
+| `monster_*`, `monster_spawner_*`, `item_*` | yes — read by prefix, so a new monster is an FGD line and a sprite |
+| `info_exit`, `info_push` | yes |
+| Procedural materials previewed in the editor | no — see below |
+
+Everything in that table is exercised headlessly by `build\maptest.exe` and
+`build\tracetest.exe`; the ones about entities are also visible in
+`build\leveltrans.exe`'s walk.
 
 ## Textures are half there
 
@@ -126,3 +175,36 @@ Set the **default face scale to 0.5**. At scale 1.0 a 128px texture spans 4m; at
 
 `src/brush.h`'s `BRUSH_UNIT` records the argument for 1/32 over the
 alternatives, and is the one number to change if this ever needs revisiting.
+
+## Limits, and how you find out you hit one
+
+Nothing here fails on a map that is too big — the surplus is **dropped**, which
+is the right behaviour for a size-bound game and an invisible one for an author.
+So each limit has a counter, and a dev build prints them in the window title
+with a `!` in front:
+
+```text
+! DROPPED brush ent | SFPS 60fps | ...
+```
+
+| | limit | counter |
+| --- | --- | --- |
+| Brushes per map | 512 | `brush` |
+| Faces, all brushes | 4096 | `brush` |
+| Faces on one brush | 32 | `brush` |
+| Entities in the `.map` | 96 | `mapent` |
+| Entities the level keeps | 64 | `ent` |
+| Lights | 64 | `light` |
+| Doors | 16 | `door` |
+| Trigger volumes | 16 | — |
+| Hurt volumes | 8 | — |
+
+A brush whose faces do not close a solid is dropped too, and counted as
+`unclosed` — that is the one on this list you can cause by dragging a face
+rather than by building something large.
+
+One more that is not a count: **the file must be ASCII.** `bake.ps1` throws
+rather than baking a map with a non-ASCII character in a name, key, value or
+texture name — silently replacing it with `?` would keep the byte length right
+and make the content wrong, which shifts every map baked after it. Comments are
+stripped before the check, so this only ever fires on something you can fix.

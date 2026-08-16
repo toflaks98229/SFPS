@@ -10,7 +10,8 @@ discipline is not.
 ## Status
 
 A small but complete FPS loop, start to finish. Win32 window → OpenGL 3.3 core
-→ shaders → procedural textures and sprites → sector-based level geometry →
+→ shaders → procedural textures and sprites → level geometry from sectors or
+from TrenchBroom brushes, mixed freely in one episode →
 FPS camera with real momentum, a DOOM-Eternal-style meat hook and recoil
 jumping → Quake-style shotgun with ammo → four monster types, three melee and
 one that shoots → health, pickups, and level transitions that end in a win
@@ -1054,8 +1055,23 @@ Collection runs every frame against the player's feet, so a pickup is taken
 A level names a `next` and drops an `exit` entity; walk onto the exit and the
 game loads `next`, **carrying your health and ammo across** — the exit is a
 reward you arrive at, the way a Doom episode runs, not a reset. The shipped
-`assets/levels.txt` wires `arena → vault`, and **vault has no `next`**, which
-is what makes it the end of the game (see below).
+campaign is `arena → atrium → vault`, and **vault has no `next`**, which is
+what makes it the end of the game (see below).
+
+The chain is not one file's list. `arena` and `vault` are sector levels in
+`assets/levels.txt`; `atrium` is `assets/maps/atrium.map`, authored in
+TrenchBroom, and it is on the chain because `arena` names it and its own
+`worldspawn` names `vault`. `level_load` looks for a `.map` before it looks in
+`levels.txt`, so a name resolves to whichever exists and the two authoring
+routes mix freely inside one episode — see
+[assets/trenchbroom/README.md](assets/trenchbroom/README.md).
+
+`build\leveltrans.exe` walks the whole chain from `WORLD_START_LEVEL` and
+asserts what has to be true of any campaign: every hop loads, has geometry, has
+an exit, keeps that exit clear of its spawn, and the chain ends rather than
+loops. It used to name `arena` and `vault` outright and went red the day a
+level was inserted between them — a test that memorises the campaign instead of
+checking it is one nobody can edit around.
 
 The whole thing is a few lines because the pieces were already there:
 

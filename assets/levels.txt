@@ -48,7 +48,16 @@
 
 l arena
 start 0 1200 0
-next vault
+# atrium is assets\maps\atrium.map, a TrenchBroom level. Naming it here is all
+# it takes to put a .map into the campaign: level_load looks for a .map before
+# it looks in this file, so a name resolves to a brush level if one exists and
+# to a level below if one does not. atrium's own worldspawn carries `next vault`,
+# so the chain closes without anything here saying so.
+# atrium은 assets\maps\atrium.map이며 TrenchBroom 레벨입니다. .map을 캠페인에 넣는 데
+# 필요한 것은 이곳에 이름을 적는 것뿐입니다. level_load는 이 파일보다 .map을 먼저 찾으므로,
+# 이름은 브러시 레벨이 있으면 그쪽으로, 없으면 아래의 레벨로 해석됩니다. atrium 자신의
+# worldspawn이 `next vault`를 나르므로 이곳에서 아무 말을 하지 않아도 체인이 닫힙니다.
+next atrium
 
 s
 floor -50  ceil 600

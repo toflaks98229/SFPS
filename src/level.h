@@ -1421,8 +1421,21 @@ typedef struct {
      * question "is this Level still alive" one nothing has to ask.
      *
      * @note Give a slot back with ::level_release when a Level is about to go
-     *       out of scope. Nothing breaks if you forget -- the serial is dead
-     *       either way -- but the slot stays claimed, and there are two.
+     *       out of scope, AND THIS IS NOT OPTIONAL. There are
+     *       ::LVL_BRUSH_SLOTS of them, which is two; a scope that abandons one
+     *       without releasing it has taken a slot nothing can ever reclaim,
+     *       and the next brush level to ask is refused rather than served
+     *       somebody else's storage. The refusal is counted
+     *       (::DIAG_LEVEL_SLOTS) and shows up as a `.map` that suddenly will
+     *       not load -- which is loud, and is the point, but it is a leak and
+     *       not a warning.
+     *
+     *       The old address-keyed pool appeared not to need this: a scratch
+     *       Level declared inside a loop landed on the same stack address every
+     *       iteration, so the pool handed back the slot it had given the last
+     *       one. That is the mistaken identity this field exists to stop, so
+     *       what looked like a pool that reclaimed slots was a pool that could
+     *       not tell two Levels apart.
      * @note Not cleared by ::level_load: reloading the SAME Level must reuse the
      *       storage it already holds rather than take the other one's. That is
      *       what makes a hot reload, and a restart, cost one slot and not two.

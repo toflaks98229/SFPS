@@ -421,6 +421,72 @@ into has no edge there at all.
 `leveltest` now checks all of it: every triangle's winding against its normal,
 and that floors, ceilings and walls are all present.
 
+### Asking the level a question
+
+Everything above builds the level. `level_trace` is how the game *queries* it —
+hitscans, the grapple, monster sight, and the shadow ray behind every baked
+vertex all go through it.
+
+It used to sample. Walk the ray in 5 cm steps, ask "is this point inside a
+sector and between its floor and ceiling", stop at the first no, then bisect the
+last interval ten times to find the surface. Nothing about that is wrong, and
+for a long time nothing about it was slow enough to look at. What it was, was
+**uninformed**: a 40 m ray took 800 samples to discover a handful of crossings.
+
+The insight is one sentence. `open_at` asks two things — does a sector cover
+`(x,z)`, and is `y` between that sector's floor and ceiling — and **neither
+answer can change except where the ray crosses an outline in plan or a
+floor/ceiling in height.** Between two such crossings the answer is constant,
+whatever the sectors are doing, overlapping and last-wins included. So find the
+crossings, sort them, and sample once inside each piece. That is not an
+approximation of the answer; it is the answer.
+
+| `level_trace`, 40 m | before | after | |
+| --- | --- | --- | --- |
+| `arena` | 10.76 µs | 0.98 µs | **11.0×** |
+| `vault` | 5.03 µs | 0.58 µs | **8.7×** |
+| `dm03` (converted Doom map) | 16.65 µs | 6.01 µs | **2.8×** |
+
+`levelbench` reports what that is as a share of a frame rather than in
+microseconds, because a microbenchmark is not a decision: at full monster load
+`arena` went from **7.3% of a 60 fps frame to 0.7%**, `dm03` from 11.3% to 4.1%.
+`level_blocked` shares the same walker, so the light bake came with it — a cold
+build of `arena` went 0.51 ms → 0.15 ms.
+
+**It is also more correct, and that is not a claim worth making from reading
+the code.** `tracediff` fires 60,000 rays per level from points inside it, runs
+the old algorithm — reimplemented from the public API, so it is a second opinion
+and not the same code asked twice — beside the new one, and adjudicates every
+disagreement with a 1 mm march over the same predicate. Across the three levels:
+**180,000 rays, 91 answers that differ, and the new one is right in all 91.**
+The old sampler had been stepping over geometry, by up to 31 m on `dm03`, where
+a ray cleared a thin solid and ran on into the next room. "No wall is thinner
+than 5 cm" had been a constraint on level authors that nobody had written down.
+
+Two things that only surfaced under that test, and neither is obvious:
+
+*Sampling at a fixed fraction of an interval whose ends are geometry puts the
+samples exactly where the sector model's hairline cracks are.* Two sectors that
+share an edge are two independent polygons that happen to have equal
+coordinates, and `point_in_sector`'s crossing test is half-open — so along the
+seam there are points inside neither. Uniform 5 cm sampling landed there only by
+luck. Hence two samples per piece that have to agree, and a 1 mm floor on how
+narrow a piece is worth sampling at all: bounded below by the format's 1 cm
+coordinates and above by float noise on a 40 m ray, so the number is a choice
+rather than a knob.
+
+*The exact crossing lies on the wall.* `level_trace` decides floor-versus-wall
+by moving only the height and asking again — and asking that **at** the wall
+makes the plan position a coin toss, which turned every wall normal vertical.
+`leveltest`'s "wall normal is horizontal" caught it. The walker now reports the
+crossing for the distance and the last point it knew to be open for that
+question; they were the same value while the answer was approximate, and stopped
+being the same value when it became exact.
+
+The old sampler survives as the fallback for a ray that meets more crossings
+than the table holds, counted by `DIAG_TRACE_EVENTS`. Slower, not wrong, and
+better than answering from a partial list.
+
 ### Tests must not name the map
 
 `arena` is a map somebody edits. The first versions of `leveltest` and
@@ -2265,6 +2331,16 @@ frames that pack, with the decoded atlas bit-identical to before.
 - [ ] More monster types, eight-view sprites
 - [x] An `exit` that ends the game rather than looping — a win screen
 - [x] Real player momentum (`Player.vel`), a grapple hook, and recoil jumping
+- [x] Doors, switches, trigger volumes and keycards
+- [x] **TrenchBroom `.map` levels** — Valve 220 brushes read with no converter,
+      collided against, lit and moved; a brush level and a sector level sit next
+      to each other in one episode and nothing downstream can tell
+- [x] Exact level queries — `level_trace` finds the crossings instead of
+      sampling past them, verified differentially against the sampler it
+      replaced
 - [ ] A vertical arena built around the hook — floating platforms, chasms, an
       anchor point you cannot reach on foot
+- [ ] **Input record and replay** — `world_step` is already a function of
+      `(World, Input, dt)`, so serialising the `Input` stream turns a bug report
+      into a reproducible test case and gives demo playback for free
 - [ ] Final packing pass (`kkrunchy` / UPX) if the budget ever gets tight

@@ -469,15 +469,17 @@ if ($Debug) {
     Write-Host ("  -> {0}  (hot reload: edits under assets\ appear live)" -f $exe) `
                -ForegroundColor Green
 } else {
-    # -UpdateReadme, so the figure quoted in README.md is the one this build
-    # just measured. Only on a release build: a -Debug binary carries symbols
-    # and is not what the budget describes, and writing its size into the
-    # README would put a number there that no shipped build ever had.
-    # -UpdateReadme를 주어 README.md에 인용된 수치가 이번 빌드가 방금 측정한 값이 되게
-    # 합니다. 릴리스 빌드에서만입니다. -Debug 바이너리는 심볼을 포함하며 예산이 설명하는
-    # 대상이 아니므로, 그 크기를 README에 쓰면 어떤 출하 빌드도 가진 적 없는 숫자를 그곳에
-    # 두게 됩니다.
-    & (Join-Path $root 'size.ps1') -UpdateReadme
+    # -UpdateDocs, so every figure quoted in the tree is the one this build just
+    # measured -- README.md and docs\REFACTORING.md today; size.ps1 owns the
+    # list. Only on a release build: a -Debug binary carries symbols and is not
+    # what the budget describes, and writing its size into a document would put
+    # a number there that no shipped build ever had.
+    # -UpdateDocs를 주어 트리에 인용된 모든 수치가 이번 빌드가 방금 측정한 값이 되게
+    # 합니다. 오늘 기준 README.md와 docs\REFACTORING.md이며, 목록은 size.ps1이 소유합니다.
+    # 릴리스 빌드에서만입니다. -Debug 바이너리는 심볼을 포함하며 예산이 설명하는 대상이
+    # 아니므로, 그 크기를 문서에 쓰면 어떤 출하 빌드도 가진 적 없는 숫자를 그곳에 두게
+    # 됩니다.
+    & (Join-Path $root 'size.ps1') -UpdateDocs
 }
 
 if ($Tools) {

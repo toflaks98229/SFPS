@@ -132,8 +132,45 @@ typedef struct {
     int   kind;        /**< One of the PK_* constants. / PK_* 상수 중 하나. */
     v3    pos;         /**< Feet position, on the floor it spawned above. / 발 위치. 생성된 지점 아래의 바닥에 놓입니다. */
     float anim;        /**< Free-running clock for the bob and spin. / 위아래 움직임과 회전을 위한 자유 진행 시계. */
+
+    /**
+     * @brief Velocity while it is still in the air; zero once it has landed.
+     *
+     * ENGLISH
+     * -------
+     * ZERO IS THE ORDINARY CASE and costs nothing. An item the level laid out
+     * has never moved and never will, so it starts at zero and ::pickup_update
+     * skips the whole of the flight path for it. Only ::pickup_toss ever writes
+     * a non-zero one.
+     *
+     * Doubling as the "am I flying" flag rather than carrying a separate one:
+     * a pickup with velocity is in the air by definition, and a second field
+     * saying so is a second thing that can disagree with the first.
+     *
+     * 한국어
+     * ------
+     * @brief 아직 공중에 있는 동안의 속도. 착지하면 0입니다.
+     *
+     * 0이 평범한 경우이며 비용이 들지 않습니다. 레벨이 배치한 아이템은 움직인 적도 없고 앞으로도
+     * 없으므로 0에서 시작하며, ::pickup_update가 그런 아이템에 대해서는 비행 경로 전체를
+     * 건너뜁니다. 0이 아닌 값을 쓰는 것은 ::pickup_toss뿐입니다.
+     *
+     * 별도의 플래그를 두는 대신 "날고 있는가"를 겸합니다. 속도를 가진 아이템은 정의상 공중에
+     * 있으며, 그렇다고 말하는 두 번째 필드는 첫 번째와 어긋날 수 있는 두 번째 것입니다.
+     */
+    v3    vel;
+
     int   active;      /**< 0 once collected. / 획득되면 0이 됩니다. */
 } Pickup;
+
+/* --- what a tossed item does / 던져진 아이템이 하는 일 ---------------------- */
+
+/** @brief Downward acceleration on an item in the air, m/s^2. / 공중의 아이템에 걸리는 하향 가속도. */
+#define PICKUP_GRAVITY  16.0f
+/** @brief Outward speed a reward leaves the drop point at, m/s. / 보상이 낙하 지점을 떠나는 바깥 방향 속도. */
+#define PICKUP_TOSS_OUT 3.4f
+/** @brief Upward speed it leaves at, m/s. / 떠날 때의 상승 속도. */
+#define PICKUP_TOSS_UP  4.2f
 
 /**
  * @struct PickupPool
@@ -279,8 +316,68 @@ const Pickup *pickup_at(const Pools *pl, int i);
  *       함께 사용하므로, 층이 겹친 섹터에서 다른 층의 아이템을 천장 너머로
  *       획득하지 않습니다.
  */
-void pickup_update(Pools *pl, v3 player_eye, int *health, int health_max,
+void pickup_update(Pools *pl, const Level *l, v3 player_eye,
+                   int *health, int health_max,
                    Weapon *w, int *keys, float dt);
+
+/**
+ * @brief Throws an item into the air from a point, to land and be collected.
+ *
+ * ENGLISH
+ * -------
+ * Diablo's drop, and the reason it is worth the arc: an item that simply
+ * APPEARS on the floor has to be noticed, and one that is thrown has already
+ * been noticed by the time it lands. In an arena, where the reward arrives at
+ * the same moment the room goes quiet, that difference is the whole of whether
+ * the player knows they were paid.
+ *
+ * @param[in,out] pl   Pools to place it in.
+ * @param[in]     kind One of the PK_* constants.
+ * @param[in]     from Where the throw starts, feet-height metres.
+ * @param[in]     vel  How it leaves, m/s. Zero simply places it.
+ * @return Non-zero if it was placed.
+ *
+ * @note REUSES A COLLECTED SLOT before growing the array. A level lays its
+ *       items out once and only ever loses them, so the pool was written to
+ *       fill and stay filled; an arena rewards every wave and would reach
+ *       ::PICKUP_MAX in a dozen of them. A hole is what a collected item leaves
+ *       and it is exactly the right size.
+ * @note Raises ::DIAG_PICKUP_CAP and places nothing when there is no room, so a
+ *       reward that silently did not arrive is counted rather than wondered
+ *       about.
+ * @warning Where it LANDS is found by ::level_ground from the point it reaches,
+ *          so an item thrown off a ledge lands under the ledge rather than in
+ *          the air. It is not swept: it passes through walls on the way out.
+ *          The throw is short and the drop point is where the player is
+ *          standing, which is the case that has floor under it.
+ *
+ * 한국어
+ * ------
+ * @brief 아이템을 한 지점에서 공중으로 던져, 떨어진 뒤 획득되게 합니다.
+ *
+ * 디아블로의 드롭이며, 포물선이 값어치를 하는 이유입니다. 그냥 바닥에 *나타나는* 아이템은
+ * 알아채져야 하지만, 던져진 아이템은 떨어질 무렵 이미 알아채진 상태입니다. 방이 조용해지는
+ * 바로 그 순간 보상이 도착하는 아레나에서, 그 차이가 플레이어가 자신이 보상받았음을 아는지
+ * 여부의 전부입니다.
+ *
+ * @param[in,out] pl   아이템을 놓을 풀.
+ * @param[in]     kind PK_* 상수 중 하나.
+ * @param[in]     from 던지기가 시작되는 지점. 발 높이 기준 미터.
+ * @param[in]     vel  떠나는 속도 (m/s). 0이면 그냥 놓습니다.
+ * @return 놓였으면 0이 아닙니다.
+ *
+ * @note 배열을 늘리기 전에 *획득된 슬롯을 재사용합니다.* 레벨은 아이템을 한 번 배치하고 잃기만
+ *       하므로 풀은 채워진 뒤 그대로 유지되도록 작성되었습니다. 그러나 아레나는 웨이브마다
+ *       보상하며 열몇 번이면 ::PICKUP_MAX에 닿습니다. 획득된 아이템이 남기는 구멍이 정확히
+ *       알맞은 크기입니다.
+ * @note 자리가 없으면 ::DIAG_PICKUP_CAP을 올리고 아무것도 놓지 않으므로, 조용히 도착하지 않은
+ *       보상은 궁금해할 대상이 아니라 세어지는 대상이 됩니다.
+ * @warning *착지 지점*은 도달한 지점에서 ::level_ground로 찾으므로, 난간 밖으로 던져진 아이템은
+ *          공중이 아니라 난간 아래에 떨어집니다. 스윕하지는 않습니다. 나가는 도중에는 벽을
+ *          통과합니다. 던지기는 짧고 낙하 지점은 플레이어가 서 있는 자리이며, 그곳은 아래에
+ *          바닥이 있는 경우입니다.
+ */
+int pickup_toss(Pools *pl, int kind, v3 from, v3 vel);
 
 /**
  * @brief Resolves a pickup name to its ::PK_ kind, for a name that is not

@@ -17,6 +17,7 @@
  * 두었습니다.
  */
 
+#include <math.h>   /* cosf/sinf -- the ring a wave reward is thrown along */
 #include "world.h"
 #include "hook.h"
 #include "enemy.h"
@@ -712,6 +713,79 @@ static void step_exit(World *w) {
  * 로드가 step_exit이 아니라 이곳에 있는 이유는, 어느 레벨이 도는지를 바꾸는 곳이 정확히
  * 하나이도록 하기 위해서입니다. */
 /**
+ * @brief Throws a cleared wave's reward down around the player.
+ *
+ * ENGLISH
+ * -------
+ * SCATTERED BY INDEX RATHER THAN AT RANDOM. Item k of n leaves along the k-th
+ * of n evenly spaced directions, so the drop is a ring and every run produces
+ * the same one. Random angles would look no better -- a dozen items from one
+ * point read as a burst either way -- and would make this the one thing in a
+ * recorded demo that replays differently, for nothing.
+ *
+ * Thrown from the player's own feet, because that is where they are looking
+ * when the room goes quiet. ::pickup_toss refuses to be collected in flight, so
+ * standing on the drop point does not absorb the reward before it is seen.
+ *
+ * @param[in,out] w World whose player is being paid.
+ * @note Ammo only for weapons already held; see ::WORLD_WAVE_AMMO.
+ *
+ * 한국어
+ * ------
+ * @brief 정리된 웨이브의 보상을 플레이어 주위로 던집니다.
+ *
+ * 무작위가 아니라 *인덱스로* 흩뿌립니다. n개 중 k번째 아이템은 균등하게 나뉜 n개 방향 중
+ * k번째로 떠나므로, 드롭은 고리 모양이고 모든 플레이가 같은 것을 만들어 냅니다. 무작위 각도가
+ * 더 나아 보이지도 않으며(한 지점에서 나온 열몇 개는 어느 쪽이든 폭발로 읽힙니다), 기록된
+ * 데모에서 다르게 재생되는 유일한 것을 아무 대가 없이 만들게 됩니다.
+ *
+ * 플레이어 자신의 발치에서 던지는 이유는 방이 조용해질 때 그들이 보고 있는 곳이 그곳이기
+ * 때문입니다. ::pickup_toss는 비행 중 획득을 거부하므로, 낙하 지점에 서 있어도 보상이 보이기
+ * 전에 흡수되지 않습니다.
+ *
+ * @param[in,out] w 플레이어가 보상받는 월드.
+ * @note 탄약은 이미 보유한 무기에 대해서만입니다. ::WORLD_WAVE_AMMO를 참조하십시오.
+ */
+static void wave_reward(World *w) {
+    /* What is actually going to be thrown, gathered first: the ring is spaced
+       by how many there are, and the ammo count depends on what the player
+       holds. Spacing by the intended count instead would leave a gap in the
+       ring wherever a weapon was not owned.
+       실제로 던져질 것을 먼저 모읍니다. 고리의 간격은 개수로 정해지는데, 탄약의 수는
+       플레이어가 무엇을 들고 있는지에 달려 있습니다. 의도한 개수로 간격을 잡으면 보유하지 않은
+       무기가 있는 자리마다 고리에 틈이 생깁니다. */
+    int kinds[WORLD_WAVE_MEDKITS + WORLD_WAVE_AMMO];
+    int n = 0;
+
+    for (int i = 0; i < WORLD_WAVE_MEDKITS; i++)
+        kinds[n++] = PK_HEALTH;
+
+    for (int i = 0, gun = 0; i < WORLD_WAVE_AMMO; i++) {
+        /* Round-robin over the weapons actually held, so a player with three
+           guns is fed all three rather than three boxes for the first.
+           실제로 보유한 무기를 돌아가며 채웁니다. 총 세 자루를 든 플레이어가 첫 번째 것의
+           상자 세 개가 아니라 셋 모두를 받게 하기 위함입니다. */
+        int found = -1;
+        for (int k = 0; k < WP_TYPES; k++) {
+            int t = (gun + k) % WP_TYPES;
+            if (w->weapon.owned[t]) { found = t; gun = t + 1; break; }
+        }
+        if (found < 0) break;                  /* holding nothing that takes ammo */
+        kinds[n++] = PK_AMMO_FOR(found);
+    }
+
+    v3 feet = v3f(w->player.pos.x, w->player.pos.y - PLAYER_EYE, w->player.pos.z);
+
+    for (int i = 0; i < n; i++) {
+        float a = 6.2831853f * (float)i / (float)n;
+        v3 vel = v3f(cosf(a) * PICKUP_TOSS_OUT,
+                     PICKUP_TOSS_UP,
+                     sinf(a) * PICKUP_TOSS_OUT);
+        pickup_toss(&w->pools, kinds[i], feet, vel);
+    }
+}
+
+/**
  * @brief Runs the arena: starts waves, notices they are cleared, times the rest.
  *
  * ENGLISH
@@ -778,8 +852,16 @@ static void step_wave(World *w, float dt) {
 
     w->run.wave_time += dt;
 
-    if (enemy_wave_done(&w->pools))
+    /* Paid on the frame the wave is noticed to be over, not when the breather
+       ends: the reward has to be in the air while the room is going quiet,
+       which is the moment it reads as payment for what just happened.
+       휴식이 끝날 때가 아니라 웨이브가 끝났음을 알아챈 프레임에 지급합니다. 보상은 방이
+       조용해지는 동안 공중에 있어야 하며, 그때가 방금 일어난 일에 대한 대가로 읽히는
+       순간입니다. */
+    if (enemy_wave_done(&w->pools)) {
         w->run.wave_break = WORLD_WAVE_BREAK;
+        wave_reward(w);
+    }
 }
 
 static void step_between(World *w, float dt) {
@@ -1346,7 +1428,8 @@ int world_step(World *w, const Input *in, float aspect, float dt) {
        is passed whole rather than one ammo pointer, because a box says which
        belt it fills and a weapon pickup fills none of them. */
     if (!frozen)
-        pickup_update(&w->pools, w->player.pos, &w->player.health, PLAYER_MAX_HP,
+        pickup_update(&w->pools, &w->level, w->player.pos,
+                      &w->player.health, PLAYER_MAX_HP,
                       &w->weapon, &w->player.keys, dt);
 
     /* Before the exit, because a pad and an exit on the same tile is a level

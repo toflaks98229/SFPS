@@ -344,6 +344,119 @@ int main(void) {
         ok(w.pools.enemy.spawner[0].warn == 0.0f, "and arming clears it");
     }
 
+    /* --- the reward, and the arc that announces it -----------------------
+       Diablo's drop. The claim worth checking is not that items appear -- that
+       is one line -- but that they are IN THE AIR for a while and cannot be
+       absorbed by the player standing on the drop point, which is what makes
+       the arc visible at all.
+       디아블로의 드롭입니다. 검사할 가치가 있는 주장은 아이템이 나타난다는 것이 아니라(그것은
+       한 줄입니다) 그것들이 한동안 *공중에* 있으며 낙하 지점에 서 있는 플레이어에게 흡수될 수
+       없다는 것입니다. 그것이 포물선을 애초에 보이게 만드는 것입니다. */
+    printf("\nthe wave reward\n");
+    {
+        fixture(&w);
+        add_spawner(&w.level, "spawner_imp", 2000, 0, 5, 0, 0);
+        enemy_spawn_level(&w.pools, &w.level);
+        w.weapon.owned[WP_SHOTGUN] = 1;
+        w.weapon.ammo[WP_SHOTGUN]  = 0;
+        step_alive(&w, 1);
+
+        int before = pickup_count(&w.pools);
+        step_alive(&w, 2000);
+        for (int i = 0; i < w.pools.enemy.count; i++)
+            w.pools.enemy.m[i].active = 0;
+        step_alive(&w, 1);
+
+        int after = pickup_count(&w.pools);
+        ok(after > before, "clearing a wave throws items down");
+        /* All of both budgets. The ammo goes round-robin over the weapons
+           actually held, so a player with one gun gets all three boxes for it
+           rather than one box and two nothings.
+           두 예산 모두입니다. 탄약은 실제로 보유한 무기를 돌아가며 배정되므로, 총 한 자루를 든
+           플레이어는 상자 하나와 빈자리 둘이 아니라 세 상자를 모두 그 총으로 받습니다. */
+        oki(after - before == WORLD_WAVE_MEDKITS + WORLD_WAVE_AMMO,
+            "the medkits and a box for every point of the ammo budget",
+            after - before, WORLD_WAVE_MEDKITS + WORLD_WAVE_AMMO);
+
+        /* IN THE AIR. The player is standing exactly where they were thrown
+           from, so any of these that were collectable would already be gone.
+           공중에 있습니다. 플레이어는 던져진 바로 그 자리에 서 있으므로, 이 중 획득 가능한
+           것이 있었다면 이미 사라졌을 것입니다. */
+        int flying = 0;
+        for (int i = 0; i < w.pools.pickup.count; i++) {
+            const Pickup *p = &w.pools.pickup.p[i];
+            if (p->active && (p->vel.x || p->vel.y || p->vel.z)) flying++;
+        }
+        oki(flying == after - before, "and every one of them is in the air",
+            flying, after - before);
+        oki(w.player.health == PLAYER_MAX_HP,
+            "with none of it absorbed on the frame it was thrown",
+            w.player.health, PLAYER_MAX_HP);
+
+        /* They land, and only then can be had. Health is topped up by
+           step_alive, so ammo is what proves collection happened.
+           떨어지고 나서야 가질 수 있습니다. 체력은 step_alive가 채우므로, 획득이 일어났음을
+           증명하는 것은 탄약입니다. */
+        step_alive(&w, 180);
+        int still_flying = 0;
+        for (int i = 0; i < w.pools.pickup.count; i++) {
+            const Pickup *p = &w.pools.pickup.p[i];
+            if (p->active && (p->vel.x || p->vel.y || p->vel.z)) still_flying++;
+        }
+        oki(still_flying == 0, "three seconds later they have all landed",
+            still_flying, 0);
+
+        /* THROWN CLEAR OF WHERE THE PLAYER STANDS, which is the other half of
+           the arc's job: a reward that lands under your feet is one you never
+           went and got. So the player has to walk to it, and that is checked by
+           walking to it -- standing still and asserting the ammo went up would
+           only pass if the drop had failed to travel.
+           플레이어가 서 있는 자리 *밖으로* 던져지며, 그것이 포물선이 하는 일의 나머지
+           절반입니다. 발밑에 떨어지는 보상은 가지러 간 적 없는 보상입니다. 그래서 플레이어는
+           그곳까지 걸어가야 하며, 걸어가서 검사합니다. 가만히 서서 탄약이 늘었다고 단언하는
+           것은 드롭이 이동에 실패했을 때에만 통과합니다. */
+        int found = -1;
+        for (int i = 0; i < w.pools.pickup.count; i++) {
+            const Pickup *p = &w.pools.pickup.p[i];
+            if (p->active && PK_AMMO_WEAPON(p->kind) == WP_SHOTGUN) { found = i; break; }
+        }
+        ok(found >= 0, "an ammo box is lying there");
+        if (found >= 0) {
+            v3 at = w.pools.pickup.p[found].pos;
+            float away = (at.x - 0.0f) * (at.x - 0.0f) + (at.z - 0.0f) * (at.z - 0.0f);
+            ok(away > PICKUP_RADIUS * PICKUP_RADIUS,
+               "out of reach of where it was thrown from");
+
+            w.player.pos = v3f(at.x, at.y + PLAYER_EYE, at.z);
+            step_alive(&w, 2);
+            ok(w.weapon.ammo[WP_SHOTGUN] > 0, "and collectable once walked to");
+        }
+    }
+
+    /* --- a collected slot is reused --------------------------------------
+       An arena rewards every wave and the pool holds PICKUP_MAX. Without reuse
+       it fills in a dozen waves and DIAG_PICKUP_CAP fires for the rest of the
+       run, which is a counter reporting a design that did not scale.
+       아레나는 웨이브마다 보상하고 풀은 PICKUP_MAX를 담습니다. 재사용이 없으면 열몇 웨이브면
+       가득 차고 남은 플레이 내내 DIAG_PICKUP_CAP이 발생합니다. 그것은 확장되지 않은 설계를
+       보고하는 카운터입니다. */
+    printf("\nthe pool does not fill up\n");
+    {
+        fixture(&w);
+        int cap_before = diag_count(DIAG_PICKUP_CAP);
+
+        /* Throw and collect, many more times than there are slots. */
+        for (int round = 0; round < PICKUP_MAX * 3; round++) {
+            pickup_toss(&w.pools, PK_HEALTH, v3f(0, 0, 0), v3f(0, 0, 0));
+            for (int i = 0; i < w.pools.pickup.count; i++)
+                w.pools.pickup.p[i].active = 0;
+        }
+        ok(w.pools.pickup.count <= PICKUP_MAX, "the count never passes the cap");
+        oki(diag_count(DIAG_PICKUP_CAP) == cap_before,
+            "and nothing was ever refused for want of room",
+            diag_count(DIAG_PICKUP_CAP) - cap_before, 0);
+    }
+
     printf("\n%s\n", fails ? "  FAILED" : "  passed");
     return fails ? 1 : 0;
 }

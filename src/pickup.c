@@ -90,7 +90,69 @@ const Pickup *pickup_at(const Pools *pl, int i) {
     return (i >= 0 && i < pl->pickup.count) ? &pl->pickup.p[i] : 0;
 }
 
-void pickup_update(Pools *pl, v3 player_eye, int *health, int health_max,
+int pickup_toss(Pools *pl, int kind, v3 from, v3 vel) {
+    Pickup *p = 0;
+
+    /* A collected item's hole, before growing the array. See the note on this
+       function for why an arena needs this and a level never did.
+       배열을 늘리기 전에 획득된 아이템의 구멍을 씁니다. 아레나가 이것을 필요로 하고 레벨은
+       필요로 한 적 없는 이유는 이 함수의 설명을 참조하십시오. */
+    for (int i = 0; i < pl->pickup.count; i++)
+        if (!pl->pickup.p[i].active) { p = &pl->pickup.p[i]; break; }
+
+    if (!p) {
+        if (pl->pickup.count >= PICKUP_MAX) { DIAG(DIAG_PICKUP_CAP); return 0; }
+        p = &pl->pickup.p[pl->pickup.count++];
+    }
+
+    Pickup zero = {0};
+    *p = zero;
+    p->kind   = kind;
+    p->pos    = from;
+    p->vel    = vel;
+    p->active = 1;
+    return 1;
+}
+
+/* One item's flight. Returns non-zero while it is still in the air, which is
+   also the answer to "may it be collected yet".
+   아이템 하나의 비행입니다. 아직 공중에 있으면 0이 아닌 값을 반환하며, 그것은 "아직 획득할 수
+   있는가"에 대한 답이기도 합니다. */
+static int fly(Pickup *p, const Level *l, float dt) {
+    if (p->vel.x == 0.0f && p->vel.y == 0.0f && p->vel.z == 0.0f) return 0;
+
+    p->vel.y -= PICKUP_GRAVITY * dt;
+    p->pos = v3add(p->pos, v3scale(p->vel, dt));
+
+    /* Only ever caught on the way DOWN. Tested against the rising half too and
+       an item thrown upward from the floor lands on the frame it left, because
+       it is still at floor height and already "below" it.
+       내려오는 중에만 잡습니다. 올라가는 절반에서도 검사하면, 바닥에서 위로 던진 아이템이
+       떠난 프레임에 착지합니다. 아직 바닥 높이에 있고 이미 그 "아래"이기 때문입다. */
+    if (p->vel.y > 0.0f) return 1;
+
+    float f, c;
+    if (!level_ground(l, p->pos.x, p->pos.z, p->pos.y + 1.0f, 1e9f, &f, &c)) {
+        /* Nowhere to land: no floor was found under where it got to. Stopped
+           where it is rather than falling for ever, so a reward thrown at a
+           hole is reachable instead of gone.
+           내려앉을 곳이 없습니다. 도달한 자리 아래에서 바닥을 찾지 못했습니다. 영원히
+           떨어지는 대신 그 자리에 멈추므로, 구멍을 향해 던져진 보상은 사라지지 않고 닿을 수
+           있는 곳에 남습니다. */
+        p->vel = v3f(0, 0, 0);
+        return 0;
+    }
+
+    if (p->pos.y <= f) {
+        p->pos.y = f;
+        p->vel   = v3f(0, 0, 0);
+        return 0;
+    }
+    return 1;
+}
+
+void pickup_update(Pools *pl, const Level *l, v3 player_eye,
+                   int *health, int health_max,
                    Weapon *w, int *keys, float dt) {
     /* The player's feet, so a pickup at floor level is compared like with
        like rather than against the eye 1.7 m up. */
@@ -104,6 +166,17 @@ void pickup_update(Pools *pl, v3 player_eye, int *health, int health_max,
            애니메이션 시계는 거리 판정보다 먼저 진행되므로, 플레이어가 닿지 않는
            아이템도 계속 움직입니다. */
         p->anim += dt;
+
+        /* IN THE AIR IS NOT COLLECTABLE, and that is the point rather than a
+           limitation: the arc is what makes the reward noticed, and an item
+           collected on the frame it was thrown never drew one. It also stops a
+           reward tossed from the player's own feet being absorbed instantly by
+           the player standing there.
+           공중에 있는 것은 획득할 수 없으며, 그것은 제약이 아니라 요점입니다. 포물선이 보상을
+           알아채이게 만드는 것인데, 던져진 프레임에 획득된 아이템은 포물선을 그린 적이
+           없습니다. 또한 플레이어 자신의 발치에서 던져진 보상이 그 자리에 서 있는 플레이어에게
+           즉시 흡수되는 것을 막습니다. */
+        if (fly(p, l, dt)) continue;
 
         /* Squared distance, avoiding a square root in the common
            "not close enough" case.

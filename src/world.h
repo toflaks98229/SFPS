@@ -112,6 +112,46 @@
  */
 #define WORLD_WAVE_BREAK 6.0f
 
+/**
+ * @brief Medkits a cleared wave throws down.
+ *
+ * ENGLISH
+ * -------
+ * TWO, and it is a count rather than an amount for a reason: ::PICKUP_HEALTH is
+ * how much one medkit gives, and a wave that healed the player by a number
+ * would be a second rule about what health is worth. Two of the thing that
+ * already exists says the same and stays true when the medkit is retuned.
+ *
+ * The reward is also deliberately not a full heal. An arena where every wave
+ * restores you is an arena where only the last wave can kill you, and the run
+ * has no shape until then.
+ *
+ * 한국어
+ * ------
+ * @brief 정리된 웨이브가 떨어뜨리는 구급상자의 수.
+ *
+ * 둘이며, 양이 아니라 *개수*인 데에는 이유가 있습니다. ::PICKUP_HEALTH가 구급상자 하나가 주는
+ * 양이고, 웨이브가 플레이어를 어떤 숫자만큼 회복시킨다면 그것은 체력의 값어치에 대한 두 번째
+ * 규칙이 됩니다. 이미 존재하는 것의 두 개가 같은 말을 하면서, 구급상자를 다시 조율해도
+ * 참으로 남습니다.
+ *
+ * 보상은 또한 의도적으로 완전 회복이 아닙니다. 웨이브마다 회복시켜 주는 아레나는 마지막
+ * 웨이브만이 플레이어를 죽일 수 있는 아레나이며, 그전까지 플레이는 아무 형태도 갖지 않습니다.
+ */
+#define WORLD_WAVE_MEDKITS 2
+
+/**
+ * @brief Ammo boxes a cleared wave throws down, for weapons the player holds.
+ *
+ * ENGLISH: Only for owned weapons, because a box for a gun you have not found
+ * is the one thing ::pickup_update refuses to collect -- it would lie on the
+ * floor for the rest of the run looking like something you had missed.
+ *
+ * 한국어: 보유한 무기에 대해서만입니다. 찾지 못한 총의 상자는 ::pickup_update가 획득을 거부하는
+ * 유일한 것이며, 플레이가 끝날 때까지 바닥에 남아 놓친 무언가처럼 보이게 됩니다.
+ */
+#define WORLD_WAVE_AMMO 3
+
 #include "level.h"
 #include "player.h"
 #include "weapon.h"

@@ -97,6 +97,35 @@ typedef struct {
     int      level_range_count;         /**< Runs in use. / 사용 중인 구간의 수. */
 
     /**
+     * @brief Where the moving half begins, in vertices and in runs.
+     *
+     * ENGLISH
+     * -------
+     * ::scene_build_level builds the static half first and the moving half
+     * after it, so everything a door touches is a SUFFIX of one buffer and one
+     * range table. These two are that boundary, and they are what
+     * ::scene_rebuild_moving truncates back to.
+     *
+     * Both are 0 on a level that does not split (see ::level_geometry_split),
+     * which makes the moving half the whole level and a rebuild the whole
+     * rebuild -- the behaviour every level had before the split existed.
+     *
+     * 한국어
+     * ------
+     * @brief 움직이는 절반이 시작하는 지점. 정점 단위와 구간 단위 양쪽.
+     *
+     * ::scene_build_level은 정적인 절반을 먼저, 움직이는 절반을 그 뒤에 생성하므로, 문이
+     * 건드리는 모든 것이 하나의 버퍼와 하나의 구간 표의 *접미사*가 됩니다. 이 둘이 그 경계이며,
+     * ::scene_rebuild_moving이 되돌리는 지점입니다.
+     *
+     * 분할되지 않는 레벨(::level_geometry_split 참조)에서는 둘 다 0이며, 그러면 움직이는 절반이
+     * 곧 레벨 전체이고 재생성이 곧 전체 재생성입니다. 분할이 존재하기 전 모든 레벨의 동작과
+     * 같습니다.
+     */
+    int      level_static_verts;
+    int      level_static_ranges;
+
+    /**
      * @brief The drawn gun: its mesh, materials and the buffers they build in.
      *
      * ENGLISH: Owned here rather than by ::World because it is one gun per GL
@@ -188,6 +217,46 @@ void scene_free(Scene *s);
  * @warning 활성 GL 컨텍스트가 필요합니다.
  */
 void scene_build_level(Scene *s, const Level *l, int dynamic);
+
+/**
+ * @brief Rebuilds only the geometry a door moves, and re-sends only that.
+ *
+ * ENGLISH
+ * -------
+ * The per-frame half of ::scene_build_level. The static half is left exactly
+ * as it was -- not rebuilt, not re-baked and not re-uploaded -- and the moving
+ * half is built again from where the doors are now.
+ *
+ * @param[in,out] s Scene holding the level built by ::scene_build_level.
+ * @param[in]     l The same level, with its doors moved.
+ * @note FALLS BACK TO A WHOLE REBUILD rather than refusing, in the two cases it
+ *       cannot do the cheap thing: a level that does not split, and a moving
+ *       half whose vertex count changed under it. Both leave the screen correct
+ *       and merely cost what the frame used to cost, which is the right way for
+ *       an optimisation to fail.
+ * @warning Requires a current GL context, and requires ::scene_build_level to
+ *          have run for this level first. Calling it for a level the scene has
+ *          not built rebuilds the wrong geometry, not nothing.
+ *
+ * 한국어
+ * ------
+ * @brief 문이 움직이는 지오메트리만 다시 만들고, 그것만 다시 보냅니다.
+ *
+ * ::scene_build_level의 프레임별 절반입니다. 정적인 절반은 있던 그대로 둡니다. 다시 만들지도,
+ * 다시 굽지도, 다시 올리지도 않습니다. 움직이는 절반만 문이 지금 있는 자리를 기준으로 다시
+ * 만듭니다.
+ *
+ * @param[in,out] s ::scene_build_level이 생성한 레벨을 보유한 장면.
+ * @param[in]     l 문이 움직인, 그 같은 레벨.
+ * @note 값싼 경로를 택할 수 없는 두 경우에 거절하는 대신 *전체 재생성으로 되돌아갑니다.*
+ *       분할되지 않는 레벨, 그리고 움직이는 절반의 정점 수가 바뀐 경우입니다. 둘 다 화면을
+ *       올바르게 유지하며 단지 이전에 치르던 비용을 치를 뿐입니다. 최적화가 실패해야 하는
+ *       올바른 방식입니다.
+ * @warning 활성 GL 컨텍스트가 필요하며, 이 레벨에 대해 ::scene_build_level이 먼저 실행되어
+ *          있어야 합니다. 장면이 생성한 적 없는 레벨에 대해 호출하면 아무 일도 없는 것이 아니라
+ *          엉뚱한 지오메트리를 다시 만듭니다.
+ */
+void scene_rebuild_moving(Scene *s, const Level *l);
 
 /* --- One frame, in one function / 한 프레임을 담은 하나의 함수 --- */
 

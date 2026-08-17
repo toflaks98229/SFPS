@@ -871,8 +871,11 @@ int world_load_level(World *w, const char *name, WorldEnter how) {
 
     /* The sectors just changed, so the mesh built from them is stale. Raised
        here rather than rebuilt here: this module does not know what a Scene is.
+       ALL of it, and this is the site that has to say so: a new level shares
+       nothing with the one before it, so the static half is stale too and a
+       partial rebuild would leave the previous level's walls on screen.
        See ::World::geometry_dirty. */
-    w->geometry_dirty = 1;
+    w->geometry_dirty = WORLD_GEOM_ALL;
 
     /* What the player keeps, taken before the spawn and put back after it. Read
        unconditionally, because reading is free and a branch here would be a
@@ -1247,8 +1250,15 @@ int world_step(World *w, const Input *in, float aspect, float dt) {
        문은 섹터 자체를 움직이므로 충돌하는 모든 것이 문의 정체를 모른 채 그것을 봅니다.
        그러나 *그려지는* 지오메트리는 따라가려면 다시 만들어야 합니다. 실제로 움직이는
        동안에만 수행하므로, 문이 없거나 전부 멈춰 있는 레벨은 비용을 치르지 않습니다. */
-    if (!frozen && door_update(&w->level, w->player.pos, w->player.keys, dt))
-        w->geometry_dirty = 1;
+    if (!frozen && door_update(&w->level, w->player.pos, w->player.keys, dt)
+        && w->geometry_dirty < WORLD_GEOM_MOVING)
+        /* Raised to MOVING, never lowered TO it. A door that moves on the frame
+           a level loaded must not turn that load's whole rebuild into a partial
+           one -- the static half would still be the previous level's.
+           MOVING으로 올릴 뿐, MOVING으로 *내리지는* 않습니다. 레벨이 로드된 프레임에 움직인
+           문이 그 로드의 전체 재생성을 부분 재생성으로 바꿔서는 안 됩니다. 그러면 정적인
+           절반이 여전히 이전 레벨의 것으로 남습니다. */
+        w->geometry_dirty = WORLD_GEOM_MOVING;
 
     /* Grenades and bolts advance with the world. Frozen with it too: a grenade
        hanging in mid-air behind a pause menu says the game is still running
@@ -1307,12 +1317,17 @@ int world_step(World *w, const Input *in, float aspect, float dt) {
 }
 
 int world_take_geometry(World *w, int *dynamic) {
-    if (!w->geometry_dirty) return 0;
-    w->geometry_dirty = 0;
+    return world_take_geometry_scope(w, dynamic) != WORLD_GEOM_NONE;
+}
+
+WorldGeom world_take_geometry_scope(World *w, int *dynamic) {
+    if (!w->geometry_dirty) return WORLD_GEOM_NONE;
+    WorldGeom scope = (WorldGeom)w->geometry_dirty;
+    w->geometry_dirty = WORLD_GEOM_NONE;
 
     /* The first rebuild creates the mesh; every one after it replaces an
        existing allocation. The caller no longer has to know which it is. */
     if (dynamic) *dynamic = w->geometry_uploaded;
     w->geometry_uploaded = 1;
-    return 1;
+    return scope;
 }

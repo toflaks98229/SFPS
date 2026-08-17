@@ -1708,6 +1708,173 @@ void level_grid_build(Level *l);
 int level_geometry(MeshBuf *b, const Level *l, MdlRange *ranges, int max_ranges);
 
 /**
+ * @enum LevelPart
+ * @brief Which half of a level's geometry to build.
+ *
+ * ENGLISH
+ * -------
+ * A door moves geometry, and the geometry it does not move is the overwhelming
+ * majority of a level. Rebuilding all of it every frame of a door's swing is
+ * what this exists to stop: levelbench put a moving frame at 0.82x the cost of
+ * a whole load build, so a door in motion costs very nearly what appearing in
+ * the level costs, sixty times a second.
+ *
+ * ::LVL_PART_STATIC and ::LVL_PART_MOVING partition the level between them --
+ * every brush lands in exactly one, and both walk brushes in ascending index
+ * order, so STATIC followed by MOVING is a stable partition of ::LVL_PART_ALL
+ * rather than merely the same vertices in some order. tools\splittest.c
+ * asserts that vertex for vertex; it is the only way to state "the split
+ * changes nothing about what is drawn" as something a machine can check.
+ *
+ * @note ::LVL_PART_ALL is the existing contract and what ::level_geometry
+ *       passes. Nothing that does not care about doors has to learn about this.
+ * @warning ONLY THE BRUSH MODEL SPLITS. Ask ::level_geometry_split first --
+ *          the sector model returns 0 there and both halves then build
+ *          everything, which is correct and pointless. See that function for
+ *          why the sector path cannot do this safely.
+ *
+ * 한국어
+ * ------
+ * @brief 레벨 지오메트리의 어느 절반을 생성할지 지정합니다.
+ *
+ * 문은 지오메트리를 움직이며, 문이 움직이지 *않는* 지오메트리가 레벨의 압도적 다수입니다.
+ * 문이 열리는 동안 매 프레임 그 전부를 다시 만드는 것이 이것이 막으려는 대상입니다.
+ * levelbench는 움직이는 프레임을 로드 시 전체 생성의 0.82배로 측정했습니다. 즉 움직이는 문은
+ * 레벨에 나타나는 것과 거의 같은 비용을 초당 60번 치릅니다.
+ *
+ * ::LVL_PART_STATIC과 ::LVL_PART_MOVING은 레벨을 둘로 분할합니다. 모든 브러시가 정확히 한쪽에
+ * 속하며, 양쪽 모두 브러시를 인덱스 오름차순으로 순회하므로 STATIC 다음 MOVING은 단지 같은
+ * 정점들의 어떤 순서가 아니라 ::LVL_PART_ALL의 *안정 분할*입니다. tools\splittest.c가 이를
+ * 정점 단위로 단언합니다. "분할은 그려지는 것을 바꾸지 않는다"를 기계가 검사할 수 있는 형태로
+ * 진술하는 유일한 방법입니다.
+ *
+ * @note ::LVL_PART_ALL이 기존 계약이며 ::level_geometry가 넘기는 값입니다. 문에 관심 없는
+ *       무엇도 이것을 배울 필요가 없습니다.
+ * @warning *브러시 모델만* 분할됩니다. 먼저 ::level_geometry_split에 물으십시오. 섹터 모델은
+ *          그곳에서 0을 반환하며, 그 경우 양쪽 절반이 모두 전체를 생성합니다. 올바르지만
+ *          무의미합니다. 섹터 경로가 이것을 안전하게 할 수 없는 이유는 그 함수를 참조하십시오.
+ */
+typedef enum {
+    LVL_PART_ALL,     /**< Everything. The existing contract. / 전체. 기존 계약입니다. */
+    LVL_PART_STATIC,  /**< Only what no door moves. / 어떤 문도 움직이지 않는 것만. */
+    LVL_PART_MOVING   /**< Only what a door moves. / 문이 움직이는 것만. */
+} LevelPart;
+
+/**
+ * @brief Whether this level's geometry can be built in halves at all.
+ *
+ * ENGLISH
+ * -------
+ * TWO CONDITIONS, and the second is the interesting one.
+ *
+ * A level splits when it is a BRUSH level and at least one door moves brushes.
+ * The first half of that is a capability and the second is simply whether
+ * there is anything to gain.
+ *
+ * WHY THE SECTOR MODEL IS EXCLUDED, and it is not an omission. ::level_edge_spans
+ * builds a wall by asking ::level_sector_at what is on the far side of each
+ * edge and reading THAT sector's floor and ceiling. So a door that rises does
+ * not only change its own walls -- it changes the step every neighbouring
+ * sector draws against it, and the step is owned by whichever of the two has
+ * the higher index. A "moving set" would have to include those neighbours.
+ *
+ * That much could be computed once at load. What cannot is ::DOOR_X and
+ * ::DOOR_Z: a sliding door moves the sector's POINTS, so which sectors it is
+ * adjacent to changes as it slides. A set computed at load is not conservative
+ * enough for it, and being wrong here does not fail loudly -- it drops the
+ * walls that should have appeared and leaves a hole you can see through and
+ * walk into. That is precisely the silent truncation diag.h was written to end,
+ * so the sector path keeps rebuilding everything until there is a way to state
+ * its moving set that a test can check.
+ *
+ * A brush face has no such dependency: it is the intersection of its own
+ * brush's half-spaces and reads nothing outside it, so translating a brush
+ * changes exactly that brush's vertices.
+ *
+ * @param[in] l Level to ask about.
+ * @return Non-zero when ::LVL_PART_STATIC and ::LVL_PART_MOVING partition this
+ *         level, 0 when both would build all of it.
+ *
+ * 한국어
+ * ------
+ * @brief 이 레벨의 지오메트리를 애초에 절반으로 나누어 생성할 수 있는가.
+ *
+ * 조건은 둘이며, 흥미로운 쪽은 두 번째입니다.
+ *
+ * 레벨이 *브러시* 레벨이고 최소 하나의 문이 브러시를 움직일 때 분할됩니다. 앞쪽 절반은
+ * 가능한가이고 뒤쪽 절반은 얻을 것이 있는가입니다.
+ *
+ * 섹터 모델이 제외된 이유이며, 빠뜨린 것이 아닙니다. ::level_edge_spans는 각 모서리 건너편에
+ * 무엇이 있는지를 ::level_sector_at에 묻고 *그* 섹터의 바닥과 천장을 읽어 벽을 만듭니다.
+ * 따라서 올라가는 문은 자기 벽만 바꾸는 것이 아니라, 이웃한 모든 섹터가 그것에 맞대어 그리는
+ * 단차를 바꿉니다. 그리고 그 단차는 둘 중 인덱스가 큰 쪽이 소유합니다. "이동 집합"은 그
+ * 이웃들까지 포함해야 합니다.
+ *
+ * 거기까지는 로드 시 한 번 계산할 수 있습니다. 할 수 *없는* 것은 ::DOOR_X와 ::DOOR_Z입니다.
+ * 미끄러지는 문은 섹터의 *점*을 움직이므로, 미끄러지는 동안 어느 섹터와 인접한지가 달라집니다.
+ * 로드 시 계산한 집합은 그것에 대해 충분히 보수적이지 않으며, 이곳에서 틀리는 것은 요란하게
+ * 실패하지 않습니다. 나타났어야 할 벽을 누락시켜, 들여다보이고 걸어 들어갈 수 있는 구멍을
+ * 남깁니다. 그것이 바로 diag.h가 끝내려고 만들어진 조용한 절단이므로, 섹터 경로는 자신의 이동
+ * 집합을 테스트가 검사할 수 있는 형태로 진술할 방법이 생길 때까지 전체를 계속 다시 만듭니다.
+ *
+ * 브러시 면에는 그런 의존이 없습니다. 자기 브러시의 반공간들의 교집합이며 그 바깥의 무엇도
+ * 읽지 않으므로, 브러시를 옮기면 정확히 그 브러시의 정점만 바뀝니다.
+ *
+ * @param[in] l 질의할 레벨.
+ * @return ::LVL_PART_STATIC과 ::LVL_PART_MOVING이 이 레벨을 분할하면 0이 아닌 값,
+ *         양쪽이 모두 전체를 생성하게 되면 0.
+ */
+int level_geometry_split(const Level *l);
+
+/**
+ * @brief Builds one half of a level's geometry. See ::LevelPart.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] b          Buffer receiving the geometry. Appended to, never
+ *                           cleared -- which is what lets STATIC and MOVING be
+ *                           built into one buffer back to back.
+ * @param[in]     l          Level to build.
+ * @param[out]    ranges     Receives one entry per run of triangles sharing a
+ *                           material. May be NULL.
+ * @param[in]     max_ranges Capacity of `ranges`.
+ * @param[in]     part       Which half. ::LVL_PART_ALL is ::level_geometry.
+ * @return How many ranges were written.
+ * @note THE STATIC LIGHT IS BAKED WHERE THE DOORS WERE. Each half bakes only
+ *       its own vertices, so a static wall keeps the shadow the door cast at
+ *       load and does not brighten when it opens. That is Quake's behaviour and
+ *       for Quake's reason -- a lightmap is compiled once and a door does not
+ *       recompile it -- and it is the price of not re-tracing every vertex in
+ *       the level sixty times a second. The moving half re-bakes as it moves,
+ *       so the door itself is lit correctly wherever it is.
+ * @warning A `max_ranges` too small drops the surplus silently and raises
+ *          ::DIAG_MAT_RANGES. Building in halves produces at least as many runs
+ *          as building whole, because a run cannot merge across the two calls.
+ *
+ * 한국어
+ * ------
+ * @brief 레벨 지오메트리의 한쪽 절반을 생성합니다. ::LevelPart를 참조하십시오.
+ * @param[in,out] b          지오메트리를 받을 버퍼. 비우지 않고 *덧붙입니다*. 그것이 STATIC과
+ *                           MOVING을 하나의 버퍼에 연달아 생성할 수 있게 하는 것입니다.
+ * @param[in]     l          생성할 대상 레벨.
+ * @param[out]    ranges     동일 재질 구간마다 하나의 항목을 받습니다. NULL이어도 됩니다.
+ * @param[in]     max_ranges `ranges`의 용량.
+ * @param[in]     part       어느 절반인지. ::LVL_PART_ALL은 ::level_geometry입니다.
+ * @return 기록된 구간의 개수.
+ * @note *정적 조명은 문이 있던 자리를 기준으로 구워집니다.* 각 절반은 자기 정점만 굽므로,
+ *       정적인 벽은 로드 시 문이 드리운 그림자를 유지하며 문이 열려도 밝아지지 않습니다.
+ *       이는 Quake의 동작이며 Quake의 이유와 같습니다. 라이트맵은 한 번 컴파일되고 문이 그것을
+ *       다시 컴파일하지 않습니다. 그리고 이것이 레벨의 모든 정점을 초당 60번 다시 판정하지 않는
+ *       대가입니다. 움직이는 절반은 움직이며 다시 굽므로 문 자체는 어디에 있든 올바르게
+ *       조명됩니다.
+ * @warning `max_ranges`가 너무 작으면 초과분을 조용히 버리고 ::DIAG_MAT_RANGES를 올립니다.
+ *          절반씩 생성하면 두 호출에 걸쳐 구간이 병합될 수 없으므로, 통째로 생성할 때보다
+ *          구간 수가 같거나 많습니다.
+ */
+int level_geometry_part(MeshBuf *b, const Level *l, MdlRange *ranges,
+                        int max_ranges, LevelPart part);
+
+/**
  * @brief Forgets every vertex the light bake has cached.
  *
  * ENGLISH

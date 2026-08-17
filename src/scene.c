@@ -308,18 +308,93 @@ void scene_free(Scene *s) {
 
 /* ----------------------------------------------------------- level geometry */
 
+/* The material half of both builders. Split out because ::scene_rebuild_moving
+   resolves only the runs after the boundary, and a second loop written out by
+   hand is how the two come to disagree about what a run's material is.
+   두 생성기의 재질 담당 절반입니다. ::scene_rebuild_moving이 경계 이후의 구간만 해석하므로
+   분리했습니다. 손으로 다시 쓴 두 번째 루프는 구간의 재질이 무엇인지에 대해 둘이 서로 다른
+   말을 하게 되는 방식입니다. */
+static void resolve_mats(Scene *s, int from) {
+    for (int i = from; i < s->level_range_count; i++)
+        s->level_tex[i] = tex_mat(s->level_ranges[i].mat);
+}
+
 void scene_build_level(Scene *s, const Level *l, int dynamic) {
     mb_reset(&s->level_buf);
-    s->level_range_count = level_geometry(&s->level_buf, l,
-                                          s->level_ranges, LVL_MAX_RANGES);
+
+    /* THE STATIC HALF FIRST, so what a door moves is a suffix of both the
+       vertex buffer and the range table. That ordering is the whole mechanism:
+       it is what lets a rebuild truncate rather than search, and what lets the
+       upload be a sub-range rather than a whole store.
+
+       A level that does not split reports no static half at all, so the moving
+       half is everything and both the truncate and the sub-upload degrade into
+       what they replaced.
+
+       *정적인 절반을 먼저* 생성하여, 문이 움직이는 것이 정점 버퍼와 구간 표 양쪽의 접미사가
+       되게 합니다. 그 순서가 기법의 전부입니다. 재생성이 탐색이 아니라 잘라내기가 되게 하고,
+       업로드가 전체 저장이 아니라 부분 범위가 되게 하는 것이 그것입니다.
+
+       분할되지 않는 레벨은 정적인 절반을 아예 보고하지 않으므로 움직이는 절반이 전체가 되며,
+       잘라내기와 부분 업로드 모두 그것들이 대체한 동작으로 자연히 되돌아갑니다. */
+    if (level_geometry_split(l)) {
+        s->level_range_count = level_geometry_part(&s->level_buf, l,
+                                                   s->level_ranges,
+                                                   LVL_MAX_RANGES,
+                                                   LVL_PART_STATIC);
+        s->level_static_verts  = s->level_buf.count;
+        s->level_static_ranges = s->level_range_count;
+
+        s->level_range_count += level_geometry_part(
+            &s->level_buf, l,
+            s->level_ranges + s->level_range_count,
+            LVL_MAX_RANGES - s->level_range_count, LVL_PART_MOVING);
+    } else {
+        s->level_static_verts  = 0;
+        s->level_static_ranges = 0;
+        s->level_range_count   = level_geometry(&s->level_buf, l,
+                                                s->level_ranges, LVL_MAX_RANGES);
+    }
+
     mesh_upload(&s->level_mesh, &s->level_buf, dynamic);
 
     /* Materials last: level_geometry decides how many runs there are, and each
        run names the material it wants.
        재질은 마지막입니다. 구간의 개수는 level_geometry가 결정하며, 각 구간이 사용할
        재질의 이름을 지정합니다. */
-    for (int i = 0; i < s->level_range_count; i++)
-        s->level_tex[i] = tex_mat(s->level_ranges[i].mat);
+    resolve_mats(s, 0);
+}
+
+void scene_rebuild_moving(Scene *s, const Level *l) {
+    /* Nothing to be clever about: rebuild the lot. Also the path a level with
+       no static half takes, which is the same statement said the other way.
+       영리하게 굴 것이 없습니다. 전부 다시 만듭니다. 정적인 절반이 없는 레벨이 택하는 경로이기도
+       하며, 같은 말을 다르게 표현한 것입니다. */
+    if (!level_geometry_split(l)) { scene_build_level(s, l, 1); return; }
+
+    /* Back to the boundary, discarding the previous frame's moving half. The
+       static half in front of it is untouched -- not rebuilt and, which is the
+       expensive half, not re-baked.
+       경계로 되돌려 이전 프레임의 움직이는 절반을 버립니다. 그 앞의 정적인 절반은 손대지
+       않습니다. 다시 만들지 않으며, 비싼 쪽인 베이크도 다시 하지 않습니다. */
+    s->level_buf.count   = s->level_static_verts;
+    s->level_range_count = s->level_static_ranges;
+
+    s->level_range_count += level_geometry_part(
+        &s->level_buf, l, s->level_ranges + s->level_range_count,
+        LVL_MAX_RANGES - s->level_range_count, LVL_PART_MOVING);
+
+    /* Sub-upload if the total still matches what the GPU store was sized for,
+       and a whole one if it does not. Translating a brush cannot change its
+       vertex count, so the fallback is for the case where something other than
+       a door changed the level under us.
+       총량이 GPU 저장 공간이 상정한 값과 여전히 같으면 부분 업로드하고, 다르면 전체를
+       올립니다. 브러시를 옮기는 것은 정점 수를 바꿀 수 없으므로, 이 되돌림은 문이 아닌
+       무언가가 우리 아래에서 레벨을 바꾼 경우를 위한 것입니다. */
+    if (!mesh_upload_from(&s->level_mesh, &s->level_buf, s->level_static_verts))
+        mesh_upload(&s->level_mesh, &s->level_buf, 1);
+
+    resolve_mats(s, s->level_static_ranges);
 }
 
 void scene_draw_level(const Scene *s, mat4 vp, v3 eye) {

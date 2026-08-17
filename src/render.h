@@ -876,6 +876,53 @@ void mb_line(MeshBuf *b, v3 a, v3 bb);
 void mesh_upload    (Mesh *m, const MeshBuf *b, int dynamic);
 
 /**
+ * @brief Re-sends only the vertices from `first` on, leaving the rest alone.
+ *
+ * ENGLISH
+ * -------
+ * For a mesh whose tail changes and whose head does not: the level, whose
+ * moving half is built after its static half and is the only part a door
+ * touches. Sending the whole buffer again would be sending an unchanged
+ * majority across the bus every frame of a door's swing.
+ *
+ * @param[in,out] m     Mesh to update. Must already hold an upload.
+ * @param[in]     b     Source buffer.
+ * @param[in]     first Index of the first vertex to send.
+ * @return Non-zero when the sub-upload happened, 0 when it could not and the
+ *         caller must fall back to a whole ::mesh_upload.
+ * @note RETURNS 0 RATHER THAN GROWING. A partial send is only valid while the
+ *       total vertex count is what the existing allocation was sized for, and
+ *       the count is checked rather than assumed -- a moving half whose vertex
+ *       count changed is a caller whose premise has broken, and silently
+ *       uploading half of it would leave the tail of the previous frame's
+ *       geometry on screen. Translating a brush cannot change its vertex count,
+ *       so this returning 0 during play means something other than a door
+ *       moved.
+ * @warning Requires a current GL context.
+ *
+ * 한국어
+ * ------
+ * @brief `first` 이후의 정점만 다시 보내고 나머지는 그대로 둡니다.
+ *
+ * 꼬리는 바뀌고 머리는 바뀌지 않는 메시를 위한 것입니다. 레벨이 그러합니다. 움직이는 절반이
+ * 정적인 절반 뒤에 생성되며, 문이 건드리는 것은 그것뿐입니다. 버퍼 전체를 다시 보내는 것은
+ * 문이 열리는 동안 매 프레임 바뀌지 않은 다수를 버스 너머로 보내는 일입니다.
+ *
+ * @param[in,out] m     갱신할 메시. 이미 업로드를 보유하고 있어야 합니다.
+ * @param[in]     b     원본 버퍼.
+ * @param[in]     first 보낼 첫 정점의 인덱스.
+ * @return 부분 업로드가 수행되면 0이 아닌 값. 불가능하여 호출자가 전체 ::mesh_upload로
+ *         되돌아가야 하면 0.
+ * @note *확장하지 않고 0을 반환합니다.* 부분 전송은 전체 정점 수가 기존 할당이 상정한 값일
+ *       때에만 유효하며, 그 수를 가정하지 않고 검사합니다. 정점 수가 달라진 움직이는 절반은
+ *       전제가 깨진 호출자이고, 그 절반만 조용히 올리면 이전 프레임 지오메트리의 꼬리가 화면에
+ *       남습니다. 브러시를 옮기는 것은 그 정점 수를 바꿀 수 없으므로, 플레이 중에 이것이 0을
+ *       반환한다면 문이 아닌 무언가가 움직인 것입니다.
+ * @warning 활성 GL 컨텍스트가 필요합니다.
+ */
+int  mesh_upload_from(Mesh *m, const MeshBuf *b, int first);
+
+/**
  * @brief Draws a mesh as triangles.
  *
  * ENGLISH

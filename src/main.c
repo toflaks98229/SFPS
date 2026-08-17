@@ -1662,9 +1662,26 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
            리로드입니다. 세 개의 호출 지점이 각자의 이유로 재생성을 기억하는 것은 그중 하나가
            잊게 되는 방식이며, 문을 열면서 출구를 넘은 프레임은 이전에 두 번 재생성했습니다.
            ::World::geometry_dirty를 참조하십시오. */
+        /* Still one site, and now it asks HOW MUCH went stale rather than only
+           whether anything did. A door in motion reaches the second branch,
+           which rebuilds and re-sends the geometry the door moves and leaves
+           the rest of the level -- the overwhelming majority of it, and the
+           part that costs a light bake -- exactly as it was.
+           여전히 한 곳이며, 이제 무언가 낡았는지만이 아니라 *얼마나* 낡았는지를 묻습니다.
+           움직이는 문은 두 번째 갈래에 도달하여, 문이 움직이는 지오메트리만 다시 만들고 다시
+           보내며, 레벨의 나머지(압도적 다수이자 라이트 베이크 비용을 치르는 부분)는 있던 그대로
+           둡니다. */
         int dynamic;
-        if (world_take_geometry(&g_world, &dynamic))
+        switch (world_take_geometry_scope(&g_world, &dynamic)) {
+        case WORLD_GEOM_ALL:
             scene_build_level(&scene, &g_world.level, dynamic);
+            break;
+        case WORLD_GEOM_MOVING:
+            scene_rebuild_moving(&scene, &g_world.level);
+            break;
+        case WORLD_GEOM_NONE:
+            break;
+        }
 
         /* --- one frame of drawing ------------------------------------------
            The other half of the pair above: everything the game shows, in one

@@ -114,6 +114,7 @@
     X(PFNGLGENBUFFERSPROC,             glGenBuffers) \
     X(PFNGLBINDBUFFERPROC,             glBindBuffer) \
     X(PFNGLBUFFERDATAPROC,             glBufferData) \
+    X(PFNGLBUFFERSUBDATAPROC,          glBufferSubData) \
     X(PFNGLVERTEXATTRIBPOINTERPROC,    glVertexAttribPointer) \
     X(PFNGLENABLEVERTEXATTRIBARRAYPROC,glEnableVertexAttribArray) \
     X(PFNGLACTIVETEXTUREPROC,          glActiveTexture) \

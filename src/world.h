@@ -620,6 +620,13 @@ typedef struct {
      * 움직인 쪽이 세우고 ::world_take_geometry가 한 곳에서 소비합니다. 그것이 또한 이
      * 모듈이 Scene의 존재를 알지 않아도 되게 하는 장치입니다.
      */
+    /* A ::WorldGeom rather than a flag, so the consumer can tell "a level was
+       loaded" from "a door moved" and rebuild only what the second one
+       invalidates. An `int` because the enum is declared below this struct,
+       beside the call that returns it.
+       플래그가 아니라 ::WorldGeom입니다. 소비하는 쪽이 "레벨이 로드되었다"와 "문이 움직였다"를
+       구별하여 두 번째가 무효화하는 것만 다시 만들 수 있게 합니다. `int`인 이유는 그 열거형이
+       이 구조체 아래, 그것을 반환하는 함수 곁에 선언되어 있기 때문입니다. */
     int geometry_dirty;
 
     /** @brief Non-zero once the level mesh has been uploaded at least once. / 레벨 메시가 최소 한 번 업로드되었으면 0이 아닙니다. */
@@ -1088,5 +1095,81 @@ int world_step(World *w, const Input *in, float aspect, float dt);
  *       0이었고 다른 두 곳에서는 리터럴 1이었습니다.
  */
 int world_take_geometry(World *w, int *dynamic);
+
+/**
+ * @enum WorldGeom
+ * @brief How much of the drawn geometry a pending rebuild has to cover.
+ *
+ * ENGLISH
+ * -------
+ * The flag used to be one bit, and one bit cannot tell the two reasons apart.
+ * A LEVEL WAS LOADED and A DOOR MOVED both made the drawn mesh stale, so both
+ * paid for the whole level: rebuilt, re-lit and re-uploaded, every frame of
+ * every swing. levelbench measured that at 0.82x the cost of the load build
+ * itself, sixty times a second.
+ *
+ * They are not the same amount of stale. A load invalidates everything; a door
+ * invalidates only what it moves. Saying which is what lets ::scene_frame's
+ * neighbour ::scene_rebuild_moving do the cheap one.
+ *
+ * @note ORDERED, and the order is what makes ::world_take_geometry's
+ *       escalation a `max` rather than a decision. A door that moves in the
+ *       same frame a level loads must not downgrade the load's whole rebuild to
+ *       a partial one, and taking the larger of the two says so without anyone
+ *       having to remember it.
+ * @note ::WORLD_GEOM_NONE is 0, so the old `if (world_take_geometry(...))`
+ *       reads exactly as it did and tools\steptest.c's assertions did not have
+ *       to change.
+ *
+ * 한국어
+ * ------
+ * @brief 대기 중인 재생성이 그려지는 지오메트리의 얼마만큼을 덮어야 하는가.
+ *
+ * 플래그는 이전에 1비트였고, 1비트는 두 가지 이유를 구별할 수 없습니다. *레벨이 로드되었다*와
+ * *문이 움직였다* 둘 다 그려지는 메시를 낡게 만들었으므로 둘 다 레벨 전체의 비용을 치렀습니다.
+ * 모든 여닫힘의 모든 프레임마다 다시 만들고, 다시 조명하고, 다시 올렸습니다. levelbench는
+ * 그것을 로드 시 생성 자체의 0.82배로, 초당 60번 측정했습니다.
+ *
+ * 둘은 같은 정도로 낡은 것이 아닙니다. 로드는 전부를 무효화하고, 문은 자신이 움직이는 것만
+ * 무효화합니다. 어느 쪽인지 말하는 것이 ::scene_rebuild_moving이 값싼 쪽을 택할 수 있게
+ * 합니다.
+ *
+ * @note *순서가 있으며*, 그 순서가 ::world_take_geometry의 승격을 판단이 아니라 `max`로
+ *       만듭니다. 레벨이 로드되는 바로 그 프레임에 움직인 문이 로드의 전체 재생성을 부분
+ *       재생성으로 격하시켜서는 안 되며, 둘 중 큰 쪽을 취하는 것이 아무도 그것을 기억하지
+ *       않아도 그렇게 말해 줍니다.
+ * @note ::WORLD_GEOM_NONE이 0이므로 기존의 `if (world_take_geometry(...))`가 그대로 읽히며,
+ *       tools\steptest.c의 단언도 바꿀 필요가 없었습니다.
+ */
+typedef enum {
+    WORLD_GEOM_NONE = 0, /**< Nothing to do. / 할 일 없음. */
+    WORLD_GEOM_MOVING,   /**< Only what a door moves. / 문이 움직이는 것만. */
+    WORLD_GEOM_ALL       /**< All of it: a level was loaded. / 전부. 레벨이 로드되었습니다. */
+} WorldGeom;
+
+/**
+ * @brief Claims the pending rebuild and says how much of it is stale.
+ *
+ * ENGLISH
+ * -------
+ * ::world_take_geometry with the scope kept rather than flattened. Same
+ * clearing, same `dynamic`, same "take rather than test" contract.
+ *
+ * @param[in,out] w       The world.
+ * @param[out]    dynamic As ::world_take_geometry. May be NULL.
+ * @return ::WORLD_GEOM_NONE when there is nothing pending, otherwise how much.
+ *
+ * 한국어
+ * ------
+ * @brief 대기 중인 재생성을 가져오며, 그중 얼마가 낡았는지 함께 말합니다.
+ *
+ * 범위를 뭉개지 않고 유지하는 ::world_take_geometry입니다. 비우는 방식도, `dynamic`도,
+ * "검사가 아니라 가져오기"라는 계약도 같습니다.
+ *
+ * @param[in,out] w       월드.
+ * @param[out]    dynamic ::world_take_geometry와 같습니다. NULL이어도 됩니다.
+ * @return 대기 중인 것이 없으면 ::WORLD_GEOM_NONE, 아니면 그 범위.
+ */
+WorldGeom world_take_geometry_scope(World *w, int *dynamic);
 
 #endif /* WORLD_H */

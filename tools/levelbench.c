@@ -32,6 +32,7 @@
 #include <windows.h>
 
 #include "level.h"
+#include "brush.h"    /* brush_translate -- how a .map door actually moves */
 #include "enemy.h"
 #include "weapon.h"
 #include "hook.h"
@@ -58,7 +59,22 @@ static void nudge_doors(Level *l, float dt) {
     int n = l->n_doors > LVL_MAX_DOORS ? LVL_MAX_DOORS : l->n_doors;
     for (int i = 0; i < n; i++) {
         const DoorDef *d = &l->doors[i];
-        if (d->sector < 0 || d->sector >= l->n_sectors) continue;
+
+        /* A brush door moves brushes, which this used to walk straight past --
+           so a .map level reported its doors and then measured a rebuild with
+           nothing moving in it, which is the flattering case and not the one
+           the number is about. ::brush_translate is what ::apply_brush calls.
+           브러시 문은 브러시를 움직이며, 이 함수는 이전에 그것을 그냥 지나쳤습니다. 그래서
+           .map 레벨은 문이 있다고 보고한 뒤 아무것도 움직이지 않는 재생성을 측정했습니다.
+           좋게 보이는 경우이지 이 수치가 다루는 경우가 아닙니다. ::brush_translate가
+           ::apply_brush가 호출하는 것입니다. */
+        if (d->sector < 0) {
+            if (l->brushes && d->n_brushes > 0)
+                brush_translate(l->brushes, d->first_brush, d->n_brushes,
+                                v3f(0.0f, d->amount * 0.01f * dt, 0.0f));
+            continue;
+        }
+        if (d->sector >= l->n_sectors) continue;
         Sector *s = &l->sectors[d->sector];
 
         switch (d->axis) {
@@ -216,8 +232,28 @@ int main(int argc, char **argv) {
                 pts[got++] = v3f(x, fl + 0.5f, z);
         }
     }
-    if (!got) { printf("\n  could not find a point inside the map\n"); return 1; }
-    printf("  sample points inside map    %6d\n\n", got);
+    /* NOT A FAILURE ANY MORE, and the level that proved it is a brush level.
+       Every sample above comes from ::level_ground, which answers for sectors;
+       a .map level has none, so the rejection sampler finds nothing and this
+       used to return 1 before reaching the geometry section -- which is the one
+       section a brush level most needs measured, since the static/moving split
+       only applies to brush levels in the first place.
+       The query timings genuinely cannot run without points. The rebuild
+       timings never needed them.
+       더 이상 실패가 아니며, 그것을 드러낸 것이 브러시 레벨입니다. 위의 모든 표본은 섹터에
+       대해 답하는 ::level_ground에서 나옵니다. .map 레벨에는 섹터가 없으므로 기각 샘플러가
+       아무것도 찾지 못하고, 이전에는 지오메트리 구간에 닿기도 전에 1을 반환했습니다. 정작
+       브러시 레벨이 가장 측정을 필요로 하는 구간이 그것인데, 정적·이동 분할이 애초에 브러시
+       레벨에만 적용되기 때문입니다.
+       질의 시간 측정은 점 없이는 정말로 실행할 수 없습니다. 재생성 시간 측정은 점을 필요로 한
+       적이 없습니다. */
+    if (!got)
+        printf("\n  no sector to sample: the query timings below are skipped,\n"
+               "  and the geometry rebuild section still runs.\n");
+    else
+        printf("  sample points inside map    %6d\n\n", got);
+
+    if (got) {
 
     /* --- 2. cost of each query ------------------------------------------ */
     printf("  --- per-call cost ---\n");
@@ -344,6 +380,8 @@ int main(int argc, char **argv) {
            "  running the full hook range, so both columns are an upper\n"
            "  bound. Treat them as the ceiling, not the expected cost.\n");
 
+    }   /* end of the sections that need sample points */
+
     /* --- 4. what a geometry rebuild costs -------------------------------
        The queries above are paid per monster; this one is paid per FRAME, and
        only while a door is moving -- but then it is paid whole. door_update
@@ -450,11 +488,52 @@ int main(int argc, char **argv) {
                            / (double)freq.QuadPart / REPS;
 
             printf("  %-38s %9.3fms  %5.1f%%\n",
-                   "DOOR IN MOTION, per frame", warm_ms,
+                   "DOOR IN MOTION, whole rebuild", warm_ms,
                    warm_ms / 16.67 * 100.0);
-            printf("\n  a moving frame costs %.2fx a load build, and the light\n"
-                   "  cache is what stands between them.\n",
-                   cold_ms > 0 ? warm_ms / cold_ms : 0.0);
+
+            /* --- the same frame, with only the moving half rebuilt ---------
+               What ::scene_rebuild_moving actually runs. The static half is
+               built once here, exactly as ::scene_build_level builds it once,
+               and then only the suffix is thrown away and remade -- which is
+               the whole claim, timed rather than asserted.
+               ::scene_rebuild_moving이 실제로 실행하는 것입니다. 정적인 절반은
+               ::scene_build_level이 한 번 생성하듯 이곳에서 한 번 생성하고, 그다음에는
+               접미사만 버리고 다시 만듭니다. 그것이 주장의 전부이며, 단언이 아니라 측정으로
+               제시합니다. */
+            if (level_geometry_split(mv)) {
+                level_light_cache_reset();
+                mb_reset(&gb);
+                level_geometry_part(&gb, mv, ranges, LVL_MAX_RANGES,
+                                    LVL_PART_STATIC);
+                int n_static = gb.count;
+                level_geometry_part(&gb, mv, ranges, LVL_MAX_RANGES,
+                                    LVL_PART_MOVING);
+
+                QueryPerformanceCounter(&t0);
+                for (int r = 0; r < REPS; r++) {
+                    nudge_doors(mv, 1.0f / REPS);
+                    gb.count = n_static;          /* truncate, do not reset */
+                    level_geometry_part(&gb, mv, ranges, LVL_MAX_RANGES,
+                                        LVL_PART_MOVING);
+                }
+                QueryPerformanceCounter(&t1);
+                double split_ms = (double)(t1.QuadPart - t0.QuadPart) * 1000.0
+                                / (double)freq.QuadPart / REPS;
+
+                printf("  %-38s %9.3fms  %5.1f%%\n",
+                       "DOOR IN MOTION, moving half only", split_ms,
+                       split_ms / 16.67 * 100.0);
+                printf("\n  %d of %d vertices move, and the split rebuilds %.1fx\n"
+                       "  less work per frame of a swing.\n",
+                       gb.count - n_static, gb.count,
+                       split_ms > 0 ? warm_ms / split_ms : 0.0);
+            } else {
+                printf("\n  a moving frame costs %.2fx a load build, and the light\n"
+                       "  cache is what stands between them. This level does not\n"
+                       "  split (see level_geometry_split), so that is the whole\n"
+                       "  cost every frame of a swing.\n",
+                       cold_ms > 0 ? warm_ms / cold_ms : 0.0);
+            }
         } else {
             printf("\n  This level has no doors, so it is built once and never\n"
                    "  rebuilt: the per-frame figure does not apply to it.\n");

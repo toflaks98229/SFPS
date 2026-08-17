@@ -2812,6 +2812,91 @@ static void bake_light(MeshBuf *b, const Level *l, int first) {
     }
 }
 
+/* Whether any door moves this brush. Linear in doors, which is at most
+   ::LVL_MAX_DOORS and is walked once per brush by the run finder below --
+   sixteen against a few hundred, against a build that traces light.
+   어떤 문이 이 브러시를 움직이는가. 문의 수에 선형이며 그 수는 많아야 ::LVL_MAX_DOORS입니다.
+   아래의 구간 탐색기가 브러시마다 한 번씩 순회합니다. 빛을 판정하는 생성 작업에 견주면 수백에
+   대한 열여섯입니다. */
+static int brush_is_moving(const Level *l, int bi) {
+    for (int i = 0; i < l->n_doors; i++) {
+        const DoorDef *d = &l->doors[i];
+        if (d->sector >= 0) continue;               /* a sector door moves no brush */
+        if (bi >= d->first_brush && bi < d->first_brush + d->n_brushes) return 1;
+    }
+    return 0;
+}
+
+int level_geometry_split(const Level *l) {
+    if (!l || !l->brushes) return 0;
+    for (int i = 0; i < l->n_doors; i++)
+        if (l->doors[i].sector < 0 && l->doors[i].n_brushes > 0) return 1;
+    return 0;
+}
+
+/* One half of a brush level, as maximal runs of brushes that belong to it.
+   RUNS RATHER THAN ONE CALL PER BRUSH because ::brush_geometry merges adjacent
+   triangles that share a material into one range, and it can only do that
+   within a single call -- a call per brush would produce a range per brush and
+   spend ::LVL_MAX_RANGES on runs that were always going to be drawn together.
+   Ascending index order, so STATIC then MOVING is a stable partition of the
+   whole build rather than the same vertices shuffled.
+   브러시 레벨의 한쪽 절반을, 그쪽에 속하는 브러시들의 최대 연속 구간 단위로 생성합니다.
+   브러시마다 한 번씩이 아니라 *구간* 단위인 이유는, ::brush_geometry가 같은 재질을 공유하는
+   인접 삼각형을 하나의 구간으로 병합하는데 그것을 한 번의 호출 안에서만 할 수 있기
+   때문입니다. 브러시마다 호출하면 브러시마다 구간이 하나씩 생기고, 어차피 함께 그려질
+   것들에 ::LVL_MAX_RANGES를 소진하게 됩니다. 인덱스 오름차순이므로 STATIC 다음 MOVING은
+   전체 생성의 안정 분할이며 같은 정점을 뒤섞은 것이 아닙니다. */
+static int brush_geometry_half(MeshBuf *b, const Level *l, MdlRange *ranges,
+                               int max_ranges, int want_moving) {
+    const BrushMap *m = l->brushes;
+    int n_ranges = 0;
+
+    for (int bi = 0; bi < m->n_brushes; ) {
+        if (brush_is_moving(l, bi) != want_moving) { bi++; continue; }
+
+        int run = bi;
+        while (run < m->n_brushes && brush_is_moving(l, run) == want_moving) run++;
+
+        /* Offset into the caller's table, so successive runs accumulate rather
+           than each overwriting the first entry.
+           호출자 표 안으로 오프셋을 주어, 연속된 구간들이 각각 첫 항목을 덮어쓰지 않고
+           누적되게 합니다. */
+        int left = max_ranges - n_ranges;
+        if (left < 0) left = 0;
+        n_ranges += brush_geometry(b, m, bi, run - bi,
+                                   ranges ? ranges + n_ranges : 0, left);
+        bi = run;
+    }
+    return n_ranges;
+}
+
+int level_geometry_part(MeshBuf *b, const Level *l, MdlRange *ranges,
+                        int max_ranges, LevelPart part) {
+    /* Where this half's vertices begin, so the bake touches only what this
+       call appended. ::bake_light has taken a `first` since the cache landed;
+       this is the caller that makes the parameter earn its place.
+       이 절반의 정점이 시작하는 위치이며, 베이크가 이번 호출이 덧붙인 것만 건드리게 합니다.
+       ::bake_light는 캐시가 도입된 이래 `first`를 받아 왔습니다. 그 인자가 제 몫을 하게
+       만드는 호출자가 바로 이것입니다. */
+    int first = b->count;
+
+    /* A level that does not split builds all of it for either half. Correct,
+       and the reason a caller must ask ::level_geometry_split rather than
+       assume: asking for MOVING here and drawing only that would draw the whole
+       level twice.
+       분할되지 않는 레벨은 어느 절반을 요청받든 전체를 생성합니다. 올바르며, 호출자가 가정하지
+       않고 ::level_geometry_split에 물어야 하는 이유입니다. 이곳에 MOVING을 요청하고 그것만
+       그리면 레벨 전체를 두 번 그리게 됩니다. */
+    if (part == LVL_PART_ALL || !level_geometry_split(l))
+        return level_geometry(b, l, ranges, max_ranges);
+
+    int n = brush_geometry_half(b, l, ranges, max_ranges,
+                                part == LVL_PART_MOVING);
+    bake_light(b, l, first);
+    return n;
+}
+
 int level_geometry(MeshBuf *b, const Level *l, MdlRange *ranges, int max_ranges) {
     /* Brushes bring their own builder, and it needs none of the machinery
        below: a brush face is convex by construction, so there is no ear-clip,

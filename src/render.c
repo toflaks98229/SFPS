@@ -493,6 +493,37 @@ void mesh_upload(Mesh *m, const MeshBuf *b, int dynamic) {
                      dynamic ? GL_DYNAMIC_DRAW : GL_STATIC_DRAW);
 }
 
+int mesh_upload_from(Mesh *m, const MeshBuf *b, int first) {
+    /* Nothing to update into. A first upload has to be a whole one: there is
+       no store to write a sub-range of yet.
+       갱신해 넣을 대상이 없습니다. 최초 업로드는 전체여야 합니다. 아직 부분 범위를 쓸 저장
+       공간 자체가 없기 때문입니다. */
+    if (!m->vao || !m->vbo) return 0;
+
+    /* THE STORE IS EXACTLY `count` VERTICES LONG, because ::mesh_upload sizes
+       glBufferData from b->count and not from b->cap. So a buffer whose total
+       has changed is a buffer this cannot write into -- past the end if it
+       grew, and leaving a stale tail behind if it shrank.
+       저장 공간의 길이는 정확히 `count` 정점입니다. ::mesh_upload가 glBufferData의 크기를
+       b->cap이 아니라 b->count로 정하기 때문입니다. 따라서 총량이 달라진 버퍼는 이것이 쓸 수
+       없는 버퍼입니다. 늘었다면 끝을 넘어서고, 줄었다면 낡은 꼬리를 남깁니다. */
+    if (b->count != m->count) return 0;
+    if (first < 0 || first > b->count) return 0;
+
+    GLsizeiptr bytes = (GLsizeiptr)(b->count - first) * (GLsizeiptr)sizeof(Vtx);
+    /* A half with nothing in it is a success with nothing to do, not a
+       failure: a level whose doors are all shut still has a moving half.
+       비어 있는 절반은 실패가 아니라 할 일이 없는 성공입니다. 문이 모두 닫힌 레벨에도
+       움직이는 절반은 존재합니다. */
+    if (!bytes) return 1;
+
+    glBindVertexArray(m->vao);
+    glBindBuffer(GL_ARRAY_BUFFER, m->vbo);
+    glBufferSubData(GL_ARRAY_BUFFER,
+                    (GLintptr)first * (GLintptr)sizeof(Vtx), bytes, b->v + first);
+    return 1;
+}
+
 void mesh_draw(const Mesh *m) {
     if (!m->count) return;
     glBindVertexArray(m->vao);

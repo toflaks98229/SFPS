@@ -59,6 +59,12 @@ static const MonType TYPES[MON_TYPES] = {
     {"hound", AI_BRAWLER, 18, 5.3f, 0.38f, 1.25f, 0.70f, 40.0f, 1.5f, 5, 0.18f, 0.65f, 1.00f, 0.0f, 400.0f, 0.3f, 0},
     /* CASTER: 계속 움직여야 하는 이유. 접근하지 않고 사정거리를 유지하며 주문을 시전하므로, 발놀림 대신 엄폐와 각도가 중요합니다. */
     {"caster", AI_CASTER, 26, 2.4f, 0.42f, 1.90f, 1.45f, 40.0f, 13.0f, 12, 0.85f, 1.40f, 0.80f, 11.0f, 180.0f, 0.9f, 0},
+    /* WRAITH: 유일하게 바닥에 없는 것. 물러나는 것이 곧 추락인 공중을 차지하며, 그것이 이 몬스터가
+       더하는 것입니다. 캐스터보다 무르고 빠르며 사거리가 짧습니다. 닿기 어려운 것이 맷집까지
+       가지면 해결책이 아니라 잡일이 되고, 짧은 사거리는 플레이어가 각도를 잡아 반격할 여지를
+       남깁니다. yaw_speed가 높은 이유는 발밑을 도는 표적을 따라가야 하기 때문이며, 그것이 지상
+       몬스터가 결코 하지 않는 일입니다. */
+    {"wraith", AI_CASTER, 22, 3.1f, 0.40f, 1.55f, 0.80f, 44.0f, 10.0f, 10, 0.70f, 1.15f, 0.85f, 13.0f, 260.0f, 0.5f, MON_FLIES},
 };
 
 /* A caster that cannot throw anything stands in its band and does nothing, and
@@ -343,9 +349,79 @@ static int foot_ok(const Level *l, const MonType *S, float x, float z,
  * @param dx x축 이동량.
  * @param dz z축 이동량.
  */
+/**
+ * @brief Whether a flyer may occupy a column at the height it is already at.
+ *
+ * ENGLISH
+ * -------
+ * ::foot_ok asks "is there floor to stand on", which is the wrong question for
+ * something that is not standing. This asks the only one that matters in the
+ * air: is the gap at this column open where the creature actually is. A flyer
+ * over a chasm has no floor under it and must still be allowed to be there;
+ * one under a low ceiling must not.
+ *
+ * @note The step limit is large rather than ::MonType::height/3, because a
+ *       flyer does not step. A small limit makes ::level_ground refuse the
+ *       column the moment the floor below drops away, which is exactly the
+ *       chasm a flyer exists to hold.
+ *
+ * 한국어
+ * ------
+ * @brief 비행체가 지금 있는 높이에서 어떤 기둥을 차지해도 되는가.
+ *
+ * ::foot_ok는 "딛고 설 바닥이 있는가"를 묻는데, 서 있지 않은 것에게는 틀린 질문입니다. 이
+ * 함수는 공중에서 유일하게 중요한 것을 묻습니다. 이 기둥의 빈 공간이 그 생물이 실제로 있는
+ * 높이에서 열려 있는가입니다. 협곡 위의 비행체는 아래에 바닥이 없어도 그곳에 있을 수 있어야
+ * 하고, 낮은 천장 아래의 비행체는 그럴 수 없어야 합니다.
+ *
+ * @note 단차 상한이 ::MonType::height/3이 아니라 큰 값인 이유는 비행체가 단차를 딛지 않기
+ *       때문입니다. 작은 상한은 아래의 바닥이 떨어지는 순간 ::level_ground가 그 기둥을
+ *       거부하게 만들며, 그곳이 바로 비행체가 존재하는 이유인 협곡입니다.
+ */
+static int air_ok(const Level *l, const MonType *S, float x, float z, float y)
+{
+    float f, c;
+    if (!level_ground(l, x, z, y, 1e9f, &f, &c))
+        return 0;
+    if (y < f)              return 0;   /* inside the floor */
+    if (y + S->height > c)  return 0;   /* head through the ceiling */
+    return 1;
+}
+
 static void move_toward(const Level *l, const MonType *S, Enemy *m,
                         float dx, float dz)
 {
+    /* A FLYER KEEPS ITS ALTITUDE THROUGH A MOVE, and this is the third and last
+       place that had to be told. ::MON_FLIES skips the fall and ::make_monster
+       places it high, and then this function put `m->pos.y = f` on every step
+       it took -- so a wraith spawned six metres up sank to the floor over the
+       first second of walking, one move at a time, and the flag looked broken
+       when what was broken was the assumption three functions deep that a
+       monster's height is whatever is under it.
+       비행체는 이동 중에도 고도를 유지하며, 이곳이 그것을 알려야 했던 세 번째이자 마지막
+       지점입니다. ::MON_FLIES가 낙하를 건너뛰고 ::make_monster가 높이 배치하는데, 그다음 이
+       함수가 걸음마다 `m->pos.y = f`를 놓았습니다. 그래서 6미터 위에 생성된 레이스가 걷기
+       시작한 첫 1초 동안 한 걸음씩 바닥으로 가라앉았고, 플래그가 고장 난 것처럼 보였지만
+       실제로 고장 난 것은 몬스터의 높이가 그 아래에 있는 것이라는, 함수 셋 깊이의
+       가정이었습니다. */
+    if (S->flags & MON_FLIES)
+    {
+        if (air_ok(l, S, m->pos.x + dx, m->pos.z + dz, m->pos.y))
+        {
+            m->pos.x += dx;
+            m->pos.z += dz;
+            return;
+        }
+        if (air_ok(l, S, m->pos.x + dx, m->pos.z, m->pos.y))
+        {
+            m->pos.x += dx;
+            return;
+        }
+        if (air_ok(l, S, m->pos.x, m->pos.z + dz, m->pos.y))
+            m->pos.z += dz;
+        return;
+    }
+
     float f;
     if (foot_ok(l, S, m->pos.x + dx, m->pos.z + dz, m->pos.y, &f))
     {
@@ -715,7 +791,24 @@ static int make_monster(Pools *pl, const Level *l, int type,
     Enemy zero = {0};
     *m = zero;
     m->type   = (short)type;
-    m->pos    = v3f(x, f, z);
+
+    /* A FLYER KEEPS THE HEIGHT IT WAS ASKED FOR, and without this the bit does
+       nothing. ::MON_FLIES stops a monster FALLING, which is only half of being
+       airborne -- this function put every monster on the floor before it ever
+       got a chance to fall, so a flyer held its altitude at ground level and
+       the flag looked like it worked while changing nothing anyone could see.
+       Never BELOW the floor, though: a marker under the geometry would put one
+       inside the world where nothing can be shot.
+       비행체는 요청받은 높이를 유지하며, 이것이 없으면 그 비트는 아무 일도 하지 않습니다.
+       ::MON_FLIES는 몬스터가 *떨어지는 것*을 막지만 그것은 공중에 있음의 절반일 뿐입니다. 이
+       함수가 떨어질 기회를 얻기도 전에 모든 몬스터를 바닥에 놓았으므로, 비행체는 지면 높이에서
+       고도를 유지했고 그 플래그는 아무도 볼 수 없는 것을 바꾸면서 동작하는 것처럼 보였습니다.
+       다만 결코 바닥 *아래*는 아닙니다. 지오메트리 밑의 표식은 무엇도 쏠 수 없는 세계 안쪽에
+       몬스터를 놓게 됩니다. */
+    float y = f;
+    if ((S->flags & MON_FLIES) && from_y > f) y = from_y;
+
+    m->pos    = v3f(x, y, z);
     m->health = S->hp;
     m->state  = E_IDLE;
     m->active = 1;
@@ -964,51 +1057,22 @@ void enemy_spawn_level(Pools *pl, const Level *l)
         int type = mon_type_for(e->kind);
         if (type < 0)
             continue;
-        const MonType *S = &TYPES[type];
 
-        float x = e->x * 0.01f, z = e->z * 0.01f;
-        float f, c;
-        /* From the marker's own height, with no step limit. The 1000 that used
-           to sit in the first argument meant "no limit" by being absurd, which
-           worked while a plan point had one floor. A brush level has storeys and
-           a search beginning a kilometre up finds the outside of the roof, so
-           the height comes from ::Entity::y -- zero on a sector level, where
-           nothing changes.
-           표식 자신의 높이에서, 단차 제한 없이 찾습니다. 첫 인자에 있던 1000은 터무니없는
-           값이 됨으로써 "제한 없음"을 뜻했고, 평면상의 한 점에 바닥이 하나인 동안에는
-           통했습니다. 브러시 레벨에는 층이 있고 1킬로미터 위에서 시작한 탐색은 지붕의
-           바깥면을 찾으므로, 높이는 ::Entity::y에서 옵니다. 섹터 레벨에서는 0이고 아무것도
-           달라지지 않습니다. */
-        if (!level_ground(l, x, z, e->y * 0.01f, 1e9f, &f, &c))
-            continue;
-        (void)S;
-
-        if (pl->enemy.count >= ENEMY_MAX)
-        {
-            DIAG(DIAG_ENEMY_CAP);
-            continue;
-        }
-
-        Enemy *m = &pl->enemy.m[pl->enemy.count++];
-        Enemy zero = {0};
-        *m = zero;
-        m->type = type;
-        m->pos = v3f(x, f, z);
-        m->health = S->hp;
-        m->state = E_IDLE;
-        m->active = 1;
-        m->anim = frand(&pl->enemy) * 6.28f;
-
-        /* Spread the sight refreshes across the period rather than lining them
-           all up on the frame after a spawn. Derived from the index so it is
-           deterministic -- the headless tests step this simulation and compare
-           exact outcomes, and frand(&pl->enemy) here would make which monster refreshes
-           on which frame depend on how many spawned before it.
-           시야 갱신을 생성 직후의 한 프레임에 몰지 않고 주기 전체에 분산시킵니다. 인덱스
-           에서 유도하므로 결정론적입니다. 헤드리스 테스트가 이 시뮬레이션을 진행시키며
-           정확한 결과를 비교하는데, 이곳에서 frand(&pl->enemy)를 쓰면 어느 몬스터가 어느 프레임에
-           갱신되는지가 그 앞에 몇 마리가 생성되었는지에 좌우됩니다. */
-        m->sight_age = (short)((pl->enemy.count - 1) % SIGHT_PERIOD);
+        /* THROUGH ::make_monster, which is what a spawner already used. The
+           twenty lines that used to be here were the same twenty, written out
+           again -- the same ground search, the same cap check, the same fields,
+           the same deterministic sight offset. Two ways to create a monster is
+           one more than there are kinds of monster, and it cost exactly what
+           duplication costs: the flyer's height was taught to one of them and
+           a `wraith` marker went on making something that stood on the floor,
+           while a `spawner_wraith` a metre away made one in the air.
+           스포너가 이미 쓰던 ::make_monster를 통합니다. 이곳에 있던 스무 줄은 같은 스무 줄을 다시
+           적은 것이었습니다. 같은 지면 탐색, 같은 상한 검사, 같은 필드, 같은 결정론적 시야
+           오프셋입니다. 몬스터를 만드는 방법이 둘인 것은 몬스터의 종류 수보다 하나 많은
+           것이며, 중복이 치르는 비용을 정확히 치렀습니다. 비행체의 높이를 둘 중 하나에만
+           가르쳤고, `wraith` 표식은 계속 바닥에 선 것을 만들었으며 한 미터 옆의
+           `spawner_wraith`는 공중에 만들었습니다. */
+        make_monster(pl, l, type, e->x * 0.01f, e->y * 0.01f, e->z * 0.01f);
     }
 
     /* After the monsters the level drew, because a spawner's ceiling counts

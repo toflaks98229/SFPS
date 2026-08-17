@@ -494,18 +494,24 @@ int main(void) {
     }
 
     /* --- the flags column --------------------------------------------------
-       MON_FLIES is capacity rather than a feature: it varies the one assumption
-       enemy_update makes about every monster, and no shipped kind carries it,
-       because the creature that would is a design decision and a sprite. What
-       IS checkable is that the column is sound and that adding it did not
-       disturb the fall it gates -- which is the whole risk of a `continue`
-       placed in a loop somebody else wrote.
+       MON_FLIES used to be capacity with nothing using it, and this block
+       asserted `flying == 0` -- a tripwire for the day a creature carried the
+       bit, so that whoever added one had to come here and say what the branch
+       now does instead of leaving a check that quietly meant nothing.
 
-       MON_FLIES는 기능이 아니라 여지입니다. enemy_update가 모든 몬스터에 대해 하는 단 하나의
-       가정을 달리하며, 배포되는 어떤 종류도 그것을 갖고 있지 않습니다. 그것을 가질 크리처가
-       설계 결정이자 스프라이트이기 때문입니다. 검사할 수 있는 것은 그 열이 온전한지, 그리고
-       그것을 추가한 일이 그것이 관장하는 낙하를 흐트러뜨리지 않았는지입니다. 남이 쓴 루프에
-       `continue`를 넣는 일의 위험 전부가 그것입니다. */
+       That day is the wraith. What is worth asserting now is not that the
+       column is sound but that the bit REACHES THE WORLD: a flag that stops a
+       monster falling does nothing on its own, because make_monster put every
+       monster on the floor before it could fall.
+
+       MON_FLIES는 쓰는 것이 없는 여지였고, 이 블록은 `flying == 0`을 단언했습니다. 어떤
+       크리처가 그 비트를 갖는 날을 위한 덫이었습니다. 그것을 추가하는 사람이 이곳에 와서 이제 그
+       분기가 무엇을 하는지 말하게 하고, 조용히 아무 뜻도 없어진 검사를 남겨 두지 않게 하려는
+       것이었습니다.
+
+       그날이 레이스입니다. 이제 단언할 가치가 있는 것은 그 열이 온전한지가 아니라 그 비트가
+       *세계에 닿는지*입니다. 몬스터가 떨어지는 것을 막는 플래그는 그 자체로는 아무것도 하지
+       않습니다. make_monster가 떨어질 수 있기 전에 모든 몬스터를 바닥에 놓았기 때문입니다. */
     printf("\nthe flags column\n");
     {
         int flying = 0, stray = 0;
@@ -516,12 +522,63 @@ int main(void) {
         }
         okf(stray == 0, "no row carries a bit this build does not define",
             (float)stray, 0.0f);
-        okf(flying == 0,
-            "and nothing ships flying yet, which is why the branch is untested",
-            (float)flying, 0.0f);
-
+        okf(flying == 1, "exactly one kind ships flying", (float)flying, 1.0f);
+        ok(mon_stats(MON_WRAITH)->flags & MON_FLIES, "and it is the wraith");
         ok((MON_FLAGS_ALL & MON_FLIES) != 0,
            "MON_FLAGS_ALL covers every bit there is");
+    }
+
+    /* --- a flyer is actually in the air -------------------------------------
+       THE HALF THE FLAG DOES NOT COVER. MON_FLIES stops the fall; it does not
+       put anything up there. Both are checked against the same marker height so
+       a change to either shows here: the wraith holds it and the imp does not.
+       플래그가 덮지 않는 절반입니다. MON_FLIES는 낙하를 멈추게 할 뿐 무언가를 위로 올려놓지는
+       않습니다. 둘을 같은 표식 높이에 대고 검사하므로 어느 쪽이 바뀌어도 이곳에 드러납니다.
+       레이스는 그 높이를 유지하고 임프는 그러지 않습니다. */
+    printf("\na flyer holds its height\n");
+    {
+        Level r = {0};
+        Sector *s = &r.sectors[r.n_sectors++];
+        short p[8] = { -2000,-2000,  2000,-2000,  2000,2000,  -2000,2000 };
+        for (int i = 0; i < 8; i++) s->pts[i] = p[i];
+        s->n = 4; s->floor = 0; s->ceil = 1200;
+
+        /* Two markers at the same height: one flyer, one that is not. */
+        Entity *a = &r.ents[r.n_ents++];
+        const char *wn = "wraith";
+        for (int i = 0; i < 7; i++) a->kind[i] = wn[i];
+        a->x = -500; a->y = 600; a->z = -500;      /* six metres up */
+
+        Entity *b = &r.ents[r.n_ents++];
+        const char *in = "imp";
+        for (int i = 0; i < 4; i++) b->kind[i] = in[i];
+        b->x = 500; b->y = 600; b->z = 500;
+
+        enemy_spawn_level(&g_pools, &r);
+        ok(enemy_count(&g_pools) == 2, "both markers made a monster");
+
+        const Enemy *fly = 0, *walk = 0;
+        for (int i = 0; i < enemy_count(&g_pools); i++) {
+            const Enemy *m = enemy_at(&g_pools, i);
+            if (m->type == MON_WRAITH) fly = m; else walk = m;
+        }
+        ok(fly && walk, "one of each");
+        if (fly && walk) {
+            okf(fly->pos.y > 5.0f, "the wraith spawns at its marker's height",
+                fly->pos.y, 6.0f);
+            okf(walk->pos.y < 0.1f, "and the imp is on the floor regardless",
+                walk->pos.y, 0.0f);
+
+            /* And it stays. A monster that merely started high and then sank is
+               the failure this is really watching for.
+               그리고 유지합니다. 높이 시작했다가 가라앉는 몬스터가 이 검사가 실제로 지켜보는
+               실패입니다. */
+            float y0 = fly->pos.y;
+            for (int i = 0; i < 120; i++)
+                enemy_update(&g_pools, &r, v3f(0, 1.7f, 0), 1.0f / 60.0f);
+            okf(fabsf(fly->pos.y - y0) < 0.01f, "and holds it two seconds later",
+                fly->pos.y, y0);
+        }
     }
 
     /* --- and an ordinary monster still falls -------------------------------

@@ -103,6 +103,38 @@ enum MonTypeID {
     MON_BRUTE,      /**< 브루트 */
     MON_HOUND,      /**< 하운드 */
     MON_CASTER,     /**< 캐스터 */
+
+    /**
+     * @brief The one that is not on the floor.
+     *
+     * ENGLISH
+     * -------
+     * THE FIRST MONSTER THAT ADDS AN AXIS RATHER THAN A STAT BLOCK. The other
+     * four differ by numbers -- the brute is a slow imp with more of everything,
+     * the hound a fast one with less -- and all four are solved by aiming
+     * forward and backing up. A wraith holds the air over a chasm, where backing
+     * up is a fall and aiming forward finds nothing, and it is the reason the
+     * grapple exists in a game about a room.
+     *
+     * Ranged, because a flyer that had to close would simply descend and become
+     * a slow imp. Fragile, because something you cannot always reach must not
+     * also take a magazine.
+     *
+     * 한국어
+     * ------
+     * @brief 바닥에 있지 않은 유일한 몬스터.
+     *
+     * 수치가 아니라 *축*을 더하는 첫 몬스터입니다. 나머지 넷은 숫자로 다릅니다. 브루트는 모든
+     * 것이 더 많은 느린 임프이고 하운드는 더 적은 빠른 임프이며, 넷 모두 앞을 조준하고 뒤로
+     * 물러나면 해결됩니다. 레이스는 협곡 위 공중을 차지하는데, 그곳에서 물러나는 것은 추락이고
+     * 앞을 조준하면 아무것도 없습니다. 그리고 그것이 방 하나짜리 게임에 그래플이 존재하는
+     * 이유입니다.
+     *
+     * 원거리인 이유는, 접근해야 하는 비행체는 그냥 내려와서 느린 임프가 되기 때문입니다.
+     * 무른 이유는, 언제나 닿을 수는 없는 것이 탄창까지 먹어서는 안 되기 때문입니다.
+     */
+    MON_WRAITH,
+
     MON_TYPES       /**< 몬스터 종류의 총 수 */
 };
 

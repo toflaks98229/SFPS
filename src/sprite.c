@@ -367,6 +367,102 @@ static int caster_pixel(int fr, float nx, float ny, unsigned char *rgb) {
     return shade(win, best, ny, glow, PAL_CASTER, rgb);
 }
 
+/* Cold where the others are warm. Every creature above is fire, meat or bone;
+   this one is the only thing in the bestiary that is not, so a shape glimpsed
+   overhead is identified by its colour before its outline is read.
+   다른 것들이 따뜻한 자리에서 차갑습니다. 위의 모든 크리처는 불이거나 살이거나 뼈이며, 이것은
+   도감에서 그렇지 않은 유일한 것입니다. 그래서 머리 위로 스친 형체는 윤곽을 읽기 전에 색으로
+   먼저 식별됩니다. */
+static const unsigned char PAL_WRAITH[C_COUNT][3] = {
+    {  58,  66, 104 }, {  84,  96, 140 }, {  38,  44,  72 },
+    { 196, 206, 228 }, { 140, 226, 255 }, {  14,  16,  30 },
+    {  90, 180, 255 },   /* C_GLOW: cold light */
+};
+
+/* NO LEGS, and that is the whole of the read. A silhouette that ends in a
+   tapering rag says "not standing on anything" from across a room, which is
+   the one fact about this monster the player has to get right immediately --
+   they cannot back away from it the way they can from everything else.
+   다리가 없으며, 그것이 읽힘의 전부입니다. 뾰족하게 좁아지는 넝마로 끝나는 실루엣은 방 건너에서
+   "아무것도 딛고 있지 않다"고 말하며, 그것이 플레이어가 즉시 알아야 할 이 몬스터에 대한 단 하나의
+   사실입니다. 다른 모든 것에서와 달리 이것에게서는 물러날 수 없습니다. */
+static int wraith_pixel(int fr, float nx, float ny, unsigned char *rgb) {
+    float arm = 0.0f, glowamt = 0.0f, lean = 0.0f, bobp = 0.0f, tatter = 0.0f;
+    switch (fr) {
+    case SPR_WALK0:  bobp =  0.05f; tatter =  0.05f; break;   /* it never walks */
+    case SPR_WALK1:  bobp = -0.05f; tatter = -0.05f; break;
+    case SPR_ATTACK: arm = 1.0f; glowamt = 1.0f; bobp = 0.02f; break;
+    case SPR_HURT:   lean = -0.16f; bobp = -0.07f; break;
+    default: break;
+    }
+
+    if (fr == SPR_DEAD) {
+        /* It does not fall over -- it comes apart. Three shreds sinking, with
+           nothing holding them in a body shape.
+           쓰러지지 않고 흩어집니다. 몸의 형태로 묶어 두는 것 없이 가라앉는 넝마 셋입니다. */
+        float best = -1e9f; int win = C_BODY;
+        part(ell(nx, ny, -0.22f, 0.08f, 0.26f, 0.07f), C_LIMB,  &best, &win);
+        part(ell(nx, ny,  0.06f, 0.12f, 0.34f, 0.09f), C_BODY,  &best, &win);
+        part(ell(nx, ny,  0.30f, 0.07f, 0.18f, 0.06f), C_BELLY, &best, &win);
+        return shade(win, best, ny / 0.24f, 0.0f, PAL_WRAITH, rgb);
+    }
+
+    ny -= bobp;
+    nx += lean * ny;
+    float best = -1e9f; int win = C_BODY;
+
+    /* The shroud: broad at the shoulders and drawn to a point in the air. It
+       stops well above where a floor would be, which is the difference between
+       this outline and the caster's.
+       수의입니다. 어깨에서 넓고 공중의 한 점으로 좁아집니다. 바닥이 있을 자리보다 한참 위에서
+       끝나며, 그것이 이 윤곽과 캐스터의 윤곽의 차이입니다. */
+    part(cap(nx, ny, 0.0f, 0.30f, tatter * 0.6f, 0.86f, 0.05f), C_LIMB, &best, &win);
+    part(ell(nx, ny, 0.0f, 0.62f, 0.29f, 0.26f), C_BODY,  &best, &win);
+    part(ell(nx, ny, 0.0f, 0.58f, 0.16f, 0.18f), C_BELLY, &best, &win);
+
+    /* Three tatters trailing below, swinging out of phase with the hover. */
+    part(cap(nx, ny, -0.13f, 0.44f, -0.17f + tatter, 0.20f, 0.045f), C_LIMB, &best, &win);
+    part(cap(nx, ny,  0.00f, 0.42f,  0.02f - tatter, 0.14f, 0.050f), C_LIMB, &best, &win);
+    part(cap(nx, ny,  0.13f, 0.44f,  0.18f + tatter, 0.22f, 0.045f), C_LIMB, &best, &win);
+
+    /* Sleeves, thrown wide on the attack rather than raised: a thing with no
+       feet braces by spreading, not by planting.
+       공격 시 들어올리는 것이 아니라 넓게 펼칩니다. 발이 없는 것은 딛는 대신 펼쳐서
+       버팁니다. */
+    float hy = 0.66f - arm * 0.06f;
+    float hx = 0.33f + arm * 0.16f;
+    part(cap(nx, ny, -0.20f, 0.74f, -hx, hy, 0.065f), C_LIMB, &best, &win);
+    part(cap(nx, ny,  0.20f, 0.74f,  hx, hy, 0.065f), C_LIMB, &best, &win);
+
+    /* Cowl. Lower and wider than the caster's, so the two do not read alike
+       when both are on screen.
+       카울입니다. 캐스터의 것보다 낮고 넓어, 둘이 동시에 화면에 있어도 같게 읽히지 않습니다. */
+    part(ell(nx, ny, 0.0f, 0.92f, 0.22f, 0.16f), C_BODY, &best, &win);
+
+    if (best <= 0.0f) return 0;
+
+    /* The void under the cowl, and one eye rather than two: a single cold point
+       is what tells it apart from the caster at a glance and from a distance,
+       which is exactly the range this thing is fought at.
+       카울 아래의 공허, 그리고 둘이 아닌 *하나*의 눈입니다. 차가운 점 하나가 한눈에, 그리고
+       멀리서 이것을 캐스터와 구별해 주며, 그 거리가 바로 이것과 싸우는 거리입니다. */
+    if (ell(nx, ny, 0.0f, 0.90f, 0.14f, 0.11f) > 0.0f) win = C_MAW;
+    if (ell(nx, ny, 0.0f, 0.91f, 0.052f, 0.048f) > 0.0f) win = C_EYE;
+
+    /* Bone at the sleeve ends, as the caster has -- the one thing they share,
+       because they are the same order of creature. */
+    if (ell(nx, ny, -hx, hy, 0.05f, 0.05f) > 0.0f ||
+        ell(nx, ny,  hx, hy, 0.05f, 0.05f) > 0.0f) win = C_HORN;
+
+    /* The bolt gathers BETWEEN the spread hands rather than at the chest, so
+       the telegraph is as wide as the pose that sells it. */
+    if (arm > 0.0f && ell(nx, ny, 0.0f, hy + 0.04f, 0.10f, 0.10f) > 0.0f)
+        win = C_EYE;
+
+    float glow = (win == C_EYE) ? (0.45f + 0.55f * glowamt) : 0.0f;
+    return shade(win, best, ny, glow, PAL_WRAITH, rgb);
+}
+
 /* -------------------------------------------------------------- dispatch */
 
 static int creature_pixel(int type, int fr, float nx, float ny, unsigned char *rgb) {
@@ -374,6 +470,7 @@ static int creature_pixel(int type, int fr, float nx, float ny, unsigned char *r
     case MON_BRUTE:  return brute_pixel(fr, nx, ny, rgb);
     case MON_HOUND:  return hound_pixel(fr, nx, ny, rgb);
     case MON_CASTER: return caster_pixel(fr, nx, ny, rgb);
+    case MON_WRAITH: return wraith_pixel(fr, nx, ny, rgb);
     default:         return imp_pixel(fr, nx, ny, rgb);
     }
 }
@@ -794,11 +891,24 @@ static int weapon_type_for_prefix(const char *s, int len) {
     return -1;
 }
 
+/* WALKS THE TABLE, exactly as ::weapon_type_for_prefix above walks wp_stats.
+   This was four spelled-out comparisons, which meant a monster's name existed
+   twice -- once in enemy.c's TYPES and once here -- and adding a fifth compiled
+   clean, ran, and simply never found its art. The sprite would fall back to the
+   SDF and look like a creature nobody had drawn yet rather than like a bug.
+   ::mon_stats already hands out the name, so there is nothing to keep in step.
+   위의 ::weapon_type_for_prefix가 wp_stats를 순회하는 것과 정확히 같이 표를 순회합니다.
+   이전에는 철자를 적은 비교 넷이었고, 그 말은 몬스터의 이름이 두 번 존재했다는 뜻입니다.
+   enemy.c의 TYPES에 한 번, 이곳에 한 번입니다. 다섯 번째를 추가하면 컴파일도 되고 실행도 되지만
+   자기 아트를 결코 찾지 못합니다. 스프라이트는 SDF로 되돌아가고, 결함이 아니라 아직 아무도 그리지
+   않은 크리처처럼 보입니다. ::mon_stats가 이미 이름을 내주므로 맞춰 둘 것이 없습니다. */
 static int mon_type_for_prefix(const char *s, int len) {
-    if (len == 3 && s[0]=='i' && s[1]=='m' && s[2]=='p')                     return MON_IMP;
-    if (len == 5 && s[0]=='b' && s[1]=='r' && s[2]=='u' && s[3]=='t' && s[4]=='e') return MON_BRUTE;
-    if (len == 5 && s[0]=='h' && s[1]=='o' && s[2]=='u' && s[3]=='n' && s[4]=='d') return MON_HOUND;
-    if (len == 6 && s[0]=='c' && s[1]=='a' && s[2]=='s' && s[3]=='t' && s[4]=='e' && s[5]=='r') return MON_CASTER;
+    for (int t = 0; t < MON_TYPES; t++) {
+        const char *n = mon_stats(t)->name;
+        int i = 0;
+        while (i < len && n[i] && n[i] == s[i]) i++;
+        if (i == len && !n[i]) return t;
+    }
     return -1;
 }
 

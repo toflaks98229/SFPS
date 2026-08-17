@@ -21,6 +21,7 @@
  */
 
 #include "gl.h"
+#include "wgl.h"   /* the WGL half this file implements */
 
 /* --- Global variable definitions / 전역 변수 정의 --- */
 

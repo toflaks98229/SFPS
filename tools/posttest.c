@@ -27,6 +27,7 @@
 
 #include <stdio.h>
 #include "gl.h"
+#include "wgl.h"
 #include "post.h"
 #include "render.h"   /* rd_init/rd_use -- the program-restore check needs the
                          renderer's own program to compare against. */

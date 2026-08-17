@@ -58,6 +58,7 @@
 #include <windows.h>
 
 #include "gl.h"
+#include "wgl.h"
 #include "render.h"
 #include "post.h"
 #include "scene.h"    /* scene_frame -- the order under test */

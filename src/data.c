@@ -1,8 +1,8 @@
 #include "data.h"
+#include <stdlib.h>   /* malloc/calloc/free: this file used to reach these through windows.h */
 #include "txt.h"          /* txt_copy -- 핫 리로드 경로 조립 */
 #include "inflate.h"      /* the baked arrays are deflated; see bake.ps1 */
 #include "diag.h"
-#include <windows.h>     /* HeapAlloc for the expanded text */
 #include "gen_assets.h"   /* bake.ps1에 의해 에셋 디렉토리에서 생성됨 */
 
 /**
@@ -59,7 +59,7 @@ const char *data_baked(int which) {
        terminator of its own.
        모든 파서가 가정하는 종료 문자를 위해 페이로드보다 1바이트 큽니다. txt.h는 널로 끝나는
        문자열을 훑으며, 압축된 형태에는 종료 문자가 없습니다. */
-    char *buf = HeapAlloc(GetProcessHeap(), 0, (SIZE_T)b->raw_len + 1);
+    char *buf = malloc((size_t)b->raw_len + 1);
     if (!buf) return "";
 
     int n = inflate_raw((unsigned char *)buf, b->raw_len, b->lz, b->lz_len);
@@ -72,7 +72,7 @@ const char *data_baked(int which) {
            에셋으로 만들어졌다는 뜻입니다. 빈 문자열은 로드되지 않는 레벨이자 아무것도 그리지
            않는 시트입니다. 눈에 띄며, 절반만 기록된 버퍼를 온전한 것처럼 파싱하는 것보다
            훨씬 낫습니다. */
-        HeapFree(GetProcessHeap(), 0, buf);
+        free(buf);
         DIAG(DIAG_ASSET_INFLATE);
         return "";
     }
@@ -185,8 +185,16 @@ const char *data_map(const char *name, int *out_len) {
  * 에셋 파일을 직접 읽고 변경 사항을 감시하여 실시간으로 게임에 반영합니다.
  */
 
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
+#include <stdio.h>    /* fopen/fread: reading a file is standard C, and was not */
+#include "plat.h"     /* where the exe lives, and whether a file has changed */
+
+/** @brief 파일 경로 버퍼의 용량.
+ *
+ * Win32의 MAX_PATH를 대신합니다. 그 매크로 하나 때문에 windows.h가 필요했고, 그것은 이
+ * 파일이 자신이 어떤 OS 위에 있는지 알아야 할 이유가 되지 못합니다. 260이 아니라 512인
+ * 것은, 이 값이 이제 Windows의 한계를 뜻하는 것이 아니라 이 프로그램이 경로에 쓰기로 한
+ * 분량을 뜻하기 때문입니다. 핫 리로드 빌드에서만 존재하는 .bss입니다. */
+#define PATH_CAP 512
 
 /** @brief 핫 리로드를 위해 감시할 파일의 경로입니다. */
 static const char *FILENAMES[DATA_COUNT] = {
@@ -218,10 +226,10 @@ _Static_assert(sizeof(FILENAMES) / sizeof(FILENAMES[0]) == DATA_COUNT,
  * @brief 단일 핫 리로드 에셋의 상태를 관리합니다.
  */
 typedef struct {
-    char     path[MAX_PATH]; /**< 파일의 전체 경로. */
+    char     path[PATH_CAP]; /**< 파일의 전체 경로. */
     char    *text;           /**< 힙에 복사된 파일 내용, 첫 로드 전까지 NULL. */
     int      len;            /**< 그 길이(바이트). 널 종료 문자 제외. */
-    FILETIME stamp;          /**< 마지막으로 확인한 파일의 타임스탬프. */
+    unsigned long long stamp; /**< 마지막으로 확인한 파일의 토큰. ::plat_file_stamp 참조. */
     int      resolved;       /**< 경로가 확인되었는지 여부. */
 } Slot;
 
@@ -238,11 +246,8 @@ static Slot g_slots[DATA_COUNT];
  * @param rel 상대 파일 경로.
  */
 static void resolve(Slot *s, const char *rel) {
-    char exe[MAX_PATH];
-    DWORD n = GetModuleFileNameA(0, exe, MAX_PATH);
-    while (n > 0 && exe[n - 1] != '\\') n--;          /* 파일 이름 제거 */
-    if (n > 1) n--;                                    /* 마지막 '\' 제거 */
-    while (n > 0 && exe[n - 1] != '\\') n--;          /* build\ 디렉토리 제거 */
+    char dir[PATH_CAP];
+    int  n = plat_exe_dir(dir, sizeof(dir));
 
     /* Directory then relative path. txt_copy returns what it wrote, so the
        second call starts where the first stopped and the remaining capacity is
@@ -251,23 +256,14 @@ static void resolve(Slot *s, const char *rel) {
        디렉토리 다음에 상대 경로입니다. txt_copy가 기록한 길이를 반환하므로 두 번째
        호출은 첫 번째가 멈춘 곳에서 시작하고 남은 용량만큼만 씁니다. exe 경로만으로
        버퍼가 가득 차더라도 넘칠 수 없는 연결입니다. */
-    int i = txt_copy(s->path, MAX_PATH, exe, (int)n);
-    txt_copy(s->path + i, MAX_PATH - i, rel, -1);
+    int i = txt_copy(s->path, PATH_CAP, dir, n);
+    txt_copy(s->path + i, PATH_CAP - i, rel, -1);
     s->resolved = 1;
 }
 
-/**
- * @brief 파일의 마지막 쓰기 타임스탬프를 가져옵니다.
- * @param path 파일 경로.
- * @param out 타임스탬프를 저장할 FILETIME 구조체 포인터.
- * @return 성공 시 1, 실패 시 0.
- */
-static int stamp_of(const char *path, FILETIME *out) {
-    WIN32_FILE_ATTRIBUTE_DATA fad;
-    if (!GetFileAttributesExA(path, GetFileExInfoStandard, &fad)) return 0;
-    *out = fad.ftLastWriteTime;
-    return 1;
-}
+/* stamp_of는 ::plat_file_stamp가 되었습니다. 이 파일이 알고 싶은 것은 "파일이 바뀌었는가"
+   뿐이었으므로 함수도 그렇게만 답합니다. 타임스탬프의 *모양*은 기계마다 다르고 이 파일이
+   신경 쓸 일이 아니었습니다. plat.h를 참조하십시오. */
 
 /**
  * @brief 파일 전체를 새로 할당된 힙 버퍼로 읽어들입니다.
@@ -279,18 +275,29 @@ static int stamp_of(const char *path, FILETIME *out) {
  * @return 성공 시 1, 실패 시 0.
  */
 static int reload(Slot *s) {
-    HANDLE f = CreateFileA(s->path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
-                           0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
-    if (f == INVALID_HANDLE_VALUE) return 0;
+    /* "rb", and the b is not decoration: a .map is read by LENGTH, and text
+       mode on Windows would silently collapse every CRLF and hand back fewer
+       bytes than the file has.
+       "rb"이며 b는 장식이 아닙니다. .map은 *길이*로 읽히고, Windows의 텍스트 모드는 모든
+       CRLF를 조용히 접어 파일이 가진 것보다 적은 바이트를 돌려줍니다. */
+    FILE *f = fopen(s->path, "rb");
+    if (!f) return 0;
 
-    DWORD size = GetFileSize(f, 0), got = 0;
-    char *buf = 0;
-    if (size != INVALID_FILE_SIZE)
-        buf = HeapAlloc(GetProcessHeap(), 0, size + 1);
+    /* Seek to the end and back rather than stat: the stream is already open,
+       and a size taken from a separate call is a size that could have been
+       measured on a different version of the file.
+       stat 대신 끝까지 갔다가 돌아옵니다. 스트림은 이미 열려 있고, 별도 호출로 얻은 크기는
+       파일의 다른 판본에서 잰 크기일 수 있습니다. */
+    long size = -1;
+    if (fseek(f, 0, SEEK_END) == 0) size = ftell(f);
+    if (size < 0 || fseek(f, 0, SEEK_SET) != 0) { fclose(f); return 0; }
 
-    if (buf && ReadFile(f, buf, size, &got, 0)) {
+    size_t got = 0;
+    char  *buf = malloc((size_t)size + 1);
+
+    if (buf && (got = fread(buf, 1, (size_t)size, f)) == (size_t)size) {
         buf[got] = 0;
-        if (s->text) HeapFree(GetProcessHeap(), 0, s->text);
+        if (s->text) free(s->text);
         s->text = buf;
         /* Recorded because a .map is read by LENGTH, not to a terminator: the
            baked blob packs the maps end to end and ::data_map must hand back
@@ -302,10 +309,10 @@ static int reload(Slot *s) {
            텍스트를 파싱하게 됩니다. */
         s->len = (int)got;
     } else {
-        if (buf) HeapFree(GetProcessHeap(), 0, buf);
+        if (buf) free(buf);
         buf = 0;
     }
-    CloseHandle(f);
+    fclose(f);
     return buf != 0;
 }
 
@@ -315,7 +322,7 @@ const char *data_text(int which) {
     Slot *s = &g_slots[which];
     if (!s->resolved) {
         resolve(s, FILENAMES[which]);
-        if (reload(s)) stamp_of(s->path, &s->stamp);
+        if (reload(s)) s->stamp = plat_file_stamp(s->path);
     }
     return s->text ? s->text : data_baked(which);
 }
@@ -351,7 +358,7 @@ const char *data_map(const char *name, int *out_len) {
        long enough to fill the buffer truncates instead of overrunning.
        assets\maps\<name>.map입니다. 매번 남은 용량에 이어 붙이며, 이는 ::resolve가 이미
        쓰는 연결 방식입니다. 버퍼를 채울 만큼 긴 이름은 넘치지 않고 잘립니다. */
-    char rel[MAX_PATH];
+    char rel[PATH_CAP];
     int n = txt_copy(rel, (int)sizeof(rel), "assets\\maps\\", -1);
     n += txt_copy(rel + n, (int)sizeof(rel) - n, name, -1);
     txt_copy(rel + n, (int)sizeof(rel) - n, ".map", -1);
@@ -360,7 +367,7 @@ const char *data_map(const char *name, int *out_len) {
     resolve(&g_map, rel);
 
     if (reload(&g_map)) {
-        stamp_of(g_map.path, &g_map.stamp);
+        g_map.stamp = plat_file_stamp(g_map.path);
         g_map_watched = 1;
         *out_len = g_map.len;
         return g_map.text;
@@ -387,10 +394,8 @@ int data_poll(void) {
        ::data_map 호출이 건네준 버퍼를, 호출자가 아직 파싱 중일 수 있는 동안 해제하게
        됩니다. 대신 변경 사실만 보고하면 그 호출자가 준비되었을 때 다시 물을 수 있습니다. */
     if (g_map_watched && g_map.resolved) {
-        FILETIME now;
-        if (stamp_of(g_map.path, &now) &&
-            (now.dwLowDateTime  != g_map.stamp.dwLowDateTime ||
-             now.dwHighDateTime != g_map.stamp.dwHighDateTime)) {
+        unsigned long long now = plat_file_stamp(g_map.path);
+        if (now && now != g_map.stamp) {
             g_map.stamp = now;
             changed = 1;
         }
@@ -401,10 +406,8 @@ int data_poll(void) {
         Slot *s = &g_slots[i];
         if (!s->resolved) continue;
 
-        FILETIME now;
-        if (!stamp_of(s->path, &now)) continue;
-        if (now.dwLowDateTime == s->stamp.dwLowDateTime &&
-            now.dwHighDateTime == s->stamp.dwHighDateTime) continue;
+        unsigned long long now = plat_file_stamp(s->path);
+        if (!now || now == s->stamp) continue;
 
         s->stamp = now;
         if (reload(s)) changed = 1;

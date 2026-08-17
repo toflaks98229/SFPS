@@ -1,4 +1,5 @@
 #include "font.h"
+#include <stdlib.h>   /* malloc/calloc/free: this file used to reach these through windows.h */
 
 /* --- 정의 --- */
 #define GLYPH_W  5      ///< @brief 글리프 너비 (픽셀).
@@ -78,8 +79,11 @@ static GLuint g_tex;
 void font_init(void) {
     if (g_tex) return;
 
-    unsigned char *px = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
-                                  ATLAS_W * ATLAS_H * 4);
+    /* calloc, not malloc: the atlas is drawn glyph by glyph and every pixel
+       no glyph touches has to be transparent black already.
+       malloc이 아니라 calloc입니다. 아틀라스는 글리프 단위로 그려지므로 어떤 글리프도
+       건드리지 않는 픽셀은 이미 투명한 검정이어야 합니다. */
+    unsigned char *px = calloc((size_t)ATLAS_W * ATLAS_H * 4, 1);
     if (!px) return;
 
     for (int i = 0; i < COUNT; i++) {
@@ -108,7 +112,7 @@ void font_init(void) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-    HeapFree(GetProcessHeap(), 0, px);
+    free(px);
 }
 
 GLuint font_texture(void) { return g_tex; }

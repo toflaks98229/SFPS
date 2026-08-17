@@ -51,6 +51,8 @@
    더 이상 그 타입들을 언급하지 않습니다. "혹시 몰라서" 남겨 둔 include는 헤더 그래프가
    실제 의존 관계를 설명하지 못하게 만드는 원인입니다. */
 #include "world.h"    /* World and Input: the simulation this file drives */
+#include <stdlib.h>   /* malloc/calloc/free: this file used to reach these through windows.h */
+#include "wgl.h"     /* gl_bootstrap/gl_make_context: this file owns the context */
 #include "render.h"   /* rd_init -- the one call that needs a context and no frame */
 #include "scene.h"    /* scene_frame: the draw order, and everything it owns */
 /* WP_TYPES, and nothing else. This used to bring in wp_stats and the hook's
@@ -997,12 +999,12 @@ static void demo_parse_cmdline(const char *cmd) {
  */
 static void demo_open(World *w) {
     if (g_demo.mode == DEMO_PLAY) {
-        char *text = HeapAlloc(GetProcessHeap(), 0, DEMO_TEXT_MAX);
+        char *text = malloc(DEMO_TEXT_MAX);
         if (!text) { g_demo.mode = DEMO_OFF; return; }
 
         int len = file_read_all(g_demo_path, text, DEMO_TEXT_MAX);
         int got = len && demo_read(&g_demo.d, text, len);
-        HeapFree(GetProcessHeap(), 0, text);
+        free(text);
 
         if (!got) {
             MessageBoxA(0, "That demo could not be read.", "SFPS", MB_ICONERROR);
@@ -1039,12 +1041,12 @@ static void demo_open(World *w) {
 static void demo_close(void) {
     if (g_demo.mode != DEMO_RECORD || g_demo.d.n <= 0) return;
 
-    char *text = HeapAlloc(GetProcessHeap(), 0, DEMO_TEXT_MAX);
+    char *text = malloc(DEMO_TEXT_MAX);
     if (!text) return;
 
     int len = demo_write(&g_demo.d, text, DEMO_TEXT_MAX);
     int put = len && file_write_all(g_demo_path, text, len);
-    HeapFree(GetProcessHeap(), 0, text);
+    free(text);
 
     if (!put)
         MessageBoxA(0, "The demo could not be written.", "SFPS", MB_ICONERROR);

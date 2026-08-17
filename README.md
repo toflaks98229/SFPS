@@ -1535,7 +1535,8 @@ have proved nothing about whether it was wired up.
 
 `level.h` is the root of the simulation half — `player.h`, `enemy.h`,
 `pickup.h` and `weapon.h` all include it. It used to include `render.h`,
-which includes `gl.h`, which includes `windows.h` and the whole OpenGL API.
+which includes `gl.h`, which at the time included `windows.h` and the whole
+OpenGL API — see the section below for how `gl.h` stopped doing that.
 So every headless movement, AI and pickup test depended on the GUI stack it
 exists precisely to avoid, and touching `render.h` forced a rebuild of
 everything.
@@ -1572,6 +1573,84 @@ everything still compiles. `tools/leveltrans.c` — which includes `level.h`
 and nothing else — checks for the sentinels those headers define and fails
 the build instead. Verified by reintroducing the violation and watching it
 fire, rather than assumed.
+
+## Where Windows stops, and how that is checked
+
+The section above kept `windows.h` out of the *simulation*. It was still in
+the **renderer** — and in the asset loader, the mesh builder, the texture
+cache and the font atlas — and nobody had said so, because nobody had asked
+the question in a way a compiler could answer.
+
+`.\build.ps1 -Portable` asks it. `tools/nowin/windows.h` is a file containing
+nothing but `#error`, it goes *first* on the include path, and every `.c` file
+in `src` is compiled against it. Anything that reaches `windows.h` by any
+route stops there and is named.
+
+**The transitive route is the entire point.** Grepping for
+`#include <windows.h>` found three files. The compiler found seventeen — and
+the fourteen it added were the ones receiving it silently through `gl.h`,
+which is exactly how a codebase stops being portable without anyone deciding
+to.
+
+| | before | after |
+|---|---|---|
+| portable | 13 | **27** |
+| Windows-only | 17 | **4** |
+
+The four are declared, in a table in `build.ps1` that says *why* each one is:
+`main.c` (window, input, frame loop), `gl.c` (WGL context creation),
+`plat_win32.c` (the Win32 side of `plat.h`), and `audio.c` — which is on the
+list marked `NOT YET SPLIT`, because its `waveOut` device and mixer thread are
+still tangled with its portable mixing policy. That is honest rather than
+tidy, and it is the remaining work.
+
+**The list is checked in both directions.** A file that is not on it and
+fails is a regression. A file that *is* on it and passes is a stale list —
+somebody finished the work and left the entry behind, and the next reader
+would believe there is more left to port than there is. Both fail the build,
+for the same reason the `_Static_assert`s elsewhere object to a table that has
+drifted from the enum beside it. Both were verified by causing them and
+watching the check fire.
+
+Four changes moved the fourteen:
+
+- **`gl.h` no longer includes `windows.h`.** mingw's `<GL/gl.h>` includes it
+  itself, and only to obtain `APIENTRY` and `WINGDIAPI` — guarded on both
+  already being defined. Defining them first is a five-line change with an
+  eleven-file blast radius. The WGL context creation that genuinely needs
+  Win32 moved to `wgl.h`, which two files include instead of eleven.
+- **`HeapAlloc(GetProcessHeap(), 0, n)` became `malloc(n)`** in seven files.
+  `msvcrt.dll` was already imported, so this is the same allocation through a
+  standard name. The two sites using `HEAP_ZERO_MEMORY` became `calloc`.
+- **`wsprintfA` became `txt_append_int`/`txt_append_str`** in `scene.c`. The
+  project already had those, `txt.h` already noted that pulling in `wsprintfA`
+  drags `windows.h`, and the HUD was the one place still doing it.
+- **`plat.h`** now holds the three things a non-platform file genuinely cannot
+  do without a host: tell the user the driver refused (`plat_fatal`, from the
+  renderer's shader-compile failure), find where the executable lives
+  (`plat_exe_dir`), and ask whether a file has changed (`plat_file_stamp`).
+  Each was one Win32 call in the middle of a file with no other reason to know
+  what OS it was on, and each alone was enough to pin its whole translation
+  unit to Windows.
+
+`plat_file_stamp` deliberately returns *an opaque token*, not a modification
+time. Callers only ever compare two for equality, and saying that in the type
+lets each host answer as precisely as it can — Win32 hands back the
+100-nanosecond `FILETIME` it already has, where a POSIX version must fold
+`st_mtim.tv_nsec` and `st_size` in beside `st_mtime`, because `st_mtime` alone
+counts whole seconds and would miss a second save inside the same one. An
+editor that formats on save does exactly that, and the symptom would look like
+the hot reload being broken.
+
+**What this is not.** It is not a Linux build — there is no CI here to run one
+on and no toolchain here to try it with, so the claim is the narrow one the
+check actually supports: these 27 translation units do not reach `windows.h`.
+And a Linux CI would not run all 28 suites anyway. Four of them —
+`posttest`, `scenetest`, `textest`, `textest_tinycache` — exist to test real
+GL output through a real context, and they would want Xvfb and Mesa rather
+than portability. `audiorace` opens a real sound device on purpose. Those are
+not portability failures; they are tests of things a headless runner does not
+have.
 
 ## Pixelisation and luminance-driven dithering
 
@@ -1917,7 +1996,9 @@ is the reason the snap grid is a uniform rather than a compile-time constant.
 | [src/mesh.h](src/mesh.h) / [src/mesh.c](src/mesh.c) | integer mesh text → geometry with authored UVs |
 | [src/audio.h](src/audio.h) / [src/audio.c](src/audio.c) | waveOut mixer and the oscillator synth |
 | [src/txt.h](src/txt.h) | the tokenizer every asset language shares |
-| [src/gl.h](src/gl.h) / [src/gl.c](src/gl.c) | WGL bootstrap, 3.3 core context, X-macro function loader |
+| [src/gl.h](src/gl.h) | the GL entry points, and no windows.h — see "Where Windows stops" |
+| [src/wgl.h](src/wgl.h) / [src/gl.c](src/gl.c) | WGL bootstrap and 3.3 core context: the Win32 half, split out |
+| [src/plat.h](src/plat.h) / [src/plat_win32.c](src/plat_win32.c) | everything src/ needs from the host, and the whole list is three functions |
 | [src/m.h](src/m.h) | vec3 + column-major mat4, all `static inline` |
 | [src/render.h](src/render.h) / [src/render.c](src/render.c) | `Box`/`Vtx`, geometry builder, extrusion + ear clipping, GPU meshes, the one shader |
 | [src/tex.h](src/tex.h) / [src/tex.c](src/tex.c) | material recipe interpreter |

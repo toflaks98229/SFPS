@@ -35,6 +35,7 @@
  */
 
 #include "../src/model.h"
+#include "../src/wgl.h"
 #include "../src/tex.h"
 #include "../src/data.h"
 #include "../src/txt.h"

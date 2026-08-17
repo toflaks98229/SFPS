@@ -25,6 +25,7 @@
  */
 
 #include "sprite.h"
+#include <stdlib.h>   /* malloc/calloc/free: this file used to reach these through windows.h */
 #include "data.h"
 #include "txt.h"
 #include "enemy.h"        /* MON_* -- the atlas row order */
@@ -626,7 +627,7 @@ GLuint pickup_atlas(void) {
     if (g_pickup_atlas) return g_pickup_atlas;
 
     int W = PK_CW * PK_KINDS, H = PK_CH;
-    unsigned char *buf = HeapAlloc(GetProcessHeap(), 0, W * H * 4);
+    unsigned char *buf = malloc(W * H * 4);
 
     for (int kind = 0; kind < PK_KINDS; kind++)
       for (int y = 0; y < PK_CH; y++)
@@ -684,7 +685,7 @@ GLuint pickup_atlas(void) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
-    HeapFree(GetProcessHeap(), 0, buf);
+    free(buf);
     return g_pickup_atlas;
 }
 
@@ -1458,7 +1459,7 @@ GLuint sprite_atlas(void) {
     if (g_atlas) return g_atlas;
 
     int W = SPR_CW * SPR_FRAMES, H = SPR_CH * MON_TYPES;
-    unsigned char *buf = HeapAlloc(GetProcessHeap(), 0, W * H * 4);
+    unsigned char *buf = malloc(W * H * 4);
 
     for (int type = 0; type < MON_TYPES; type++) {
         for (int fr = 0; fr < SPR_FRAMES; fr++) {
@@ -1532,7 +1533,7 @@ GLuint sprite_atlas(void) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
-    HeapFree(GetProcessHeap(), 0, buf);
+    free(buf);
     return g_atlas;
 }
 
@@ -1562,7 +1563,7 @@ int sprite_dump_ppm(const char *path) {
        그림이 올바르게 디코딩되어 배치되었는데도 덤프에서는 보이지 않을 수 있었습니다.
        실제로 디버깅 시간을 소모했습니다. 첫 PNG 오버레이가 고장 난 것처럼 보였지만
        고장 난 것은 그것을 들여다보는 도구였습니다. */
-    unsigned char *buf = HeapAlloc(GetProcessHeap(), 0, (SIZE_T)W * H * 4);
+    unsigned char *buf = malloc((size_t)W * H * 4);
     if (!buf) { fclose(f); return 0; }
 
     for (int type = 0; type < MON_TYPES; type++)
@@ -1592,7 +1593,7 @@ int sprite_dump_ppm(const char *path) {
         fwrite(rgb, 1, 3, f);
       }
 
-    HeapFree(GetProcessHeap(), 0, buf);
+    free(buf);
     fclose(f);
     return 1;
 }
@@ -1666,8 +1667,11 @@ static void weapon_build(void) {
        몬스터 아틀라스가 생물마다 행을 갖듯 무기마다 행을 둡니다. 한 행이면 모든 무기가
        같은 총을 그리게 되며, 그릴 그림이 하나뿐이던 동안은 실제로 그러했습니다. */
     int W = WPN_CW * WPN_FRAMES, H = WPN_CH * WP_TYPES;
-    unsigned char *buf = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
-                                   (SIZE_T)W * H * 4);
+    /* calloc: the sheet has one cell per (frame, weapon) and not every pair is
+       drawn, so the gaps must already be transparent.
+       calloc입니다. 시트는 (프레임, 무기)마다 칸을 하나씩 갖지만 모든 조합이 그려지지는
+       않으므로, 빈칸은 이미 투명해야 합니다. */
+    unsigned char *buf = calloc((size_t)W * H * 4, 1);
     if (!buf) return;
 
     overlay_drawn_sprites(buf, W, H, SPR_DEST_WEAPON);
@@ -1692,7 +1696,7 @@ static void weapon_build(void) {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     }
 
-    HeapFree(GetProcessHeap(), 0, buf);
+    free(buf);
 }
 
 int weapon_has_art(void) {

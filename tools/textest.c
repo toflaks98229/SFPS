@@ -32,6 +32,7 @@
 #include <stdio.h>
 
 #include "gl.h"
+#include "wgl.h"
 #include "tex.h"
 #include "render.h"
 #include "level.h"   /* LVL_MAT -- the authoring limit the cache must cover */

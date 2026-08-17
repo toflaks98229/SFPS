@@ -50,6 +50,7 @@
 #include "post.h"     /* post_in_world_pass -- the pass-boundary guards */
 #include "menu.h"     /* the rows the ESC menu draws, read rather than copied */
 #include "door.h"     /* the refusal notice, and the names of the key bits */
+#include "txt.h"      /* txt_append_int/_str: the HUD's numbers, without user32 */
 #include "diag.h"
 
 /* The two passes that draw themselves rather than being drawn by a scene_*
@@ -653,14 +654,14 @@ void scene_draw_hud(Scene *s, int vw, int vh, const Level *l,
     /* Health, bottom-left. Green when healthy, red when low, so a glance at
        the colour says as much as the number. */
     char hp[16];
-    wsprintfA(hp, "%d", p->health);
+    hp[txt_append_int(hp, sizeof(hp), 0, p->health)] = 0;
     float lo = p->health / (float)PLAYER_MAX_HP;
     text_run(s, HUD_MARGIN, vh - HUD_BASELINE, HUD_TEXT_SIZE, hp,
              1.0f - lo * 0.6f, 0.25f + lo * 0.7f, 0.25f, 1.0f);
 
     /* Ammo, bottom-right, and red when the gun is empty. */
     char am[16];
-    wsprintfA(am, "%d", w->ammo[w->cur]);
+    am[txt_append_int(am, sizeof(am), 0, w->ammo[w->cur])] = 0;
     float aw = font_width(HUD_TEXT_SIZE, am);
     if (w->ammo[w->cur] == 0)
         text_run(s, vw - HUD_MARGIN - aw, vh - HUD_BASELINE, HUD_TEXT_SIZE, am,
@@ -805,7 +806,9 @@ void scene_draw_hud(Scene *s, int vw, int vh, const Level *l,
         int k = door_notice_key(l);
         if (k != KEY_NONE) {
             char line[48];
-            wsprintfA(line, "%s KEYCARD REQUIRED", door_key_name(k));
+            int  n = txt_append_str(line, sizeof(line), 0, door_key_name(k));
+            n = txt_append_str(line, sizeof(line), n, " KEYCARD REQUIRED");
+            line[n] = 0;
             float lw = font_width(HUD_NOTICE_SIZE, line);
 
             /* Fades only over the tail. Fading across the whole life would
@@ -843,7 +846,11 @@ void scene_draw_win(Scene *s, int vw, int vh, const Player *p, const Weapon *w) 
 
     /* Final stats, so the ending says something rather than just stopping. */
     char line[64];
-    wsprintfA(line, "health %d   ammo %d", p->health, w->ammo[w->cur]);
+    int  n = txt_append_str(line, sizeof(line), 0, "health ");
+    n = txt_append_int(line, sizeof(line), n, p->health);
+    n = txt_append_str(line, sizeof(line), n, "   ammo ");
+    n = txt_append_int(line, sizeof(line), n, w->ammo[w->cur]);
+    line[n] = 0;
     float lw = font_width(WIN_STAT_SIZE, line);
     text_run(s, (vw - lw) * 0.5f, vh * 0.5f + 4.0f, WIN_STAT_SIZE, line,
              0.85f, 0.85f, 0.85f, 1.0f);

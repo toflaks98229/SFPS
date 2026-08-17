@@ -7,31 +7,57 @@
  * Only the entry points the game actually uses are resolved -- every unused
  * loader stub is bytes we don't get to spend on content.
  *
- * Bringing up a modern context on Win32 requires two passes, and the order
- * matters: call ::gl_bootstrap first to resolve the WGL extensions through a
- * throwaway window, then ::gl_make_context on the real window's device
- * context. A window's pixel format can only ever be set once, which is why
- * the first pass cannot reuse the window the game will actually draw into.
+ * WHAT IS NOT HERE: creating the context. That is WGL, it is Win32, and it
+ * lives in wgl.h -- which this header deliberately does not include. Eleven
+ * files include gl.h to draw with, and exactly two need to create a context,
+ * so putting both in one header made the other nine pay for the whole Win32
+ * API. See the note on the includes below.
  *
  * 한국어
  * ------
  * 게임이 실제로 사용하는 진입점만 로드합니다. 사용되지 않는 로더 스텁 하나하나가
  * 콘텐츠에 쓸 수 없게 되는 바이트이기 때문입니다.
  *
- * Win32에서 최신 컨텍스트를 준비하려면 두 단계가 필요하며 순서가 중요합니다.
- * 먼저 ::gl_bootstrap을 호출하여 임시 창을 통해 WGL 확장을 로드한 뒤, 실제
- * 창의 장치 컨텍스트에 대해 ::gl_make_context를 호출합니다. 창의 픽셀 형식은
- * 단 한 번만 설정할 수 있으므로, 첫 단계에서 게임이 실제로 그릴 창을 재사용할
- * 수 없습니다.
+ * 여기에 *없는* 것: 컨텍스트 생성. 그것은 WGL이고 Win32이며 wgl.h에 있습니다. 이 헤더는
+ * 그것을 의도적으로 포함하지 않습니다. 열한 개 파일이 그리기 위해 gl.h를 포함하지만
+ * 컨텍스트를 만들어야 하는 것은 정확히 둘뿐이므로, 둘을 한 헤더에 두면 나머지 아홉이
+ * Win32 API 전체의 비용을 치르게 됩니다. 아래 include에 관한 주석을 참조하십시오.
  */
 #ifndef GL_H
 #define GL_H
 
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
+/* mingw's <GL/gl.h> includes <windows.h> ITSELF, and only to get these two
+   macros -- the calling convention and the import decoration. It guards that
+   include on both already being defined, which is the escape hatch, and
+   defining them here is what keeps the entire Win32 API out of every file
+   that just wants to draw a triangle. Elsewhere (Mesa, and any GL header on a
+   platform that has no windows.h) the definitions below are inert: the header
+   defines APIENTRY for itself, and WINGDIAPI is not used at all.
+
+   This is a five-line change with an eleven-file blast radius, and it is the
+   whole reason the renderer is now platform-free. Deleting it does not break
+   the Windows build -- windows.h simply comes back in through the side door,
+   silently, into everything.
+
+   mingw의 <GL/gl.h>는 <windows.h>를 *스스로* 포함하며, 오직 이 두 매크로(호출 규약과
+   임포트 장식)를 얻기 위해서입니다. 그 include는 둘 다 이미 정의되어 있는지로 보호되어
+   있고 그것이 탈출구이며, 여기서 정의해 두는 것이 삼각형 하나 그리려는 모든 파일에서
+   Win32 API 전체를 몰아내는 방법입니다. 다른 곳(Mesa 및 windows.h가 없는 플랫폼의 모든
+   GL 헤더)에서는 아래 정의가 무해합니다. 그 헤더는 APIENTRY를 스스로 정의하고
+   WINGDIAPI는 아예 사용하지 않기 때문입니다.
+
+   다섯 줄짜리 변경이지만 영향 범위는 열한 개 파일이며, 렌더러가 플랫폼에서 자유로워진
+   이유가 바로 이것입니다. 이를 지워도 Windows 빌드는 깨지지 않습니다. windows.h가 옆문으로
+   조용히, 모든 것 안으로 되돌아올 뿐입니다. */
+#ifndef APIENTRY
+#define APIENTRY __stdcall
+#endif
+#ifndef WINGDIAPI
+#define WINGDIAPI __declspec(dllimport)
+#endif
+
 #include <GL/gl.h>
 #include <GL/glext.h>
-#include <GL/wglext.h>
 
 /* --- Macros and constants / 매크로 및 상수 --- */
 
@@ -116,96 +142,12 @@
 GL_FUNCS
 #undef X
 
-/* --- Public function prototypes / 공개 함수 프로토타입 --- */
-
-/**
- * @brief Resolves the WGL extensions needed to request a modern context.
- *
- * ENGLISH
- * -------
- * @brief Resolves the WGL extensions needed to request a modern context.
- * @param[in] inst Module instance used to register the temporary window class.
- * @return 1 when both required WGL extensions were resolved, 0 otherwise.
- * @retval 0 The driver is too old, or the throwaway window could not be
- *           created. The caller should abort rather than proceed to
- *           ::gl_make_context.
- * @warning Must run BEFORE the real window is given its pixel format, because
- *          a window's pixel format can only ever be set once. This is why the
- *          bootstrap uses a throwaway window and context of its own.
- * @note Creates, uses and destroys its own window, device context, GL context
- *       and window class; nothing is left registered or current on return.
- *
- * 한국어
- * ------
- * @brief 최신 컨텍스트를 요청하는 데 필요한 WGL 확장을 로드합니다.
- * @param[in] inst 임시 창 클래스를 등록하는 데 사용할 모듈 인스턴스.
- * @return 필요한 두 WGL 확장이 모두 로드되면 1, 그렇지 않으면 0.
- * @retval 0 드라이버가 너무 오래되었거나 임시 창을 생성하지 못한 경우.
- *           호출자는 ::gl_make_context로 진행하지 말고 중단해야 합니다.
- * @warning 실제 창에 픽셀 형식이 설정되기 전에 반드시 실행해야 합니다. 창의
- *          픽셀 형식은 단 한 번만 설정할 수 있기 때문입니다. 부트스트랩이
- *          자체적인 임시 창과 컨텍스트를 사용하는 이유가 바로 이것입니다.
- * @note 자체 창, 장치 컨텍스트, GL 컨텍스트, 창 클래스를 생성하고 사용한 뒤
- *       파괴합니다. 반환 시점에 등록되거나 활성 상태로 남는 자원은 없습니다.
- */
-int  gl_bootstrap(HINSTANCE inst);
-
-/**
- * @brief Creates a 3.3 core profile context and resolves every GL_FUNCS entry point.
- *
- * ENGLISH
- * -------
- * @brief Creates a 3.3 core profile context and resolves every GL_FUNCS entry point.
- * @param[in] dc Device context of the real window. Its pixel format is set
- *               here and cannot be changed afterward.
- * @return The new rendering context, made current on success, or 0 on failure.
- * @retval 0 No suitable pixel format was found, the format could not be set,
- *           context creation failed, or an entry point was missing.
- * @warning ::gl_bootstrap must have returned success first; this function
- *          calls the WGL extensions that pass resolved.
- * @warning On failure the context may already have been created and left
- *          current. The caller is expected to treat this as fatal and exit
- *          rather than attempt recovery.
- * @note The caller owns the returned context and is responsible for
- *       `wglDeleteContext` at shutdown.
- *
- * 한국어
- * ------
- * @brief 3.3 코어 프로파일 컨텍스트를 생성하고 모든 GL_FUNCS 진입점을 로드합니다.
- * @param[in] dc 실제 창의 장치 컨텍스트. 여기에서 픽셀 형식이 설정되며 이후에는
- *               변경할 수 없습니다.
- * @return 새로 생성된 렌더링 컨텍스트. 성공 시 활성 상태가 되며, 실패 시 0입니다.
- * @retval 0 적합한 픽셀 형식을 찾지 못했거나, 형식 설정에 실패했거나, 컨텍스트
- *           생성에 실패했거나, 진입점이 누락된 경우.
- * @warning ::gl_bootstrap이 먼저 성공을 반환해야 합니다. 이 함수는 해당 단계에서
- *          로드된 WGL 확장을 호출합니다.
- * @warning 실패 시 컨텍스트가 이미 생성되어 활성 상태로 남아 있을 수 있습니다.
- *          호출자는 이를 치명적 오류로 간주하고 복구를 시도하기보다 종료해야
- *          합니다.
- * @note 반환된 컨텍스트는 호출자의 소유이며, 종료 시 `wglDeleteContext`를
- *       호출할 책임이 있습니다.
- */
-HGLRC gl_make_context(HDC dc);
-
-/**
- * @brief Sets the buffer swap interval.
- *
- * ENGLISH
- * -------
- * @brief Sets the buffer swap interval.
- * @param[in] on 0 to present as fast as possible, 1 to synchronise with the
- *               display's refresh.
- * @note A silent no-op when WGL_EXT_swap_control is unavailable, so vsync is
- *       a preference rather than a requirement and never blocks startup.
- *
- * 한국어
- * ------
- * @brief 버퍼 교체 간격을 설정합니다.
- * @param[in] on 0이면 가능한 한 빠르게 출력하고, 1이면 디스플레이 주사율에
- *               동기화합니다.
- * @note WGL_EXT_swap_control을 사용할 수 없으면 아무 동작도 하지 않습니다.
- *       따라서 수직 동기화는 필수가 아닌 선택 사항이며 시작을 방해하지 않습니다.
- */
-void gl_set_vsync(int on);
+/* The prototypes that used to be here -- gl_bootstrap, gl_make_context,
+   gl_set_vsync -- are in wgl.h now. They take HINSTANCE and HDC and HGLRC,
+   so declaring them here meant declaring windows.h here, for the benefit of
+   two callers out of eleven includers.
+   여기에 있던 프로토타입들(gl_bootstrap, gl_make_context, gl_set_vsync)은 이제 wgl.h에
+   있습니다. HINSTANCE와 HDC와 HGLRC를 받으므로, 이곳에 선언한다는 것은 곧 이곳에
+   windows.h를 선언한다는 뜻이었습니다. 열한 개의 포함자 중 둘을 위해서 말입니다. */
 
 #endif

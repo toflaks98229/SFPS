@@ -16,6 +16,7 @@
  */
 
 #include "mesh.h"
+#include <stdlib.h>   /* malloc/calloc/free: this file used to reach these through windows.h */
 #include "data.h"
 #include "txt.h"
 #include "diag.h"
@@ -39,13 +40,13 @@ int mesh_build(MeshBuf *b, const char *name) {
        stack: 2048 entries of each would be ~20KB of stack frame.
        메시 하나의 공유 정점 데이터를 담을 임시 테이블입니다. 각각 2048개
        항목이면 스택 프레임이 약 20KB에 달하므로 스택 대신 힙을 사용합니다. */
-    short *pos = HeapAlloc(GetProcessHeap(), 0, MAX_POS * 3 * sizeof(short));
-    short *uv  = HeapAlloc(GetProcessHeap(), 0, MAX_UV  * 2 * sizeof(short));
+    short *pos = malloc(MAX_POS * 3 * sizeof(short));
+    short *uv  = malloc(MAX_UV  * 2 * sizeof(short));
     /* Partial allocation must still release whichever half succeeded.
        일부만 할당에 성공한 경우에도 성공한 쪽은 반드시 해제해야 합니다. */
     if (!pos || !uv) {
-        if (pos) HeapFree(GetProcessHeap(), 0, pos);
-        if (uv)  HeapFree(GetProcessHeap(), 0, uv);
+        if (pos) free(pos);
+        if (uv)  free(uv);
         return 0;
     }
 
@@ -143,8 +144,8 @@ int mesh_build(MeshBuf *b, const char *name) {
         }
     }
 
-    HeapFree(GetProcessHeap(), 0, pos);
-    HeapFree(GetProcessHeap(), 0, uv);
+    free(pos);
+    free(uv);
     /* A mesh that was never found reports zero even if triangles from other
        meshes happened to be counted.
        찾지 못한 메시는 다른 메시의 삼각형이 집계되었더라도 0을 보고합니다. */

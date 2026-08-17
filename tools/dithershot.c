@@ -23,6 +23,7 @@
 #include <string.h>
 
 #include "gl.h"
+#include "wgl.h"
 #include "post.h"
 #include "render.h"
 #include "level.h"

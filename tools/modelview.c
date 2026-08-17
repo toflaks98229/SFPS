@@ -32,6 +32,7 @@
  */
 
 #include "../src/weapon.h"
+#include "../src/wgl.h"
 #include "../src/weaponview.h"
 #include "../src/model.h"
 #include "../src/tex.h"

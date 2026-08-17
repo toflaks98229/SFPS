@@ -68,6 +68,7 @@
  */
 
 #include "../src/level.h"
+#include "../src/wgl.h"
 #include "../src/model.h"   /* MdlRange by value -- level.h only forward-declares it */
 #include "../src/font.h"
 #include "../src/tex.h"

@@ -27,6 +27,7 @@
  */
 
 #include "tex.h"
+#include <stdlib.h>   /* malloc/calloc/free: this file used to reach these through windows.h */
 #include "data.h"
 #include "txt.h"
 #include "render.h"   /* rd_proc -- a material selects the shader it draws with */
@@ -421,11 +422,11 @@ static unsigned char clamp8(float v) {
 static int fill_from_image(const char *src, unsigned char *buf, int tiles) {
     if (tiles < 1) tiles = 1;
 
-    unsigned char *px = HeapAlloc(GetProcessHeap(), 0, SPR_WALL * SPR_WALL * 4);
+    unsigned char *px = malloc(SPR_WALL * SPR_WALL * 4);
     if (!px) return 0;
 
     if (!sprite_wall(src, px)) {
-        HeapFree(GetProcessHeap(), 0, px);
+        free(px);
         return 0;
     }
 
@@ -445,7 +446,7 @@ static int fill_from_image(const char *src, unsigned char *buf, int tiles) {
         }
     }
 
-    HeapFree(GetProcessHeap(), 0, px);
+    free(px);
     return 1;
 }
 
@@ -517,10 +518,10 @@ int tex_pixels(const char *name, unsigned char *buf) {
 }
 
 GLuint tex_make(const char *name) {
-    unsigned char *buf = HeapAlloc(GetProcessHeap(), 0, SIZE * SIZE * 4);
+    unsigned char *buf = malloc(SIZE * SIZE * 4);
     if (!buf) return 0;
     if (!tex_pixels(name, buf)) {
-        HeapFree(GetProcessHeap(), 0, buf);
+        free(buf);
         return 0;
     }
 
@@ -585,7 +586,7 @@ GLuint tex_make(const char *name) {
         }
     }
 
-    HeapFree(GetProcessHeap(), 0, buf);
+    free(buf);
     return t;
 }
 

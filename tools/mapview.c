@@ -42,6 +42,7 @@
 #include "data.h"
 #include "diag.h"
 #include "gl.h"
+#include "wgl.h"
 #include "level.h"
 #include "player.h"
 #include "render.h"

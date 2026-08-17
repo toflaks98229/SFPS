@@ -18,7 +18,8 @@ param(
     [switch]$Debug,
     [switch]$Run,
     [switch]$Tools,   # also build tools\*.c
-    [string]$Tool     # build and launch just this tool, e.g. -Tool modelview
+    [string]$Tool,    # build and launch just this tool, e.g. -Tool modelview
+    [switch]$Portable # check which src\*.c still need windows.h, and nothing else
 )
 
 $ErrorActionPreference = 'Stop'
@@ -42,6 +43,110 @@ if (-not (Test-Path $gcc)) {
 # Scoped to this process only -- nothing about the machine is modified.
 $devkitBin = Join-Path $devkit 'bin'
 if ($env:PATH -notlike "*$devkitBin*") { $env:PATH = "$devkitBin;$env:PATH" }
+
+# ---------------------------------------------------------------- -Portable --
+#
+# Which translation units still need windows.h, checked by a compiler rather
+# than believed. tools\nowin\windows.h is an #error and goes FIRST on the
+# include path, so a file that reaches windows.h by any route -- its own
+# include, or one four headers deep -- fails to compile and is named here.
+#
+# The transitive route is the point. Grep finds the files that SAY they include
+# windows.h; it does not find the eleven that used to receive it silently
+# through gl.h, which is exactly how a codebase stops being portable without
+# anyone deciding to.
+#
+# $platform below is the list of files that are ALLOWED to be Windows-only,
+# and it is checked in BOTH directions. A file not on the list that fails is a
+# regression. A file ON the list that now passes is a stale list -- somebody
+# did the work and left the entry behind, and the next reader would believe
+# there is more to port than there is. Both are failures here, for the same
+# reason the _Static_asserts elsewhere in this project object to a table that
+# has quietly drifted from the enum beside it.
+#
+# 어떤 번역 단위가 여전히 windows.h를 필요로 하는지, 믿는 대신 컴파일러로 검사합니다.
+# tools\nowin\windows.h는 #error이며 include 경로 *맨 앞*에 놓이므로, 어떤 경로로든
+# windows.h에 닿는 파일은 컴파일에 실패하고 이곳에 이름이 불립니다.
+#
+# 요점은 전이적 경로입니다. grep은 windows.h를 포함한다고 *말한* 파일을 찾지만, gl.h를 통해
+# 조용히 받아 오던 열한 개는 찾지 못합니다. 코드베이스가 아무도 그렇게 정하지 않았는데도
+# 이식성을 잃는 방식이 정확히 그것입니다.
+#
+# 아래 $platform은 Windows 전용이어도 되는 파일 목록이며 *양방향*으로 검사됩니다. 목록에
+# 없는 파일이 실패하면 후퇴입니다. 목록에 *있는* 파일이 이제 통과하면 낡은 목록입니다.
+# 누군가 작업을 끝내고 항목을 남겨 둔 것이며, 다음 읽는 사람은 남은 이식 작업이 실제보다
+# 많다고 믿게 됩니다. 둘 다 이곳에서는 실패이며, 이 프로젝트의 다른 곳에 있는
+# _Static_assert가 옆의 열거형에서 조용히 멀어진 표에 반대하는 것과 같은 이유입니다.
+if ($Portable) {
+    $platform = @{
+        'main.c'        = 'the platform layer: window, input, frame loop, WinMM start-up'
+        'gl.c'          = 'WGL context creation'
+        'plat_win32.c'  = 'the Win32 side of plat.h, and meant to be the only one'
+        'audio.c'       = 'NOT YET SPLIT -- the waveOut device and mixer thread are still mixed in with the portable mixing policy'
+    }
+
+    $poison = Join-Path $root 'tools\nowin'
+    $bad = @(); $stale = @(); $ok = 0
+
+    # A failing compile is this check's NORMAL result for a platform file, so
+    # the script-wide 'Stop' has to stand down here or the first declared
+    # platform file aborts the run. $LASTEXITCODE rather than $? for the same
+    # reason: in Windows PowerShell a native command that writes to stderr sets
+    # $? to false even when it exited 0, which would report every file that
+    # merely warned as unportable.
+    # 컴파일 실패는 플랫폼 파일에 대해 이 검사의 *정상* 결과이므로, 스크립트 전역의 'Stop'이
+    # 이곳에서는 물러나야 합니다. 그러지 않으면 선언된 첫 플랫폼 파일에서 실행이 중단됩니다.
+    # $? 대신 $LASTEXITCODE인 것도 같은 이유입니다. Windows PowerShell에서 네이티브 명령이
+    # stderr에 쓰면 0으로 종료해도 $?가 false가 되며, 경고만 낸 파일까지 이식 불가로 보고하게
+    # 됩니다.
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+
+    Write-Host "`nPortability check (windows.h poisoned)" -ForegroundColor Cyan
+    foreach ($f in (Get-ChildItem (Join-Path $root 'src') -Filter *.c | Sort-Object Name)) {
+        # -DHOT_RELOAD because that path holds the file I/O, and it is the half
+        # that would otherwise go unchecked -- the release build simply has no
+        # file reading in it to be unportable.
+        # HOT_RELOAD를 정의하는 이유는 그 경로가 파일 I/O를 담고 있고, 그러지 않으면 검사되지
+        # 않을 절반이기 때문입니다. 릴리스 빌드에는 이식성을 잃을 파일 읽기 자체가 없습니다.
+        & $gcc '-std=c11' '-fsyntax-only' '-DHOT_RELOAD' '-I' $poison '-I' (Join-Path $root 'src') $f.FullName 2>$null | Out-Null
+        $pure = ($LASTEXITCODE -eq 0)
+
+        if ($platform.ContainsKey($f.Name)) {
+            if ($pure) {
+                $stale += $f.Name
+            } else {
+                Write-Host ("  {0,-16} platform  ({1})" -f $f.Name, $platform[$f.Name]) -ForegroundColor DarkGray
+            }
+        } elseif ($pure) {
+            $ok++
+        } else {
+            $bad += $f.Name
+        }
+    }
+
+    $ErrorActionPreference = $prevEAP
+    Write-Host ("`n  {0} portable, {1} declared platform" -f $ok, $platform.Count)
+
+    foreach ($f in $bad) {
+        Write-Host ("  REGRESSION  {0} reaches windows.h and is not a declared platform file" -f $f) -ForegroundColor Red
+    }
+    foreach ($f in $stale) {
+        Write-Host ("  STALE LIST  {0} no longer needs windows.h -- remove it from `$platform" -f $f) -ForegroundColor Yellow
+    }
+
+    if ($bad.Count -or $stale.Count) {
+        throw "Portability check failed: $($bad.Count) regression(s), $($stale.Count) stale entry(ies)"
+    }
+    Write-Host "  the line holds" -ForegroundColor Green
+
+    # Nothing else to do. The check needs a compiler and the sources, not a
+    # bake, a link or a size report, and making it wait for those is how a
+    # check stops being run.
+    # 더 할 일이 없습니다. 이 검사에 필요한 것은 컴파일러와 소스이지 베이크나 링크나 크기
+    # 보고가 아니며, 그것들을 기다리게 만드는 것이 검사가 실행되지 않게 되는 방식입니다.
+    exit 0
+}
 if (-not (Test-Path $outDir)) { New-Item -ItemType Directory $outDir | Out-Null }
 
 # assets\*.txt are the source of truth; bake them into src\gen_assets.h first.

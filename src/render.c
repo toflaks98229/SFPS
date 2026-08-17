@@ -26,6 +26,8 @@
  */
 
 #include "render.h"
+#include "plat.h"    /* a shader the driver refuses is not something to carry on from */
+#include <stdlib.h>   /* malloc/calloc/free: this file used to reach these through windows.h */
 #include "diag.h"
 
 /* Stringify a macro's VALUE into the shader source, the same two-level trick
@@ -42,7 +44,7 @@
 /* ------------------------------------------------------- CPU-side builder */
 
 void mb_init(MeshBuf *b, int cap) {
-    b->v = HeapAlloc(GetProcessHeap(), 0, (SIZE_T)cap * sizeof(Vtx));
+    b->v = malloc((size_t)cap * sizeof(Vtx));
 
     /* A FAILED ALLOCATION IS A BUFFER THAT IS ALWAYS FULL, not one that lies
        about its capacity. Recording `cap` here regardless of the result was a
@@ -72,7 +74,7 @@ void mb_init(MeshBuf *b, int cap) {
 }
 
 void mb_free(MeshBuf *b) {
-    if (b->v) HeapFree(GetProcessHeap(), 0, b->v);
+    if (b->v) free(b->v);
     b->v = 0; b->cap = b->count = 0;
 }
 
@@ -92,12 +94,12 @@ void mb_vtx(MeshBuf *b, v3 p, v3 n, float u, float v) {
     o->u  = u;   o->v  = v;
 
     /* Zeroed HERE, in the one place a vertex is written, rather than left to
-       each builder. The buffer is HeapAlloc'd and not cleared, so a field this
+       each builder. The buffer comes from malloc and is not cleared, so a field this
        function did not set would be whatever the last mesh left behind -- and
        the symptom would be a model lit by garbage, flickering as the allocator
        reused memory.
        각 빌더에 맡기지 않고 정점을 기록하는 유일한 이 자리에서 0으로 채웁니다. 버퍼는
-       HeapAlloc으로 잡고 비우지 않으므로, 이 함수가 설정하지 않은 필드는 직전 메시가
+       malloc으로 잡고 비우지 않으므로, 이 함수가 설정하지 않은 필드는 직전 메시가
        남긴 값이 됩니다. 증상은 쓰레기 값으로 조명된 모델이며, 할당자가 메모리를 재사용할
        때마다 깜빡입니다. */
     o->lr = o->lg = o->lb = 0.0f;
@@ -1456,8 +1458,7 @@ static GLuint compile(GLenum type, const char **src, int n) {
     if (!ok) {
         char log[1024];
         glGetShaderInfoLog(s, sizeof(log), 0, log);
-        MessageBoxA(0, log, "shader compile", MB_ICONERROR);
-        ExitProcess(1);
+        plat_fatal("shader compile", log);
     }
     return s;
 }
@@ -1476,8 +1477,7 @@ void rd_init(void) {
     if (!ok) {
         char log[1024];
         glGetProgramInfoLog(g_prog, sizeof(log), 0, log);
-        MessageBoxA(0, log, "program link", MB_ICONERROR);
-        ExitProcess(1);
+        plat_fatal("program link", log);
     }
     glDeleteShader(vs);
     glDeleteShader(fs);

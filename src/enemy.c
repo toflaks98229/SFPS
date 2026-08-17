@@ -767,6 +767,9 @@ static void spawners_of(Pools *pl, const Level *l)
         s->left      = e->p[1] > 0 ? e->p[1] : -1;      /* 0 authored means unlimited */
         s->max_alive = e->p[2];
         s->interval  = e->p[0] > 0 ? e->p[0] * 0.1f : 5.0f;
+        s->base_interval = s->interval;
+        s->burst     = 1;
+        s->warn      = 0.0f;
         /* The first one is due after a full interval, not on the frame the
            level loads: a monster that materialises while the screen is still
            fading in is one the player never saw arrive.
@@ -784,13 +787,56 @@ static void spawners_of(Pools *pl, const Level *l)
  * @brief 모든 스포너를 한 프레임 진행시킵니다.
  * @return 몬스터가 하나라도 만들어졌으면 0이 아닙니다.
  */
-static int spawners_update(Pools *pl, const Level *l, float dt)
+/* How far the player is from a spawner, on the floor plane. See
+   ::SPAWN_MIN_DIST for why height is deliberately not in this.
+   플레이어가 스포너에서 얼마나 떨어져 있는가를 바닥 평면에서 잽니다. 높이를 의도적으로
+   넣지 않는 이유는 ::SPAWN_MIN_DIST를 참조하십시오. */
+static int spawner_crowded(const Spawner *s, v3 player_eye)
+{
+    float dx = player_eye.x - s->pos.x;
+    float dz = player_eye.z - s->pos.z;
+    return dx * dx + dz * dz < SPAWN_MIN_DIST * SPAWN_MIN_DIST;
+}
+
+static int spawners_update(Pools *pl, const Level *l, v3 player_eye, float dt)
 {
     int made = 0;
 
     for (int i = 0; i < pl->enemy.n_spawners; i++) {
         Spawner *s = &pl->enemy.spawner[i];
         if (!s->active) continue;
+
+        /* --- the telegraph, before anything that could start another one ---
+           A spawner in its warning is not also counting toward its next group;
+           the two clocks never run at once. This is also why the budget is
+           spent HERE rather than when the warning was raised: a wave that ends
+           mid-telegraph has ::enemy_wave_arm clear it, and a budget already
+           deducted would have paid for monsters that never arrived.
+           예고 중인 스포너는 동시에 다음 무리를 향해 세고 있지 않습니다. 두 시계는 결코 함께
+           돌지 않습니다. 예산을 예고를 올릴 때가 아니라 *이곳에서* 쓰는 이유이기도 합니다.
+           예고 도중에 끝난 웨이브는 ::enemy_wave_arm이 그것을 지우며, 이미 차감된 예산은
+           결코 도착하지 않은 몬스터의 값을 치른 것이 됩니다. */
+        if (s->warn > 0.0f) {
+            s->warn -= dt;
+            if (s->warn > 0.0f) continue;
+            s->warn = 0.0f;
+
+            int n = s->burst > 0 ? s->burst : 1;
+            for (int k = 0; k < n; k++) {
+                if (s->left == 0) break;
+                if (s->max_alive > 0 && enemy_alive(pl) >= s->max_alive) break;
+                if (!make_monster(pl, l, s->type, s->pos.x, s->pos.y, s->pos.z))
+                    break;
+                made = 1;
+                if (s->left > 0) s->left--;
+            }
+            continue;
+        }
+
+        /* Retired only once the telegraph above has had its turn, so a spawner
+           that spent its last of the budget still delivers what it warned about.
+           위의 예고가 차례를 마친 뒤에만 은퇴시킵니다. 예산의 마지막을 쓴 스포너도 자신이
+           예고한 것은 배달합니다. */
         if (s->left == 0) { s->active = 0; continue; }
 
         s->timer -= dt;
@@ -805,14 +851,95 @@ static int spawners_update(Pools *pl, const Level *l, float dt)
            위함입니다. 박자를 놓치는 메트로놈이 아니라 대기열입니다. */
         if (s->max_alive > 0 && enemy_alive(pl) >= s->max_alive) continue;
 
-        s->timer = s->interval;
-        if (!make_monster(pl, l, s->type, s->pos.x, s->pos.y, s->pos.z)) continue;
+        /* THE SAME KIND OF WAIT, for the same reason: the timer is not reset
+           and the budget is not touched, so standing on a spawner postpones it
+           rather than disarming it. Step away and it fires on the next frame.
+           같은 종류의 기다림이며 이유도 같습니다. 타이머를 초기화하지 않고 예산도 건드리지
+           않으므로, 스포너 위에 서 있는 것은 그것을 해제하는 것이 아니라 미루는 것입니다.
+           물러나면 다음 프레임에 발동합니다. */
+        if (spawner_crowded(s, player_eye)) continue;
 
-        made = 1;
-        if (s->left > 0) s->left--;
+        s->timer = s->interval;
+        s->warn  = SPAWN_WARN_TIME;
+
+        /* Where the monsters will be, not where the spawner is: the effect has
+           to read as the ground opening under the group, so it is placed at the
+           feet and pointed up.
+           스포너가 있는 곳이 아니라 몬스터가 있게 될 곳입니다. 이펙트는 무리 아래에서 땅이
+           열리는 것으로 읽혀야 하므로 발치에 놓고 위를 향하게 합니다. */
+        fx_spawn(pl, "spawnwarp", s->pos, v3f(0.0f, 1.0f, 0.0f));
     }
     return made;
 }
+
+void enemy_wave_arm(Pools *pl, int wave)
+{
+    if (wave < 1) wave = 1;
+    int step = wave - 1;
+
+    for (int i = 0; i < pl->enemy.n_spawners; i++) {
+        Spawner *s = &pl->enemy.spawner[i];
+
+        /* Every slot, not only the active ones: a spawner retired by the
+           previous wave is exactly the one this has to bring back.
+           활성 슬롯만이 아니라 모든 슬롯입니다. 이전 웨이브가 은퇴시킨 스포너가 바로 이것이
+           되살려야 할 대상입니다. */
+        int budget = WAVE_BUDGET_BASE + step * WAVE_BUDGET_STEP;
+        if (budget > WAVE_BUDGET_MAX) budget = WAVE_BUDGET_MAX;
+
+        int burst = 1 + step / WAVE_BURST_EVERY;
+        if (burst > WAVE_BURST_MAX) burst = WAVE_BURST_MAX;
+
+        /* THE FLOOR IS NEVER ABOVE WHAT THE LEVEL ASKED FOR. Clamping straight
+           to ::WAVE_INTERVAL_MIN makes wave 1 SLOWER than authored whenever a
+           level wants a spawner faster than the floor -- the level says 1.0s,
+           the floor says 1.2s, and wave 1 arrives at 1.2s having been made
+           easier by the constant that exists to stop it getting harder. That
+           also contradicts this function's own contract, which is that wave 1
+           is the authored numbers.
+           So the floor is the smaller of the two: deeper waves still cannot go
+           below ::WAVE_INTERVAL_MIN, and a level that authored something faster
+           keeps it from the first wave to the last.
+           하한은 결코 레벨이 요청한 값보다 위가 아닙니다. ::WAVE_INTERVAL_MIN으로 곧장
+           고정하면, 레벨이 하한보다 빠른 스포너를 원할 때마다 웨이브 1이 제작된 값보다
+           *느려집니다*. 레벨은 1.0초를 말하고 하한은 1.2초를 말하며, 웨이브 1은 더 어려워지는
+           것을 막으려고 존재하는 상수 때문에 더 쉬워진 채 1.2초로 도착합니다. 그것은 이 함수
+           자신의 계약(웨이브 1은 제작된 수치 그대로)과도 모순됩니다.
+           그래서 하한은 둘 중 작은 쪽입니다. 깊은 웨이브는 여전히 ::WAVE_INTERVAL_MIN 아래로
+           갈 수 없고, 더 빠르게 제작한 레벨은 첫 웨이브부터 끝까지 그것을 유지합니다. */
+        float floor_iv = s->base_interval < WAVE_INTERVAL_MIN
+                       ? s->base_interval : WAVE_INTERVAL_MIN;
+        float interval = s->base_interval - step * WAVE_INTERVAL_STEP;
+        if (interval < floor_iv) interval = floor_iv;
+
+        s->left     = (short)budget;
+        s->burst    = (short)burst;
+        s->interval = interval;
+
+        /* The first group of a wave is due after a full interval, for the
+           reason the first of a level is: a monster that arrives on the frame
+           the banner appears is one the player never saw arrive.
+           웨이브의 첫 무리는 온전한 한 주기 뒤에 나옵니다. 레벨의 첫 번째와 같은 이유입니다.
+           배너가 뜨는 프레임에 도착하는 몬스터는 플레이어가 도착을 보지 못한 몬스터입니다. */
+        s->timer  = interval;
+        s->warn   = 0.0f;
+        s->active = 1;
+    }
+}
+
+int enemy_wave_done(const Pools *pl)
+{
+    if (pl->enemy.n_spawners < 1) return 0;
+
+    for (int i = 0; i < pl->enemy.n_spawners; i++) {
+        const Spawner *s = &pl->enemy.spawner[i];
+        if (s->warn > 0.0f) return 0;              /* already owed */
+        if (s->active && s->left != 0) return 0;   /* still to send */
+    }
+    return enemy_alive(pl) == 0;
+}
+
+int enemy_spawner_count(const Pools *pl) { return pl->enemy.n_spawners; }
 
 void enemy_spawn_level(Pools *pl, const Level *l)
 {
@@ -1102,7 +1229,7 @@ int enemy_update(Pools *pl, const Level *l, v3 player_eye, float dt)
        frame this frame rather than standing still for one.
        몬스터를 진행시키기 전입니다. 이번 프레임에 만들어진 몬스터가 한 프레임을 가만히 서
        있는 대신 이번 프레임에 첫 프레임을 얻도록 합니다. */
-    spawners_update(pl, l, dt);
+    spawners_update(pl, l, player_eye, dt);
 
     for (int i = 0; i < pl->enemy.count; i++)
     {

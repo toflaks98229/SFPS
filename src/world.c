@@ -711,6 +711,77 @@ static void step_exit(World *w) {
  * changes which level is running -- see world_load_level's own note on that.
  * 로드가 step_exit이 아니라 이곳에 있는 이유는, 어느 레벨이 도는지를 바꾸는 곳이 정확히
  * 하나이도록 하기 위해서입니다. */
+/**
+ * @brief Runs the arena: starts waves, notices they are cleared, times the rest.
+ *
+ * ENGLISH
+ * -------
+ * Does nothing at all on a level with no spawners, which is every level that is
+ * not an arena. That test is first and is the reason this can be called
+ * unconditionally from ::world_step without every ordinary level growing a wave
+ * counter it never uses.
+ *
+ * WHY THE CLEAR TEST IS ::enemy_wave_done AND NOT "no monsters alive". A wave
+ * is cleared when nothing is left to send AND nothing is still walking; asking
+ * only the second question ends the wave in the gap between two groups, which
+ * is every few seconds. See that function.
+ *
+ * 한국어
+ * ------
+ * @brief 아레나를 돌립니다. 웨이브를 시작하고, 정리된 것을 알아채고, 휴식을 잽니다.
+ *
+ * 스포너가 없는 레벨에서는 아무것도 하지 않으며, 그것이 아레나가 아닌 모든 레벨입니다. 그
+ * 검사가 맨 앞에 있는 것이, 평범한 레벨마다 쓰지도 않을 웨이브 계수기를 갖지 않고도 이 함수를
+ * ::world_step에서 조건 없이 부를 수 있는 이유입니다.
+ *
+ * 정리 판정이 "살아 있는 몬스터 없음"이 아니라 ::enemy_wave_done인 이유. 웨이브는 보낼 것이
+ * 남지 않았고 *동시에* 걸어다니는 것도 없을 때 정리됩니다. 두 번째만 물으면 두 무리 사이의
+ * 빈틈에서 웨이브가 끝나며, 그것은 몇 초마다입니다.
+ */
+static void step_wave(World *w, float dt) {
+    if (!enemy_spawner_count(&w->pools)) return;
+
+    /* --- the first wave -------------------------------------------------
+       Started here rather than by ::world_load_level, so a level that is an
+       arena becomes one by having spawners rather than by being named -- and so
+       an arena entered from a menu, a restart or a transition all begin the
+       same way without any of them being asked to.
+       ::world_load_level이 아니라 이곳에서 시작합니다. 그래서 어떤 레벨이 아레나가 되는 것은
+       이름이 아니라 스포너를 가졌기 때문이며, 메뉴·재시작·전환 중 무엇으로 들어온 아레나든
+       요청받지 않고도 같은 방식으로 시작합니다. */
+    if (w->run.wave < 1) {
+        w->run.wave      = 1;
+        w->run.wave_best = 1;
+        w->run.wave_time = 0.0f;
+        enemy_wave_arm(&w->pools, 1);
+        return;
+    }
+
+    /* --- the breather ----------------------------------------------------
+       Counted down BEFORE the clear test, so the frame the break ends is the
+       frame the next wave arms rather than one that could also notice the new
+       wave is already clear -- it is, for the instant before its spawners run.
+       정리 판정보다 *먼저* 감소시킵니다. 휴식이 끝나는 프레임이 다음 웨이브를 장전하는
+       프레임이 되게 하기 위함이며, 그러지 않으면 그 프레임이 새 웨이브가 이미 정리되었다고
+       알아챌 수도 있습니다. 스포너가 돌기 직전 한순간 실제로 그러합니다. */
+    if (w->run.wave_break > 0.0f) {
+        w->run.wave_break -= dt;
+        if (w->run.wave_break > 0.0f) return;
+
+        w->run.wave_break = 0.0f;
+        w->run.wave++;
+        if (w->run.wave > w->run.wave_best) w->run.wave_best = w->run.wave;
+        w->run.wave_time = 0.0f;
+        enemy_wave_arm(&w->pools, w->run.wave);
+        return;
+    }
+
+    w->run.wave_time += dt;
+
+    if (enemy_wave_done(&w->pools))
+        w->run.wave_break = WORLD_WAVE_BREAK;
+}
+
 static void step_between(World *w, float dt) {
     if (!w->run.between) return;
 
@@ -1285,6 +1356,22 @@ int world_step(World *w, const Input *in, float aspect, float dt) {
        이 순서는 그것을 눈에 띄게 만듭니다. 조용히 레벨이 끝나는 대신 플레이어가 공중으로
        던져집니다. */
     if (!frozen) step_push(w);
+
+    /* AFTER the monsters were stepped and BEFORE the exit.
+       After, because "is the wave clear" is a question about the state this
+       frame produced -- asking before means answering about the previous frame
+       and ending a wave one frame after the last monster fell, which is a frame
+       in which it is already visibly over.
+       Before ::step_exit, because an arena's exit is not what ends it: a wave
+       clearing must not race a player standing on an exit pad, and this order
+       makes the wave the thing that resolves first.
+       몬스터가 진행된 *뒤*이고 출구보다 *앞*입니다.
+       뒤인 것은 "웨이브가 정리되었는가"가 이번 프레임이 만들어 낸 상태에 대한 질문이기
+       때문입니다. 앞에서 물으면 이전 프레임에 대해 답하게 되고, 마지막 몬스터가 쓰러진 지 한
+       프레임 뒤에 웨이브가 끝납니다. 그 한 프레임은 이미 눈에 띄게 끝나 있는 프레임입니다.
+       ::step_exit보다 앞인 것은 아레나를 끝내는 것이 출구가 아니기 때문입니다. 웨이브 정리가
+       출구 발판에 선 플레이어와 경쟁해서는 안 되며, 이 순서가 웨이브를 먼저 결판나게 합니다. */
+    if (!frozen) step_wave(w, dt);
 
     if (!frozen) step_exit(w);
 

@@ -985,12 +985,31 @@ static void test_entities(void) {
     enemy_update(&PL, &LV, v3f(0, 1.7f, 5.0f), DT);
     check(enemy_count(&PL) == before, "and it makes nothing on the first frame");
 
-    /* Eight seconds later, one. */
-    for (int i = 0; i < 8 * 60; i++) enemy_update(&PL, &LV, v3f(0, 1.7f, 5.0f), DT);
+    /* Eight seconds AND THE TELEGRAPH later, one.
+       The interval is when the spawner FIRES; ::SPAWN_WARN_TIME is how long the
+       warning stands before the monsters land in it. Stepping exactly one
+       interval used to be enough and now lands mid-warning, which is not a
+       regression -- it is the delay the arena is built on. Written as the two
+       durations added rather than as a bigger number, so a change to either
+       moves this with it.
+       간격은 스포너가 *발동하는* 시점이고, ::SPAWN_WARN_TIME은 몬스터가 그 안으로 내려서기
+       전까지 예고가 서 있는 시간입니다. 정확히 한 주기만 진행시키는 것으로 충분했지만 이제는
+       예고 도중에 멈춥니다. 후퇴가 아니라 아레나가 딛고 선 지연입니다. 더 큰 숫자 하나가 아니라
+       두 지속 시간의 합으로 적었으므로, 둘 중 무엇이 바뀌어도 이 값이 함께 움직입니다. */
+    int wait = (int)((8.0f + SPAWN_WARN_TIME) * 60.0f) + 2;
+    for (int i = 0; i < wait; i++) enemy_update(&PL, &LV, v3f(0, 1.7f, 5.0f), DT);
     check(enemy_count(&PL) == before + 1, "one interval later, one monster");
     check(PL.enemy.spawner[0].left == 5, "and one fewer left to make");
 
     const Enemy *made = enemy_at(&PL, before);
+    /* Guarded rather than trusted. ::enemy_at hands back NULL for an index that
+       was never filled, and the check above is exactly the one that fails when
+       it was not -- dereferencing here turned a readable FAIL into a segfault
+       and cost the crash-site hunt that found this.
+       신뢰하지 않고 방어합니다. ::enemy_at은 채워진 적 없는 인덱스에 NULL을 돌려주며, 바로 위의
+       검사가 채워지지 않았을 때 실패하는 그 검사입니다. 이곳에서 역참조하면 읽을 수 있는 FAIL이
+       세그폴트가 되며, 그 대가로 크래시 지점을 찾는 작업을 치렀습니다. */
+    if (!made) { check(0, "made on the balcony its origin was over"); return; }
     checkf(made->pos.y, 3.0f, 0.05f,
            "made on the balcony its origin was over, not on the floor below it");
 

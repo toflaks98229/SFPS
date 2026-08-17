@@ -432,3 +432,52 @@ speed 220 180
 spawn 4
 gravity 850
 drag 1
+
+# --- the arena tells you where ---------------------------------------------
+#
+# THE ONLY EFFECT HERE THAT IS A PROMISE RATHER THAN A CONSEQUENCE. Everything
+# else in this file happens because something already happened -- a shot landed,
+# a body fell. This one says something is ABOUT to, and it has SPAWN_WARN_TIME
+# to say it in, so it is read under pressure by a player who is looking
+# somewhere else.
+#
+# So it is built to be seen from the corner of an eye rather than to be pretty:
+# a rising column, not a burst. `spawn 40` puts the particles around the mouth
+# rather than at a point, negative gravity makes them climb, and the low drag
+# keeps them climbing for the whole life instead of settling -- a shape that
+# grows upward is the one that catches peripheral vision, which is the whole
+# job. Additive and violet because nothing else in this palette is: every other
+# effect here is fire, blood or smoke, so the one colour that means "not a
+# consequence" is the one no consequence uses.
+#
+# life 550 against SPAWN_WARN_TIME's 0.55s, so the column is still there when
+# the monsters land in it. A warning that has faded before the thing it warned
+# about is a warning nobody connected to anything.
+#
+# 이곳에서 유일하게 결과가 아니라 *예고*인 이펙트입니다. 이 파일의 다른 모든 것은 이미 무슨
+# 일이 일어났기 때문에 일어납니다. 탄이 박혔고, 몸이 쓰러졌습니다. 이것은 무언가가 *일어날
+# 것*이라고 말하며, 말할 시간은 SPAWN_WARN_TIME뿐이고, 다른 곳을 보고 있는 플레이어가 압박
+# 속에서 읽습니다.
+#
+# 그래서 예쁘기보다 곁눈으로 보이도록 만들었습니다. 폭발이 아니라 솟아오르는 기둥입니다.
+# `spawn 40`이 입자를 한 점이 아니라 입구 둘레에 놓고, 음수 중력이 그것들을 올라가게 하며,
+# 낮은 drag가 가라앉는 대신 수명 내내 계속 오르게 합니다. 위로 자라는 형태가 주변시에 걸리는
+# 형태이며 그것이 이 이펙트의 일 전부입니다. 가산 합성에 보라색인 이유는 이 팔레트에서 다른
+# 무엇도 그렇지 않기 때문입니다. 이곳의 다른 이펙트는 전부 불·피·연기이므로, "결과가 아님"을
+# 뜻할 색은 어떤 결과도 쓰지 않는 색입니다.
+#
+# SPAWN_WARN_TIME의 0.55초에 대해 life 550입니다. 몬스터가 그 안으로 내려설 때 기둥이 아직
+# 있어야 합니다. 예고한 대상보다 먼저 사라진 예고는 아무도 무엇과도 연결하지 못한 예고입니다.
+e spawnwarp
+count 30
+life 550
+size 11 2
+rgb 176 108 255
+rgb2 74 26 150
+alpha 90 0
+speed 150 60
+spawn 40
+drag 20
+gravity -110
+spin 90
+blend add

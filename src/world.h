@@ -82,6 +82,36 @@
  * 화면이 그 결과입니다. */
 #define WORLD_BETWEEN_TIME 2.6f
 
+/**
+ * @brief How long the breather between two waves lasts, seconds.
+ *
+ * ENGLISH
+ * -------
+ * Longer than ::WORLD_BETWEEN_TIME because it is not a screen to read, it is
+ * time to USE: the wave's reward is on the floor and the player has to go and
+ * get it. Short enough that it is a breath rather than an interlude -- an arena
+ * that stops being tense between waves has waves that are separate fights
+ * instead of one accelerating one.
+ *
+ * Public because the banner counts down against it, for the reason
+ * ::WORLD_BETWEEN_TIME is public: a second constant on the drawing side is a
+ * number that can disagree with the one that actually ends it.
+ *
+ * 한국어
+ * ------
+ * @brief 두 웨이브 사이의 휴식이 지속되는 시간 (초).
+ *
+ * ::WORLD_BETWEEN_TIME보다 긴 이유는, 그것이 읽을 화면이 아니라 *쓸* 시간이기 때문입니다.
+ * 웨이브의 보상이 바닥에 있고 플레이어는 가서 주워야 합니다. 그러면서도 막간이 아니라 한
+ * 숨이 되도록 짧습니다. 웨이브 사이에 팽팽함이 풀리는 아레나는, 하나의 가속하는 전투가 아니라
+ * 서로 분리된 전투들을 가진 아레나입니다.
+ *
+ * 공개하는 이유는 배너가 이 값에 맞춰 카운트다운하기 때문이며, ::WORLD_BETWEEN_TIME을
+ * 공개하는 이유와 같습니다. 그리는 쪽의 두 번째 상수는 실제로 그것을 끝내는 값과 어긋날 수
+ * 있는 숫자입니다.
+ */
+#define WORLD_WAVE_BREAK 6.0f
+
 #include "level.h"
 #include "player.h"
 #include "weapon.h"

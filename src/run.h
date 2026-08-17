@@ -241,6 +241,60 @@ typedef struct {
     char  cleared[32];
     char  entering[32];
 
+    /* --- the arena / 아레나 ------------------------------------------------
+     *
+     * ENGLISH
+     * -------
+     * A WAVE IS A STAGE THAT DOES NOT RELOAD THE LEVEL, and that is the whole
+     * difference between this and ::between above. An arena is one room the
+     * player stays in; the progression is how hard it is rather than where it
+     * is. So there is no `cleared`/`entering` pair here -- both names would be
+     * the same room -- and no ::world_load_level at the end of a wave, which is
+     * also why a wave costs no geometry rebuild and no light bake.
+     *
+     * ZERO IS "NOT AN ARENA". A level with no spawners never starts a wave, so
+     * every ordinary level runs with ::wave at 0 and none of this applies. That
+     * is what lets the arena live beside the level chain rather than replacing
+     * it -- and what lets every existing test carry on meaning what it meant.
+     *
+     * 한국어
+     * ------
+     * *웨이브는 레벨을 다시 로드하지 않는 스테이지이며*, 그것이 위의 ::between과 이것의 차이
+     * 전부입니다. 아레나는 플레이어가 머무는 하나의 방이고, 진행은 어디인가가 아니라 얼마나
+     * 험한가입니다. 그래서 이곳에는 `cleared`/`entering` 쌍이 없고(두 이름이 같은 방일
+     * 것입니다) 웨이브 끝에 ::world_load_level도 없습니다. 웨이브가 지오메트리 재생성도 라이트
+     * 베이크도 치르지 않는 이유이기도 합니다.
+     *
+     * 0은 "아레나가 아님"입니다. 스포너가 없는 레벨은 결코 웨이브를 시작하지 않으므로, 모든
+     * 평범한 레벨은 ::wave가 0인 채로 돌아가고 이 중 어느 것도 적용되지 않습니다. 그것이
+     * 아레나가 레벨 사슬을 대체하지 않고 그 곁에 살 수 있게 하는 것이며, 기존의 모든 검사가
+     * 뜻하던 바를 계속 뜻하게 하는 것입니다. */
+
+    /** @brief Which wave is running, 1-based. 0 means this is not an arena. / 진행 중인 웨이브. 1부터 셉니다. 0이면 아레나가 아닙니다. */
+    int   wave;
+
+    /** @brief Seconds the current wave has been fought. / 현재 웨이브를 싸운 시간 (초). */
+    float wave_time;
+
+    /**
+     * @brief Seconds left in the breather between waves; 0 while fighting.
+     *
+     * ENGLISH: DOES NOT FREEZE THE WORLD, unlike every other pause in this
+     * struct. The breather is when the player runs around picking up what the
+     * wave dropped, so it has to be played rather than watched -- see
+     * ::world_frozen for the list of things that do stop, and note that this is
+     * deliberately not on it.
+     *
+     * 한국어: 이 구조체의 다른 모든 멈춤과 달리 *월드를 정지시키지 않습니다*. 휴식은
+     * 플레이어가 웨이브가 떨어뜨린 것을 주우러 돌아다니는 시간이므로, 보는 것이 아니라
+     * 플레이하는 것이어야 합니다. 무엇이 실제로 멈추는지는 ::world_frozen의 목록을
+     * 참조하십시오. 이것이 의도적으로 그 목록에 없다는 점에 유의하십시오.
+     */
+    float wave_break;
+
+    /** @brief Highest wave reached this run: what a death screen has to report. / 이번 플레이에서 도달한 최고 웨이브. 사망 화면이 보고해야 할 값. */
+    int   wave_best;
+
     /* --- lava hazard timers ------------------------------------------------
        These were function-local statics inside the frame loop, which put them
        somewhere a restart could not see. Harmless in practice -- the accumulator

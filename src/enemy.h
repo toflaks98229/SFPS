@@ -574,10 +574,166 @@ typedef struct {
     short type;       /**< Which MON_* it makes. / 어떤 MON_*를 만드는지. */
     short left;       /**< How many more it will make; -1 is unlimited. / 앞으로 만들 개수. -1이면 무제한. */
     short max_alive;  /**< Ceiling on monsters in the level; 0 is none. / 레벨 내 몬스터 상한. 0이면 없음. */
-    float interval;   /**< Seconds between one and the next. / 하나와 다음 사이의 초. */
+
+    /**
+     * @brief How many to make each time it fires. One is the old behaviour.
+     *
+     * ENGLISH: An arena wants a GROUP to arrive, not a queue of individuals --
+     * a monster every five seconds is a corridor's pacing, and four at once
+     * from the same mouth is a fight. Separate from ::interval because they
+     * tune different things: the interval is how often you are interrupted and
+     * this is how much of a problem each interruption is.
+     *
+     * 한국어: 아레나는 줄 서서 오는 개체가 아니라 *무리*가 도착하기를 바랍니다. 5초에 한
+     * 마리는 복도의 박자이고, 같은 입에서 한 번에 넷은 전투입니다. ::interval과 분리한 이유는
+     * 둘이 서로 다른 것을 조율하기 때문입니다. 간격은 얼마나 자주 방해받는가이고, 이것은 그
+     * 방해 하나가 얼마나 큰 문제인가입니다.
+     */
+    short burst;
+
+    float interval;   /**< Seconds between one group and the next. / 한 무리와 다음 무리 사이의 초. */
+
+    /**
+     * @brief The interval the LEVEL authored, which no wave ever changes.
+     *
+     * ENGLISH: ::enemy_wave_arm derives ::interval from this rather than from
+     * the previous wave's value. Deriving it from itself compounds -- wave 10
+     * would be the wave-1 number shrunk ten times over rather than shrunk by
+     * ten steps -- and the floor would be reached in about four waves no matter
+     * what the level asked for. The authored number has to survive being scaled.
+     *
+     * 한국어: ::enemy_wave_arm은 ::interval을 이전 웨이브의 값이 아니라 이 값에서 유도합니다.
+     * 자기 자신에서 유도하면 복리로 줄어듭니다. 웨이브 10은 웨이브 1의 값이 열 단계만큼 줄어든
+     * 것이 아니라 열 번 줄어든 것이 되며, 레벨이 무엇을 요청했든 네 웨이브쯤이면 하한에
+     * 닿습니다. 제작된 수치는 배율이 적용되어도 살아남아야 합니다.
+     */
+    float base_interval;
+
     float timer;      /**< Seconds until the next. / 다음까지 남은 초. */
+
+    /**
+     * @brief Seconds left in the telegraph, or 0 when nothing is coming.
+     *
+     * ENGLISH
+     * -------
+     * A monster that appears where the player was already looking is a monster
+     * that was never fair. So firing is two steps: the effect plays at the
+     * spawn point, and the monsters arrive ::SPAWN_WARN_TIME later. This field
+     * is what makes the gap a state rather than a sleep -- ::enemy_update is
+     * called once per frame and cannot block.
+     *
+     * @note Counted down BEFORE ::timer is looked at, so a spawner in its
+     *       telegraph is not also counting toward its next group. The two
+     *       clocks never run at once.
+     *
+     * 한국어
+     * ------
+     * @brief 예고에 남은 시간(초). 오는 것이 없으면 0입니다.
+     *
+     * 플레이어가 이미 보고 있던 자리에 나타나는 몬스터는 애초에 공정한 적이 없습니다. 그래서
+     * 발동은 두 단계입니다. 생성 지점에서 이펙트가 재생되고, ::SPAWN_WARN_TIME 뒤에 몬스터가
+     * 도착합니다. 이 필드가 그 간격을 대기가 아니라 *상태*로 만듭니다. ::enemy_update는
+     * 프레임마다 한 번 불리며 멈춰 있을 수 없습니다.
+     *
+     * @note ::timer를 보기 *전에* 감소시키므로, 예고 중인 스포너가 동시에 다음 무리를 향해
+     *       세고 있지 않습니다. 두 시계는 결코 함께 돌지 않습니다.
+     */
+    float warn;
+
     int   active;     /**< Non-zero while this slot is a spawner. / 이 슬롯이 스포너이면 0이 아닙니다. */
 } Spawner;
+
+/**
+ * @brief Seconds between a spawn's telegraph and the monsters arriving.
+ *
+ * ENGLISH: Long enough to turn toward and short enough not to be a lull. It is
+ * the same number for every spawner on purpose -- a player learns one delay,
+ * and a per-kind delay would be a tell that means something different at each
+ * mouth.
+ *
+ * 한국어: 돌아볼 수 있을 만큼 길고 소강 상태가 되지 않을 만큼 짧습니다. 모든 스포너가 같은
+ * 값인 것은 의도입니다. 플레이어는 하나의 지연을 익히며, 종류별 지연은 입마다 다른 것을
+ * 뜻하는 신호가 됩니다.
+ */
+#define SPAWN_WARN_TIME 0.55f
+
+/**
+ * @brief How close the player must be for a spawner to hold its fire, metres.
+ *
+ * ENGLISH
+ * -------
+ * A monster that materialises on top of the player is not difficulty, it is the
+ * game reaching past what they could have done about it: there is no reaction
+ * that helps, and the hit lands before the telegraph is even read. The spawner
+ * simply waits instead -- it does not consume its budget, does not reset its
+ * interval, and fires the moment the player gives it room.
+ *
+ * @note Measured on the HORIZONTAL PLANE, ignoring height. A vertical arena has
+ *       spawners above and below the player that are metres away in y and
+ *       directly overhead in x/z, and dropping a monster onto someone's head is
+ *       exactly the case this exists to stop. Comparing full 3D distance would
+ *       call that far away and let it through.
+ *
+ * 한국어
+ * ------
+ * @brief 스포너가 발동을 멈출 만큼 플레이어가 가까운 거리(미터).
+ *
+ * 플레이어 머리 위에 나타나는 몬스터는 난이도가 아니라, 게임이 플레이어가 할 수 있었던 것
+ * 너머로 손을 뻗는 일입니다. 도움이 되는 반응이 없고, 예고를 읽기도 전에 타격이 들어옵니다.
+ * 스포너는 대신 그저 기다립니다. 예산을 소모하지도, 간격을 초기화하지도 않으며, 플레이어가
+ * 자리를 내주는 즉시 발동합니다.
+ *
+ * @note 높이를 무시하고 *수평면*에서 잽니다. 수직 아레나에는 플레이어의 위아래로 y 기준
+ *       몇 미터 떨어져 있으면서 x/z로는 바로 머리 위인 스포너가 있으며, 누군가의 머리 위로
+ *       몬스터를 떨어뜨리는 것이 바로 이것이 막으려는 경우입니다. 3차원 거리를 비교하면
+ *       그것을 멀다고 판정하고 통과시킵니다.
+ */
+#define SPAWN_MIN_DIST 6.0f
+
+/* --- what a wave multiplies, per spawner / 웨이브가 스포너마다 곱하는 것 ---------
+ *
+ * ENGLISH
+ * -------
+ * ::enemy_wave_arm reads these and nothing else does. They are the difficulty
+ * curve, written as five numbers in one place rather than as arithmetic spread
+ * through that function, because tuning an arena is changing these and looking
+ * -- and a curve you have to read code to find is a curve nobody tunes.
+ *
+ * EVERY ONE IS CLAMPED. The budget and the group stop growing and the interval
+ * stops shrinking, so the curve flattens into a hard but finite steady state
+ * instead of running to a wave that no reflex can survive. Where it flattens is
+ * the real difficulty of the game; how fast it gets there is the ramp.
+ *
+ * 한국어
+ * ------
+ * ::enemy_wave_arm만이 이 값들을 읽습니다. 이것이 난이도 곡선이며, 그 함수 전반에 흩어진
+ * 산술이 아니라 한곳의 숫자 다섯 개로 적었습니다. 아레나를 조율하는 일은 이 값을 바꾸고
+ * 보는 것이고, 찾으려면 코드를 읽어야 하는 곡선은 아무도 조율하지 않는 곡선이기 때문입니다.
+ *
+ * 전부 상한이 있습니다. 예산과 무리는 커지기를 멈추고 간격은 줄어들기를 멈추므로, 곡선은 어떤
+ * 반사신경으로도 살아남을 수 없는 웨이브로 달려가는 대신 험하지만 유한한 정상 상태로
+ * 평평해집니다. 어디서 평평해지는가가 이 게임의 실제 난이도이고, 거기까지 얼마나 빨리
+ * 가는가가 경사입니다. */
+
+/** @brief Monsters one spawner sends in wave 1. / 웨이브 1에서 스포너 하나가 보내는 몬스터 수. */
+#define WAVE_BUDGET_BASE 4
+/** @brief Added to that budget each wave. / 웨이브마다 그 예산에 더해지는 수. */
+#define WAVE_BUDGET_STEP 2
+/** @brief Where the budget stops growing. / 예산이 커지기를 멈추는 지점. */
+#define WAVE_BUDGET_MAX  24
+/** @brief Waves between each increase of the group size. / 무리 크기가 한 번 커지는 데 걸리는 웨이브 수. */
+#define WAVE_BURST_EVERY 3
+/** @brief Largest group one spawner delivers at once. / 스포너 하나가 한 번에 배달하는 최대 무리. */
+#define WAVE_BURST_MAX   5
+/** @brief Seconds taken off the interval each wave. / 웨이브마다 간격에서 깎이는 초. */
+#define WAVE_INTERVAL_STEP 0.35f
+/** @brief Shortest the interval ever gets, seconds. / 간격이 도달할 수 있는 최솟값 (초). */
+#define WAVE_INTERVAL_MIN  1.2f
+
+_Static_assert(WAVE_BURST_MAX <= ENEMY_MAX,
+               "one group must fit the pool it spawns into");
+_Static_assert(WAVE_INTERVAL_MIN > 0.0f,
+               "a zero interval is a spawner that fires every frame");
 
 typedef struct {
     Enemy    m[ENEMY_MAX];             /**< Monsters, packed to `count`. / `count`까지 채워진 몬스터. */
@@ -645,6 +801,92 @@ int enemy_count(const Pools *pl);
  * @return 살아있는 몬스터 수.
  */
 int enemy_alive(const Pools *pl);
+
+/**
+ * @brief Re-arms every spawner for a wave, scaled by which wave it is.
+ *
+ * ENGLISH
+ * -------
+ * A wave is a budget the spawners spend and then stop. ::enemy_spawn_level
+ * reads what the level AUTHORED -- the kinds, the places, the base rate -- and
+ * this multiplies it by how deep the run has got. The level says what this
+ * arena is; the wave number says how bad it is right now.
+ *
+ * WHAT SCALES AND WHY EACH. The budget grows so a wave lasts longer than the
+ * one before it, the group grows so the room fills faster than the player can
+ * clear it, and the interval shrinks so the gaps stop being rests. All three
+ * are clamped: an unbounded curve is a wave that cannot be survived by anyone,
+ * which is a different game from a hard one.
+ *
+ * @param[in,out] pl   Pools whose spawners to re-arm.
+ * @param[in]     wave Which wave, 1-based. Wave 1 is the authored numbers.
+ * @note Sets ::Spawner::left, so a wave ENDS: every spawner runs out and
+ *       ::enemy_wave_done can become true. A spawner left unlimited would make
+ *       a wave that never clears and a reward that never arrives.
+ * @note Clears any telegraph in flight. A wave that ended while a spawn was
+ *       warned must not deliver that group into the breather.
+ *
+ * 한국어
+ * ------
+ * @brief 모든 스포너를 한 웨이브 분량으로, 웨이브 수에 따라 키워서 재장전합니다.
+ *
+ * 웨이브는 스포너가 쓰고 나면 멈추는 예산입니다. ::enemy_spawn_level은 레벨이 *제작한*
+ * 것(종류, 자리, 기본 속도)을 읽고, 이 함수가 거기에 플레이가 얼마나 깊어졌는지를 곱합니다.
+ * 레벨은 이 아레나가 무엇인지 말하고, 웨이브 수는 지금 그것이 얼마나 험한지 말합니다.
+ *
+ * 무엇이 커지고 각각 왜인가. 예산이 커지는 것은 한 웨이브가 앞의 것보다 오래 가게 하기
+ * 위함이고, 무리가 커지는 것은 플레이어가 정리하는 속도보다 방이 빨리 차게 하기 위함이며,
+ * 간격이 줄어드는 것은 빈틈이 휴식이기를 그만두게 하기 위함입니다. 셋 모두 상한이 있습니다.
+ * 경계 없는 곡선은 누구도 살아남을 수 없는 웨이브이며, 그것은 어려운 게임과는 다른 게임입니다.
+ *
+ * @param[in,out] pl   재장전할 스포너를 가진 풀.
+ * @param[in]     wave 몇 번째 웨이브인지. 1부터 셉니다. 웨이브 1이 제작된 수치 그대로입니다.
+ * @note ::Spawner::left를 설정하므로 웨이브가 *끝납니다*. 모든 스포너가 소진되고
+ *       ::enemy_wave_done이 참이 될 수 있습니다. 무제한으로 둔 스포너는 결코 정리되지 않는
+ *       웨이브와 결코 도착하지 않는 보상을 만듭니다.
+ * @note 진행 중인 예고를 지웁니다. 생성이 예고된 채로 끝난 웨이브가 그 무리를 휴식 시간으로
+ *       배달해서는 안 됩니다.
+ */
+void enemy_wave_arm(Pools *pl, int wave);
+
+/**
+ * @brief Whether the current wave has nothing left to send and nothing alive.
+ *
+ * ENGLISH
+ * -------
+ * BOTH HALVES, and the second is the one that is easy to forget: a spawner
+ * whose budget is spent has not cleared the wave while its last group is still
+ * walking around. A telegraph in flight counts as "still to come" for the same
+ * reason -- the monsters are already owed.
+ *
+ * @param[in] pl Pools to ask.
+ * @return Non-zero when the wave is over.
+ * @note A level with NO spawners is never done by this test, and that is
+ *       correct: it is not an arena, it has no waves, and ::step_wave never
+ *       asks. The laid-out monsters of an ordinary level are not a wave.
+ *
+ * 한국어
+ * ------
+ * @brief 현재 웨이브가 보낼 것도 남지 않고 살아 있는 것도 없는가.
+ *
+ * *양쪽 모두*이며, 잊기 쉬운 쪽은 두 번째입니다. 예산을 다 쓴 스포너는 마지막 무리가 아직
+ * 돌아다니는 동안에는 웨이브를 정리한 것이 아닙니다. 진행 중인 예고도 같은 이유로 "아직 올 것"에
+ * 셉니다. 그 몬스터들은 이미 빚진 것입니다.
+ *
+ * @param[in] pl 질의할 풀.
+ * @return 웨이브가 끝났으면 0이 아닙니다.
+ * @note 스포너가 *없는* 레벨은 이 검사로 결코 끝나지 않으며 그것이 옳습니다. 그런 레벨은
+ *       아레나가 아니고 웨이브도 없으며 ::step_wave가 묻지도 않습니다. 평범한 레벨이 배치한
+ *       몬스터는 웨이브가 아닙니다.
+ */
+int enemy_wave_done(const Pools *pl);
+
+/**
+ * @brief How many spawners this pool is running. 0 means "not an arena".
+ *
+ * 한국어: 이 풀이 돌리는 스포너의 수입니다. 0이면 "아레나가 아님"입니다.
+ */
+int enemy_spawner_count(const Pools *pl);
 
 /**
  * @brief 지정된 인덱스의 몬스터 정보를 가져옵니다.

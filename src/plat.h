@@ -47,15 +47,17 @@
  * 아니라 검사인 이유는, "핵심은 깨끗하게 유지했다"가 바로 쓸 때는 참이고 일 년 뒤에는
  * 거짓인 종류의 문장이기 때문입니다.
  *
- * @note THE PLATFORM FILES, and why each is one: plat_win32.c (this header),
- *       main.c (window, input, frame loop, WinMM start-up), gl.c (WGL context
- *       creation), and the device half of audio.c (waveOut and the mixer
- *       thread), which is still inside audio.c and is the one item on this
- *       list that has not been separated yet.
- * @note 플랫폼 파일들과 각각의 이유: plat_win32.c (이 헤더), main.c (창, 입력, 프레임 루프,
- *       WinMM 기동), gl.c (WGL 컨텍스트 생성), 그리고 audio.c의 장치 절반(waveOut과 믹서
- *       스레드). 마지막 것은 아직 audio.c 안에 있으며 이 목록에서 유일하게 분리되지 않은
- *       항목입니다.
+ * @note THE PLATFORM FILES, and why each is one -- the whole list is four:
+ *       plat_win32.c (this header), main.c (window, input, frame loop), gl.c
+ *       (WGL context creation, declared in wgl.h), and audio_win32.c (waveOut,
+ *       the mixer thread, and the lock, declared in audio_dev.h). Three of the
+ *       four have a header of their own naming exactly what they owe the rest
+ *       of src, which is what makes the list short enough to be worth reading.
+ * @note 플랫폼 파일들과 각각의 이유. 전체 목록은 넷입니다. plat_win32.c (이 헤더), main.c
+ *       (창, 입력, 프레임 루프), gl.c (WGL 컨텍스트 생성, wgl.h가 선언), audio_win32.c
+ *       (waveOut, 믹서 스레드, 그리고 락. audio_dev.h가 선언). 넷 중 셋이 src의 나머지에
+ *       무엇을 빚지고 있는지를 정확히 이름 붙인 자기 헤더를 가지며, 그것이 이 목록을 읽을
+ *       가치가 있을 만큼 짧게 유지하는 것입니다.
  */
 #ifndef PLAT_H
 #define PLAT_H

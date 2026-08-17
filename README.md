@@ -1594,15 +1594,15 @@ to.
 
 | | before | after |
 |---|---|---|
-| portable | 13 | **27** |
+| portable | 13 | **28** |
 | Windows-only | 17 | **4** |
 
 The four are declared, in a table in `build.ps1` that says *why* each one is:
-`main.c` (window, input, frame loop), `gl.c` (WGL context creation),
-`plat_win32.c` (the Win32 side of `plat.h`), and `audio.c` — which is on the
-list marked `NOT YET SPLIT`, because its `waveOut` device and mixer thread are
-still tangled with its portable mixing policy. That is honest rather than
-tidy, and it is the remaining work.
+`main.c` (window, input, frame loop), `gl.c` (WGL context creation, declared
+in `wgl.h`), `plat_win32.c` (the Win32 side of `plat.h`), and `audio_win32.c`
+(`waveOut`, the mixer thread and the lock, declared in `audio_dev.h`). Three
+of the four have a header naming exactly what they owe the rest of `src`,
+which is what keeps the list short enough to be worth reading.
 
 **The list is checked in both directions.** A file that is not on it and
 fails is a regression. A file that *is* on it and passes is a stale list —
@@ -1641,6 +1641,28 @@ lets each host answer as precisely as it can — Win32 hands back the
 counts whole seconds and would miss a second save inside the same one. An
 editor that formats on save does exactly that, and the symptom would look like
 the hot reload being broken.
+
+**Splitting `audio.c` was not a move.** `audio.c` decides what a sound *is* —
+layers, envelopes, which of twelve voices gets evicted, how gain falls off
+with distance. `audio_win32.c` owns what a machine plays it on. The traffic
+crosses both ways, which is why `audio_dev.h` exists rather than one side
+including the other: the device calls `audio_mix` when a buffer comes back
+empty, and the policy calls `audio_dev_lock` because the voice table it writes
+is the one the mixer is reading.
+
+The subtle part was `g_ready` — a flag gating the critical section's *own
+validity*, since `audio_shutdown` deletes the lock from the game thread while
+the mixer may still be running. Four call sites in the policy half each spelled
+out the same "is there a device" test by hand before daring to enter the lock.
+It is folded into `audio_dev_lock` now, which returns 0 when there is no device
+and nothing to take — so `audio.c` never sees the flag, never sees
+`__atomic_load_n`, and has no cross-thread state left in a file with no threads
+of its own. The gate and the lock it gates were one thing described as two.
+
+There genuinely is no device sometimes: `sndtest` renders sounds offline and
+never calls `audio_init`, and a machine with no sound card reaches the same
+path. Entering a critical section that was never initialised is not a missed
+optimisation there, it is the bug.
 
 **What this is not.** It is not a Linux build — there is no CI here to run one
 on and no toolchain here to try it with, so the claim is the narrow one the

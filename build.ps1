@@ -82,7 +82,7 @@ if ($Portable) {
         'main.c'        = 'the platform layer: window, input, frame loop, WinMM start-up'
         'gl.c'          = 'WGL context creation'
         'plat_win32.c'  = 'the Win32 side of plat.h, and meant to be the only one'
-        'audio.c'       = 'NOT YET SPLIT -- the waveOut device and mixer thread are still mixed in with the portable mixing policy'
+        'audio_win32.c' = 'waveOut, the mixer thread, and the lock the voice table needs'
     }
 
     $poison = Join-Path $root 'tools\nowin'

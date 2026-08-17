@@ -1,17 +1,13 @@
 #include "audio.h"
+#include "audio_dev.h"   /* RATE/FRAMES/NBUF, audio_mix, and the lock */
 #include "data.h"
 #include "txt.h"
 #include "diag.h"
 
 #define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#include <mmsystem.h>
 #include <math.h>
 
 /* --- 매크로 및 상수 --- */
-#define RATE        44100   ///< @brief 오디오 샘플 레이트 (Hz).
-#define FRAMES      512     ///< @brief 버퍼 당 프레임 수. 약 11.6ms에 해당하며, 약 46ms의 지연 시간을 가집니다.
-#define NBUF        4       ///< @brief 오디오 버퍼의 수.
 #define MAX_LAYERS  6       ///< @brief 사운드 레시피의 최대 레이어 수.
 /* 캐시할 수 있는 최대 사운드 레시피 수.
  *
@@ -111,97 +107,6 @@ static int   g_parsed;
 
 // 활성 보이스
 static Voice            g_voices[MAX_VOICES];
-static CRITICAL_SECTION g_lock;
-
-/* 장치가 열리고 스레드가 실행 중인지 여부.
- *
- * ENGLISH
- * -------
- * THE GATE ON g_lock's OWN VALIDITY. audio_shutdown clears it from the game
- * thread while the mixer may still be running, and once it is clear the
- * critical section has been deleted and must not be entered.
- *
- * READ AND WRITTEN THROUGH ::flag_get AND ::flag_set, not as a plain variable,
- * and it used to be `volatile` instead. That was borrowed from MSVC, where
- * volatile carries acquire/release semantics by default. It does not in GCC,
- * which is what builds this: there volatile means only "do not cache it in a
- * register", and orders nothing with respect to the surrounding
- * non-volatile writes. The claim this flag makes is an ORDERING claim -- a
- * thread that sees it set must also see an initialised g_lock and an open
- * device, and a thread that sees it clear must not be about to enter either.
- * That needs a release on the way out and an acquire on the way in, which is
- * what the two helpers below are.
- *
- * It worked, and would have gone on working: x86 does not reorder stores with
- * stores or loads with loads, so the hardware supplied for free what the source
- * never asked for. Nothing here is a bug report. It is a claim that was true
- * about the machine rather than about the program.
- *
- * 한국어
- * ------
- * g_lock 자체의 유효성을 결정하는 게이트입니다. audio_shutdown이 믹서가 아직 실행 중일 수
- * 있는 상태에서 게임 스레드로부터 이 값을 해제하며, 해제된 이후에는 임계 영역이 삭제된
- * 상태이므로 진입해서는 안 됩니다.
- *
- * 평범한 변수가 아니라 ::flag_get과 ::flag_set을 통해 읽고 씁니다. 이전에는 대신
- * `volatile`이었습니다. 그것은 MSVC에서 빌려 온 것으로, 그곳에서는 volatile이 기본적으로
- * 획득·해제 의미론을 가집니다. 이것을 빌드하는 GCC에서는 그렇지 않습니다. 그곳에서 volatile은
- * "레지스터에 캐시하지 말라"는 뜻일 뿐이며 주변의 비휘발성 쓰기에 대해 아무 순서도 정하지
- * 않습니다. 이 플래그가 하는 주장은 *순서*에 대한 주장입니다. 이것이 설정된 것을 본 스레드는
- * 초기화된 g_lock과 열린 장치도 보아야 하고, 해제된 것을 본 스레드는 그 어느 쪽에도 진입하려
- * 해서는 안 됩니다. 그러려면 나갈 때 해제, 들어올 때 획득이 필요하며, 아래 두 헬퍼가 그것입니다.
- *
- * 동작했고 앞으로도 동작했을 것입니다. x86은 저장을 저장과, 적재를 적재와 재배열하지 않으므로
- * 하드웨어가 소스 코드는 요청한 적 없는 것을 공짜로 공급했습니다. 이것은 버그 보고가 아닙니다.
- * 프로그램이 아니라 기계에 대해 참이던 주장입니다.
- */
-static LONG g_ready;
-
-// 오디오 백엔드
-static HWAVEOUT g_dev;
-static HANDLE   g_event, g_thread;
-static WAVEHDR  g_hdr[NBUF];
-static short    g_buf[NBUF][FRAMES];
-/* Read by the mixer thread's loop and cleared by the game thread. Same
-   treatment as g_ready and for the same reason; see the note above it.
-   믹서 스레드의 루프가 읽고 게임 스레드가 해제합니다. g_ready와 같은 처리이며 이유도
-   같습니다. 그 위의 설명을 참조하십시오. */
-static LONG g_running;
-
-/**
- * @brief Reads a cross-thread flag, and everything the writer wrote before it.
- *
- * ENGLISH
- * -------
- * Acquire, so a thread that sees the flag set also sees the critical section,
- * the device and the buffers that were prepared before it was set. On x86 this
- * compiles to the same plain load `volatile` did -- the barrier is against the
- * COMPILER reordering, which is the part that was never guaranteed.
- *
- * 한국어
- * ------
- * @brief 스레드 간 플래그를, 기록자가 그 이전에 쓴 모든 것과 함께 읽습니다.
- *
- * 획득 의미론입니다. 플래그가 설정된 것을 본 스레드는 그것이 설정되기 전에 준비된 임계 영역과
- * 장치와 버퍼도 봅니다. x86에서는 `volatile`이 만들던 것과 같은 평범한 적재로 컴파일됩니다.
- * 장벽이 막는 것은 *컴파일러*의 재배열이며, 그 부분이 보장된 적 없던 것입니다.
- */
-static int flag_get(LONG *p) {
-    return (int)__atomic_load_n(p, __ATOMIC_ACQUIRE);
-}
-
-/**
- * @brief Publishes a cross-thread flag, and everything written before it.
- *
- * ENGLISH: Release, so nothing the compiler could have moved past this write
- * becomes visible to a reader before the write itself.
- *
- * 한국어: 해제 의미론입니다. 컴파일러가 이 쓰기 너머로 옮길 수 있었을 무엇도, 그 쓰기 자체보다
- * 먼저 판독자에게 보이지 않게 됩니다.
- */
-static void flag_set(LONG *p, int v) {
-    __atomic_store_n(p, (LONG)v, __ATOMIC_RELEASE);
-}
 
 /* --- 정적 함수 선언 --- */
 static void parse_sounds(void);
@@ -211,8 +116,6 @@ static float frand(unsigned *s);
 static float osc(int wave, float phase, float *hold, unsigned *rng);
 static float envelope(const Layer *L, float t_ms);
 static int render_voice(Voice *V, short *out, int frames);
-static void mix(short *out, int frames);
-static DWORD WINAPI mixer_thread(LPVOID param);
 
 /* --- 정적 함수 구현 --- */
 
@@ -617,35 +520,24 @@ static int render_voice(Voice *V, short *out, int frames) {
  * @param out 출력 오디오 버퍼.
  * @param frames 믹싱할 프레임 수.
  */
-static void mix(short *out, int frames) {
+void audio_mix(short *out, int frames) {
+    /* Cleared first and unconditionally. Every sample is written even when no
+       voice is playing, because the caller hands this buffer straight to
+       hardware and one left untouched replays whatever was in it last.
+       가장 먼저 무조건 비웁니다. 재생 중인 보이스가 없어도 모든 샘플을 기록하는 것은,
+       호출자가 이 버퍼를 하드웨어에 그대로 넘기므로 손대지 않은 버퍼는 직전에 들어 있던
+       것을 다시 재생하기 때문입니다. */
     for (int i = 0; i < frames; i++) out[i] = 0;
 
-    EnterCriticalSection(&g_lock);
+    int held = audio_dev_lock();
     for (int v = 0; v < MAX_VOICES; v++) {
         Voice *V = &g_voices[v];
         if (!V->snd) continue;
         if (!render_voice(V, out, frames)) V->snd = 0;
     }
-    LeaveCriticalSection(&g_lock);
+    if (held) audio_dev_unlock();
 }
 
-/**
- * @brief 오디오 믹싱을 처리하는 백그라운드 스레드 함수입니다.
- * @param param 스레드 파라미터 (사용되지 않음).
- * @return 스레드 종료 코드.
- */
-static DWORD WINAPI mixer_thread(LPVOID param) {
-    (void)param;
-    while (flag_get(&g_running)) {
-        WaitForSingleObject(g_event, 100);
-        for (int i = 0; i < NBUF; i++) {
-            if (!(g_hdr[i].dwFlags & WHDR_DONE)) continue;
-            mix(g_buf[i], FRAMES);
-            waveOutWrite(g_dev, &g_hdr[i], sizeof(WAVEHDR));
-        }
-    }
-    return 0;
-}
 
 /* --- 공개 API 함수 --- */
 
@@ -654,23 +546,24 @@ int audio_rate(void) { return RATE; }
 int audio_render(const char *name, short *out, int max_frames) {
     /* Offline path, and the only public entry point that may run with no
        device open at all -- tools/sndtest.c never calls audio_init. Take the
-       lock only when there is a mixer to race with; g_ready false means the
-       critical section was never initialised and entering it is itself the
-       bug. The voice below is a local, so nothing here publishes state to
-       the mixer either way.
+       audio_dev_lock answers "was there anything to take" and returns 0 when
+       no device was ever opened, which is exactly this case -- see audio_dev.h
+       for why the gate belongs inside the lock rather than at each of the four
+       call sites that used to test it. The voice below is a local, so nothing
+       here publishes state to the mixer either way.
 
        오프라인 경로이며, 장치가 전혀 열리지 않은 상태에서 실행될 수 있는 유일한
        공개 진입점입니다. tools/sndtest.c는 audio_init을 호출하지 않습니다. 경쟁할
-       믹서가 존재할 때만 락을 획득합니다. g_ready가 거짓이라는 것은 임계 영역이
-       초기화된 적이 없다는 뜻이며, 그 상태에서 진입하는 것 자체가 버그입니다. 아래의
-       보이스는 지역 변수이므로, 어느 쪽이든 믹서에 상태를 공개하지 않습니다. */
-    int lock = flag_get(&g_ready);
-    if (lock) EnterCriticalSection(&g_lock);
+       audio_dev_lock이 "획득할 것이 있었는가"에 답하며, 장치가 한 번도 열리지 않았으면
+       0을 반환합니다. 바로 이 경우입니다. 게이트가 그것을 검사하던 네 지점이 아니라 락
+       안에 속하는 이유는 audio_dev.h를 참조하십시오. 아래의 보이스는 지역 변수이므로,
+       어느 쪽이든 믹서에 상태를 공개하지 않습니다. */
+    int lock = audio_dev_lock();
 
     if (!g_parsed) parse_sounds();
     const Sound *s = find_sound(name);
 
-    if (lock) LeaveCriticalSection(&g_lock);
+    if (lock) audio_dev_unlock();
     /* The same test audio_play makes, and it was wrong here too: a sampled
        sound has no layers, so this returned 0 frames for every sound that came
        from a WAV. Two copies of one rule is how one of them stays wrong -- the
@@ -697,85 +590,6 @@ int audio_render(const char *name, short *out, int max_frames) {
     return done;
 }
 
-int audio_init(void) {
-    WAVEFORMATEX fmt = {0};
-    fmt.wFormatTag      = WAVE_FORMAT_PCM;
-    fmt.nChannels       = 1;
-    fmt.nSamplesPerSec  = RATE;
-    fmt.wBitsPerSample  = 16;
-    fmt.nBlockAlign     = 2;
-    fmt.nAvgBytesPerSec = RATE * 2;
-
-    g_event = CreateEventA(0, FALSE, FALSE, 0);
-    if (!g_event) return 0;
-
-    if (waveOutOpen(&g_dev, WAVE_MAPPER, &fmt, (DWORD_PTR)g_event, 0,
-                    CALLBACK_EVENT) != MMSYSERR_NOERROR) {
-        CloseHandle(g_event);
-        g_event = 0;
-        return 0;
-    }
-
-    InitializeCriticalSection(&g_lock);
-
-    for (int i = 0; i < NBUF; i++) {
-        g_hdr[i].lpData         = (LPSTR)g_buf[i];
-        g_hdr[i].dwBufferLength = FRAMES * 2;
-        waveOutPrepareHeader(g_dev, &g_hdr[i], sizeof(WAVEHDR));
-        waveOutWrite(g_dev, &g_hdr[i], sizeof(WAVEHDR));
-    }
-
-    flag_set(&g_running, 1);
-    g_thread = CreateThread(0, 0, mixer_thread, 0, 0, 0);
-    if (!g_thread) { audio_shutdown(); return 0; }
-
-    /* LAST, and that is the ordering this flag exists to express: everything
-       it gates -- the lock, the device, the prepared headers, the running mixer
-       -- is in place above, and the release makes all of it visible to whoever
-       sees this set.
-       마지막이며, 그것이 이 플래그가 표현하려는 순서입니다. 이것이 여는 모든 것(락, 장치,
-       준비된 헤더, 실행 중인 믹서)이 위에서 갖춰졌고, 해제 의미론이 그 전부를 이 값이 설정된
-       것을 본 쪽에게 보이게 합니다. */
-    flag_set(&g_ready, 1);
-    return 1;
-}
-
-void audio_shutdown(void) {
-    if (!g_event) return;
-
-    /* Close the gate FIRST. g_ready is what audio_play tests before entering
-       g_lock, so it has to be false before the critical section is deleted --
-       otherwise a call already past the test enters a deleted lock. The
-       mixer is stopped and joined below, so once this is clear no thread can
-       reach the lock again.
-
-       가장 먼저 게이트를 닫습니다. g_ready는 audio_play가 g_lock에 진입하기 전에
-       검사하는 값이므로, 임계 영역이 삭제되기 전에 반드시 거짓이어야 합니다. 그렇지
-       않으면 이미 검사를 통과한 호출이 삭제된 락에 진입하게 됩니다. 아래에서 믹서를
-       정지시키고 합류시키므로, 이 값이 해제된 뒤에는 어떤 스레드도 락에 다시 도달할
-       수 없습니다. */
-    int was_ready = flag_get(&g_ready);
-    flag_set(&g_ready, 0);
-
-    flag_set(&g_running, 0);
-    if (g_thread) {
-        SetEvent(g_event);
-        WaitForSingleObject(g_thread, 500);
-        CloseHandle(g_thread);
-        g_thread = 0;
-    }
-    if (g_dev) {
-        waveOutReset(g_dev);
-        for (int i = 0; i < NBUF; i++)
-            waveOutUnprepareHeader(g_dev, &g_hdr[i], sizeof(WAVEHDR));
-        waveOutClose(g_dev);
-        g_dev = 0;
-    }
-    /* Safe now: the mixer has been joined and the gate is shut. */
-    if (was_ready) DeleteCriticalSection(&g_lock);
-    CloseHandle(g_event);
-    g_event = 0;
-}
 
 void audio_reload(void) {
     /* g_parsed is shared with the mixer's view of g_sounds[], so clearing it
@@ -787,10 +601,9 @@ void audio_reload(void) {
        때도 레시피 테이블에 대한 다른 모든 접근과 마찬가지로 락을 획득합니다. 실제
        재파싱은 다음 audio_play 시점에 락을 보유한 게임 스레드에서 수행되며, 믹서
        스레드에서는 결코 일어나지 않습니다. */
-    if (!flag_get(&g_ready)) { g_parsed = 0; return; }   /* device never opened; no mixer to race */
-    EnterCriticalSection(&g_lock);
+    if (!audio_dev_lock()) { g_parsed = 0; return; }   /* no device; no mixer to race */
     g_parsed = 0;
-    LeaveCriticalSection(&g_lock);
+    audio_dev_unlock();
 }
 
 /* Threading contract
@@ -826,9 +639,7 @@ static v3 g_listener;
 void audio_listener(v3 pos) { g_listener = pos; }
 
 static void play_gain(const char *name, int gain) {
-    if (!flag_get(&g_ready)) return;
-
-    EnterCriticalSection(&g_lock);
+    if (!audio_dev_lock()) return;
 
     /* Parse on demand, but on THIS thread and under the lock. find_sound no
        longer does this for us, precisely so it cannot happen unlocked.
@@ -844,7 +655,7 @@ static void play_gain(const char *name, int gain) {
        사운드를 거부했고, 그래서 문과 스위치와 열쇠는 이식된 뒤에도 아무 소리를 내지
        않았습니다. */
     const Sound *s = find_sound(name);
-    if (!s || (!s->n && s->pcm_n <= 0)) { LeaveCriticalSection(&g_lock); return; }
+    if (!s || (!s->n && s->pcm_n <= 0)) { audio_dev_unlock(); return; }
 
     int slot = -1, oldest = -1, oldest_pos = -1;
     for (int i = 0; i < MAX_VOICES; i++) {
@@ -859,7 +670,7 @@ static void play_gain(const char *name, int gain) {
     V->gain = gain < 0 ? 0 : (gain > 100 ? 100 : gain);
     V->rng  = 0x2545f491u + (unsigned)slot * 2654435761u;
     for (int k = 0; k < MAX_LAYERS; k++) { V->phase[k] = 0.0f; V->hold[k] = 0.0f; }
-    LeaveCriticalSection(&g_lock);
+    audio_dev_unlock();
 }
 
 void audio_play(const char *name, int gain) { play_gain(name, gain); }

@@ -457,6 +457,88 @@ int main(void) {
             diag_count(DIAG_PICKUP_CAP) - cap_before, 0);
     }
 
+    /* --- the shipped arena ------------------------------------------------
+       Everything above runs on a box this file built, for the reason movetest
+       learned: a level is a thing somebody edits and a test that names its
+       coordinates goes red on every edit. So this section asks only what any
+       ARENA must satisfy, whatever it is shaped like -- the same bargain
+       tracetest strikes with the shipped level.
+
+       What it is really proving is that the four changes underneath it meet:
+       the level format carries a spawner's height, make_monster hands it to a
+       flyer, move_toward lets the flyer keep it, and step_wave notices any of
+       it happened. Each is checked alone above; only a real level checks that
+       they are wired to each other.
+
+       위의 모든 것은 이 파일이 만든 상자에서 돌아갑니다. movetest가 배운 이유와 같습니다.
+       레벨은 누군가 편집하는 것이고 그 좌표를 적은 검사는 편집할 때마다 빨개집니다. 그래서 이
+       구획은 아레나가 어떤 모양이든 만족해야 하는 것만 묻습니다. tracetest가 출하 레벨과 맺는
+       것과 같은 거래입니다.
+
+       실제로 증명하는 것은 그 아래의 네 변경이 서로 만난다는 사실입니다. 레벨 형식이 스포너의
+       높이를 나르고, make_monster가 그것을 비행체에게 건네고, move_toward가 비행체가 그것을
+       유지하게 하고, step_wave가 그 일이 일어났음을 알아챕니다. 각각은 위에서 따로 검사했고,
+       그것들이 서로 연결되어 있는지는 실제 레벨만이 검사합니다. */
+    printf("\nthe shipped arena\n");
+    {
+        world_init(&w);
+        w.run.title = 0;
+
+        if (!world_load_level(&w, "spire", WORLD_ENTER_NEW)) {
+            ok(0, "spire loads");
+        } else {
+            ok(1, "spire loads");
+            ok(w.level.brushes != 0,
+               "and is a brush level, which is what a floating ledge needs");
+
+            /* Solid ground under the start, which every level owes whatever
+               else it does. */
+            float f, c;
+            ok(level_ground(&w.level, w.player.pos.x, w.player.pos.z,
+                            w.player.pos.y, 1e9f, &f, &c),
+               "there is floor under the player start");
+
+            int spawners = enemy_spawner_count(&w.pools);
+            ok(spawners > 0, "it is an arena: at least one spawner");
+
+            /* At least one mouth in the air. Asked of the SPAWNER rather than
+               of a coordinate, so moving it in the editor changes nothing here
+               as long as it stays a flyer's.
+               좌표가 아니라 *스포너*에게 묻습니다. 에디터에서 옮겨도 비행체의 것으로 남아
+               있는 한 이곳은 달라지지 않습니다. */
+            int air = 0;
+            for (int i = 0; i < spawners; i++) {
+                const Spawner *s = &w.pools.enemy.spawner[i];
+                if (mon_stats(s->type)->flags & MON_FLIES) air++;
+            }
+            ok(air > 0, "and at least one of them is a flyer's");
+
+            /* Play it. Long enough for the slowest spawner to have fired and
+               its telegraph to have landed. */
+            step_alive(&w, 1);
+            oki(w.run.wave == 1, "stepping it starts wave 1", w.run.wave, 1);
+
+            step_alive(&w, 60 * 30);
+            ok(enemy_alive(&w.pools) > 0, "and thirty seconds in, it is populated");
+
+            /* THE POINT OF THE WHOLE LEVEL: something is up there. Measured
+               against the floor beneath each monster rather than against a
+               number, so it stays true if the arena is rebuilt taller.
+               레벨 전체의 요점입니다. 무언가가 위에 있습니다. 숫자가 아니라 각 몬스터 아래의
+               바닥에 대고 재므로, 아레나를 더 높게 다시 지어도 참으로 남습니다. */
+            int airborne = 0;
+            for (int i = 0; i < w.pools.enemy.count; i++) {
+                const Enemy *m = &w.pools.enemy.m[i];
+                if (!m->active) continue;
+                float mf, mc;
+                if (!level_ground(&w.level, m->pos.x, m->pos.z, m->pos.y, 1e9f, &mf, &mc))
+                    continue;
+                if (m->pos.y > mf + 1.0f) airborne++;
+            }
+            ok(airborne > 0, "and something is off the ground");
+        }
+    }
+
     printf("\n%s\n", fails ? "  FAILED" : "  passed");
     return fails ? 1 : 0;
 }

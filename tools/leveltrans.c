@@ -13,7 +13,7 @@
  * is a thing somebody edits, and a test that names its contents goes red on
  * every edit.
  *
- * So it walks the chain now, from ::WORLD_START_LEVEL to whatever ends it, and
+ * So it walks the chain now, from ::WORLD_CHAIN_ROOT to whatever ends it, and
  * asserts at every hop the things that must be true of ANY campaign. Adding a
  * level, reordering two, or replacing a sector level with a .map changes what
  * this prints and not whether it passes. What still fails it is a typo'd
@@ -29,7 +29,7 @@
  * 맵은 누군가 편집하는 대상이고, 그 내용을 이름으로 지목하는 테스트는 편집할 때마다
  * 빨간불이 됩니다.
  *
- * 그래서 이제는 ::WORLD_START_LEVEL에서 시작해 끝나는 곳까지 체인을 걸으며, 매 구간마다
+ * 그래서 이제는 ::WORLD_CHAIN_ROOT에서 시작해 끝나는 곳까지 체인을 걸으며, 매 구간마다
  * *어떤* 캠페인에든 참이어야 하는 것들을 단언합니다. 레벨을 추가하거나, 둘의 순서를 바꾸거나,
  * 섹터 레벨을 .map으로 교체하는 것은 이 파일이 무엇을 출력하는지를 바꿀 뿐 통과 여부를 바꾸지
  * 않습니다. 여전히 실패시키는 것은 오타 난 `next`, 스폰 지점 위의 출구, 지오메트리가 없는
@@ -39,7 +39,7 @@
 #include <stdio.h>
 #include <math.h>
 #include "level.h"
-#include "world.h"   /* WORLD_START_LEVEL, WORLD_STAGE_MAX_HOPS: the chain's ends */
+#include "world.h"   /* WORLD_CHAIN_ROOT, WORLD_STAGE_MAX_HOPS: the chain's ends */
 #include "txt.h"     /* txt_copy -- the chain is walked by name */
 
 /* Layering guard, enforced on every build rather than trusted to review.
@@ -116,7 +116,7 @@ int main(void) {
     printf("leveltrans\n\n");
 
     char at[64];
-    txt_copy(at, sizeof(at), WORLD_START_LEVEL, -1);
+    txt_copy(at, sizeof(at), WORLD_CHAIN_ROOT, -1);
 
     /* Two levels live at once here for the same reason world.c keeps two: the
        one being checked and the one it names. Released at the end of each hop

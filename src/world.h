@@ -208,8 +208,74 @@
 /** @brief Capacity of ::World::cur_level, bytes. / ::World::cur_level의 크기 (바이트). */
 #define WORLD_LEVEL_MAX 32
 
-/** @brief The level a fresh ::World starts in. / 새 ::World가 시작하는 레벨. */
-#define WORLD_START_LEVEL "arena"
+/**
+ * @brief The level a fresh ::World starts in.
+ *
+ * ENGLISH
+ * -------
+ * An ARENA, and it is terminal: `spire` carries no `next` and has no exit, so
+ * the game the player boots into is one room and a wave counter. That is the
+ * game this is becoming -- see ::RunState::wave.
+ *
+ * @warning THIS IS NO LONGER THE HEAD OF THE CAMPAIGN. It was, and while it was
+ *          "where the game starts" and "where the chain begins" were the same
+ *          fact and one constant said both. They have come apart:
+ *          ::world_progress_for_stage walks from HERE, so with an arena at the
+ *          front it finds a chain of one and ::world_start_stage refuses every
+ *          level of the old campaign. Those levels still load by name -- nothing
+ *          has been deleted -- but nothing reaches them by walking forward.
+ *          ::WORLD_CHAIN_ROOT is the other half, and the tests that check the
+ *          progression machinery use it.
+ *
+ * 한국어
+ * ------
+ * @brief 새 ::World가 시작하는 레벨.
+ *
+ * *아레나*이며 종착점입니다. `spire`는 `next`를 지니지 않고 출구도 없으므로, 플레이어가 부팅해
+ * 들어가는 게임은 방 하나와 웨이브 계수기입니다. 이것이 이 프로젝트가 되어 가는 게임입니다.
+ * ::RunState::wave를 참조하십시오.
+ *
+ * @warning *이것은 더 이상 캠페인의 머리가 아닙니다.* 한때는 그러했고, 그동안에는 "게임이
+ *          시작하는 곳"과 "사슬이 시작하는 곳"이 같은 사실이었으며 상수 하나가 둘 다를
+ *          말했습니다. 이제 둘은 갈라졌습니다. ::world_progress_for_stage가 *이곳*에서부터
+ *          걷는데, 앞에 아레나가 있으면 길이 1의 사슬을 찾고 ::world_start_stage는 옛 캠페인의
+ *          모든 레벨을 거절합니다. 그 레벨들은 여전히 이름으로 로드되며 아무것도 삭제되지
+ *          않았습니다. 다만 앞으로 걸어서 도달하는 것이 없을 뿐입니다. ::WORLD_CHAIN_ROOT가
+ *          나머지 절반이며, 진행 기구를 검사하는 검사들이 그것을 씁니다.
+ */
+#define WORLD_START_LEVEL "spire"
+
+/**
+ * @brief Where the level text's `next` chain begins.
+ *
+ * ENGLISH
+ * -------
+ * Split from ::WORLD_START_LEVEL when the game stopped booting into the
+ * campaign. Nothing in src reads this: the chain-walking machinery takes a name
+ * from its caller and has no opinion about which one. It is here rather than
+ * spelled into each test because it is a fact about the shipped CONTENT, and a
+ * fact stated in three test files is a fact that will be true in two of them.
+ *
+ * @note If the campaign is ever retired outright, this constant and the checks
+ *       that use it go together -- which is the point of naming it. A chain
+ *       nothing walks is easier to notice than a chain three tests walk from
+ *       three separately spelled starting points.
+ *
+ * 한국어
+ * ------
+ * @brief 레벨 텍스트의 `next` 사슬이 시작되는 곳.
+ *
+ * 게임이 캠페인으로 부팅하기를 그만두었을 때 ::WORLD_START_LEVEL에서 갈라져 나왔습니다. src의
+ * 어떤 것도 이것을 읽지 않습니다. 사슬을 걷는 기구는 호출자에게서 이름을 받으며 그것이 어느
+ * 것인지에 대해 아무 견해도 갖지 않습니다. 각 검사에 적어 넣지 않고 이곳에 두는 이유는 이것이
+ * *출하되는 콘텐츠*에 대한 사실이기 때문이며, 세 개의 검사 파일에 적힌 사실은 그중 둘에서만
+ * 참이 될 사실이기 때문입니다.
+ *
+ * @note 캠페인을 아예 은퇴시킨다면 이 상수와 그것을 쓰는 검사들이 함께 갑니다. 이름을 붙이는
+ *       요점이 그것입니다. 아무도 걷지 않는 사슬은, 세 검사가 각각 따로 적은 출발점에서 걷는
+ *       사슬보다 알아채기 쉽습니다.
+ */
+#define WORLD_CHAIN_ROOT "arena"
 
 /**
  * @brief How far ::world_progress_for_stage will walk the `next` chain.
@@ -932,8 +998,28 @@ int world_load_level(World *w, const char *name, WorldEnter how);
  * @note 사슬 위의 각 스테이지를 임시 ::Level로 로드하여 엔티티를 읽습니다. 호출이 지속되는
  *       동안 약 19KB의 스택을 사용하며, 이 호출은 스테이지를 고를 때 한 번 일어나고 프레임
  *       안에서는 결코 일어나지 않습니다.
+ *
+ * @param[in]  root Where to start walking. This was ::WORLD_START_LEVEL, spelled
+ *                  inside, and that was right while the game booted into the
+ *                  campaign. It does not any more -- the start is an arena that
+ *                  chains to nothing -- so a walk hardwired to it would find a
+ *                  chain of one and refuse every level of the campaign that is
+ *                  still shipped. Walking a chain has to know where the chain
+ *                  begins, and that is now a different fact from where the game
+ *                  begins. Pass ::WORLD_CHAIN_ROOT for the campaign.
+ * @param[in]  name The stage being asked about.
+ * @param[out] out  Left untouched when the walk does not reach `name`.
+ *
+ * @param[in]  root 어디서부터 걸을지. 이전에는 ::WORLD_START_LEVEL이었고 내부에 적혀 있었으며,
+ *                  게임이 캠페인으로 부팅하는 동안에는 옳았습니다. 이제는 그렇지 않습니다.
+ *                  시작은 아무것도 잇지 않는 아레나이므로, 그것에 고정된 순회는 길이 1의 사슬을
+ *                  찾고 여전히 출하되는 캠페인의 모든 레벨을 거절하게 됩니다. 사슬을 걷는 일은
+ *                  사슬이 어디서 시작하는지 알아야 하며, 그것은 이제 게임이 어디서 시작하는지와
+ *                  다른 사실입니다. 캠페인에 대해서는 ::WORLD_CHAIN_ROOT를 넘기십시오.
+ * @param[in]  name 질의 대상 스테이지.
+ * @param[out] out  순회가 `name`에 닿지 못하면 손대지 않습니다.
  */
-int world_progress_for_stage(const char *name, PlayerProgress *out);
+int world_progress_for_stage(const char *root, const char *name, PlayerProgress *out);
 
 /**
  * @brief Begins a run at `name`, as though the player had played their way there.
@@ -961,7 +1047,7 @@ int world_progress_for_stage(const char *name, PlayerProgress *out);
  *       시작한 스테이지를 재시작하면 부팅 구성이 아니라 같은 탄약대로 되돌아가는 이유가
  *       그것입니다.
  */
-int world_start_stage(World *w, const char *name);
+int world_start_stage(World *w, const char *root, const char *name);
 
 /**
  * @brief Reads out what the player would keep across a level boundary.

@@ -1194,12 +1194,13 @@ static void grant_weapons_of(const Level *l, PlayerProgress *out) {
  *       레벨은 그 전부에서 반납되어야 합니다. return마다 반납을 두는 것은 다섯 번째 return을
  *       추가하며 잊을 기회가 네 번 있다는 뜻이고, 감싸는 함수는 잊을 수 없는 한 곳입니다.
  */
-static int stage_walk(const char *name, PlayerProgress *out, Level *scan) {
+static int stage_walk(const char *root, const char *name,
+                      PlayerProgress *out, Level *scan) {
     PlayerProgress p;
     progress_boot(&p);
 
     char at[WORLD_LEVEL_MAX];
-    txt_copy(at, sizeof(at), WORLD_START_LEVEL, -1);
+    txt_copy(at, sizeof(at), root, -1);
 
     /* Bounded because `next` is authored text and may point backwards. A cycle
        would otherwise walk for ever, and a stage-select menu is not a place to
@@ -1237,7 +1238,7 @@ static int stage_walk(const char *name, PlayerProgress *out, Level *scan) {
     return 0;   /* longer than any episode, or a loop */
 }
 
-int world_progress_for_stage(const char *name, PlayerProgress *out) {
+int world_progress_for_stage(const char *root, const char *name, PlayerProgress *out) {
     /* One scratch level, reused for every hop. Zeroed once: level_load resets
        the counts and names it fills, so nothing stale is ever read, but a
        19KB local that begins as whatever was on the stack is a bad habit to
@@ -1247,7 +1248,7 @@ int world_progress_for_stage(const char *name, PlayerProgress *out) {
        무엇으로 시작하는 19KB 지역 변수를 파서 옆에 남겨 두는 것은 나쁜 습관입니다. */
     Level scan = {0};
 
-    int found = stage_walk(name, out, &scan);
+    int found = stage_walk(root, name, out, &scan);
 
     /* GIVEN BACK BEFORE THIS FRAME ENDS, and this is the call the whole brush
        slot change was made for. `scan` is a stack local that is about to stop
@@ -1266,9 +1267,9 @@ int world_progress_for_stage(const char *name, PlayerProgress *out) {
     return found;
 }
 
-int world_start_stage(World *w, const char *name) {
+int world_start_stage(World *w, const char *root, const char *name) {
     PlayerProgress want;
-    if (!world_progress_for_stage(name, &want)) return 0;
+    if (!world_progress_for_stage(root, name, &want)) return 0;
 
     /* Seed the checkpoint and enter as a replay of it. That is one mechanism
        doing two jobs: the player starts the stage with this belt, and a restart

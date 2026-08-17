@@ -445,6 +445,19 @@ int main(void) {
         okf(w.player.health == PLAYER_MAX_HP, "a fresh run starts at full health",
             (float)w.player.health, (float)PLAYER_MAX_HP);
         ok(w.geometry_dirty, "and the level it reloaded needs its geometry rebuilt");
+
+        /* THIS BLOCK LOADS A LEVEL WITHOUT LOOKING LIKE IT. world_restart
+           reloads World::cur_level, which world_init seeded with
+           WORLD_START_LEVEL -- so a block that never names a level still takes
+           a brush slot, and there are two. Invisible while the start level was
+           sectors and the reason the three fixtures after this one began
+           failing the moment it was a .map.
+           이 블록은 그렇게 보이지 않으면서 레벨을 로드합니다. world_restart는
+           World::cur_level을 다시 로드하는데 world_init이 그것을 WORLD_START_LEVEL로 심어
+           두었습니다. 따라서 레벨을 전혀 언급하지 않는 블록도 브러시 슬롯을 가져가며, 슬롯은
+           둘뿐입니다. 시작 레벨이 섹터인 동안에는 보이지 않았고, 그것이 .map이 되는 순간 이
+           블록 뒤의 픽스처 셋이 실패하기 시작한 이유입니다. */
+        level_release(&w.level);
     }
 
     /* --- what the player carries, and what they do not ----------------------
@@ -507,6 +520,17 @@ int main(void) {
         ok(w.weapon.cur == WP_SHOTGUN && w.weapon.owned[WP_SHOTGUN]
            && w.weapon.ammo[WP_SHOTGUN] == WEAPON_START_AMMO,
            "leaving exactly the belt the game boots with");
+        /* GIVEN BACK, because this World is abandoned here and the brush pool
+           has room for exactly two. This cost nothing while the start level was
+           sectors -- arena claimed no slot -- and became mandatory the moment it
+           was a .map: the third fixture to load one is refused, and it is
+           refused by a load returning 0 that nobody was checking.
+           See ::Level::brush_key and ::DIAG_LEVEL_SLOTS.
+           이 World가 이곳에서 버려지고 브러시 풀은 정확히 둘을 담기 때문에 반납합니다. 시작
+           레벨이 섹터인 동안에는 비용이 없었지만(arena는 슬롯을 쓰지 않았습니다) .map이 되는
+           순간 필수가 되었습니다. 그것을 로드하는 세 번째 픽스처가 거절되며, 아무도 검사하지
+           않던 로드가 0을 반환하는 방식으로 거절됩니다. */
+        level_release(&w.level);
     }
 
     /* --- door state that outlived the level it described --------------------
@@ -606,6 +630,10 @@ int main(void) {
         world_restart(&f);
         ok(!f.weapon.owned[LAST] && f.weapon.ammo[WP_SHOTGUN] == WEAPON_START_AMMO,
            "restarting the FIRST stage still hands back the boot belt");
+
+        /* Both of this block's Worlds, for the reason above. */
+        level_release(&w.level);
+        level_release(&f.level);
     }
 
     /* --- starting part way into the episode --------------------------------
@@ -641,7 +669,7 @@ int main(void) {
         static Level walk;
 
         PlayerProgress first;
-        ok(world_progress_for_stage(WORLD_START_LEVEL, &first),
+        ok(world_progress_for_stage(WORLD_CHAIN_ROOT, WORLD_CHAIN_ROOT, &first),
            "the first stage is reachable from itself");
         {
             /* Nothing precedes it, so there is nothing to have been given. */
@@ -656,14 +684,14 @@ int main(void) {
 
         /* Walk the shipped chain, checking the invariants at every stage. */
         char at[WORLD_LEVEL_MAX];
-        txt_copy(at, sizeof(at), WORLD_START_LEVEL, -1);
+        txt_copy(at, sizeof(at), WORLD_CHAIN_ROOT, -1);
 
         PlayerProgress prev = first;
         int stages = 0, shrank = 0, wrong_ammo = 0, grew = 0;
 
         for (int hop = 0; hop < 8; hop++) {
             PlayerProgress p;
-            if (!world_progress_for_stage(at, &p)) break;
+            if (!world_progress_for_stage(WORLD_CHAIN_ROOT, at, &p)) break;
             stages++;
 
             for (int i = 0; i < WP_TYPES; i++) {
@@ -709,7 +737,7 @@ int main(void) {
         {
             /* Walk to the end of the chain. */
             char deep[WORLD_LEVEL_MAX];
-            txt_copy(deep, sizeof(deep), WORLD_START_LEVEL, -1);
+            txt_copy(deep, sizeof(deep), WORLD_CHAIN_ROOT, -1);
             for (int hop = 0; hop < 8; hop++) {
                 if (!level_load(deep, &walk) || !walk.next[0]) break;
                 txt_copy(deep, sizeof(deep), walk.next, -1);
@@ -721,7 +749,7 @@ int main(void) {
             for (int i = 0; i < WP_TYPES; i++) want[i] = 0;
 
             char cur[WORLD_LEVEL_MAX];
-            txt_copy(cur, sizeof(cur), WORLD_START_LEVEL, -1);
+            txt_copy(cur, sizeof(cur), WORLD_CHAIN_ROOT, -1);
             int before = 0;
             for (int hop = 0; hop < 8 && !same_name(cur, deep); hop++) {
                 if (!level_load(cur, &walk)) break;
@@ -733,7 +761,7 @@ int main(void) {
             level_release(&walk);
 
             PlayerProgress d;
-            ok(world_progress_for_stage(deep, &d), "the deepest stage is reachable");
+            ok(world_progress_for_stage(WORLD_CHAIN_ROOT, deep, &d), "the deepest stage is reachable");
 
             int mismatch = 0;
             for (int i = 0; i < WP_TYPES; i++) {
@@ -749,7 +777,7 @@ int main(void) {
         /* Unreachable names change nothing. */
         PlayerProgress untouched;
         untouched.health = 1234;
-        ok(!world_progress_for_stage("no-such-stage-exists", &untouched),
+        ok(!world_progress_for_stage(WORLD_CHAIN_ROOT, "no-such-stage-exists", &untouched),
            "a stage not on the chain is refused");
         okf(untouched.health == 1234, "and the caller's buffer is left alone",
             (float)untouched.health, 1234.0f);
@@ -759,7 +787,7 @@ int main(void) {
         World s;
         world_init(&s);
         s.run.title = 0;
-        ok(world_start_stage(&s, WORLD_START_LEVEL), "a stage can be started directly");
+        ok(world_start_stage(&s, WORLD_CHAIN_ROOT, WORLD_CHAIN_ROOT), "a stage can be started directly");
         s.weapon.ammo[WP_SHOTGUN] = 0;
         world_restart(&s);
         okf(s.weapon.ammo[WP_SHOTGUN] == first.ammo[WP_SHOTGUN],

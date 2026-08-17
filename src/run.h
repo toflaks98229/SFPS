@@ -51,15 +51,17 @@
  * construction rather than by somebody remembering to extend a list, and the
  * question "what does a restart clear" has one place to look.
  *
- * @note This is run state, NOT world state. `g_level`, `g_player` and
- *       `g_weapon` are deliberately outside it: a restart reloads the level and
- *       respawns the player through ::load_level, which owns rules of its own
- *       about what carries across. Folding them in would put two different
- *       lifetimes behind one reset.
- * @note Not in a header and not shared. The frame loop is the only thing that
- *       may decide a run has ended, and every module that needs to know is told
- *       through an argument -- ::scene_draw_death takes its fade time rather
- *       than reading it from here.
+ * @note This is run state, NOT world state. ::World::level, ::World::player and
+ *       ::World::weapon are deliberately its siblings rather than its contents:
+ *       a restart reloads the level and respawns the player through
+ *       ::world_load_level, which owns rules of its own about what carries
+ *       across. Folding them in would put two different lifetimes behind one
+ *       reset.
+ * @note Read through the ::World that owns it, never reached for directly.
+ *       ::world_step is the only thing that may decide a run has ended, and
+ *       every module that needs to know is told through an argument --
+ *       ::scene_draw_death takes its fade time rather than reading it from a
+ *       run it was handed.
  *
  * 한국어
  * ------
@@ -76,14 +78,14 @@
  * 목록을 늘려 주기를 기다리지 않고 구조적으로 초기화되며, "재시작이 무엇을 정리하는가"를
  * 확인할 곳이 한 군데가 됩니다.
  *
- * @note 이것은 *플레이* 상태이며 월드 상태가 아닙니다. `g_level`, `g_player`,
- *       `g_weapon`은 의도적으로 바깥에 둡니다. 재시작은 ::load_level을 통해 레벨을 다시
- *       로드하고 플레이어를 다시 스폰하는데, 그 함수는 무엇이 이어지는지에 대한 자체
- *       규칙을 가지고 있습니다. 이들을 안에 넣으면 서로 다른 두 수명이 하나의 초기화
- *       뒤에 놓이게 됩니다.
- * @note 헤더에 두지 않으며 공유하지도 않습니다. 플레이가 끝났다고 결정할 수 있는 것은
- *       프레임 루프뿐이며, 알아야 하는 모든 모듈은 인자로 전달받습니다.
- *       ::scene_draw_death는 페이드 시간을 이곳에서 읽지 않고 인자로 받습니다.
+ * @note 이것은 *플레이* 상태이며 월드 상태가 아닙니다. ::World::level, ::World::player,
+ *       ::World::weapon은 의도적으로 이것의 내용물이 아니라 형제로 둡니다. 재시작은
+ *       ::world_load_level을 통해 레벨을 다시 로드하고 플레이어를 다시 스폰하는데, 그 함수는
+ *       무엇이 이어지는지에 대한 자체 규칙을 가지고 있습니다. 이들을 안에 넣으면 서로 다른 두
+ *       수명이 하나의 초기화 뒤에 놓이게 됩니다.
+ * @note 이것을 소유한 ::World를 통해 읽으며, 직접 손을 뻗지 않습니다. 플레이가 끝났다고 결정할
+ *       수 있는 것은 ::world_step뿐이며, 알아야 하는 모든 모듈은 인자로 전달받습니다.
+ *       ::scene_draw_death는 페이드 시간을 건네받은 플레이에서 읽지 않고 인자로 받습니다.
  */
 typedef struct {
     /**

@@ -1149,7 +1149,7 @@ int rd_light_count(void);
  *       the buffer is the honest amount and is nearly invisible at 640x360,
  *       because the artefact is a whole-pixel jump and those pixels are small.
  * @warning Applies to every draw until changed, including the view model.
- *          ::wp_draw_view disables it for exactly that reason -- the gun sits
+ *          ::wpview_draw_view disables it for exactly that reason -- the gun sits
  *          at a fixed distance in the centre of the screen, where a constant
  *          vibration is least forgivable.
  *
@@ -1166,7 +1166,7 @@ int rd_light_count(void);
  * @note 버퍼보다 *성긴* 격자가 "더 PSX답게"를 위한 조정값입니다. 버퍼와 일치시키는 것이
  *       정직한 양이지만 640x360에서는 거의 보이지 않습니다. 이 아티팩트는 픽셀 단위
  *       도약인데 그 픽셀이 작기 때문입니다.
- * @warning 변경 전까지 뷰 모델을 포함한 모든 그리기에 적용됩니다. ::wp_draw_view가 바로
+ * @warning 변경 전까지 뷰 모델을 포함한 모든 그리기에 적용됩니다. ::wpview_draw_view가 바로
  *          그 이유로 이를 비활성화합니다. 총기는 화면 중앙의 고정된 거리에 있으며,
  *          그곳에서의 지속적인 진동이 가장 용납하기 어렵습니다.
  */

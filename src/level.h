@@ -210,10 +210,21 @@ typedef struct BrushMap BrushMap;
 
 /**
  * @brief Which way a door travels when it opens.
- * @note The order is the order ::DOOR_AXIS_NAMES lists them, which is what the
- *       level text is parsed against and what mapedit writes back.
+ * @warning THE NAMES ARE SPELLED OUT TWICE and neither copy is this enum.
+ *          level.c parses them as a `txt_is` chain and tools\mapedit.c writes
+ *          them back from a local `AXIS[DOOR_AXES]` table, so adding an axis
+ *          here compiles clean, loads as ::DOOR_UP, and saves as "up" -- a
+ *          door that quietly changes direction when a map is opened and
+ *          resaved. There is no shared table to add it to; there are two
+ *          places to remember, and this note is the only thing that says so.
  *
  * @brief 문이 열릴 때 이동하는 방향입니다.
+ * @warning *이름이 두 번 따로 적혀 있으며* 그 어느 쪽도 이 열거형이 아닙니다. level.c는
+ *          `txt_is` 사슬로 파싱하고 tools\mapedit.c는 자기 지역 `AXIS[DOOR_AXES]` 표에서
+ *          되씁니다. 따라서 이곳에 축을 추가하면 컴파일은 통과하고, ::DOOR_UP으로 로드되며,
+ *          "up"으로 저장됩니다. 맵을 열었다 다시 저장하면 조용히 방향이 바뀌는 문입니다.
+ *          추가할 공유 표는 없습니다. 기억해야 할 곳이 둘 있고, 그렇게 말해 주는 것은 이
+ *          주석뿐입니다.
  */
 enum {
     DOOR_UP,    /**< Ceiling rises. / 천장이 올라갑니다. */
@@ -1880,10 +1891,19 @@ int level_geometry_part(MeshBuf *b, const Level *l, MdlRange *ranges,
  * ENGLISH
  * -------
  * ::level_geometry bakes each vertex's static light against the level and
- * keeps the answer under that vertex's position and normal, so that a door
- * moving -- which rebuilds the whole level's geometry -- does not re-trace the
- * 80% of vertices that came back to exactly where they were. See level.c for
- * why the key is sufficient and what the cache deliberately stops following.
+ * keeps the answer under that vertex's position and normal, so that a rebuild
+ * does not re-trace the vertices that came back to exactly where they were --
+ * 79.9% of them with a door at half travel, which tools\leveltest.c measures
+ * rather than this comment claiming. See level.c for why the key is sufficient
+ * and what the cache deliberately stops following.
+ *
+ * @note WHAT THE CACHE IS STILL FOR, now that ::LVL_PART_STATIC exists. A brush
+ *       level no longer rebuilds the whole of itself when a door moves, so the
+ *       unmoved vertices are not re-traced because they are not rebuilt at all
+ *       -- the cache is not what saves them any more. It still earns its place
+ *       on the sector model, which ::level_geometry_split refuses and which
+ *       therefore does rebuild everything, and on a load, where a level built
+ *       twice in one session pays once.
  *
  * ::level_load calls this, which covers the game: a level becoming a different
  * level is the only thing that invalidates a reading, and that is the one

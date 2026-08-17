@@ -11,7 +11,7 @@
  * never asks for.
  *
  * @note Touches no GL, deliberately. The flight, the bouncing, the fuse and the
- *       blast radius are all arithmetic over a struct, so tools/projtest.c
+ *       blast radius are all arithmetic over a struct, so tools/weapontest.c
  *       steps a grenade down a corridor and asserts where it lands without a
  *       window -- the same split player.c, enemy.c and hook.c are built on.
  * @note Separate from enemy.c's `Shot`, which looks the same from a distance
@@ -27,7 +27,7 @@
  * 않는 판단입니다.
  *
  * @note 의도적으로 GL을 전혀 건드리지 않습니다. 비행·도탄·도화선·폭발 반경이 모두 구조체에
- *       대한 산술이므로, tools/projtest.c가 창 없이 유탄을 복도로 굴려 어디에 떨어지는지
+ *       대한 산술이므로, tools/weapontest.c가 창 없이 유탄을 복도로 굴려 어디에 떨어지는지
  *       단언합니다. player.c, enemy.c, hook.c가 기반한 것과 같은 분리입니다.
  * @note enemy.c의 `Shot`과 별개입니다. 멀리서 보면 같아 보이지만 아닙니다. 그쪽은
  *       *플레이어*를, 이쪽은 *몬스터*를 향해 훑습니다. 합치면 발사체가 어느 편인지를
@@ -190,7 +190,7 @@ int proj_live(const Pools *pl);
  *
  * @note Public because the axe's landing slam is the same operation as a
  *       grenade going off, and two copies of a falloff curve is two curves to
- *       tune. See ::wp_axe_slam.
+ *       tune. See ::wp_axe_land.
  *
  * @brief `at`을 중심으로 `radius` 안의 모든 몬스터에 거리에 따라 감소하는 피해를 줍니다.
  * @note 공개된 이유는 도끼의 착지 내려찍기가 유탄 폭발과 동일한 연산이기 때문입니다.

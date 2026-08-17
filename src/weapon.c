@@ -26,7 +26,7 @@
  *       tether and the flying claw, because drawing them needs the gun's
  *       model-space muzzle, which is a property of the weapon rather than of
  *       the hook.
- * @note ::wp_fire and the hook both push the player through a `v3 *player_vel`
+ * @note ::wp_update and the hook both push the player through a `v3 *player_vel`
  *       the caller passes in, so a shot and a grapple pull are two things doing
  *       the same kind of push rather than two mechanisms that both happen to
  *       move the player.
@@ -42,7 +42,7 @@
  *       분리하면서 로직을 옮기지도 호출 지점을 바꾸지도 않았습니다. 로프와 비행 중인
  *       클로를 *그리는* 것은 여전히 이 파일입니다. 그리려면 총기의 모델 공간 총구가
  *       필요한데, 그것은 훅이 아니라 무기의 속성이기 때문입니다.
- * @note ::wp_fire와 훅은 모두 호출자가 넘겨준 `v3 *player_vel`을 통해 플레이어를
+ * @note ::wp_update와 훅은 모두 호출자가 넘겨준 `v3 *player_vel`을 통해 플레이어를
  *       밀어냅니다. 따라서 사격과 그래플 견인은 우연히 둘 다 플레이어를 움직이는 서로
  *       다른 두 장치가 아니라, 같은 종류의 밀어내기를 하는 두 가지입니다.
  */
@@ -401,10 +401,10 @@ void wp_init(Weapon *w) {
  *       해당 점의 뷰 모델 투영 기준 정규화 장치 좌표를 구한 뒤 이를 고정 거리에서
  *       월드 카메라로 재투영합니다. 대안인 수동 조정 월드 오프셋 방식은 누군가
  *       총기를 옮기거나 모델을 다시 그리는 즉시 어긋납니다.
- * @note ::g_muzzle을 고정하지 않고 임의의 총기 로컬 점을 받으므로, 동일한 투영이
+ * @note ::w->muzzle을 고정하지 않고 임의의 총기 로컬 점을 받으므로, 동일한 투영이
  *       총열(예광탄)과 그 아래에 매달린 훅 발사기(로프) 양쪽에 이 수식의 사본
  *       없이 사용됩니다.
- * @warning ::wp_update가 설정하는 ::g_world_fov와 ::g_aspect를 읽습니다. 첫
+ * @warning ::wp_update가 설정하는 ::w->world_fov와 ::w->aspect를 읽습니다. 첫
  *          wp_update 이전에 호출하면 초기 기본값이 사용됩니다.
  */
 v3 wp_muzzle_world_at(const Weapon *w, v3 local, v3 eye, v3 right, v3 up, v3 fwd) {

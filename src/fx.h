@@ -51,7 +51,8 @@
  *       rewritten in place.
  * @note This owns WORLD effects only. Screen effects live in post.c, because
  *       they are a property of the resolve pass rather than of anything in the
- *       scene -- see the note on ::fx_screen_shake for where the line is.
+ *       scene -- ::post_set_scanline and ::post_set_dither are that side of the
+ *       line, and neither takes a position because neither has one.
  *
  * 한국어
  * ------
@@ -71,8 +72,9 @@
  *       리로드 시 살아 있는 입자는 이전되지 않고 버려집니다. 입자가 정의 테이블의
  *       인덱스를 들고 있는데 그 테이블이 제자리에서 재작성되기 때문입니다.
  * @note 이 모듈은 *월드* 이펙트만 소유합니다. 화면 이펙트는 post.c에 있습니다. 그것은
- *       장면 속 무언가의 속성이 아니라 해상 패스의 속성이기 때문입니다. 경계에 대해서는
- *       ::fx_screen_shake의 설명을 참조하십시오.
+ *       장면 속 무언가의 속성이 아니라 해상 패스의 속성이기 때문입니다. ::post_set_scanline과
+ *       ::post_set_dither가 경계의 저쪽이며, 둘 다 위치를 받지 않습니다. 가진 적이 없기
+ *       때문입니다.
  */
 #ifndef FX_H
 #define FX_H

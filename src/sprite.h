@@ -117,8 +117,11 @@
  * -------
  * A Doom-style weapon sprite, drawn as art rather than extruded from an
  * outline. It REPLACES the 3D view model when it exists, and the 3D one stays
- * as the fallback: `assets/sprites/gun0.png` and up is all it takes to switch,
- * and deleting them switches back. That is deliberately a stronger rule than
+ * as the fallback: `assets/sprites/shotgun0.png` and up is all it takes to
+ * switch, and deleting them switches back. The prefix is the weapon's own
+ * ::WeaponType::name rather than a literal "gun" -- the axe's art is
+ * `axe0.png` -- so a weapon added to the table brings its own filename with it
+ * and there is no third place to update. That is deliberately a stronger rule than
  * the monsters follow -- a drawing composites OVER an SDF creature, because a
  * half-drawn bestiary should still show creatures, whereas a gun drawn over a
  * 3D gun would be two guns.
@@ -479,9 +482,9 @@ int sprite_weapon_muzzle_px(int type, int frame, int *x, int *y);
  *
  * ENGLISH
  * -------
- * @return Non-zero when `assets/sprites/gun<N>.png` supplied at least one frame.
+ * @return Non-zero when `assets/sprites/<weapon name><N>.png` supplied at least one frame.
  *
- * @note This is the switch. ::wp_draw_view asks it once per frame and draws the
+ * @note This is the switch. ::wpview_draw_view asks it once per frame and draws the
  *       sprite or the extruded model accordingly, so adding art is dropping in
  *       a file and removing it is deleting one. Nothing else changes and no
  *       flag has to be kept in agreement with the files on disk.
@@ -491,9 +494,9 @@ int sprite_weapon_muzzle_px(int type, int frame, int *x, int *y);
  * 한국어
  * ------
  * @brief 무기 아트가 존재하는지, 따라서 그것을 그릴지 여부입니다.
- * @return `assets/sprites/gun<N>.png`가 최소 한 프레임을 제공했으면 0이 아닙니다.
+ * @return `assets/sprites/<weapon name><N>.png`가 최소 한 프레임을 제공했으면 0이 아닙니다.
  *
- * @note 이것이 전환 스위치입니다. ::wp_draw_view가 프레임마다 한 번 묻고 그에 따라
+ * @note 이것이 전환 스위치입니다. ::wpview_draw_view가 프레임마다 한 번 묻고 그에 따라
  *       스프라이트 또는 압출 모델을 그립니다. 따라서 아트를 추가하는 것은 파일을 넣는
  *       것이고 제거하는 것은 파일을 지우는 것입니다. 그 외에는 아무것도 바뀌지 않으며,
  *       디스크의 파일과 일치시켜야 하는 플래그도 없습니다.

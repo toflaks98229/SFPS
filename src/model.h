@@ -8,7 +8,7 @@
  * integer-only language the texture recipes use -- no float parsing anywhere
  * in the project.
  *
- * This is the format tools/modeledit.exe reads and writes, which is the real
+ * This is the format build/modeledit.exe reads and writes, which is the real
  * reason for text: it diffs, it round-trips through an editor, and one
  * grammar covers textures, models and levels. It also happens to beat a float
  * table on size (a 3-float vector is 12 bytes; "0 1 -62" is 7) and compresses
@@ -19,7 +19,7 @@
  * 모델 라이브러리는 model.c의 내장 문자열 하나에 존재하며, 텍스처 레시피와 동일한
  * 정수 전용 언어로 작성됩니다. 프로젝트 어디에도 부동소수점 파싱이 없습니다.
  *
- * 이것은 tools/modeledit.exe가 읽고 쓰는 형식이며, 텍스트를 사용하는 진짜 이유이기도
+ * 이것은 build/modeledit.exe가 읽고 쓰는 형식이며, 텍스트를 사용하는 진짜 이유이기도
  * 합니다. 텍스트는 diff가 가능하고, 에디터를 거쳐도 원본이 보존되며, 하나의 문법이
  * 텍스처와 모델과 레벨을 모두 아우릅니다. 덤으로 float 테이블보다 크기가 작고(3개의
  * float 벡터는 12바이트지만 "0 1 -62"는 7바이트입니다) exe 패커에서 훨씬 잘

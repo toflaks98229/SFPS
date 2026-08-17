@@ -281,7 +281,7 @@ int wp_type_for(const char *name);
  * ENGLISH
  * -------
  * @brief Placement and projection of the first-person view model.
- * @note These are runtime values rather than #defines so tools/modelview.exe
+ * @note These are runtime values rather than #defines so build/modelview.exe
  *       can drive the *same* transform the game uses while you nudge it -- a
  *       copy of the maths inside the tool would drift from the game the first
  *       time either side was edited.
@@ -289,7 +289,7 @@ int wp_type_for(const char *name);
  * 한국어
  * ------
  * @brief 1인칭 뷰 모델의 배치와 투영 정보입니다.
- * @note #define이 아닌 런타임 값인 이유는, tools/modelview.exe가 위치를 조정하는
+ * @note #define이 아닌 런타임 값인 이유는, build/modelview.exe가 위치를 조정하는
  *       동안 게임이 사용하는 것과 *동일한* 변환을 사용할 수 있게 하기 위함입니다.
  *       도구 안에 수식을 복사해 두면 어느 한쪽을 수정하는 순간 게임과 어긋나게
  *       됩니다.

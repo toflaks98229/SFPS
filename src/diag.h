@@ -153,14 +153,14 @@ typedef enum {
     /**
      * @brief A monster type's archetype and its stats disagree.
      *
-     * ENGLISH: A ::MON_CASTER row with no `shot_speed` stands in its preferred
-     * band and never fires; a ::MON_BRAWLER row that carries one has a stat
+     * ENGLISH: A ::AI_CASTER row with no `shot_speed` stands in its preferred
+     * band and never fires; a ::AI_BRAWLER row that carries one has a stat
      * nothing reads. Neither crashes and neither looks like an error -- the
      * monster simply behaves like a worse version of itself, which reads as
      * tuning rather than as a table row that is wrong.
      *
-     * 한국어: `shot_speed`가 없는 ::MON_CASTER 행은 선호 대역에 서서 결코 발사하지
-     * 않고, 그것을 가진 ::MON_BRAWLER 행은 아무도 읽지 않는 수치를 지닙니다. 어느 쪽도
+     * 한국어: `shot_speed`가 없는 ::AI_CASTER 행은 선호 대역에 서서 결코 발사하지
+     * 않고, 그것을 가진 ::AI_BRAWLER 행은 아무도 읽지 않는 수치를 지닙니다. 어느 쪽도
      * 죽지 않고 어느 쪽도 오류처럼 보이지 않습니다. 그 몬스터는 그저 자기 자신의 못한
      * 판본처럼 행동하며, 그것은 잘못된 표의 행이 아니라 수치 조정처럼 읽힙니다.
      */

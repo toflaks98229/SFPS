@@ -508,50 +508,8 @@ static void step_smoke(World *w, float dt) {
     }
 }
 
-/* -------------------------------------------------------------------- exit */
+/* ------------------------------ screens, the belt, pads, the exit, the arena */
 
-/**
- * @brief Reaching the exit: the next level, or the end of the game.
- *
- * ENGLISH
- * -------
- * @param[in,out] w The world.
- * @note Health and ammo carry over on a transition, the way a Doom episode runs
- *       -- the exit is a reward you arrive at, not a reset. A level with no
- *       `next` is terminal, so its exit ends the game.
- * @note `w->level.next` is handed straight to ::world_load_level, which copies
- *       the name before it parses. This used to need a local buffer here,
- *       because ::level_load blanks the destination's `next` field and would
- *       have erased its own search string mid-call.
- *
- * 한국어
- * ------
- * @brief 출구 도달. 다음 레벨 또는 게임의 끝입니다.
- * @param[in,out] w 월드.
- * @note 전환 시 체력과 탄약이 이어집니다. Doom 에피소드가 진행되는 방식이며, 출구는 도달하는
- *       보상이지 초기화가 아닙니다. `next`가 없는 레벨은 종착지이므로 그 출구가 게임을
- *       끝냅니다.
- * @note `w->level.next`를 ::world_load_level에 그대로 넘깁니다. 그 함수가 파싱 전에 이름을
- *       복사합니다. 이전에는 이곳에 지역 버퍼가 필요했습니다. ::level_load가 대상의 `next`
- *       필드를 비우므로 호출 도중에 자기 검색 문자열을 지웠기 때문입니다.
- */
-/* The jump pad, applied where the player is standing.
- *
- * ONLY WHILE GROUNDED, and that -- not the assignment below -- is what makes
- * the height fixed. It is a correctness requirement rather than a design
- * choice.
- * The pad is found by an x/z test, and a player launched straight up stays
- * inside that radius for the whole ascent: without the ground test the pad
- * would re-set the velocity every frame, cancelling gravity, and hold them
- * rising at launch speed until they drifted sideways off it. Requiring contact
- * makes it fire once per landing, which is also what a pad you step on means.
- *
- * 플레이어가 서 있는 자리에 적용되는 점프대입니다. 높이를 고정시키는 것은 아래의 대입이
- * 아니라 *접지 조건*입니다. 설계 선택이 아니라 정확성 문제입니다. 점프대는 x/z
- * 판정으로 찾는데, 곧장 위로 발사된 플레이어는 상승 내내 그 반경 안에 머뭅니다. 접지
- * 검사가 없으면 점프대가 매 프레임 속도를 다시 설정해 중력을 상쇄하고, 옆으로 벗어날
- * 때까지 발사 속력으로 계속 올라갑니다. 접촉을 요구하면 착지마다 한 번 발동하며, 그것이
- * 밟는 점프대의 의미이기도 합니다. */
 /**
  * @brief What a keypress means on the screen the player is looking at.
  *
@@ -650,6 +608,23 @@ static void step_weapon_pick(World *w, int want) {
     if (dsnd) audio_play(dsnd, 85);
 }
 
+/* The jump pad, applied where the player is standing.
+ *
+ * ONLY WHILE GROUNDED, and that -- not the assignment below -- is what makes
+ * the height fixed. It is a correctness requirement rather than a design
+ * choice.
+ * The pad is found by an x/z test, and a player launched straight up stays
+ * inside that radius for the whole ascent: without the ground test the pad
+ * would re-set the velocity every frame, cancelling gravity, and hold them
+ * rising at launch speed until they drifted sideways off it. Requiring contact
+ * makes it fire once per landing, which is also what a pad you step on means.
+ *
+ * 플레이어가 서 있는 자리에 적용되는 점프대입니다. 높이를 고정시키는 것은 아래의 대입이
+ * 아니라 *접지 조건*입니다. 설계 선택이 아니라 정확성 문제입니다. 점프대는 x/z
+ * 판정으로 찾는데, 곧장 위로 발사된 플레이어는 상승 내내 그 반경 안에 머뭅니다. 접지
+ * 검사가 없으면 점프대가 매 프레임 속도를 다시 설정해 중력을 상쇄하고, 옆으로 벗어날
+ * 때까지 발사 속력으로 계속 올라갑니다. 접촉을 요구하면 착지마다 한 번 발동하며, 그것이
+ * 밟는 점프대의 의미이기도 합니다. */
 static void step_push(World *w) {
     if (!w->player.grounded) return;
 
@@ -661,6 +636,31 @@ static void step_push(World *w) {
     audio_play_at("hland", 85, w->player.pos);
 }
 
+/**
+ * @brief Reaching the exit: the next level, or the end of the game.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] w The world.
+ * @note Health and ammo carry over on a transition, the way a Doom episode runs
+ *       -- the exit is a reward you arrive at, not a reset. A level with no
+ *       `next` is terminal, so its exit ends the game.
+ * @note `w->level.next` is handed straight to ::world_load_level, which copies
+ *       the name before it parses. This used to need a local buffer here,
+ *       because ::level_load blanks the destination's `next` field and would
+ *       have erased its own search string mid-call.
+ *
+ * 한국어
+ * ------
+ * @brief 출구 도달. 다음 레벨 또는 게임의 끝입니다.
+ * @param[in,out] w 월드.
+ * @note 전환 시 체력과 탄약이 이어집니다. Doom 에피소드가 진행되는 방식이며, 출구는 도달하는
+ *       보상이지 초기화가 아닙니다. `next`가 없는 레벨은 종착지이므로 그 출구가 게임을
+ *       끝냅니다.
+ * @note `w->level.next`를 ::world_load_level에 그대로 넘깁니다. 그 함수가 파싱 전에 이름을
+ *       복사합니다. 이전에는 이곳에 지역 버퍼가 필요했습니다. ::level_load가 대상의 `next`
+ *       필드를 비우므로 호출 도중에 자기 검색 문자열을 지웠기 때문입니다.
+ */
 static void step_exit(World *w) {
     if (!level_exit_at(&w->level, w->player.pos.x, w->player.pos.z)) return;
 
@@ -693,25 +693,6 @@ static void step_exit(World *w) {
     audio_play("exit", 90);
 }
 
-/* How long the names are up before the level behind them loads.
- *
- * A DURATION RATHER THAN A KEYPRESS. Doom's intermission waits for one, and
- * Doom's intermission has tallies to read; ours has two names, and a prompt to
- * dismiss two names is ceremony around nothing. Long enough to read them,
- * short enough that it does not become the thing between the player and the
- * next fight.
- * 키 입력이 아니라 시간입니다. Doom의 인터미션은 입력을 기다리지만 그것에는 읽을 집계가
- * 있습니다. 우리 것에는 이름 둘뿐이고, 이름 둘을 넘기기 위한 안내는 아무것도 아닌 것을
- * 둘러싼 의식입니다. 읽을 만큼 길고, 플레이어와 다음 전투 사이를 가로막는 것이 되지 않을
- * 만큼 짧습니다. */
-
-
-/* Advances the between-levels screen, and loads when it is done.
- *
- * The load is here rather than in step_exit so there is exactly one place that
- * changes which level is running -- see world_load_level's own note on that.
- * 로드가 step_exit이 아니라 이곳에 있는 이유는, 어느 레벨이 도는지를 바꾸는 곳이 정확히
- * 하나이도록 하기 위해서입니다. */
 /**
  * @brief Throws a cleared wave's reward down around the player.
  *
@@ -864,6 +845,20 @@ static void step_wave(World *w, float dt) {
     }
 }
 
+/* Advances the between-levels screen, and loads when it is done.
+ *
+ * The load is here rather than in step_exit so there is exactly one place that
+ * changes which level is running -- see world_load_level's own note on that.
+ * How long the screen stays up is ::WORLD_BETWEEN_TIME, and the reasoning for
+ * that duration lives beside the constant in world.h rather than being restated
+ * here -- a second copy of it sat at this spot until the constant moved, and
+ * two copies of a rationale is how one of them comes to describe a number that
+ * is no longer the number.
+ * 로드가 step_exit이 아니라 이곳에 있는 이유는, 어느 레벨이 도는지를 바꾸는 곳이 정확히
+ * 하나이도록 하기 위해서입니다. 화면이 떠 있는 시간은 ::WORLD_BETWEEN_TIME이며, 그 시간에
+ * 대한 근거는 이곳에 다시 적지 않고 world.h의 상수 곁에 둡니다. 상수가 옮겨 간 뒤에도 그
+ * 사본이 이 자리에 남아 있었으며, 근거의 사본이 둘이라는 것은 그중 하나가 더 이상 그 숫자가
+ * 아닌 숫자를 설명하게 되는 방식입니다. */
 static void step_between(World *w, float dt) {
     if (!w->run.between) return;
 

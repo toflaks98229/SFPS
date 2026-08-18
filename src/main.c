@@ -5,7 +5,14 @@
  * ENGLISH
  * -------
  * This file owns only what cannot be tested headlessly: the Win32 window, the
- * GL context, raw input, and the graphics settings that resize a render target.
+ * GL context, raw input, and the one graphics setting that is genuinely a
+ * window operation -- switching between windowed and borderless.
+ *
+ * It used to say "the graphics settings that resize a render target", and that
+ * had stopped being a description of this file and become a claim on work it
+ * merely happened to hold. Sizing an offscreen buffer from a client area is
+ * arithmetic; reading the settings block is a menu question; neither needs a
+ * window and both are gfx.c's. What is left here is the HWND itself.
  *
  * The per-frame UPDATE used to be here too, in the body of `WinMain`, and so
  * did the per-frame DRAW. Neither is any more -- see world.c and scene.c. Both
@@ -24,7 +31,14 @@
  * 한국어
  * ------
  * 이 파일은 헤드리스로 테스트할 수 없는 요소만을 담당합니다. Win32 창, GL 컨텍스트, 원시
- * 입력, 그리고 렌더 타깃 크기를 바꾸는 그래픽 설정입니다.
+ * 입력, 그리고 진짜로 창에 대한 작업인 그래픽 설정 하나입니다. 창 모드와 테두리 없는 전체
+ * 화면 사이의 전환입니다.
+ *
+ * 이전에는 "렌더 타깃 크기를 바꾸는 그래픽 설정"이라고 적혀 있었고, 그것은 이 파일에 대한
+ * 서술이기를 그만두고 단지 이 파일이 쥐고 있게 된 작업에 대한 주장이 되어 있었습니다.
+ * 클라이언트 영역으로 오프스크린 버퍼 크기를 정하는 것은 산술이고, 설정 블록을 읽는 것은
+ * 메뉴에 대한 질문이며, 어느 쪽도 창을 필요로 하지 않고 둘 다 gfx.c의 것입니다. 이곳에 남은
+ * 것은 HWND 자체입니다.
  *
  * 프레임별 *갱신*도 이전에는 `WinMain`의 본문 안에 있었고, 프레임별 *그리기*도 그러했습니다.
  * 이제 둘 다 없습니다. world.c와 scene.c를 참조하십시오. 두 순서 모두 바로 이 주석이
@@ -50,8 +64,16 @@
    scene.c로, 몬스터·아이템·발사체·문·레벨 수명 주기는 world.c로 옮겨 갔습니다. 이 파일은
    더 이상 그 타입들을 언급하지 않습니다. "혹시 몰라서" 남겨 둔 include는 헤더 그래프가
    실제 의존 관계를 설명하지 못하게 만드는 원인입니다. */
+/* stdlib.h and txt.h were here, and both left with the demo plumbing. malloc
+   and free served exactly two callers -- the recording read at startup and the
+   one written at exit -- and txt_is parsed exactly two command-line flags. All
+   four are demo_file.c's now, and an include kept past the last call site is
+   how a header graph stops describing what actually depends on what.
+   stdlib.h와 txt.h가 이곳에 있었고 둘 다 데모 배관을 따라 나갔습니다. malloc과 free는 정확히
+   두 호출자를 위한 것이었고(시작 시 읽는 기록과 종료 시 쓰는 기록) txt_is는 정확히 두 개의
+   명령줄 플래그를 파싱했습니다. 넷 모두 이제 demo_file.c의 것이며, 마지막 호출 지점보다 오래
+   남은 include는 헤더 그래프가 실제 의존 관계를 설명하지 못하게 만드는 원인입니다. */
 #include "world.h"    /* World and Input: the simulation this file drives */
-#include <stdlib.h>   /* malloc/calloc/free: this file used to reach these through windows.h */
 #include "wgl.h"     /* gl_bootstrap/gl_make_context: this file owns the context */
 #include "render.h"   /* rd_init -- the one call that needs a context and no frame */
 #include "scene.h"    /* scene_frame: the draw order, and everything it owns */
@@ -73,8 +95,9 @@
 #include "data.h"
 #include "decal.h"    /* decal_init/decal_free -- the pool's lifetime, not its draw */
 #include "fx.h"       /* fx_reload -- what a hot reload does to live particles */
-#include "demo.h"    /* -record / -play: the run as a list of intents */
-#include "txt.h"     /* txt_is -- parsing two flags off the command line */
+#include "demo.h"    /* demo_take / demo_put: the two calls that are in a frame */
+#include "demo_file.h" /* DemoFile, and the three that are not: the flag and the bytes */
+#include "gfx.h"     /* the render target a pixel preset asks for, and the live settings */
 #include "diag.h"
 
 /* GET_X_LPARAM / GET_Y_LPARAM, for the menu's mouse coordinates. These unpack
@@ -243,65 +266,34 @@ static HWND g_wnd;
 /* --- recording and replaying / 기록과 재생 --- */
 
 /**
- * @brief What the command line asked this process to do with a demo.
+ * @brief The recording, where playback has got to, and the file it came from.
  *
  * ENGLISH
  * -------
- * `-record <file>` plays normally and writes the input stream out at exit;
- * `-play <file>` reads one and drives ::world_step from it instead of from the
- * keyboard. The rules are demo.c's and the file is this file's, which is the
- * same division every other module here keeps: ::demo_write turns a recording
- * into bytes and putting bytes on a disk is a thing only a platform can do.
+ * A file-scope global for the reason ::g_world is one: it is 144KB, and the
+ * frame loop below drives it every frame.
+ *
+ * What USED to be here as well was the path buffer beside it, the text
+ * capacity those two calls needed, and the four functions that turned a command
+ * line into one and a recording into bytes. All of that is demo_file.c now --
+ * the rules were always demo.c's and the file was always the platform's, and
+ * this file kept the second half only because there was nowhere else to put it.
+ * There is now, and it turned out not to need a window at all.
  *
  * 한국어
  * ------
- * @brief 명령줄이 이 프로세스에 데모로 무엇을 하라고 요청했는가.
+ * @brief 기록, 재생 진행 위치, 그리고 그것이 온 파일.
  *
- * `-record <파일>`은 평소대로 플레이하며 종료 시 입력 스트림을 기록해 내보내고,
- * `-play <파일>`은 그것을 읽어 키보드가 아니라 그것으로 ::world_step을 구동합니다. 규칙은
- * demo.c의 것이고 파일은 이 파일의 것이며, 이곳의 다른 모든 모듈이 지키는 것과 같은 구분입니다.
- * ::demo_write가 기록을 바이트로 바꾸고, 바이트를 디스크에 올리는 것은 플랫폼만이 할 수 있는
- * 일입니다.
+ * 파일 스코프 전역인 이유는 ::g_world가 그런 이유와 같습니다. 144KB이며 아래의 프레임 루프가
+ * 매 프레임 그것을 구동합니다.
+ *
+ * 이전에 이곳에 *함께* 있던 것은 그 곁의 경로 버퍼, 두 호출이 필요로 하던 텍스트 용량, 그리고
+ * 명령줄을 기록으로, 기록을 바이트로 바꾸던 함수 넷입니다. 그 전부가 이제 demo_file.c입니다.
+ * 규칙은 언제나 demo.c의 것이었고 파일은 언제나 플랫폼의 것이었으며, 이 파일이 두 번째 절반을
+ * 쥐고 있던 이유는 달리 둘 곳이 없었기 때문입니다. 이제 있으며, 정작 창은 전혀 필요하지
+ * 않았던 것으로 드러났습니다.
  */
-static char g_demo_path[MAX_PATH];
-
-/**
- * @brief The recording and where playback has got to. 144KB; file scope.
- *
- * 한국어: 기록과 재생 진행 위치입니다. 144KB이므로 파일 스코프입니다.
- */
-static DemoDrive g_demo;
-
-/**
- * @brief How much text a full recording comes to.
- *
- * ENGLISH
- * -------
- * ::DEMO_MAX_FRAMES lines at 24 bytes, against a measured 16.8 -- a frame that
- * needs every digit of every field is longer than a typical one, and the header
- * is on top.
- *
- * @note Not a resident buffer. It was one, and that was 432KB of `.bss` alive
- *       for the whole process to serve two calls: one at startup and one at
- *       exit. It is heap now, taken and given back inside each. The project's
- *       rule is that a FRAME never allocates, which this keeps -- neither call
- *       is in one.
- *
- * 한국어
- * ------
- * @brief 기록 하나가 가득 찼을 때의 텍스트 크기입니다.
- *
- * ::DEMO_MAX_FRAMES 줄에 줄당 24바이트이며, 실측은 16.8입니다. 모든 필드가 모든 자릿수를 쓰는
- * 프레임은 평범한 프레임보다 길고 그 위에 헤더가 얹힙니다.
- *
- * @note 상주 버퍼가 아닙니다. 이전에는 그러했고, 그것은 호출 두 번(시작 시 하나, 종료 시
- *       하나)을 위해 프로세스 내내 살아 있는 432KB의 `.bss`였습니다. 이제 힙이며 각 호출
- *       안에서 잡고 돌려줍니다. 이 프로젝트의 규칙은 *프레임*이 결코 할당하지 않는다는
- *       것이고 이것은 그 규칙을 지킵니다. 두 호출 중 어느 것도 프레임 안에 있지 않습니다.
- */
-#define DEMO_TEXT_BYTES_PER_FRAME 24
-#define DEMO_TEXT_HEADER_MAX      256
-#define DEMO_TEXT_MAX (DEMO_MAX_FRAMES * DEMO_TEXT_BYTES_PER_FRAME                        + DEMO_TEXT_HEADER_MAX)
+static DemoFile g_demo;
 
 /* --- The simulation / 시뮬레이션 --- */
 
@@ -886,244 +878,32 @@ static void input_gather(Input *in, const World *w) {
     g_edge = none;
 }
 
-/* -------------------------------------------------------------- demo files */
+/* ------------------------------------------------------------ display mode */
 
 /**
- * @brief Reads the whole of a file into `buf`.
- * @return Bytes read, or 0.
+ * @brief The client area, which is the one fact ::gfx_apply_pixel_preset wants.
  *
- * @brief 파일 전체를 `buf`로 읽습니다.
+ * ENGLISH: The sizing rule itself is gfx.c's; what a window is currently
+ * measuring is this file's, and it is the whole of what crosses that seam. Two
+ * ints rather than an HWND is what keeps gfx.c on the portable side of
+ * build.ps1 -Portable -- see gfx.h.
+ *
+ * @note Not clamped here. ::gfx_apply_pixel_preset clamps what it divides by,
+ *       so a minimised window is handled once at the place that would divide by
+ *       zero rather than at each call site that might.
+ *
+ * 한국어: 크기 결정 규칙 자체는 gfx.c의 것이고, 창이 지금 무엇을 재고 있는지는 이 파일의
+ * 것이며, 그 이음매를 넘는 것은 그것이 전부입니다. HWND가 아니라 int 둘인 것이 gfx.c를
+ * build.ps1 -Portable의 이식 가능한 쪽에 남게 하는 것입니다. gfx.h를 참조하십시오.
+ *
+ * @note 이곳에서 보정하지 않습니다. ::gfx_apply_pixel_preset이 자신이 나누는 값을 보정하므로,
+ *       최소화된 창은 그럴 수도 있는 각 호출 지점이 아니라 실제로 0으로 나누게 될 한 곳에서
+ *       한 번 처리됩니다.
  */
-static int file_read_all(const char *path, char *buf, int cap) {
-    HANDLE h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, 0,
-                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
-    if (h == INVALID_HANDLE_VALUE) return 0;
-
-    DWORD got = 0;
-    if (!ReadFile(h, buf, (DWORD)cap, &got, 0)) got = 0;
-    CloseHandle(h);
-    return (int)got;
-}
-
-/**
- * @brief Writes `len` bytes to `path`, replacing whatever was there.
- * @return Non-zero on success.
- *
- * @brief `path`에 `len` 바이트를 기록하며 기존 내용을 대체합니다.
- */
-static int file_write_all(const char *path, const char *buf, int len) {
-    HANDLE h = CreateFileA(path, GENERIC_WRITE, 0, 0,
-                           CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
-    if (h == INVALID_HANDLE_VALUE) return 0;
-
-    DWORD put = 0;
-    int ok = WriteFile(h, buf, (DWORD)len, &put, 0) && (int)put == len;
-    CloseHandle(h);
-    return ok;
-}
-
-/**
- * @brief Pulls `-record <file>` or `-play <file>` off the command line.
- *
- * ENGLISH
- * -------
- * @param[in] cmd The raw command line, as `WinMain` receives it.
- *
- * @note Hand-parsed rather than through CommandLineToArgvW, which lives in
- *       shell32 and would put a DLL on the import table for two flags. The
- *       grammar is one flag and one path, and quotes are honoured because a
- *       path with a space in it is the normal case on Windows.
- *
- * 한국어
- * ------
- * @brief 명령줄에서 `-record <파일>` 또는 `-play <파일>`을 꺼냅니다.
- * @note CommandLineToArgvW를 쓰지 않고 직접 파싱합니다. 그것은 shell32에 있으며 플래그 두 개를
- *       위해 임포트 테이블에 DLL을 올리게 됩니다. 문법은 플래그 하나와 경로 하나이며, 공백이 든
- *       경로가 Windows에서는 평범한 경우이므로 따옴표를 존중합니다.
- */
-static void demo_parse_cmdline(const char *cmd) {
-    while (*cmd) {
-        while (*cmd == ' ' || *cmd == '\t') cmd++;
-        if (!*cmd) break;
-
-        int want = DEMO_OFF;
-        if (txt_is(cmd, 7, "-record")) { want = DEMO_RECORD; cmd += 7; }
-        else if (txt_is(cmd, 5, "-play")) { want = DEMO_PLAY; cmd += 5; }
-        else { while (*cmd && *cmd != ' ' && *cmd != '\t') cmd++; continue; }
-
-        while (*cmd == ' ' || *cmd == '\t') cmd++;
-
-        char quote = 0;
-        if (*cmd == '"') { quote = '"'; cmd++; }
-
-        int n = 0;
-        while (*cmd && n < (int)sizeof(g_demo_path) - 1 &&
-               (quote ? *cmd != quote : (*cmd != ' ' && *cmd != '\t')))
-            g_demo_path[n++] = *cmd++;
-        g_demo_path[n] = 0;
-        if (quote && *cmd == quote) cmd++;
-
-        /* A flag with no path is not a request to record into "". Ignored, so
-           the game starts normally rather than failing on a typo.
-           경로 없는 플래그는 ""에 기록하라는 요청이 아닙니다. 무시하므로, 오타에 실패하는
-           대신 게임이 평소대로 시작합니다. */
-        if (n > 0) g_demo.mode = want;
-    }
-}
-
-/**
- * @brief Loads a recording to play, or begins one, and says where to start.
- *
- * ENGLISH
- * -------
- * @param[in,out] w World whose ::World::cur_level a playback overrides.
- *
- * THE FILE HALF, and only that. Which frame comes next and what happens when a
- * recording runs out are ::demo_take's; this reads bytes off a disk and hands
- * them to ::demo_read, because reading a disk is the one part of it that needs
- * an operating system.
- *
- * @note A recording that will not load is reported and then ignored, and the
- *       game starts normally. A demo is not a reason to refuse to run.
- *
- * 한국어
- * ------
- * @brief 재생할 기록을 불러오거나 새 기록을 시작하고, 어디서 시작할지 알려 줍니다.
- *
- * *파일 쪽 절반*이며 그것뿐입니다. 다음 프레임이 무엇인지, 기록이 다 떨어지면 어떻게 되는지는
- * ::demo_take의 것입니다. 이 함수는 디스크에서 바이트를 읽어 ::demo_read에 건넵니다. 그중
- * 운영체제가 필요한 부분이 디스크를 읽는 것뿐이기 때문입니다.
- *
- * @note 불러오지 못하는 기록은 알린 뒤 무시하고 게임은 평소대로 시작합니다. 데모는 실행을
- *       거부할 이유가 아닙니다.
- */
-static void demo_open(World *w) {
-    if (g_demo.mode == DEMO_PLAY) {
-        char *text = malloc(DEMO_TEXT_MAX);
-        if (!text) { g_demo.mode = DEMO_OFF; return; }
-
-        int len = file_read_all(g_demo_path, text, DEMO_TEXT_MAX);
-        int got = len && demo_read(&g_demo.d, text, len);
-        free(text);
-
-        if (!got) {
-            MessageBoxA(0, "That demo could not be read.", "SFPS", MB_ICONERROR);
-            g_demo.mode = DEMO_OFF;
-            return;
-        }
-        /* A recording carries a level name and nothing else, so playback enters
-           it exactly as a new game does -- see the load below. Carrying world
-           state is precisely what would make a demo unable to disagree with the
-           game. See demo.h.
-           기록은 레벨 이름만 나르므로 재생은 새 게임과 정확히 같은 방식으로 진입합니다.
-           아래의 로드를 참조하십시오. 월드 상태를 나르는 것이야말로 데모가 게임과 어긋날 수
-           없게 만드는 바로 그것입니다. demo.h를 참조하십시오. */
-        txt_copy(w->cur_level, sizeof(w->cur_level), g_demo.d.level, -1);
-        g_demo.frame = 0;
-
-    } else if (g_demo.mode == DEMO_RECORD) {
-        demo_begin(&g_demo.d, w->cur_level);
-    }
-}
-
-/**
- * @brief Writes the recording out, if one was being made.
- *
- * @note On the way out rather than as it goes: a recording is one file, and
- *       appending every frame would put a disk write in the frame loop to save
- *       a crash that would have taken the world state with it anyway.
- *
- * @brief 기록 중이었다면 그것을 기록해 내보냅니다.
- * @note 진행하며 쓰지 않고 나갈 때 씁니다. 기록은 파일 하나이고 매 프레임 덧붙이면 프레임
- *       루프에 디스크 쓰기를 두게 되는데, 그것이 구해 낼 크래시는 어차피 월드 상태를 함께
- *       가져갑니다.
- */
-static void demo_close(void) {
-    if (g_demo.mode != DEMO_RECORD || g_demo.d.n <= 0) return;
-
-    char *text = malloc(DEMO_TEXT_MAX);
-    if (!text) return;
-
-    int len = demo_write(&g_demo.d, text, DEMO_TEXT_MAX);
-    int put = len && file_write_all(g_demo_path, text, len);
-    free(text);
-
-    if (!put)
-        MessageBoxA(0, "The demo could not be written.", "SFPS", MB_ICONERROR);
-}
-
-/* ------------------------------------------------------ graphics settings */
-
-/**
- * @brief Art-resolution target for each ::GfxPixelPreset, in pixels of height.
- *
- * ENGLISH
- * -------
- * Indexed by the preset, so a new preset is a row here and an enum value in
- * menu.h -- nothing else. ::POST_HEIGHT remains the compiled-in default and is
- * what ::GFX_PIXEL_NORMAL reproduces exactly, so shipping with the menu
- * untouched renders precisely the frame the game rendered before it existed.
- *
- * 한국어
- * ------
- * @brief 각 ::GfxPixelPreset의 아트 해상도 목표 높이(픽셀)입니다.
- *
- * 프리셋으로 인덱싱되므로 새 프리셋은 이곳의 행 하나와 menu.h의 열거형 값 하나가
- * 전부입니다. ::POST_HEIGHT는 컴파일 시점 기본값으로 남으며 ::GFX_PIXEL_NORMAL이 그것을
- * 정확히 재현하므로, 메뉴를 건드리지 않고 실행하면 이 기능이 없던 때와 정확히 같은
- * 프레임이 그려집니다.
- */
-static const int PIXEL_HEIGHTS[GFX_PIXEL_COUNT] = {
-    240,           /* GFX_PIXEL_CHUNKY -- roughly the PlayStation's own */
-    POST_HEIGHT,   /* GFX_PIXEL_NORMAL -- the shipped default, 360 */
-    540            /* GFX_PIXEL_FINE   -- close to unpixelised at 1080p */
-};
-
-/**
- * @brief (Re)creates the offscreen target to match the window and the preset.
- *
- * ENGLISH
- * -------
- * @param[in] preset A ::GfxPixelPreset.
- * @note ::post_init allocates unconditionally, so an existing target has to be
- *       torn down first or its GL objects leak. ::post_shutdown fully resets
- *       the module, which is what makes shutdown-then-init a safe resize.
- * @note The integer magnification is picked FIRST and the buffer derived from
- *       it, never the other way round -- a buffer sized by rounding the width
- *       lets the magnification differ per axis, which stretches the image.
- *
- * 한국어
- * ------
- * @brief 창과 프리셋에 맞추어 오프스크린 타깃을 (재)생성합니다.
- * @param[in] preset ::GfxPixelPreset 값.
- * @note ::post_init은 무조건 할당하므로 기존 타깃을 먼저 해제하지 않으면 GL 객체가
- *       누수됩니다. ::post_shutdown이 모듈을 완전히 초기화하므로 해제 후 재생성이
- *       안전한 크기 변경 방법입니다.
- * @note 정수 확대 배율을 *먼저* 정하고 버퍼를 그로부터 유도하며, 결코 그 반대가 아닙니다.
- *       너비를 반올림해 크기를 정한 버퍼는 축마다 배율이 달라질 수 있고, 그러면 이미지가
- *       늘어납니다.
- */
-static void apply_pixel_preset(int preset) {
-    if (preset < 0 || preset >= GFX_PIXEL_COUNT) preset = GFX_PIXEL_NORMAL;
-
-    RECT ir; GetClientRect(g_wnd, &ir);
-    int iw = ir.right - ir.left, ih = ir.bottom - ir.top;
-    if (iw < 1) iw = 1;
-    if (ih < 1) ih = 1;
-
-    int target = PIXEL_HEIGHTS[preset];
-    int scale  = ih / target;
-    if (scale < 1) scale = 1;
-
-    /* Preserve whether the effect was switched off, so changing the pixel size
-       does not quietly switch the whole pass back on.
-       효과가 꺼져 있었는지를 보존합니다. 픽셀 크기를 바꾸는 것이 패스 전체를 조용히 다시
-       켜서는 안 됩니다. */
-    int was_on = post_enabled();
-
-    post_shutdown();
-    post_init(iw / scale, ih / scale);
-    post_set_enabled(was_on);
+static void client_size(int *w, int *h) {
+    RECT rc; GetClientRect(g_wnd, &rc);
+    *w = rc.right - rc.left;
+    *h = rc.bottom - rc.top;
 }
 
 /**
@@ -1184,54 +964,6 @@ static void apply_display_mode(int mode) {
         SetWindowPos(g_wnd, HWND_TOP, mx, my, w, h,
                      SWP_FRAMECHANGED | SWP_SHOWWINDOW);
     }
-}
-
-/**
- * @brief Applies every menu setting that needs no signal to change.
- *
- * ENGLISH
- * -------
- * Read straight from the menu every frame, so toggling one is visible on the
- * very next frame and nothing has to notify anything. The two settings that
- * cannot work this way -- the display mode and the pixel size -- reallocate a
- * render target, so they arrive as menu ACTIONS instead.
- *
- * 한국어
- * ------
- * @brief 변경에 신호가 필요 없는 모든 메뉴 설정을 적용합니다.
- *
- * 매 프레임 메뉴에서 직접 읽으므로 전환하면 바로 다음 프레임에 반영되며 무엇도 무엇에게
- * 알릴 필요가 없습니다. 이 방식이 통하지 않는 두 설정(디스플레이 모드와 픽셀 크기)은 렌더
- * 타깃을 재할당하므로 메뉴 *액션*으로 도착합니다.
- */
-static void apply_live_settings(void) {
-    post_set_enabled(menu_settings()->post_on);
-    post_set_scanline(menu_settings()->scanlines ? POST_SCANLINE_DEFAULT : 0.0f);
-
-    /* Steps per channel, and the grain that rides on them. A table rather
-       than arithmetic on the enum, because these are four points chosen by
-       eye and the spacing between them is not regular -- HEAVY to NORMAL
-       is the jump that matters and the rest is fine tuning.
-       OFF is not zero dither: it is thirty-two steps, the PlayStation's own
-       five bits a channel, where the pattern stops being visible on its own
-       rather than being switched off.
-       채널당 단계 수와 그 위에 얹히는 그레인입니다. 열거형에 대한 산술이 아니라
-       표인 이유는, 이 넷이 눈으로 고른 지점이고 간격이 규칙적이지 않기 때문입니다.
-       HEAVY에서 NORMAL로 가는 것이 중요한 도약이고 나머지는 미세 조정입니다.
-       OFF는 디더 0이 아니라 32단계, 즉 플레이스테이션 자신의 채널당 5비트이며,
-       패턴이 꺼지는 것이 아니라 그 자체로는 보이지 않게 되는 지점입니다. */
-    static const struct { float levels, grain; } DITHER[GFX_DITHER_COUNT] = {
-        {  4.0f, 0.050f },   /* HEAVY  -- what this shipped with */
-        { 12.0f, 0.015f },   /* NORMAL */
-        { 20.0f, 0.008f },   /* LIGHT  */
-        { 32.0f, 0.000f },   /* OFF    -- the PlayStation's 15-bit colour */
-    };
-    int di = menu_settings()->dither;
-    if (di < 0 || di >= GFX_DITHER_COUNT) di = GFX_DITHER_NORMAL;
-    int pat = menu_settings()->pattern;
-    if (pat < 0 || pat >= GFX_PATTERN_COUNT) pat = GFX_PATTERN_BAYER;
-    post_set_dither(DITHER[di].levels, DITHER[di].grain,
-                    pat == GFX_PATTERN_NOISE ? 1.0f : 0.0f);
 }
 
 /* -------------------------------------------------------------------- draw */
@@ -1391,7 +1123,7 @@ static int app_start(HINSTANCE inst, int show, HDC *dc, Scene *scene) {
 
     /* The offscreen target, sized so that magnifying it back to the window is
        an exact integer scale in both axes. The sizing rule itself lives in
-       apply_pixel_preset, because the settings menu resizes the target at
+       gfx.c, because the settings menu resizes the target at
        runtime and a second copy of that reasoning would drift from the first.
        menu_init runs before it so the preset it reads is a real one.
 
@@ -1400,7 +1132,7 @@ static int app_start(HINSTANCE inst, int show, HDC *dc, Scene *scene) {
        would be the wrong trade.
 
        오프스크린 타깃입니다. 창 크기로 다시 확대할 때 양쪽 축 모두 정확한 정수 배율이
-       되도록 크기를 정합니다. 크기 결정 규칙 자체는 apply_pixel_preset에 있습니다. 설정
+       되도록 크기를 정합니다. 크기 결정 규칙 자체는 gfx.c에 있습니다. 설정
        메뉴가 런타임에 타깃 크기를 바꾸는데, 그 논리의 사본이 두 개면 서로 어긋나게 되기
        때문입니다. 읽어 오는 프리셋이 실제 값이 되도록 menu_init을 먼저 실행합니다.
 
@@ -1408,7 +1140,9 @@ static int app_start(HINSTANCE inst, int show, HDC *dc, Scene *scene) {
        게임은 창에 직접 렌더링합니다. 순전히 미관을 위한 패스 때문에 실행을 거부하는
        것은 잘못된 선택입니다. */
     menu_init(0);
-    apply_pixel_preset(menu_settings()->pixel);
+    int cw, ch;
+    client_size(&cw, &ch);
+    gfx_apply_pixel_preset(menu_settings()->pixel, cw, ch);
 
     audio_init();   /* silent, not fatal, if there is no output device */
 
@@ -1455,7 +1189,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
        loaded and that load is the last thing app_start's successor does.
        무엇이 만들어지기도 전입니다. 재생이 어느 레벨을 로드할지 덮어쓰며, 그 로드는 app_start
        다음에 오는 것이 하는 마지막 일이기 때문입니다. */
-    demo_parse_cmdline(cmd);
+    demo_file_parse_cmdline(&g_demo, cmd);
 
     /* Initialised because ::app_start writes it only once the window exists,
        and the compiler cannot see that a non-zero return implies it did. A
@@ -1467,20 +1201,30 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
     Scene scene;
     if (!app_start(inst, show, &dc, &scene)) return 1;
 
-    demo_open(&g_world);
+    /* The message box is here rather than inside, because saying something to
+       the user is a window's job and demo_file.c has no window -- see
+       demo_file.h. A recording that will not load is reported and then ignored,
+       and the game starts normally: a demo is not a reason to refuse to run.
+       메시지 박스가 안이 아니라 이곳에 있는 이유는, 사용자에게 무언가를 말하는 것이 창의
+       일이고 demo_file.c에는 창이 없기 때문입니다. demo_file.h를 참조하십시오. 불러오지 못하는
+       기록은 알린 뒤 무시하며 게임은 평소대로 시작합니다. 데모는 실행을 거부할 이유가
+       아닙니다. */
+    if (!demo_file_open(&g_demo, &g_world))
+        MessageBoxA(0, "That demo could not be read.", "SFPS", MB_ICONERROR);
 
-    /* WORLD_ENTER_NEW: a fresh start begins at full health with the boot belt,
-       which is what wp_init just set. It also leaves the stage checkpoint a
-       restart replays, so restarting the first stage lands exactly here. The
-       geometry this makes stale is uploaded by the world_take_geometry in the
-       loop below, on the first frame. */
     /* WORLD_ENTER_NEW whichever this is: a fresh start begins at full health
-       with the boot belt, and a playback enters its recorded level the same way
-       -- which is the one entry a recording can reproduce without carrying
-       world state. See demo.h.
-       어느 쪽이든 WORLD_ENTER_NEW입니다. 새 시작은 체력이 가득한 부팅 구성으로 시작하고,
-       재생도 기록된 레벨에 같은 방식으로 진입합니다. 월드 상태를 나르지 않고 기록이 재현할 수
-       있는 유일한 진입입니다. demo.h를 참조하십시오. */
+       with the boot belt, which is what wp_init just set, and a playback enters
+       its recorded level the same way -- which is the one entry a recording can
+       reproduce without carrying world state. See demo.h. It also leaves behind
+       the stage checkpoint a restart replays, so restarting the first stage
+       lands exactly here. The geometry this makes stale is uploaded by the
+       world_take_geometry_scope in the loop below, on the first frame.
+       어느 쪽이든 WORLD_ENTER_NEW입니다. 새 시작은 wp_init이 방금 설정한 부팅 구성으로 체력이
+       가득한 채 시작하고, 재생도 기록된 레벨에 같은 방식으로 진입합니다. 월드 상태를 나르지
+       않고 기록이 재현할 수 있는 유일한 진입입니다. demo.h를 참조하십시오. 또한 재시작이
+       재생할 스테이지 체크포인트를 남기므로, 첫 스테이지를 재시작하면 정확히 이 자리에
+       도달합니다. 이것이 낡게 만드는 지오메트리는 아래 루프의 world_take_geometry_scope가 첫
+       프레임에 업로드합니다. */
     world_load_level(&g_world, g_world.cur_level, WORLD_ENTER_NEW);
 
     LARGE_INTEGER freq, prev_t;
@@ -1516,7 +1260,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
         case MENU_ACT_RESTART:
             g_world.run.restart_wanted = 1;
             break;
-        case MENU_ACT_DISPLAY:
+        case MENU_ACT_DISPLAY: {
             apply_display_mode(menu_settings()->display);
             /* After the window has been restyled, not before: the offscreen
                buffer is sized from the CLIENT area, and that is only correct
@@ -1524,14 +1268,17 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
                창 스타일을 바꾼 *뒤*여야 합니다. 오프스크린 버퍼는 클라이언트 영역을
                기준으로 크기가 정해지는데, 그 값은 새 스타일이 적용된 뒤에야
                올바릅니다. */
-            apply_pixel_preset(menu_settings()->pixel);
+            int cw, ch;
+            client_size(&cw, &ch);
+            gfx_apply_pixel_preset(menu_settings()->pixel, cw, ch);
             break;
+        }
         case MENU_ACT_NONE:
             break;
         }
         if (!g_running) break;
 
-        apply_live_settings();
+        gfx_apply_live_settings();
 
         RECT cr; GetClientRect(g_wnd, &cr);
         int vw = cr.right - cr.left, vh = cr.bottom - cr.top;
@@ -1557,7 +1304,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
            ::demo_take는 줄 것이 없으면 아무것도 쓰지 않으므로, 아래 두 줄이 분기의 전부입니다. */
         Input in;
         float sim_aspect = (float)vw / (float)vh;
-        if (!demo_take(&g_demo, &in, &sim_aspect, &dt))
+        if (!demo_take(&g_demo.drive, &in, &sim_aspect, &dt))
             input_gather(&in, &g_world);
 
         /* Read before the step, because the step is what clears it and the
@@ -1571,7 +1318,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
            ::step_confirm으로 옮겨 갔고 이 절반만 남았습니다. */
         int was_title = g_world.run.title;
 
-        demo_put(&g_demo, &in, vw, vh, dt);
+        demo_put(&g_demo.drive, &in, vw, vh, dt);
 
         int frozen = world_step(&g_world, &in, sim_aspect, dt);
 
@@ -1704,17 +1451,23 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
         }
     }
 
+    if (!demo_file_close(&g_demo))
+        MessageBoxA(0, "The demo could not be written.", "SFPS", MB_ICONERROR);
+
     /* Pairs every mb_init in scene_init, and level_buf's below. The process is
        about to exit and the OS would reclaim all of it anyway, but render.h
        states the contract and this file is the one people copy from when they
        add a buffer -- leaving it unpaired here is how it stops being kept
        anywhere.
+       This paragraph sat above demo_close() until the demo plumbing moved out,
+       which is how a comment ends up explaining the call that happens to follow
+       it rather than the one it was written for.
        scene_init의 모든 mb_init과 짝을 맞춥니다. 프로세스가 곧
        종료되므로 OS가 어차피 전부 회수하지만, render.h가 계약을 명시하고 있으며 새
        버퍼를 추가하는 사람이 참고하는 파일이 바로 이 파일입니다. 이곳에서 짝을 맞추지
-       않으면 그 계약은 어디에서도 지켜지지 않게 됩니다. */
-    demo_close();
-
+       않으면 그 계약은 어디에서도 지켜지지 않게 됩니다.
+       이 문단은 데모 배관이 빠져나가기 전까지 demo_close() 위에 있었습니다. 주석이 자신이
+       설명하려던 호출이 아니라 우연히 뒤에 오는 호출을 설명하게 되는 방식이 그것입니다. */
     scene_free(&scene);
     decal_free();
 

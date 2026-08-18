@@ -1096,6 +1096,23 @@ static const char *FS_SRC =
 "uniform int  uNumLights;\n"
 "uniform vec4 uLightPos[" RD_STR(RD_MAX_LIGHTS) "];\n"
 "uniform vec4 uLightCol[" RD_STR(RD_MAX_LIGHTS) "];\n"
+/* How much of a moving light a billboard takes, against what the world takes.
+ *
+ * BELOW ONE ON PURPOSE. The world's lighting multiplies by a Lambert term that
+ * averages well under half over a surface facing every which way; a sprite has
+ * no usable normal and skips that term entirely (see uMode==5), so at equal
+ * power it would come out brighter than the wall behind it and read as
+ * self-illuminated. This is the factor that puts the two back on the same
+ * footing, chosen by eye against a muzzle flash at arm's length.
+ *
+ * 빌보드가 움직이는 빛을 얼마나 받는지, 월드가 받는 것에 대한 비율입니다.
+ *
+ * *의도적으로 1보다 작습니다.* 월드의 조명은 온갖 방향을 향한 표면 전체에 대해 평균이 0.5에
+ * 한참 못 미치는 램버트 항을 곱하지만, 스프라이트는 쓸 만한 법선이 없어 그 항을 통째로
+ * 건너뜁니다(uMode==5 참조). 같은 세기라면 뒤의 벽보다 밝게 나와 스스로 빛나는 것처럼
+ * 읽힙니다. 이 계수가 둘을 같은 기준에 되돌려 놓으며, 팔 길이 거리의 총구 섬광에 맞춰 눈으로
+ * 골랐습니다. */
+"const float SPRITE_LIGHT = 0.55;\n"
 "out vec4 oCol;\n";
 
 /* Split here so FS_PROC can be spliced in between without any string
@@ -1126,6 +1143,48 @@ static const char *FS_MAIN =
 "    vec4 sp=texture(uTex,uv);\n"
 "    if(sp.a<0.5) discard;\n"
 "    vec3 c=sp.rgb*uColor.rgb;\n"
+/* --- moving light on a billboard ---------------------------------------
+   ADDED, NEVER SUBTRACTED, which is the whole of why this is safe. A sprite
+   carries no baked light (::Vtx::lr is 0 on everything but level geometry),
+   so lighting one the way the world is lit would mean a monster in an unlit
+   room going black -- darker than before the change, and worse. Adding a
+   contribution instead leaves the artwork's own shading as the floor and
+   lets a muzzle flash or an explosion raise it.
+
+   NO N-dot-L, and that is not a shortcut. A billboard's normal is generated
+   to face the camera, so it carries no information about which way the
+   creature is turned; a Lambert term against it would say "lit from
+   wherever the player is standing", which is exactly wrong for a light off
+   to one side. Distance attenuation alone is the honest half of the model.
+
+   Modulated by `sp.rgb` rather than added flat, so a dark creature stays
+   dark. Adding light to a black silhouette would paint the light's own
+   colour onto it and turn every monster into a lantern at close range.
+
+   빌보드 위의 움직이는 빛입니다. *더하기만 하고 빼지 않으며*, 그것이 이것이 안전한
+   이유의 전부입니다. 스프라이트는 구워진 빛을 지니지 않으므로(::Vtx::lr은 레벨
+   지오메트리 외에는 전부 0), 월드와 같은 방식으로 조명하면 불 꺼진 방의 몬스터가
+   검게 됩니다. 변경 전보다 어두워지는 것이며 더 나쁩니다. 대신 기여분을 더하면 그림
+   자체의 음영이 바닥으로 남고, 총구 섬광이나 폭발이 그것을 들어 올립니다.
+
+   N·L이 없으며 이는 편법이 아닙니다. 빌보드의 법선은 카메라를 향하도록 생성되므로
+   그 생물이 어느 쪽을 향하고 있는지에 대한 정보를 담고 있지 않습니다. 그것에 대한
+   램버트 항은 "플레이어가 서 있는 쪽에서 비춘다"고 말하게 되는데, 옆쪽의 광원에
+   대해서는 정확히 틀린 말입니다. 거리 감쇠만이 이 모델의 정직한 절반입니다.
+
+   평평하게 더하지 않고 `sp.rgb`로 변조하므로 어두운 생물은 어둡게 남습니다. 검은
+   실루엣에 빛을 더하면 광원 자신의 색이 칠해져, 가까이서 모든 몬스터가 등불이
+   됩니다. */
+"    vec3 add=vec3(0.0);\n"
+"    for(int i=0;i<uNumLights;i++){\n"
+"      vec3  d=uLightPos[i].xyz-vPos;\n"
+"      float dist=length(d);\n"
+"      float rad=uLightPos[i].w;\n"
+"      if(dist>rad) continue;\n"
+"      float att=1.0-dist/rad; att*=att;\n"
+"      add+=uLightCol[i].rgb*(att*uLightCol[i].a);\n"
+"    }\n"
+"    c+=sp.rgb*add*SPRITE_LIGHT;\n"
 "    c=mix(c, vec3(1.0,0.92,0.92), uColor.a);\n"
 "    float fg=clamp(length(vPos-uEye)/30.0,0.0,1.0);\n"
 "    oCol=vec4(mix(c, vec3(0.05,0.06,0.09), fg*fg), 1.0);\n"

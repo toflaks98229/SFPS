@@ -63,6 +63,7 @@
 #include "post.h"
 #include "scene.h"    /* scene_frame -- the order under test */
 #include "world.h"
+#include "proj.h"   /* proj_fire: putting a light in the air for the check below */
 #include "weapon.h"   /* the weapon's rules; scene_init takes one, so WinMain
                          does it separately from world_init and so does this */
 #include "font.h"
@@ -467,6 +468,56 @@ int main(void) {
     ok(w.level.n_lights > 0, "the level under test actually has lamps");
     ok(rd_light_count() == 0,
        "and none of them occupy a dynamic light slot");
+
+    /* --- and the slots are not merely unused -----------------------------
+       The check above passes just as well when nothing can ever fill a slot,
+       which is exactly the state this code was in: rd_lights(0,0,0) sat at the
+       end of the world pass and emptied the array every frame, so "no lamp
+       occupies a slot" was true because NOTHING did. That is a weaker fact
+       than it reads as, and it held for as long as the feature was missing.
+
+       Putting a grenade in the air separates the two. If the count is still
+       zero with one live projectile, the moving-light feed is gone again and
+       the assertion above has quietly gone back to proving nothing.
+
+       그리고 슬롯이 단지 *쓰이지 않는* 것이 아님을 확인합니다.
+       위의 검사는 슬롯을 채울 수 있는 것이 아예 없을 때에도 똑같이 통과하며, 이 코드가 바로 그
+       상태에 있었습니다. rd_lights(0,0,0)이 월드 패스 끝에 앉아 매 프레임 배열을 비웠으므로,
+       "어떤 등도 슬롯을 차지하지 않는다"는 *아무것도* 차지하지 않았기 때문에 참이었습니다.
+       읽히는 것보다 약한 사실이며, 기능이 없는 동안 내내 유지되었습니다.
+
+       유탄을 공중에 띄우면 둘이 갈라집니다. 살아 있는 발사체가 하나 있는데도 개수가 여전히
+       0이라면 움직이는 광원 공급이 다시 사라진 것이고, 위의 단언은 조용히 아무것도 증명하지
+       않는 상태로 되돌아간 것입니다. */
+    clear_state(&w);
+    proj_fire(&w.pools, w.player.pos, v3f(0.0f, 0.0f, -1.0f),
+              12.0f,   /* speed   */
+              0.0f,    /* gravity: straight, so it stays where it was put */
+              20,      /* damage  */
+              2.0f,    /* blast   */
+              3.0f);   /* fuse    */
+    frame_hash(&w, &scene, 0);
+    printf("      with one projectile in the air the shader was given %d\n",
+           rd_light_count());
+    ok(rd_light_count() > 0,
+       "a projectile in flight does occupy one");
+
+    /* Back to rest, so the passes after this one are not lit by a leftover.
+       proj_reset AS WELL AS clear_state, because they clear different things:
+       clear_state puts the RUN back and knows nothing about the pools, and this
+       file never calls world_step, so nothing would ever retire the grenade on
+       its own. The first version of this check left it in the air and failed
+       here, which is the pools half of ::World saying so out loud.
+       휴지 상태로 되돌립니다. 이후의 패스들이 남은 광원으로 조명되지 않도록 합니다.
+       clear_state와 *함께* proj_reset을 호출하는 이유는 둘이 서로 다른 것을 비우기
+       때문입니다. clear_state는 *플레이*를 되돌릴 뿐 풀에 대해 아무것도 모르며, 이 파일은
+       world_step을 결코 호출하지 않으므로 유탄을 스스로 퇴역시킬 것이 없습니다. 이 검사의 첫
+       판은 그것을 공중에 남겨 둔 채 이곳에서 실패했고, 그것이 ::World의 풀 절반이 직접 말해 준
+       것입니다. */
+    clear_state(&w);
+    proj_reset(&w.pools);
+    frame_hash(&w, &scene, 0);
+    ok(rd_light_count() == 0, "and the set empties again once it is gone");
 
     /* --- 7. what the boundary counted -----------------------------------
        Last, so it covers every frame above. A non-zero delta means one of

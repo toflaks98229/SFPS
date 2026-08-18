@@ -103,6 +103,198 @@
  */
 #define PSX_SNAP_COARSE 2.0f
 
+/* --- moving light ----------------------------------------------------------
+ *
+ * ENGLISH
+ * -------
+ * WHAT THESE EIGHT SLOTS ARE FOR, finally used. render.h reserved them for
+ * light the bake cannot produce -- a muzzle flash, a grenade in the air, a
+ * bolt crossing a dark room -- and ::scene_draw_level's own comment recorded
+ * that nothing filled them yet, so every frame ran the shader's light loop
+ * with a count of zero. The loop was live, the lamps were baked, and the only
+ * light that ever MOVED in this game was the one nobody had written.
+ *
+ * The sources below are the three that already exist as visible things: the
+ * gun going off, the player's projectiles, and the monsters'. Each of those is
+ * drawn as a glow already, so a light beside it is the same event told to the
+ * geometry rather than a new effect invented here.
+ *
+ * @note Radii are metres and generous. A muzzle flash lasts ::FLASH_TIME and a
+ *       radius that only reaches the wall it is fired at would never be seen
+ *       on anything else; the point is the room, not the wall.
+ * @note Powers are what ::rd_lights takes in `.a`. They sit under 1 because
+ *       the shader adds them on top of the baked light rather than replacing
+ *       it, and a corridor already lit to 0.6 does not have 0.4 of headroom
+ *       to spare before it clips.
+ *
+ * 한국어
+ * ------
+ * *이 여덟 슬롯이 무엇을 위한 것이었는지*, 마침내 쓰입니다. render.h는 베이크가 만들어 낼 수
+ * 없는 빛(총구 섬광, 공중의 유탄, 어두운 방을 가로지르는 볼트)을 위해 이것들을 예약해 두었고,
+ * ::scene_draw_level 자신의 주석이 아직 그것을 채우는 것이 없다고 적어 두었습니다. 그래서 매
+ * 프레임 셰이더의 조명 루프가 개수 0으로 돌았습니다. 루프는 살아 있었고 등은 구워져 있었으며,
+ * 이 게임에서 실제로 *움직이는* 유일한 빛은 아무도 쓰지 않은 그것이었습니다.
+ *
+ * 아래의 광원들은 이미 눈에 보이는 것으로 존재하는 셋입니다. 발사되는 총, 플레이어의 발사체,
+ * 그리고 몬스터의 발사체입니다. 각각은 이미 발광체로 그려지고 있으므로, 그 곁의 광원은 이곳에서
+ * 새로 발명한 효과가 아니라 같은 사건을 지오메트리에게도 알리는 것입니다.
+ *
+ * @note 반경은 미터이며 넉넉합니다. 총구 섬광은 ::FLASH_TIME 동안 지속되는데, 겨눈 벽에만 닿는
+ *       반경이라면 다른 무엇에서도 보이지 않을 것입니다. 요점은 벽이 아니라 방입니다.
+ * @note 세기는 ::rd_lights가 `.a`로 받는 값입니다. 1보다 작은 이유는 셰이더가 이것을 구워진 빛을
+ *       대체하지 않고 그 위에 *더하기* 때문이며, 이미 0.6으로 밝은 복도에는 잘리기 전까지 0.4의
+ *       여유밖에 없기 때문입니다. */
+#define LIGHT_MUZZLE_RADIUS  7.0f   ///< @brief Metres a muzzle flash reaches. / 총구 섬광이 닿는 거리 (미터).
+#define LIGHT_MUZZLE_POWER   0.85f  ///< @brief Peak power, faded over ::FLASH_TIME. / 최대 세기. ::FLASH_TIME에 걸쳐 감쇠합니다.
+#define LIGHT_PROJ_RADIUS    5.0f   ///< @brief Metres a player projectile lights. / 플레이어 발사체가 밝히는 거리 (미터).
+#define LIGHT_PROJ_POWER     0.55f  ///< @brief Steady, for as long as it is in the air. / 공중에 있는 동안 일정합니다.
+#define LIGHT_SHOT_RADIUS    4.5f   ///< @brief Metres a monster bolt lights. / 몬스터 볼트가 밝히는 거리 (미터).
+#define LIGHT_SHOT_POWER     0.60f  ///< @brief Bolts read as the brighter thing in a dark room. / 볼트는 어두운 방에서 더 밝은 것으로 읽힙니다.
+
+/** @brief Warm white: burnt powder, not a torch. / 따뜻한 백색. 횃불이 아니라 연소한 화약입니다. */
+static const float LIGHT_COL_MUZZLE[3] = { 1.00f, 0.86f, 0.62f };
+/** @brief The grenade's own hot orange. / 유탄 자신의 뜨거운 주황색. */
+static const float LIGHT_COL_PROJ[3]   = { 1.00f, 0.62f, 0.26f };
+/** @brief The bolt's cold green, matching how ::scene_draw_shots draws it. / 볼트의 차가운 녹색. ::scene_draw_shots가 그리는 방식과 맞춥니다. */
+static const float LIGHT_COL_SHOT[3]   = { 0.55f, 1.00f, 0.70f };
+
+
+/**
+ * @struct MoveLight
+ * @brief One candidate light, and how far it is from the eye.
+ *
+ * ENGLISH: The distance is kept because there are more things that could light
+ * a frame than ::RD_MAX_LIGHTS slots to hold them -- a grenade volley alone can
+ * out-number eight -- and something has to lose. Nearest wins, so what is
+ * dropped is what was contributing least.
+ *
+ * 한국어: 거리를 함께 보관하는 이유는, 한 프레임을 밝힐 수 있는 것이 ::RD_MAX_LIGHTS 슬롯보다
+ * 많을 수 있고(유탄 일제 사격 하나만으로도 여덟을 넘습니다) 무언가는 탈락해야 하기 때문입니다.
+ * 가까운 쪽이 이기므로, 버려지는 것은 가장 적게 기여하던 것입니다.
+ */
+typedef struct { float pos[4], col[4], d2; } MoveLight;
+
+/**
+ * @brief Offers one light to the frame's set, keeping the nearest eight.
+ *
+ * @note Silently ignores a power of zero, so a caller may hand over a faded
+ *       source without testing it first -- a muzzle flash on its last frame is
+ *       the normal case, not an error.
+ *
+ * @brief 한 프레임의 광원 집합에 광원 하나를 제안하며, 가장 가까운 여덟 개를 유지합니다.
+ * @note 세기가 0이면 조용히 무시하므로, 호출자는 먼저 검사하지 않고 사그라든 광원을 그대로
+ *       건네도 됩니다. 마지막 프레임의 총구 섬광이 오류가 아니라 평범한 경우입니다.
+ */
+static void light_offer(MoveLight *ls, int *n, v3 p, float radius,
+                        const float col[3], float power, v3 eye) {
+    if (power <= 0.0f || radius <= 0.0f) return;
+
+    float dx = p.x - eye.x, dy = p.y - eye.y, dz = p.z - eye.z;
+    float d2 = dx*dx + dy*dy + dz*dz;
+
+    int slot = *n;
+    if (slot >= RD_MAX_LIGHTS) {
+        /* Full. Evict the farthest, and only if this one beats it -- otherwise
+           a distant grenade at the end of the list would displace the flash
+           going off in the player's hands.
+           가득 찼습니다. 가장 먼 것을 밀어내되 이것이 그것을 이길 때만입니다. 그러지 않으면
+           목록 끝의 먼 유탄이 플레이어 손에서 터지는 섬광을 밀어냅니다. */
+        int worst = 0;
+        for (int i = 1; i < RD_MAX_LIGHTS; i++)
+            if (ls[i].d2 > ls[worst].d2) worst = i;
+        if (ls[worst].d2 <= d2) return;
+        slot = worst;
+    } else {
+        (*n)++;
+    }
+
+    ls[slot].pos[0] = p.x; ls[slot].pos[1] = p.y;
+    ls[slot].pos[2] = p.z; ls[slot].pos[3] = radius;
+    ls[slot].col[0] = col[0]; ls[slot].col[1] = col[1];
+    ls[slot].col[2] = col[2]; ls[slot].col[3] = power;
+    ls[slot].d2 = d2;
+}
+
+/**
+ * @brief Gathers this frame's moving lights and hands them to the shader.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] w   The world, read for the gun and the things in the air.
+ * @param[in] eye Camera position: what "nearest" is measured from.
+ *
+ * @note Uploaded ONCE for the whole frame rather than per pass. Every pass
+ *       after this one -- the level, the monsters, the pickups -- reads the
+ *       same eight, which is what makes a grenade light a wall and the monster
+ *       standing against it by the same amount. ::rd_use first, because
+ *       ::rd_lights sets uniforms and says nothing about which program is bound.
+ * @note The muzzle flash is placed at the EYE rather than at the gun's muzzle.
+ *       They are about half a metre apart and the light reaches seven, so the
+ *       difference is invisible -- and solving the muzzle would mean repeating
+ *       ::wp_update's view-model projection here, for a result no one can see.
+ *
+ * 한국어
+ * ------
+ * @brief 이번 프레임의 움직이는 광원을 모아 셰이더에 건넵니다.
+ * @param[in] w   월드. 총과 공중에 있는 것들을 읽습니다.
+ * @param[in] eye 카메라 위치. "가깝다"를 재는 기준입니다.
+ *
+ * @note 패스마다가 아니라 프레임 전체에 대해 *한 번* 업로드합니다. 이후의 모든 패스(레벨,
+ *       몬스터, 아이템)가 같은 여덟 개를 읽으며, 그것이 유탄이 벽과 그 앞에 선 몬스터를 같은
+ *       양만큼 밝히게 하는 것입니다. ::rd_lights는 유니폼을 설정할 뿐 어느 프로그램이
+ *       바인딩되어 있는지에 대해 아무 말도 하지 않으므로 ::rd_use를 먼저 호출합니다.
+ * @note 총구 섬광은 총구가 아니라 *눈*에 놓습니다. 둘은 0.5미터쯤 떨어져 있고 빛은 7미터를
+ *       가므로 차이가 보이지 않습니다. 총구를 구하려면 이곳에서 ::wp_update의 뷰 모델 투영을
+ *       반복해야 하는데, 아무도 볼 수 없는 결과를 위해서입니다.
+ */
+static void scene_lights(const World *w, v3 eye) {
+    MoveLight ls[RD_MAX_LIGHTS];
+    int n = 0;
+
+    /* The gun. Faded over its own timer so the light leaves with the flash
+       sprite rather than snapping off a frame later.
+       총입니다. 자기 타이머에 맞춰 감쇠하므로, 빛이 한 프레임 뒤에 뚝 꺼지지 않고 섬광
+       스프라이트와 함께 사라집니다. */
+    if (w->weapon.flash > 0.0f) {
+        float f = w->weapon.flash / FLASH_TIME;
+        if (f > 1.0f) f = 1.0f;
+        light_offer(ls, &n, eye, LIGHT_MUZZLE_RADIUS, LIGHT_COL_MUZZLE,
+                    LIGHT_MUZZLE_POWER * f, eye);
+    }
+
+    /* The player's grenades and bolts, for as long as they are in the air. */
+    for (int i = 0, pn = proj_count(&w->pools); i < pn; i++) {
+        const Proj *p = proj_at(&w->pools, i);
+        if (!p->active) continue;
+        light_offer(ls, &n, p->pos, LIGHT_PROJ_RADIUS, LIGHT_COL_PROJ,
+                    LIGHT_PROJ_POWER, eye);
+    }
+
+    /* The monsters'. Drawn as additive rosettes already -- see
+       ::scene_draw_shots -- so this is the same bolt told to the geometry. */
+    for (int i = 0, sn = enemy_shot_count(&w->pools); i < sn; i++) {
+        const Shot *sh = enemy_shot_at(&w->pools, i);
+        if (!sh->active) continue;
+        light_offer(ls, &n, sh->pos, LIGHT_SHOT_RADIUS, LIGHT_COL_SHOT,
+                    LIGHT_SHOT_POWER, eye);
+    }
+
+    /* Flattened into the two arrays ::rd_lights takes. Kept apart until here
+       because the eviction above needs the distance beside the light, and
+       ::rd_lights wants neither.
+       ::rd_lights가 받는 두 배열로 펼칩니다. 이곳까지 나누어 둔 이유는 위의 축출이 광원 곁의
+       거리를 필요로 하는데 ::rd_lights는 그 어느 것도 원하지 않기 때문입니다. */
+    float pos[RD_MAX_LIGHTS * 4], col[RD_MAX_LIGHTS * 4];
+    for (int i = 0; i < n; i++)
+        for (int k = 0; k < 4; k++) {
+            pos[i*4 + k] = ls[i].pos[k];
+            col[i*4 + k] = ls[i].col[k];
+        }
+
+    rd_use();
+    rd_lights(pos, col, n);
+}
+
 /* --- monster projectiles ---
    A bolt is drawn as two groups of camera-facing quads: wide dim petals that
    carry the round shape, and small bright ones that give it a hot core. A
@@ -433,10 +625,20 @@ void scene_draw_level(const Scene *s, mat4 vp, v3 eye) {
        이제 이 슬롯의 용도는 베이크가 할 수 없는 것, 즉 *움직이는* 빛입니다. 총구 섬광, 폭발,
        날아가는 발사체입니다. 어느 것도 레벨 파일에 없고, 어느 것도 구울 수 없으며, 여덟 개면
        충분합니다. 아직 그것을 채우는 것이 없으므로 월드 패스는 0개로 돌아갑니다. */
+    /* rd_lights(0, 0, 0) was here, and it is what kept the paragraph above true
+       for as long as it was: the slots stayed empty because this line emptied
+       them, every frame, after anything that might have filled them. The set is
+       ::scene_lights's now and is uploaded once for the whole frame, before
+       this pass -- so the level, the monsters and the pickups are all lit by
+       the same eight rather than the level being lit by none.
+       rd_lights(0, 0, 0)이 이곳에 있었고, 위 문단이 참으로 남아 있던 이유가 바로 그것입니다.
+       슬롯이 비어 있던 것은 그것을 채울 수 있는 무엇보다도 뒤에서 이 줄이 매 프레임 비웠기
+       때문입니다. 이제 그 집합은 ::scene_lights의 것이며 이 패스보다 앞서 프레임 전체에 대해
+       한 번 업로드됩니다. 그래서 레벨과 몬스터와 아이템이 모두 같은 여덟 개로 조명되며, 레벨이
+       하나도 없이 조명되지 않습니다. */
     rd_mode(RD_WORLD);
     rd_mvp(vp);
     rd_eye(eye);
-    rd_lights(0, 0, 0);
     glActiveTexture(GL_TEXTURE0);
     for (int i = 0; i < s->level_range_count; i++) {
         tex_use(&s->level_tex[i]);
@@ -1497,6 +1699,7 @@ void scene_frame(const World *w, Scene *sc, int vw, int vh, int frozen) {
         cam_roll    = DEATH_ROLL * e;
     }
 
+
     /* One derivation, two users. The billboards below span along `cam.right`
        and `cam.up`, and they have to be the axes the view matrix was built
        from: this used to call mat4_fps_view_roll and then re-derive the
@@ -1521,6 +1724,15 @@ void scene_frame(const World *w, Scene *sc, int vw, int vh, int frozen) {
        collapse is the fallen eye rather than the standing one.
        카메라의 실제 위치를 기준으로 조명과 안개를 적용합니다. 쓰러지는 동안 그것은
        서 있던 눈이 아니라 넘어진 눈입니다. */
+    /* BEFORE the level and therefore before every sprite pass below it, which
+       is the whole point: a grenade has to light the wall and the monster
+       standing against it by the same amount, or the monster reads as pasted
+       on. See ::scene_lights.
+       레벨보다 먼저이며 따라서 그 아래의 모든 스프라이트 패스보다 먼저입니다. 그것이 요점의
+       전부입니다. 유탄은 벽과 그 앞에 선 몬스터를 같은 양만큼 밝혀야 하며, 그러지 않으면
+       몬스터가 붙여 놓은 것처럼 읽힙니다. ::scene_lights를 참조하십시오. */
+    scene_lights(w, eye_pos);
+
     scene_draw_level(sc, vp, eye_pos);
 
     /* --- monsters, pickups and projectiles ---

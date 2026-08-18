@@ -1113,6 +1113,45 @@ static const char *FS_SRC =
  * 아니라 유니폼인 이유는 uSnap이 그런 이유와 같습니다. 게임이 도는 동안 둘을 나란히 비교할 수
  * 있으며, 이런 값이 정해지는 방법의 대부분이 그것입니다. */
 "uniform float uAffine;\n"
+/* How far the texture may slide, in UV units -- which are TILES here.
+ *
+ * THE BUG THIS FIXES. Affine error is proportional to the UV RANGE across a
+ * triangle, and this project's UVs are world-space projections: brush_face_uv
+ * divides map units by 128, so a 512-unit wall spans 4 tiles and a large room
+ * spans a dozen or more. A face mapped 0..1 warped subtly and a face mapped
+ * 0..16 warped sixteen times as hard, off the same uAffine -- so the materials
+ * that tile most were exactly the ones that came apart. That is not a period
+ * artifact, it is a texture that has stopped being attached to its surface.
+ *
+ * Bounding the DEVIATION rather than scaling it makes the warp an absolute
+ * slide instead of a proportional one: every face slides by up to this much,
+ * whether it tiles once or twenty times. That is also closer to what the
+ * hardware did -- its polygons were small, so its UV ranges were small, and the
+ * error it produced was small in absolute terms rather than relative ones.
+ *
+ * Saturates smoothly (d*L/(L+|d|)) rather than clamping. A clamp would put a
+ * hard crease across a face at the point it engaged, which trades one visible
+ * fault for another; this is near-identity for small deviations and eases into
+ * the limit for large ones.
+ *
+ * 텍스처가 미끄러질 수 있는 최대치이며 단위는 UV, 즉 이곳에서는 *타일*입니다.
+ *
+ * *이것이 고치는 결함.* 어파인 오차는 삼각형을 가로지르는 UV *범위*에 비례하는데, 이
+ * 프로젝트의 UV는 월드 공간 투영입니다. brush_face_uv가 맵 단위를 128로 나누므로 512유닛 벽은
+ * 4타일, 큰 방은 열 몇 타일에 걸칩니다. 0..1로 매핑된 면은 미묘하게 일그러지고 0..16으로
+ * 매핑된 면은 같은 uAffine에서 열여섯 배로 일그러졌습니다. 그래서 가장 많이 타일링되는 재질이
+ * 정확히 무너지는 재질이었습니다. 그것은 시대의 아티팩트가 아니라 표면에 붙어 있기를 그만둔
+ * 텍스처입니다.
+ *
+ * 비율로 조정하지 않고 *편차*를 제한하면 왜곡이 비례가 아니라 절대적인 미끄러짐이 됩니다. 한
+ * 번 타일링되든 스무 번 타일링되든 모든 면이 이만큼까지만 미끄러집니다. 이것이 실제 하드웨어에
+ * 더 가깝기도 합니다. 그 폴리곤은 작았으므로 UV 범위도 작았고, 만들어 내는 오차도 상대적이
+ * 아니라 절대적으로 작았습니다.
+ *
+ * 잘라 내지 않고 부드럽게 포화시킵니다(d*L/(L+|d|)). 잘라 내면 그것이 걸리는 지점에서 면을
+ * 가로지르는 뚜렷한 접힘이 생겨, 눈에 띄는 결함 하나를 다른 하나와 바꾸는 셈입니다. 이 식은
+ * 작은 편차에서는 거의 항등이고 큰 편차에서는 한계로 완만히 들어갑니다. */
+"const float AFF_LIMIT = 0.35;\n"
 "uniform sampler2D uTex;\n"
 "uniform vec3 uEye;\n"
 "uniform int uMode;\n"
@@ -1167,14 +1206,37 @@ static const char *FS_MAIN =
 "  vec3 n=normalize(vNrm);\n"
 /* UVs now arrive per vertex, so extruded silhouettes can carry a real
    parameterisation instead of everything being guessed from world position. */
-/* NOT applied to uMode==3 above, which samples vUV directly. Text is drawn in
-   screen coordinates, so there is no perspective to be wrong about and the two
-   interpolations agree -- but a glyph atlas is the one place where a UV off by
-   a texel picks up the neighbouring letter.
-   위의 uMode==3에는 적용하지 *않습니다*. 그 분기는 vUV를 직접 샘플링합니다. 텍스트는 화면
-   좌표로 그려지므로 틀릴 원근이 없고 두 보간이 일치합니다. 다만 글리프 아틀라스는 UV가 한
-   텍셀만 어긋나도 옆 글자를 집어 오는 유일한 곳입니다. */
-"  vec2 uv=mix(vUV,vUVa,uAffine);\n"
+/* WORLD GEOMETRY ONLY, and the gate is here rather than left to the caller
+   because the other modes are not merely uninteresting -- they are wrong.
+   uMode==1 and uMode==6 are the view model, which is part of the FRAME the way
+   the HUD is: it sits inches from the eye, fills a quarter of the screen and is
+   hand-drawn, so warping it reads as the gun melting rather than as a period.
+   uMode==5 is a billboard, generated to face the camera, so `w` is very nearly
+   constant across it and the two interpolations already agree -- applying the
+   mix there buys nothing and leaves a surprise for the one frame that tilts a
+   sprite, which the death camera's roll does. uMode==4 is the editor's swatch,
+   which exists to show a material exactly as it is.
+
+   scene.c ALSO sets uAffine to 0 around the UI passes, and that is not
+   redundant with this: that call says "this section of the frame does not
+   warp", this says "within a section that does, only the level does". Two
+   granularities, and losing either one loses a different thing.
+
+   *월드 지오메트리 전용*이며, 게이트를 호출자에게 맡기지 않고 이곳에 두는 이유는 다른 모드가
+   단지 무의미한 것이 아니라 *틀리기* 때문입니다. uMode==1과 uMode==6은 뷰 모델이며 HUD와 같은
+   의미에서 *프레임*의 일부입니다. 눈에서 몇 센티미터 거리에 있고 화면의 4분의 1을 채우며 손으로
+   그린 것이므로, 그것을 일그러뜨리면 시대가 아니라 총이 녹아내리는 것으로 읽힙니다. uMode==5는
+   카메라를 향하도록 생성된 빌보드이므로 `w`가 거의 일정하고 두 보간이 이미 일치합니다. 그곳에
+   섞기를 적용해도 얻는 것이 없으며, 스프라이트가 기울어지는 한 프레임(사망 카메라의 회전이 그렇게
+   합니다)에 놀라움만 남깁니다. uMode==4는 재질을 있는 그대로 보여 주려고 존재하는 에디터
+   스와치입니다.
+
+   scene.c도 UI 패스 주변에서 uAffine을 0으로 설정하며, 그것은 이것과 중복이 아닙니다. 그 호출은
+   "프레임의 이 구간은 왜곡되지 않는다"고 말하고, 이것은 "왜곡되는 구간 안에서도 레벨만
+   왜곡된다"고 말합니다. 두 개의 입도이며, 어느 하나를 잃으면 서로 다른 것을 잃습니다. */
+"  vec2 dUV = vUVa - vUV;\n"
+"  dUV *= AFF_LIMIT / (AFF_LIMIT + abs(dUV));\n"
+"  vec2 uv = vUV + dUV * ((uMode==0) ? uAffine : 0.0);\n"
 /* One lookup either way: sampled from a texture, or computed from the UV.
    Alpha carries gloss in both, so the lighting below does not care which. */
 "  vec4 s = (uProc==0) ? texture(uTex,uv)\n"

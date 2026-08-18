@@ -225,8 +225,22 @@ static void step_look_move(World *w, const Input *in, float aspect, float dt) {
        stair is not an impact.
        착지입니다. 하한은 ::WORLD_SHAKE_LAND_MIN의 것이며, 계단을 내려서는 것은 충격이
        아닙니다. */
-    if (was_air && w->player.grounded && fall > WORLD_SHAKE_LAND_MIN)
+    if (was_air && w->player.grounded && fall > WORLD_SHAKE_LAND_MIN) {
         world_shake(w, WORLD_SHAKE_LAND * (fall / WORLD_SHAKE_LAND_MIN - 1.0f));
+
+        /* Dust at the FEET, not at the eye. Player::pos is the eye -- the same
+           distinction the hazard check makes a few lines into ::step_damage --
+           and a puff born at head height reads as the player exhaling rather
+           than as the floor being hit.
+           눈이 아니라 *발*에서 나는 먼지입니다. Player::pos는 눈이며, ::step_damage 초입의
+           지형 판정이 두는 것과 같은 구분입니다. 머리 높이에서 태어난 먼지는 바닥을 친 것이
+           아니라 플레이어가 숨을 내쉰 것으로 읽힙니다. */
+        v3 feet = v3f(w->player.pos.x, w->player.pos.y - PLAYER_EYE,
+                      w->player.pos.z);
+        fx_spawn(&w->pools, "landdust", feet, v3f(0.0f, 1.0f, 0.0f));
+
+        audio_play_at("hland", 60, feet);
+    }
 
     /* The leap resolves after player_move, so the slam lands on where the
        player actually ended up rather than a frame behind it -- the same reason

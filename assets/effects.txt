@@ -481,3 +481,19 @@ drag 20
 gravity -110
 spin 90
 blend add
+
+e landdust
+  count 12               # a footfall, not a detonation -- blastdome has 44
+  life 520
+  size 10 30             # GROWS: dust spreads outward along the floor
+  rgb 122 112 98         # dry floor grit, not smoke
+  rgb2 74 70 66
+  alpha 46 0             # faint on purpose: it happens on every hard landing
+  speed 210 120          # outward, low
+  spawn 16
+  drag 260               # throws out, then stops -- dust does not drift far
+  spin 60
+  gravity 210            # settles rather than rises; this is not smoke
+  dome 1                 # a spreading ring at the feet, not a ball
+  blend alpha            # dust occludes; it does not glow
+  face camera

@@ -331,13 +331,28 @@ static void digest_print(const Digest *d) {
    and nothing else; none of them was chosen.
    `demotest -bless`가 채웁니다. 이곳의 모든 숫자는 아래의 실행이 만들어 낸 것이며 그 외에는
    없습니다. 어느 것도 사람이 고르지 않았습니다. */
+/* RE-BLESSED once, for `landdust`. Worth recording what moved and what did not,
+   because the two answer different questions: `frng` changed and NOTHING ELSE
+   did -- not the position, not the velocity, not the aim, not the health, not
+   the monsters, not world_time. A hard landing now spawns a puff, so the
+   PARTICLE rng is one draw further along; the simulation the player is playing
+   is bit-for-bit the run it was before.
+   That is the shape a presentation change should leave here. A diff that also
+   moved `px` would be a presentation change that was not one.
+   `landdust` 때문에 한 번 다시 승인했습니다. 무엇이 움직였고 무엇이 움직이지 않았는지 적어 둘
+   가치가 있습니다. 둘은 서로 다른 질문에 답하기 때문입니다. `frng`가 바뀌었고 *그 외에는
+   아무것도* 바뀌지 않았습니다. 위치도, 속도도, 조준도, 체력도, 몬스터도, world_time도
+   아닙니다. 세게 착지하면 이제 먼지가 생기므로 *파티클* 난수가 한 번 더 진행되었을 뿐,
+   플레이어가 하는 시뮬레이션은 이전의 그 플레이와 비트 단위로 같습니다.
+   연출 변경이 이곳에 남겨야 할 모양이 그것입니다. `px`까지 움직인 차이는 연출 변경이
+   아니었던 것입니다. */
 static const Digest GOLDEN = {
     /* px py pz */ -12.2013168f, 2.84367466f, -14.8857975f,
     /* vx vy vz */ -0.312936455f, 1.9998908f, 0.38904506f,
     /* yaw pitch */ 0.382800102f, 0.534599602f,
     /* health keys grounded */ 73, 0, 0,
     /* cur ammo */ 0, 0,
-    /* wrng srng erng frng */ 2972006077u, 3707978689u, 2180890343u, 805981011u,
+    /* wrng srng erng frng */ 2972006077u, 3707978689u, 2180890343u, 1524351959u,
     /* enemies hp */ 1, 40,
     /* proj marks */ 0, 0,
     /* world_time */ 29.9002438f

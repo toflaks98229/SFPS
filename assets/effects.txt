@@ -507,3 +507,69 @@ e landdust
   dome 1                 # a spreading ring at the feet, not a ball
   blend alpha            # dust occludes; it does not glow
   face camera
+
+# --- explosion shards -------------------------------------------------------
+# The low-poly explosion look, in the terms this engine has. There is no mesh
+# VFX path here and no sprite-sheet animation -- an effect is camera-facing
+# quads with a size ramp -- so what carries the read is the SHAPE OF THE EVENT
+# rather than the geometry: a hard additive flash, opaque tumbling chunks that
+# fall, and the existing dome and smoke around them. Chunks are what separate
+# an explosion from a glow; they are drawn `blend alpha` on purpose, because a
+# piece of debris occludes what is behind it and light does not.
+#
+# COLOUR FOLLOWS THE PROJECTILE, which is the whole point of there being two of
+# these. The grenade burns orange, so its shards are hot metal cooling to
+# scorched iron; the monster's bolt is blue -- scene_draw_shots paints the halo
+# (0.10,0.42,0.85) and boltburst already cools into it -- so its shards are the
+# same blue. Sharing one effect between them, which detonate used to do with
+# boltburst, put blue sparks in a grenade blast.
+#
+# 이 엔진이 가진 용어로 옮긴 로우 폴리 폭발 외형입니다. 이곳에는 메시 VFX 경로도 스프라이트
+# 시트 애니메이션도 없으며 이펙트란 크기 램프를 가진 카메라 지향 사각형입니다. 그래서 읽기를
+# 만드는 것은 지오메트리가 아니라 *사건의 형태*입니다. 단단한 가산 섬광, 떨어지는 불투명한
+# 조각들, 그리고 그 주위의 기존 돔과 연기입니다. 조각이야말로 폭발과 발광을 가르는 것이며,
+# 의도적으로 `blend alpha`로 그립니다. 파편은 뒤를 가리고 빛은 가리지 않기 때문입니다.
+#
+# *색은 발사체를 따릅니다.* 이것이 둘로 나뉜 이유 전부입니다. 유탄은 주황으로 타므로 그 조각은
+# 식어 가는 뜨거운 금속이고, 몬스터의 볼트는 파랗기에(scene_draw_shots가 헤일로를
+# (0.10,0.42,0.85)로 칠하고 boltburst도 이미 그 색으로 식습니다) 그 조각도 같은 파랑입니다.
+# detonate가 boltburst로 하던 것처럼 둘이 하나를 공유하면 유탄 폭발에 파란 불꽃이 섞입니다.
+
+e blastburst
+  count 20
+  life 260
+  size 18 3
+  rgb 255 236 190
+  rgb2 235 96 24
+  alpha 90 0
+  speed 520 430
+  blend add
+  face camera
+
+e blastshard
+  count 22
+  life 820
+  size 9 5
+  rgb 255 176 78
+  rgb2 120 44 18
+  alpha 100 0
+  speed 560 380
+  spin 900
+  gravity 780
+  drag 12
+  blend alpha
+  face camera
+
+e boltshard
+  count 14
+  life 640
+  size 8 4
+  rgb 198 230 255
+  rgb2 42 92 190
+  alpha 100 0
+  speed 470 330
+  spin 820
+  gravity 700
+  drag 14
+  blend alpha
+  face camera

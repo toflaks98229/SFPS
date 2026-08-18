@@ -299,6 +299,7 @@ static int shots_update(Pools *pl, const Level *l, v3 player_eye, float dt)
                볼트의 진행 방향 반대로 터뜨립니다. 그래야 대상을 통과하는 것이 아니라
                맞은 지점에서 튀어나오는 것으로 읽힙니다. */
             fx_spawn(pl, "boltburst", s->pos, v3scale(dir, -1.0f));
+            fx_spawn(pl, "boltshard", s->pos, v3scale(dir, -1.0f));
             continue;
         }
 
@@ -308,6 +309,7 @@ static int shots_update(Pools *pl, const Level *l, v3 player_eye, float dt)
             s->active = 0;
             play_at(s->pos, "ehit", 45);
             fx_spawn(pl, "boltburst", s->pos, n);
+            fx_spawn(pl, "boltshard", s->pos, n);
             continue;
         }
 

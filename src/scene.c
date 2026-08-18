@@ -193,8 +193,21 @@
 static const float LIGHT_COL_MUZZLE[3] = { 1.00f, 0.86f, 0.62f };
 /** @brief The grenade's own hot orange. / 유탄 자신의 뜨거운 주황색. */
 static const float LIGHT_COL_PROJ[3]   = { 1.00f, 0.62f, 0.26f };
-/** @brief The bolt's cold green, matching how ::scene_draw_shots draws it. / 볼트의 차가운 녹색. ::scene_draw_shots가 그리는 방식과 맞춥니다. */
-static const float LIGHT_COL_SHOT[3]   = { 0.55f, 1.00f, 0.70f };
+/**
+ * @brief The bolt's cold blue, taken from how ::scene_draw_shots actually draws it.
+ *
+ * ENGLISH: This said "cold green" and was green, and the bolt it lights is BLUE
+ * -- scene_draw_shots paints the halo (0.10,0.42,0.85) and the core
+ * (0.85,0.98,1.00), and boltburst cools into the same blue. A light that
+ * disagrees with the thing emitting it is worse than no light: the wall says one
+ * colour and the bolt in front of it says another, and the eye reads the wall.
+ *
+ * 한국어: 이 값은 "차가운 녹색"이라 적혀 있었고 실제로 녹색이었는데, 그것이 밝히는 볼트는
+ * *파란색*입니다. scene_draw_shots가 헤일로를 (0.10,0.42,0.85)로, 코어를 (0.85,0.98,1.00)로
+ * 칠하고 boltburst도 같은 파랑으로 식습니다. 자기를 내는 것과 어긋나는 광원은 광원이 없는 것보다
+ * 나쁩니다. 벽은 한 색을 말하고 그 앞의 볼트는 다른 색을 말하는데, 눈은 벽을 믿습니다.
+ */
+static const float LIGHT_COL_SHOT[3]   = { 0.42f, 0.68f, 1.00f };
 
 /* --- how a shake looks -----------------------------------------------------
  * HOW HARD is ::RunState::shake's and the world's; how it LOOKS is this file's,

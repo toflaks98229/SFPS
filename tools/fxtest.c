@@ -320,7 +320,24 @@ int main(void) {
                                    muzzle */
                                 "sawspark", "sawgrind",
                                 /* the rest of what a bullet leaves */
-                                "smokepuff", "debris" };
+                                "smokepuff", "debris",
+                                /* AND THE LIST FELL BEHIND AGAIN. `landdust`
+                                   and the three shard effects were spawned by
+                                   the game and named nowhere here, so the check
+                                   above passed while covering none of them --
+                                   which is the same way `hookbiteb` and
+                                   `hookland` went unchecked, recorded a few
+                                   lines up. A name this list does not carry is
+                                   a name fx_spawn can silently fail to find.
+                                   그리고 목록이 또 뒤처졌습니다. `landdust`와 세 개의
+                                   조각 이펙트를 게임이 생성하는데 이곳에는 이름이
+                                   없었으므로, 위의 검사는 그중 무엇도 덮지 않은 채
+                                   통과했습니다. 몇 줄 위에 적힌 `hookbiteb`와
+                                   `hookland`가 검사되지 않던 것과 같은 방식입니다.
+                                   이 목록이 나르지 않는 이름은 fx_spawn이 조용히 찾지
+                                   못할 수 있는 이름입니다. */
+                                "landdust",
+                                "blastburst", "blastshard", "boltshard" };
         int found = 0;
         for (int i = 0; i < (int)(sizeof(NAMES)/sizeof(NAMES[0])); i++) {
             fx_reload(&g_pools);

@@ -134,7 +134,16 @@ static void detonate(Pools *pl, Proj *p, v3 at, v3 normal) {
         fx_spawn(pl, "blastcore",   at, normal);
         fx_spawn(pl, "blastsmoke",  at, v3f(0, 1, 0));
         fx_spawn(pl, "blastdebris", at, normal);
-        fx_spawn(pl, "boltburst",   at, normal);
+        /* blastburst, NOT boltburst. This borrowed the monster bolt's
+           flash, which cools into that bolt's blue -- so a grenade going
+           off threw blue sparks. The two events want the same SHAPE and
+           opposite colours; sharing one effect gave them the reverse.
+           boltburst가 아니라 blastburst입니다. 이 줄은 몬스터 볼트의 섬광을
+           빌려 썼고 그것은 그 볼트의 파랑으로 식습니다. 그래서 유탄이 터지면
+           파란 불꽃이 튀었습니다. 두 사건은 같은 *형태*와 반대되는 색을
+           원하는데, 하나를 공유하면 그 반대를 얻습니다. */
+        fx_spawn(pl, "blastburst", at, normal);
+        fx_spawn(pl, "blastshard", at, normal);
 
         /* ITS OWN SOUND, AND FROM WHERE IT HAPPENED. This was `impact`, which
            is DSPUNCH -- a punch -- at a flat gain of 100 wherever in the level

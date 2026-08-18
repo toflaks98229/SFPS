@@ -681,9 +681,36 @@ int audio_sound_count(void) {
        parses first; this is the one caller that does not.
        아무것도 재생되기 전에 도구가 물어볼 수 있으므로 필요 시 파싱합니다. 표를 읽는
        다른 모든 경로는 먼저 파싱하는 audio_play를 거치며, 이것이 그러지 않는 유일한
-       호출자입니다. */
+       호출자입니다.
+
+       UNDER THE LOCK, like every other reader of the recipe table. It was not,
+       and the threading contract above this function says plainly that
+       g_sounds[], g_n_sounds and g_parsed are touched only under g_lock -- so
+       this was the one place that read the gate and could rewrite the whole
+       table from index 0 while the mixer was dereferencing Voice::snd into it.
+       That is the same race the contract describes find_sound() having had.
+
+       It could not fire in practice: the only caller is tools/sndtest.c, which
+       never calls audio_init, so there is no mixer thread and audio_dev_lock
+       returns 0. But "no current caller reaches it" is not the same as "it
+       cannot happen", and this is a public entry point in audio.h -- the next
+       caller would be a game-thread one, with a device open.
+
+       레시피 표를 읽는 다른 모든 경로와 마찬가지로 락 안에서 수행합니다. 이전에는 그렇지
+       않았고, 이 함수 위의 스레딩 계약은 g_sounds[]·g_n_sounds·g_parsed가 오직 g_lock
+       하에서만 접근된다고 분명히 적고 있습니다. 그런데 이곳이 게이트를 읽고, 믹서가
+       Voice::snd로 역참조하는 동안 표 전체를 0번 인덱스부터 다시 쓸 수 있는 유일한
+       지점이었습니다. 계약이 find_sound()에 대해 서술한 바로 그 레이스입니다.
+
+       실제로 발생할 수는 없었습니다. 유일한 호출자인 tools/sndtest.c가 audio_init을 결코
+       호출하지 않으므로 믹서 스레드가 없고 audio_dev_lock이 0을 반환합니다. 그러나 "현재
+       도달하는 호출자가 없다"는 "일어날 수 없다"와 같지 않으며, 이것은 audio.h의 공개
+       진입점입니다. 다음 호출자는 장치가 열린 채의 게임 스레드 호출자일 것입니다. */
+    int held = audio_dev_lock();
     if (!g_parsed) parse_sounds();
-    return g_n_sounds;
+    int n = g_n_sounds;
+    if (held) audio_dev_unlock();
+    return n;
 }
 
 /* The curve, in one place, so audio_play_at and the test that checks it

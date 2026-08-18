@@ -497,6 +497,9 @@ void post_size(int *w, int *h);
  */
 void post_set_scanline(float depth);
 
+/** @brief World seconds, for effects that must stop when the world does. See post.c. / 월드가 멈추면 함께 멈춰야 하는 효과를 위한 월드 초. post.c 참조. */
+void post_set_world_time(float t);
+
 /**
  * @brief Sets how hard the resolve pass quantises and grains the picture.
  *

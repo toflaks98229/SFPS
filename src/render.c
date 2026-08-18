@@ -831,14 +831,27 @@ static const char *FS_PROC =
  * 속도는 의도적으로 서로 배수가 아닙니다. 1:2인 두 움직임은 몇 초마다 눈에 띄게 반복되며,
  * 용암 바닥은 플레이어가 오래 곁에 서 있는 대상입니다. */
 "vec3 pLava(vec2 uv, vec3 base){\n"
-"  const float DRIFT = 0.035;\n"
-"  const float SHEAR = 0.055;\n"
+/* DRIFT and SHEAR were here. They offset two copies of `uv` by uTime and used
+   them as the fbm domain, so the crust pattern SCROLLED -- standing in for heat
+   haze, and unable to do that job. The domain they scrolled in is the tiled,
+   world-projected UV, so the shimmer was locked to the material's TILING: it moved
+   with the texture instead of with the air above it, and on a floor tiled a dozen
+   times across it read as the surface sliding under itself.
+   Haze belongs to the air between the eye and the lava rather than to the lava's
+   surface, which means it belongs to a screen-space pass. It is post.c's now, and
+   what is left here is what lava IS: a crust fixed to the rock.
+   DRIFT와 SHEAR가 이곳에 있었습니다. `uv`의 사본 둘을 uTime으로 밀어 fbm의 정의역으로 썼으므로
+   지각 패턴이 *스크롤*했습니다. 열 아지랑이를 대신하고 있었고 그 일을 할 수 없었습니다.
+   스크롤하던 정의역이 타일링된 월드 투영 UV이므로 일렁임이 재질의 *타일링*에 묶였고, 공기가
+   아니라 텍스처를 따라 움직였습니다. 열두 번쯤 타일링된 바닥에서는 표면이 자기 밑으로
+   미끄러지는 것으로 읽혔습니다.
+   아지랑이는 용암의 표면이 아니라 눈과 용암 사이의 *공기*에 속하며, 곧 화면 공간 패스에
+   속한다는 뜻입니다. 이제 post.c의 것이고, 이곳에 남은 것은 용암이 무엇인가, 즉 바위에 고정된
+   지각입니다. */
 "  const float PULSE = 0.45;\n"
 
-"  vec2 d1 = uv + vec2( uTime * DRIFT, uTime * DRIFT * 0.6);\n"
-"  vec2 d2 = uv + vec2(-uTime * SHEAR, uTime * SHEAR * 0.35);\n"
 
-"  float f = fbm(d1*1.7);\n"
+"  float f = fbm(uv*1.7);\n"
 /* Distance from the plate threshold: 0 in the middle of a crack, 1 well
    inside a plate. */
 /* The window sits LOW so most of the surface is crust and the glow is the
@@ -857,7 +870,7 @@ static const char *FS_PROC =
 "  float crust = smoothstep(0.30 + pb, 0.42 + pb, f);\n"
 /* A second, finer field breaks the plates up so they do not read as one
    continuous sheet with holes in it. */
-"  crust *= 0.75 + 0.25*smoothstep(0.35, 0.65, fbm(d2*5.5));\n"
+"  crust *= 0.75 + 0.25*smoothstep(0.35, 0.65, fbm(uv*5.5));\n"
 /* Grain sampled from the STATIC uv, not a drifting one: this is the surface of
    the rock itself, and rock does not flow. Drifting this too made the whole
    floor read as one scrolling texture rather than as plates moving on a melt.

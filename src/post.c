@@ -68,6 +68,7 @@ static GLuint g_vao;
 /** @brief The resolve program and its uniform locations. / 해상 프로그램과 그 유니폼 위치. */
 static GLuint g_prog;
 static GLint  g_u_tex, g_u_res, g_u_win, g_u_time, g_u_scan;
+static GLint  g_u_wtime;
 /** @brief Quantisation steps per channel. See post_set_dither. / 채널당 양자화 단계. */
 static float g_levels = POST_LEVELS_DEFAULT;
 /** @brief Per-frame grain amplitude. See post_set_dither. / 프레임별 그레인 세기. */
@@ -80,6 +81,18 @@ static GLint g_u_levels, g_u_grain;
 static float  g_scan = POST_SCANLINE_DEFAULT;
 /** @brief Frames drawn, wrapped. Drives the CRT grain. / 그린 프레임 수(순환). CRT 그레인을 구동합니다. */
 static float  g_frame;
+/* World time, which is NOT g_frame. g_frame counts resolves and drives the
+   grain, which must keep moving so a still image does not freeze into a fixed
+   speckle. The haze is the opposite: it is part of the WORLD, so it stops when
+   the world does and reproduces exactly for a given world state -- which is
+   what lets scenetest compare two draws of one world and what keeps a recorded
+   demo looking the same on playback.
+   월드 시계이며 g_frame이 *아닙니다*. g_frame은 리졸브를 세며 그레인을 구동하는데, 그레인은
+   정지 화면이 고정된 얼룩으로 굳지 않도록 계속 움직여야 합니다. 아지랑이는 반대입니다. 그것은
+   *월드*의 일부이므로 월드가 멈추면 멈추고, 주어진 월드 상태에 대해 정확히 재현됩니다. 그것이
+   scenetest가 한 월드의 두 그리기를 비교할 수 있게 하고 기록된 데모가 재생 시 같아 보이게
+   합니다. */
+static float  g_wtime;
 /** @brief Offscreen dimensions in pixels. / 오프스크린 크기(픽셀). */
 static int    g_w, g_h;
 /** @brief Non-zero once init succeeded; cleared if the FBO was incomplete. / 초기화 성공 시 0이 아님. FBO가 불완전하면 해제됩니다. */
@@ -207,6 +220,13 @@ static const char *FS =
    by the caller so it never grows large enough to lose float precision.
    매 프레임 동일해서는 안 되는 것을 위한 프레임 카운터입니다. float 정밀도를 잃을 만큼
    커지지 않도록 호출자가 순환시킵니다. */
+/* World seconds, wrapped by WORLD_TIME_WRAP. Drives the haze, which belongs to
+   the world and stops with it -- unlike uTime above, which counts frames and
+   must keep moving so the grain does not freeze into a fixed speckle.
+   WORLD_TIME_WRAP으로 순환하는 월드 초입니다. 아지랑이를 구동하며, 아지랑이는 월드에 속하므로
+   월드와 함께 멈춥니다. 프레임을 세는 위의 uTime과 다릅니다. 그쪽은 그레인이 고정된 얼룩으로
+   굳지 않도록 계속 움직여야 합니다. */
+"uniform float uWorld;\n"
 "uniform float uTime;\n"
 /* Scanline depth, as a uniform rather than a constant.
  *
@@ -553,6 +573,81 @@ static const char *FS =
 "  vec3  avg3 = textureLod(uTex, vec2(0.5), 20.0).rgb;\n"
 "  float avg  = dot(avg3, vec3(0.2126, 0.7152, 0.0722));\n"
 "  vec2  uv   = (vUV - 0.5) * (1.0 - BREATHE * avg) + 0.5;\n"
+
+/* --- heat haze -------------------------------------------------------------
+ *
+ * ENGLISH
+ * -------
+ * WHY THIS IS A SCREEN PASS AND NOT A MATERIAL. pLava used to scroll its own
+ * noise domain to suggest rising heat, and the domain it scrolled in is the
+ * tiled, world-projected UV -- so the shimmer was welded to the material's
+ * tiling. It moved with the texture rather than with the air, and on a floor
+ * tiled a dozen times across it read as the surface sliding under itself.
+ *
+ * Haze is not a property of lava. It is what the air between the eye and the
+ * lava does to everything seen THROUGH it, which is a statement about the
+ * screen and can only be made here. Displacing `uv` before the resolve below
+ * bends the whole image -- the wall behind the pit, the monster standing in
+ * it, the far side of the room -- which is the thing that was missing.
+ *
+ * WHERE THE HEAT IS, without a mask buffer. The image already says: hot things
+ * in this game are bright and far more red than blue, and nothing else is.
+ * Sampling a few taps BELOW each pixel and weighting them by that gives a mask
+ * that rises off lava, off an explosion and off a muzzle flash, fades with
+ * height, and needs no second render target, no depth read and no new pass.
+ *
+ * @note Taps go DOWNWARD in UV, which is downward on screen -- GL puts (0,0) at
+ *       the bottom left. Heat rises, so the source of a hazy pixel is beneath
+ *       it; sampling above would put the shimmer under the lava instead of over
+ *       it.
+ * @note The mask is read at the UNDISPLACED uv and the displacement applied
+ *       after. Feeding a displaced coordinate back into its own mask is how a
+ *       cheap distortion turns into a feedback loop that boils.
+ *
+ * 한국어
+ * ------
+ * *왜 재질이 아니라 화면 패스인가.* pLava는 올라오는 열을 암시하려고 자기 노이즈 정의역을
+ * 스크롤했고, 그 정의역은 타일링된 월드 투영 UV입니다. 그래서 일렁임이 재질의 타일링에 용접되어
+ * 있었습니다. 공기가 아니라 텍스처를 따라 움직였고, 열두 번쯤 타일링된 바닥에서는 표면이 자기
+ * 밑으로 미끄러지는 것으로 읽혔습니다.
+ *
+ * 아지랑이는 용암의 속성이 아닙니다. 눈과 용암 사이의 *공기*가 그것을 *통해* 보이는 모든 것에
+ * 하는 일이며, 그것은 화면에 대한 진술이므로 이곳에서만 할 수 있습니다. 아래의 리졸브 이전에
+ * `uv`를 밀면 이미지 전체가 휩니다. 구덩이 뒤의 벽, 그 안에 선 몬스터, 방 건너편까지. 빠져
+ * 있던 것이 그것입니다.
+ *
+ * *마스크 버퍼 없이 열이 어디 있는지 알아내기.* 이미지가 이미 말해 줍니다. 이 게임에서 뜨거운
+ * 것은 밝고 파랑보다 빨강이 훨씬 강하며, 그 밖에는 그런 것이 없습니다. 각 픽셀 *아래쪽*으로 몇
+ * 번 표본을 뜨고 그 기준으로 가중하면, 용암에서도 폭발에서도 총구 섬광에서도 피어오르고 높이에
+ * 따라 옅어지는 마스크가 나옵니다. 두 번째 렌더 타깃도, 깊이 읽기도, 새 패스도 필요 없습니다.
+ *
+ * @note 표본은 UV에서 *아래로* 갑니다. GL은 (0,0)을 좌하단에 두므로 그것이 화면 아래입니다.
+ *       열은 올라가므로 아지랑이 픽셀의 원천은 그 아래에 있습니다. 위로 표본을 뜨면 일렁임이
+ *       용암 위가 아니라 아래에 생깁니다.
+ * @note 마스크는 *밀리지 않은* uv에서 읽고 변위는 그 뒤에 적용합니다. 밀린 좌표를 자기 마스크에
+ *       되먹이는 것이 값싼 왜곡을 끓어오르는 피드백 루프로 만드는 방법입니다. */
+"  const float HAZE_REACH  = 0.085;\n"
+"  const float HAZE_AMOUNT = 0.0032;\n"
+"  const float HAZE_FREQ   = 41.0;\n"
+"  const float HAZE_SPEED  = 2.1;\n"
+"  float heat = 0.0;\n"
+"  for (int i = 1; i <= 3; ++i) {\n"
+"    float k = float(i) / 3.0;\n"
+"    vec3  c = textureLod(uTex, uv - vec2(0.0, HAZE_REACH * k), 0.0).rgb;\n"
+"    float hot = clamp((c.r - c.b) * 1.7, 0.0, 1.0)\n"
+"              * clamp(c.r * 1.4, 0.0, 1.0);\n"
+"    heat += hot * (1.0 - k);\n"
+"  }\n"
+"  heat = clamp(heat * 0.75, 0.0, 1.0);\n"
+/* Two waves at different rates on each axis, so the shimmer does not read as a
+   single travelling sine. The vertical displacement is a fraction of the
+   horizontal: air columns wander sideways more than they climb.
+   축마다 서로 다른 속도의 파동 둘을 써서, 일렁임이 하나의 흘러가는 사인파로 읽히지 않게
+   합니다. 수직 변위는 수평의 일부입니다. 공기 기둥은 올라가는 것보다 옆으로 더 흔들립니다. */
+"  float hw = sin(uv.y * HAZE_FREQ + uWorld * HAZE_SPEED)\n"
+"           * cos(uv.x * HAZE_FREQ * 0.7 - uWorld * HAZE_SPEED * 0.8);\n"
+"  uv.x += hw * heat * HAZE_AMOUNT;\n"
+"  uv.y += hw * heat * HAZE_AMOUNT * 0.45;\n"
 
 "  vec3 accum = vec3(0.0);\n"
 "  vec2 texel = 1.0 / (uRes * SUPERSAMPLE);\n"
@@ -1056,6 +1151,7 @@ int post_init(int width, int height) {
     g_u_win  = glGetUniformLocation(g_prog, "uWin");
     g_u_time = glGetUniformLocation(g_prog, "uTime");
     g_u_scan = glGetUniformLocation(g_prog, "uScan");
+    g_u_wtime = glGetUniformLocation(g_prog, "uWorld");
     g_u_levels = glGetUniformLocation(g_prog, "uLevels");
     g_u_grain  = glGetUniformLocation(g_prog, "uGrain");
     g_u_noise  = glGetUniformLocation(g_prog, "uNoise");
@@ -1083,6 +1179,26 @@ void post_set_dither(float levels, float grain, float noise) {
     g_grain  = grain  < 0.0f ? 0.0f : (grain  > 0.5f  ? 0.5f  : grain);
     g_noise  = noise  < 0.0f ? 0.0f : (noise  > 1.0f  ? 1.0f  : noise);
 }
+
+/**
+ * @brief Tells the resolve what time it is IN THE WORLD, seconds.
+ *
+ * ENGLISH: Drives the heat haze, and is deliberately not the frame counter
+ * uTime already carries. The grain has to move on a still image or it freezes
+ * into a fixed speckle; the haze is part of the world and has to STOP when the
+ * world does -- a paused game whose air is still shimmering says the world is
+ * running when it is not, which is the argument RunState::world_time is built
+ * on. It also makes a frame reproduce exactly for a given world state, which is
+ * what lets scenetest compare two draws of one world.
+ *
+ * 한국어: 열 아지랑이를 구동하며, uTime이 이미 나르는 프레임 카운터가 의도적으로 아닙니다.
+ * 그레인은 정지 화면에서도 움직여야 고정된 얼룩으로 굳지 않지만, 아지랑이는 월드의 일부이므로
+ * 월드가 멈추면 함께 멈춰야 합니다. 공기가 여전히 일렁이는 일시정지 화면은 멈춰 있는 월드가
+ * 돌아가고 있다고 말하는 셈이며, 그것이 RunState::world_time이 딛고 선 논거입니다. 또한 주어진
+ * 월드 상태에 대해 프레임이 정확히 재현되게 하며, 그것이 scenetest가 한 월드의 두 그리기를
+ * 비교할 수 있게 합니다.
+ */
+void post_set_world_time(float t) { g_wtime = t; }
 
 void post_set_scanline(float depth) {
     if (depth < 0.0f) depth = 0.0f;
@@ -1166,6 +1282,7 @@ void post_end(int win_w, int win_h) {
     g_frame += 1.0f;
     if (g_frame > 4096.0f) g_frame = 0.0f;
     glUniform1f(g_u_time, g_frame);
+    glUniform1f(g_u_wtime, g_wtime);
     glUniform1f(g_u_scan, g_scan);
     glUniform1f(g_u_levels, g_levels);
     glUniform1f(g_u_grain, g_grain);

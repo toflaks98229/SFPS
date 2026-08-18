@@ -1703,6 +1703,19 @@ void scene_frame(const World *w, Scene *sc, int vw, int vh, int frozen) {
        only read here, so a lava floor stops churning when the world stops. */
     rd_time(w->run.world_time);
 
+    /* The same clock to the resolve, for the same reason. The heat haze is a
+       screen-space effect but it belongs to the WORLD -- it stops when the
+       world stops, exactly as the lava it rises off does. post.c's own uTime
+       counts frames and drives the grain, which must keep moving on a still
+       image; handing the haze that clock would leave the air shimmering behind
+       a pause menu and make two draws of one world differ.
+       같은 시계를 리졸브에도 건넵니다. 이유도 같습니다. 열 아지랑이는 화면 공간 효과이지만
+       *월드*에 속합니다. 그것이 피어오르는 용암이 그러하듯 월드가 멈추면 함께 멈춥니다.
+       post.c 자신의 uTime은 프레임을 세며 그레인을 구동하는데, 그레인은 정지 화면에서도
+       계속 움직여야 합니다. 아지랑이에 그 시계를 주면 일시정지 메뉴 뒤에서 공기가 계속
+       일렁이고, 한 월드의 두 그리기가 서로 달라집니다. */
+    post_set_world_time(w->run.world_time);
+
     /* Vertex snapping, on for the world and off again before the UI. The grid
        is the offscreen buffer, so the quantisation lands on the pixels the
        image is actually rasterised into. post_size reports 0,0 when the pass is

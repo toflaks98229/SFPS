@@ -264,17 +264,27 @@ e pickup
 # 있어야 하는 유일한 대상입니다. 용암 위의 가산 연기는 빛나게 되는데, 그것은 모순입니다.
 # 그을음이기 때문입니다.
 e lavasmoke
-  count 1                # one puff per spawn -- main.c paces the rate
-  life 2400              # long: smoke lingers where a spark does not
-  size 26 78             # GROWS as it rises, the way a plume disperses
-  rgb 90 68 58           # warm soot, lit from below by what it came off
-  rgb2 42 40 44          # cooling to a neutral grey as it climbs
-  alpha 34 0
-  speed 55 30            # gentle -- the rise is buoyancy, not a throw
-  spawn 22               # scattered, so a run of puffs is not a column
-  drag 40
+  count 1                # one puff per spawn -- world.c paces the rate
+  life 4200              # LONG. Density here is accumulation: a puff has to
+                         # still be in the air when the next several arrive, or
+                         # the room never fills and each puff reads on its own.
+  size 34 150            # and it has to get BIG. Coverage per draw call is the
+                         # cheap half of "thick" -- every particle is its own
+                         # draw call (see fx.c), so widening one costs nothing
+                         # where adding one costs a call.
+  rgb 96 74 62           # warm soot, lit from below by what it came off
+  rgb2 44 42 46          # cooling to a neutral grey as it climbs
+  alpha 26 0             # FAINTER than before, deliberately. Thickness should
+                         # come from many thin layers overlapping, not from a
+                         # few opaque ones -- opaque puffs read as blobs
+                         # crossing each other, thin ones read as air.
+  speed 45 26            # gentler still: it should hang, not travel
+  spawn 26               # scattered, so a run of puffs is not a column
+  drag 70                # bleeds the initial push off sooner, so it stalls and
+                         # spreads instead of climbing out of the room
   spin 24                # slow roll; smoke turns over, it does not tumble
-  gravity -95            # NEGATIVE: it rises, and keeps accelerating
+  gravity -55            # still NEGATIVE, but slower: smoke that rises fast
+                         # leaves, and what leaves cannot be thick
   blend alpha            # must be able to be darker than the lava behind it
   face camera
 

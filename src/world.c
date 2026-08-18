@@ -52,8 +52,32 @@
  * 사거리는 먼 곳의 연기를 공유 파티클 풀에서 아예 배제합니다. FX_MAX_PARTICLES에서
  * 용암 방 하나가 게임의 다른 모든 효과를 고갈시킬 수 있으며, 플레이어 뒤의 연기는 아무런
  * 가치가 없습니다. */
-#define LAVA_SMOKE_INTERVAL  0.16f  ///< @brief Seconds between batches. / 묶음 사이의 간격 (초).
-#define LAVA_SMOKE_PER_TICK  2      ///< @brief Puffs attempted per batch. / 묶음당 시도하는 연기 수.
+/* WHAT THIS COSTS, worked out rather than hoped for, because the note above is
+ * right that a lava room can starve every other effect in the game.
+ *
+ *   (1 / 0.11) * 4 puffs a second * 4.2s of life  ~=  150 particles resident
+ *
+ * against FX_MAX_PARTICLES of 1536, so a tenth of the pool with the room fully
+ * smoked -- and the range gate below keeps that a tenth rather than a tenth per
+ * lava pool. The other cost is draw calls: fx.c gives every particle its own,
+ * so this is ~150 of them. That is why the puffs were made BIGGER and FAINTER
+ * as well as more numerous; coverage per call is free where another call is
+ * not, and thickness that comes from overlap reads as air where thickness that
+ * comes from opacity reads as blobs.
+ *
+ * 이것이 치르는 비용이며, 바라는 대신 계산했습니다. 위의 주석이 옳게 지적하듯 용암 방 하나가
+ * 게임의 다른 모든 효과를 고갈시킬 수 있기 때문입니다.
+ *
+ *   (1 / 0.11) * 초당 4개 * 수명 4.2초  ~=  상주 입자 약 150개
+ *
+ * FX_MAX_PARTICLES 1536에 대해 방이 완전히 연기로 찼을 때 풀의 10분의 1이며, 아래의 거리
+ * 게이트가 그것을 "용암 웅덩이마다 10분의 1"이 아니라 그냥 10분의 1로 유지합니다. 다른 비용은
+ * 드로우 콜입니다. fx.c는 입자마다 하나씩 발급하므로 약 150회입니다. 그래서 연기를 수만 늘리지
+ * 않고 *더 크고 더 옅게* 만들었습니다. 호출당 덮는 면적은 공짜지만 호출 하나를 더하는 것은
+ * 그렇지 않으며, 겹침에서 오는 두께는 공기로 읽히고 불투명도에서 오는 두께는 덩어리로
+ * 읽힙니다. */
+#define LAVA_SMOKE_INTERVAL  0.11f  ///< @brief Seconds between batches. / 묶음 사이의 간격 (초).
+#define LAVA_SMOKE_PER_TICK  4      ///< @brief Puffs attempted per batch. / 묶음당 시도하는 연기 수.
 #define LAVA_SMOKE_RANGE     22.0f  ///< @brief Metres beyond which no smoke spawns. / 이 거리를 넘으면 연기를 생성하지 않습니다 (미터).
 
 /**

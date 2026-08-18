@@ -150,6 +150,77 @@ static void weapons_in(const Level *l, int *owned) {
 
 /* ------------------------------------------------------------------ main */
 
+/* --- the view shake ---------------------------------------------------------
+ *
+ * Three facts, and the third is the one worth a test.
+ *
+ * A shake has to START on something the player did, it has to END on its own,
+ * and it must NOT MOVE THE AIM. The first two would be noticed the first time
+ * anybody played; the third would not, because a camera that drags the aim with
+ * it feels like bad mouse handling rather than like a bug in a shake -- and the
+ * obvious way to implement one, adding the offset to World::yaw, does exactly
+ * that. So the aim is checked to the bit, before and after.
+ *
+ * 흔들림에 대한 세 가지 사실이며, 세 번째가 검사할 가치가 있는 것입니다.
+ *
+ * 흔들림은 플레이어가 한 무언가에서 *시작*해야 하고, 스스로 *끝*나야 하며, *조준을 움직여서는
+ * 안 됩니다.* 앞의 둘은 누구든 처음 플레이할 때 알아챕니다. 세 번째는 아닙니다. 조준을 끌고
+ * 다니는 카메라는 흔들림의 결함이 아니라 마우스 처리가 나쁜 것처럼 느껴지기 때문이며, 그것을
+ * 구현하는 자명한 방법(World::yaw에 변위를 더하는 것)이 정확히 그렇게 만듭니다. 그래서 조준을
+ * 전후로 비트 단위까지 검사합니다. */
+static void check_shake(void) {
+    printf("\nview shake\n");
+
+    World w;
+    fixture(&w, 0);
+
+    ok(w.run.shake == 0.0f, "a fresh world is not shaking");
+
+    /* Firing. The trigger is held for one step, which is all a shot needs. */
+    float yaw0 = w.yaw, pitch0 = w.pitch;
+    Input in = {0};
+    in.fire = 1;
+    world_step(&w, &in, 1.777f, 0.016f);
+
+    ok(w.run.shake > 0.0f, "firing shakes the view");
+    ok(w.yaw == yaw0 && w.pitch == pitch0,
+       "and does not move the aim by so much as a bit");
+
+    /* It ends on its own. Long enough that WORLD_SHAKE_DECAY has to have run;
+       short enough that this is not just "eventually". */
+    Input idle = {0};
+    for (int i = 0; i < 40; i++) world_step(&w, &idle, 1.777f, 0.016f);
+    ok(w.run.shake == 0.0f, "and it settles back to still");
+
+    /* Taking a hit shakes harder than a shot, because it is scaled by what the
+       hit was worth -- and a hit worth half the bar is not a shotgun. */
+    fixture(&w, 0);
+    world_step(&w, &in, 1.777f, 0.016f);
+    float from_fire = w.run.shake;
+
+    fixture(&w, 0);
+    world_shake(&w, WORLD_SHAKE_HURT * 0.5f);
+    ok(w.run.shake > from_fire, "a serious hit shakes harder than a shot");
+
+    /* The loudest wins rather than the sum, so a busy frame does not launch
+       the camera. Two quiet events must not add up to a loud one. */
+    fixture(&w, 0);
+    world_shake(&w, 0.4f);
+    world_shake(&w, 0.2f);
+    ok(w.run.shake == 0.4f, "a quieter source does not add to a louder one");
+    world_shake(&w, 0.7f);
+    ok(w.run.shake == 0.7f, "and a louder one replaces it");
+
+    /* Clamped, so no pile-up leaves the camera in the next room. */
+    world_shake(&w, 99.0f);
+    ok(w.run.shake == WORLD_SHAKE_MAX, "and the magnitude is capped");
+
+    /* A restart puts it back, by construction rather than by being listed --
+       which is the whole reason it lives in RunState. */
+    run_reset(&w.run, 0);
+    ok(w.run.shake == 0.0f, "a restart clears it");
+}
+
 int main(void) {
     printf("steptest\n\n");
 
@@ -1241,6 +1312,8 @@ int main(void) {
                "and did not carry over into the next frame");
         }
     }
+
+    check_shake();
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall frame-order checks passed\n", fails);
     return fails != 0;

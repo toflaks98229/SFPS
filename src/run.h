@@ -326,6 +326,51 @@ typedef struct {
      * 시작할 때와 같은 연기를 재현합니다.
      */
     unsigned smoke_rng;
+
+    /**
+     * @brief How hard the view is being shaken, 0 when it is still.
+     *
+     * ENGLISH
+     * -------
+     * A MAGNITUDE, not an offset. Where the camera actually ends up is worked
+     * out when the frame is drawn, from this and ::RunState::world_time -- so
+     * the shake needs no position, no velocity and no second clock, and a
+     * ::World that is copied or stepped headlessly carries the whole of it in
+     * one float.
+     *
+     * IT DOES NOT MOVE THE AIM. ::World::yaw and ::World::pitch are untouched;
+     * only the drawn camera is displaced. A shake that moved where the shots
+     * go would make the player fight their own weapon, and the one thing a
+     * recoil kick must not do is decide where the bullet went.
+     *
+     * @note Raised by ::world_shake, which takes the LOUDER of the two rather
+     *       than adding: a shotgun fired inside a grenade blast is one violent
+     *       moment, not two summed into a camera that leaves the room.
+     * @note Cleared by ::run_reset with everything else, so a restart begins
+     *       still. It decays with ::RunState::world_time rather than on its own
+     *       clock, which is what keeps the amplitude and the phase in step
+     *       across a pause.
+     *
+     * 한국어
+     * ------
+     * @brief 시야가 얼마나 세게 흔들리고 있는가. 멈춰 있으면 0입니다.
+     *
+     * 변위가 아니라 *크기*입니다. 카메라가 실제로 어디에 놓이는지는 이 값과
+     * ::RunState::world_time으로부터 그릴 때 계산합니다. 그래서 흔들림에는 위치도 속도도 두
+     * 번째 시계도 필요 없으며, 복사되거나 헤드리스로 진행되는 ::World가 그 전부를 float 하나에
+     * 담아 나릅니다.
+     *
+     * *조준을 움직이지 않습니다.* ::World::yaw와 ::World::pitch는 건드리지 않으며 그려지는
+     * 카메라만 어긋납니다. 탄착점을 옮기는 흔들림은 플레이어가 자기 무기와 싸우게 만들며,
+     * 반동이 결코 해서는 안 되는 일이 총알이 어디로 갔는지 결정하는 것입니다.
+     *
+     * @note ::world_shake가 올리며, 더하지 않고 둘 중 *큰* 쪽을 취합니다. 유탄 폭발 안에서 쏜
+     *       샷건은 하나의 격렬한 순간이지, 카메라가 방을 떠나도록 합해질 둘이 아닙니다.
+     * @note ::run_reset이 나머지와 함께 지우므로 재시작은 멈춘 상태로 시작합니다. 자기 시계가
+     *       아니라 ::RunState::world_time과 함께 감쇠하며, 그것이 일시정지를 사이에 두고 진폭과
+     *       위상을 어긋나지 않게 합니다.
+     */
+    float shake;
 } RunState;
 
 /** @brief Seed ::RunState::smoke_rng starts every run from. / ::RunState::smoke_rng가 매 플레이마다 시작하는 시드. */

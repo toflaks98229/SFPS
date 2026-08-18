@@ -205,10 +205,28 @@ static void step_look_move(World *w, const Input *in, float aspect, float dt) {
        continue on their own once thrown. */
     wp_hook_update(&w->weapon, &w->pools, &w->level, &w->player.pos, &w->player.vel, dt);
 
+    /* Read BEFORE the move, because the move is what resolves both: `grounded`
+       is what player_move decides, and `vel.y` is what it spends against the
+       floor. Asking afterwards gets a player who is already standing at rest,
+       which says nothing about how hard they arrived.
+       이동 *전에* 읽습니다. 이동이 둘 다를 결정하기 때문입니다. `grounded`는 player_move가
+       정하는 것이고 `vel.y`는 그것이 바닥에 대고 소모하는 것입니다. 나중에 물으면 이미
+       멈춰 서 있는 플레이어를 얻게 되는데, 그것은 얼마나 세게 도착했는지에 대해 아무것도
+       말해 주지 않습니다. */
+    int   was_air = !w->player.grounded;
+    float fall    = -w->player.vel.y;
+
     /* Jump is suppressed only while actually being pulled. It would not fire
        mid-pull anyway (jumping needs `grounded`), but suppressing it keeps the
        intent explicit rather than relying on that coincidence. */
     player_move(&w->player, &w->level, wish, speed, in->jump && !hooked, dt);
+
+    /* Landing. The floor test is ::WORLD_SHAKE_LAND_MIN's, so stepping off a
+       stair is not an impact.
+       착지입니다. 하한은 ::WORLD_SHAKE_LAND_MIN의 것이며, 계단을 내려서는 것은 충격이
+       아닙니다. */
+    if (was_air && w->player.grounded && fall > WORLD_SHAKE_LAND_MIN)
+        world_shake(w, WORLD_SHAKE_LAND * (fall / WORLD_SHAKE_LAND_MIN - 1.0f));
 
     /* The leap resolves after player_move, so the slam lands on where the
        player actually ended up rather than a frame behind it -- the same reason
@@ -219,10 +237,24 @@ static void step_look_move(World *w, const Input *in, float aspect, float dt) {
     wp_axe_land(&w->weapon, &w->pools, w->player.pos, w->player.grounded, dt);
 
     /* Last, so its timers see the movement that actually happened. */
+    float flash_was = w->weapon.flash;
     wp_update(&w->weapon, &w->pools, &w->level, dt, in->fire,
               w->player.pos, w->yaw, w->pitch, move_speed,
               in->look_dx, in->look_dy,
               WORLD_FOV, aspect, &w->player.vel, w->player.grounded);
+
+    /* THE MUZZLE FLASH COMING UP IS THE SHOT, and reading it here is what saves
+       plumbing a "did it fire" signal out of wp_update -- which returns nothing
+       and would have had to grow a parameter to say so. The flash is set by the
+       same branch that spends the ammo, so a rising edge is a shot and nothing
+       else: a swing that misses does not raise it, and a weapon on cooldown
+       does not either.
+       *총구 섬광이 올라오는 것이 곧 사격이며*, 이곳에서 그것을 읽는 것이 "발사했는가" 신호를
+       wp_update에서 끌어내는 배관을 아끼는 방법입니다. 그 함수는 아무것도 반환하지 않으며 그
+       사실을 말하려면 매개변수가 늘어나야 했을 것입니다. 섬광은 탄약을 소모하는 바로 그
+       분기가 설정하므로, 상승 엣지는 사격이고 그 외의 무엇도 아닙니다. 빗나간 휘두르기는
+       그것을 올리지 않고, 재사용 대기 중인 무기도 마찬가지입니다. */
+    if (w->weapon.flash > flash_was) world_shake(w, WORLD_SHAKE_FIRE);
 }
 
 /* ----------------------------------------------------------------- damage */
@@ -261,6 +293,15 @@ static void step_damage(World *w, float dt) {
         if (w->player.health < 0) w->player.health = 0;
         w->player.hurt = 1.0f;
         audio_play("phurt", 90);
+
+        /* Scaled by what the hit was worth against a full bar, so a scratch
+           registers and a mauling is unmistakable. The health figure the player
+           is already watching is what drives it, which is why this needs no
+           tuning table of its own.
+           그 피격이 가득 찬 체력 바에 대해 얼마짜리였는지로 조정하므로, 스치는 상처도
+           등록되고 크게 물어뜯긴 것은 착각할 수 없습니다. 플레이어가 이미 지켜보고 있는
+           체력 수치가 이것을 구동하며, 그래서 자체 조율 표가 필요 없습니다. */
+        world_shake(w, WORLD_SHAKE_HURT * (float)dmg / (float)PLAYER_MAX_HP);
     }
 
     /* --- hazard floors: lava, acid ---------------------------------------
@@ -1325,6 +1366,12 @@ void world_restart(World *w) {
     run_reset(&w->run, 0);
 }
 
+void world_shake(World *w, float amount) {
+    if (amount <= 0.0f) return;
+    if (amount > WORLD_SHAKE_MAX) amount = WORLD_SHAKE_MAX;
+    if (amount > w->run.shake) w->run.shake = amount;
+}
+
 int world_frozen(const World *w, int paused) {
     /* THE INTERMISSION FREEZES TOO. It is the same kind of state as the win
        screen: a moment held over a level that is finished with. Without it the
@@ -1411,6 +1458,18 @@ int world_step(World *w, const Input *in, float aspect, float dt) {
     if (w->run.dead)  w->run.death_time += dt;
     if (w->run.title) w->run.title_time += dt;
     if (w->player.hurt > 0.0f) w->player.hurt -= dt * 2.0f;
+
+    /* Decays with the world rather than on a clock of its own, so a shake that
+       was going when the menu opened is still going when it closes -- and its
+       phase, which ::scene_frame reads out of ::RunState::world_time, has not
+       run on without it. Gated for the same reason that clock is.
+       자기 시계가 아니라 월드와 함께 감쇠하므로, 메뉴가 열릴 때 진행 중이던 흔들림은 메뉴가
+       닫힐 때에도 진행 중입니다. 그리고 ::scene_frame이 ::RunState::world_time에서 읽는
+       위상도 그것 없이 앞서 나가지 않았습니다. 그 시계와 같은 이유로 게이트를 겁니다. */
+    if (!frozen && w->run.shake > 0.0f) {
+        w->run.shake -= dt * WORLD_SHAKE_DECAY;
+        if (w->run.shake < 0.0f) w->run.shake = 0.0f;
+    }
 
     if (!frozen) step_smoke(w, dt);
 

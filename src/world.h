@@ -182,6 +182,75 @@
  */
 #define WORLD_FOV 1.5708f
 
+/* --- view shake ------------------------------------------------------------
+ *
+ * ENGLISH
+ * -------
+ * WHAT SHAKES AND WHAT DOES NOT. The drawn camera shakes; the aim does not.
+ * See ::RunState::shake for why that separation is not negotiable.
+ *
+ * The three sources are the three moments the player already knows something
+ * violent happened, so the shake confirms an event rather than inventing one:
+ * the gun going off, taking a hit, and landing hard. Each is detected in
+ * ::world_step from state that already exists -- the muzzle flash coming up,
+ * the damage total, the ground arriving under a falling player -- so none of
+ * them needed a new signal plumbed out of the module that causes it.
+ *
+ * Public because ::scene_frame reads the magnitude to place the camera, and
+ * because a second copy of the decay rate on the drawing side would be a
+ * number that could disagree with the one that actually ends the shake.
+ *
+ * 한국어
+ * ------
+ * *무엇이 흔들리고 무엇이 흔들리지 않는가.* 그려지는 카메라는 흔들리고 조준은 흔들리지
+ * 않습니다. 그 분리가 타협 불가능한 이유는 ::RunState::shake를 참조하십시오.
+ *
+ * 세 개의 원천은 플레이어가 이미 격렬한 일이 일어났음을 아는 세 순간이므로, 흔들림은 사건을
+ * 만들어 내지 않고 확인해 줍니다. 총이 발사되는 것, 피격당하는 것, 세게 착지하는 것입니다.
+ * 각각은 이미 존재하는 상태로부터 ::world_step에서 감지됩니다. 올라오는 총구 섬광, 피해
+ * 총량, 떨어지는 플레이어 밑에 도착하는 지면입니다. 그래서 그중 어느 것도 그것을 일으키는
+ * 모듈로부터 새 신호를 끌어낼 필요가 없었습니다.
+ *
+ * 공개하는 이유는 ::scene_frame이 카메라를 놓기 위해 크기를 읽기 때문이며, 그리는 쪽의 두
+ * 번째 감쇠율 사본은 실제로 흔들림을 끝내는 값과 어긋날 수 있는 숫자이기 때문입니다. */
+
+/** @brief How fast a shake dies, per second. / 흔들림이 잦아드는 속도 (초당). */
+#define WORLD_SHAKE_DECAY 5.5f
+
+/** @brief Ceiling, so no pile-up leaves the camera in the next room. / 상한. 누적이 카메라를 옆방에 두지 않도록 합니다. */
+#define WORLD_SHAKE_MAX   1.0f
+
+/** @brief A shot. Small: it happens constantly and must not become the game. / 사격. 작습니다. 끊임없이 일어나므로 게임 그 자체가 되어서는 안 됩니다. */
+#define WORLD_SHAKE_FIRE  0.30f
+
+/**
+ * @brief Taking a hit, at the point where one hit is the whole bar.
+ *
+ * ENGLISH: Scaled by the fraction of maximum health the hit took, so a scratch
+ * registers and a mauling is unmistakable. That is the one place a number the
+ * player watches -- their health -- gets to drive the camera.
+ *
+ * 한국어: 그 피격이 가져간 최대 체력의 비율로 조정하므로, 스치는 상처도 등록되고 크게
+ * 물어뜯긴 것은 착각할 수 없습니다. 플레이어가 지켜보는 숫자인 체력이 카메라를 구동하는
+ * 유일한 지점입니다.
+ */
+#define WORLD_SHAKE_HURT  1.30f
+
+/** @brief Landing, scaled by how fast the ground arrived. / 착지. 지면이 얼마나 빨리 도착했는지로 조정합니다. */
+#define WORLD_SHAKE_LAND  0.85f
+
+/**
+ * @brief Downward speed a landing needs before it shakes anything, m/s.
+ *
+ * ENGLISH: Walking off a step is not an impact. Without a floor here every
+ * stair in the level would jolt the camera, which reads as the engine being
+ * broken rather than as the player being heavy.
+ *
+ * 한국어: 계단 하나를 내려서는 것은 충격이 아닙니다. 이 하한이 없으면 레벨의 모든 계단이
+ * 카메라를 흔들며, 그것은 플레이어가 무겁다는 뜻이 아니라 엔진이 고장 났다는 뜻으로 읽힙니다.
+ */
+#define WORLD_SHAKE_LAND_MIN 7.0f
+
 /**
  * @brief Seconds after which ::RunState::world_time wraps.
  *
@@ -1250,6 +1319,40 @@ void world_restart(World *w);
  *       사라집니다.
  */
 int world_frozen(const World *w, int paused);
+
+/**
+ * @brief Shakes the drawn camera, if this is louder than what is already going.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] w      The world whose view is shaken.
+ * @param[in]     amount Magnitude. Clamped to ::WORLD_SHAKE_MAX; values at or
+ *                       below zero do nothing, so a caller may hand over a
+ *                       scaled figure without testing it first.
+ *
+ * @note TAKES THE LOUDER, never the sum. Two events in one frame -- a shotgun
+ *       fired inside a blast -- are one violent moment. Adding them would make
+ *       a busy frame shake harder than any single thing in it warrants, and the
+ *       busiest frames are exactly the ones already hardest to read.
+ * @note Public so that a later source -- an explosion, a door slamming, a boss
+ *       landing -- is one call rather than a new field. ::world_step raises the
+ *       three that exist today from state it already has.
+ *
+ * 한국어
+ * ------
+ * @brief 지금 진행 중인 것보다 크다면 그려지는 카메라를 흔듭니다.
+ * @param[in,out] w      시야가 흔들릴 월드.
+ * @param[in]     amount 크기. ::WORLD_SHAKE_MAX로 제한되며 0 이하이면 아무 일도 하지
+ *                       않으므로, 호출자는 먼저 검사하지 않고 조정된 값을 그대로 건네도 됩니다.
+ *
+ * @note 합이 아니라 *큰 쪽*을 취합니다. 한 프레임의 두 사건(폭발 안에서 쏜 샷건)은 하나의
+ *       격렬한 순간입니다. 더하면 분주한 프레임이 그 안의 어떤 단일 사건이 정당화하는 것보다
+ *       세게 흔들리는데, 가장 분주한 프레임이야말로 이미 읽기 가장 어려운 프레임입니다.
+ * @note 공개하는 이유는 나중의 원천(폭발, 쾅 닫히는 문, 착지하는 보스)이 새 필드가 아니라
+ *       호출 하나가 되도록 하기 위함입니다. ::world_step은 오늘 존재하는 셋을 이미 가진
+ *       상태로부터 올립니다.
+ */
+void world_shake(World *w, float amount);
 
 /**
  * @brief Advances the world by one frame.

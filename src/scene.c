@@ -158,6 +158,17 @@ static const float LIGHT_COL_PROJ[3]   = { 1.00f, 0.62f, 0.26f };
 /** @brief The bolt's cold green, matching how ::scene_draw_shots draws it. / 볼트의 차가운 녹색. ::scene_draw_shots가 그리는 방식과 맞춥니다. */
 static const float LIGHT_COL_SHOT[3]   = { 0.55f, 1.00f, 0.70f };
 
+/* --- how a shake looks -----------------------------------------------------
+ * HOW HARD is ::RunState::shake's and the world's; how it LOOKS is this file's,
+ * for the same reason ::PSX_SNAP_COARSE lives here rather than in main.c. The
+ * simulation has no opinion about whether a jolt is mostly sway or mostly roll.
+ *
+ * 얼마나 *센가*는 ::RunState::shake와 월드의 것이고, 어떻게 *보이는가*는 이 파일의 것입니다.
+ * ::PSX_SNAP_COARSE가 main.c가 아니라 이곳에 있는 것과 같은 이유입니다. 시뮬레이션은 충격이
+ * 주로 흔들림인지 주로 회전인지에 대해 아무 견해도 갖지 않습니다. */
+#define SHAKE_FREQ 34.0f    ///< @brief Radians per second of world time. / 월드 시간 초당 라디안.
+#define SHAKE_SWAY 0.045f   ///< @brief Metres the eye is displaced at full strength. / 최대 세기에서 눈이 밀리는 거리 (미터).
+#define SHAKE_ROLL 0.030f   ///< @brief Radians of roll at full strength. / 최대 세기에서의 회전 (라디안).
 
 /**
  * @struct MoveLight
@@ -1699,6 +1710,45 @@ void scene_frame(const World *w, Scene *sc, int vw, int vh, int frozen) {
         cam_roll    = DEATH_ROLL * e;
     }
 
+    /* --- the shake --------------------------------------------------------
+       AFTER the collapse and on top of it, because they answer different
+       questions: the collapse says where the body fell to, the shake says the
+       room is still ringing. A death that ends in a jolt reads as the two
+       happening to the same camera, which is what they are.
+
+       Displaces the EYE and rolls the view; it never touches ::World::yaw or
+       ::World::pitch. Those are the aim, ::world_step owns them, and a shake
+       that moved where the shots go would make the player fight their own gun.
+       See ::RunState::shake.
+
+       The phase comes from ::RunState::world_time rather than from a clock kept
+       here, so the shake is a pure function of state a headless step already
+       produces -- a recorded demo shakes identically on playback, and nothing
+       had to be added to ::World to make that true. The three multipliers are
+       deliberately not whole ratios: three sine waves at 1:2:3 would beat back
+       into a single visible period, which reads as a wobble rather than a jolt.
+
+       흔들림입니다. 쓰러짐 *뒤에* 그 위로 얹는 이유는 둘이 서로 다른 질문에 답하기
+       때문입니다. 쓰러짐은 몸이 어디로 떨어졌는지를 말하고, 흔들림은 방이 아직 울리고 있음을
+       말합니다. 충격으로 끝나는 죽음은 그 둘이 같은 카메라에 일어나는 것으로 읽히며, 실제로
+       그렇습니다.
+
+       *눈*을 옮기고 시야를 굴릴 뿐 ::World::yaw나 ::World::pitch는 결코 건드리지 않습니다.
+       그것들은 조준이고 ::world_step의 것이며, 탄착점을 옮기는 흔들림은 플레이어가 자기 총과
+       싸우게 만듭니다. ::RunState::shake를 참조하십시오.
+
+       위상은 이곳에 둔 시계가 아니라 ::RunState::world_time에서 옵니다. 그래서 흔들림은
+       헤드리스 스텝이 이미 만들어 내는 상태만의 순수 함수이며, 기록된 데모는 재생 시 동일하게
+       흔들리고 그것을 참으로 만들기 위해 ::World에 무엇도 추가할 필요가 없었습니다. 세 배수를
+       일부러 정수비로 두지 않은 이유는, 1:2:3의 사인파 셋은 하나의 눈에 띄는 주기로 맞물려
+       충격이 아니라 흔들거림으로 읽히기 때문입니다. */
+    if (w->run.shake > 0.0f) {
+        float s = w->run.shake;
+        float t = w->run.world_time * SHAKE_FREQ;
+        eye_pos.x += sinf(t * 1.00f) * s * SHAKE_SWAY;
+        eye_pos.y += sinf(t * 1.71f) * s * SHAKE_SWAY;
+        cam_roll  += sinf(t * 1.31f) * s * SHAKE_ROLL;
+    }
 
     /* One derivation, two users. The billboards below span along `cam.right`
        and `cam.up`, and they have to be the axes the view matrix was built

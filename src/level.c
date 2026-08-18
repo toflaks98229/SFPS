@@ -36,6 +36,7 @@
 #include "model.h"
 #include "data.h"
 #include "brush.h"
+#include "brushstore.h"   /* BrushStore, by value: the slots a brush level lands in */
 #include "txt.h"
 #include "diag.h"
 
@@ -876,36 +877,49 @@ static int level_parse_text(const char *name, Level *out) {
 static const v3 POINT_BOX = { 0.0f, 0.0f, 0.0f };
 
 /**
- * @brief Storage for the brush maps that loaded levels point at.
+ * @brief The store a caller gets when it does not name one.
  *
  * ENGLISH
  * -------
- * TWO, because two is how many levels are live at once: the one being played
- * and the scratch ::Level world.c walks the level chain with. A third would be
- * something new, and ::DIAG_LEVEL_SLOTS is there to say so rather than let it
- * pass.
+ * THE STORAGE ITSELF IS ::BrushStore'S NOW, and this is one instance of it --
+ * the one ::level_load and ::level_release use. What that changes is not where
+ * the bytes are but WHOSE they are: ::LVL_BRUSH_SLOTS was a ceiling on how many
+ * brush levels could be live in the PROCESS, and it is now a ceiling per store.
+ * A second consumer that wants levels of its own takes a second store and
+ * neither can starve the other. See brushstore.h.
  *
- * A pool rather than a field on ::Level because a ::BrushMap is 420KB against
- * Level's 24KB and Levels are stack locals throughout the test suite -- see the
- * note on ::Level::brushes. A pool rather than the heap because nothing here
- * has a destructor to free one, and a level that is loaded and abandoned is the
- * normal case rather than the exception.
+ * WHY THERE IS STILL A DEFAULT. The overwhelming case is a program that runs
+ * one set of levels, and there are 31 calls to ::level_load in this project that
+ * are all that program. Making every one of them name a store would be 31 copies
+ * of a fact with one answer -- which is the argument pools.h makes for leaving
+ * audio, post and menu where they are, applied to a caller instead of a module.
+ * The difference from before is that this is now *a* store rather than *the*
+ * store, and nothing is refused because something else already loaded a level.
  *
  * 한국어
  * ------
- * @brief 로드된 레벨들이 가리키는 브러시 맵의 저장 공간입니다.
+ * @brief 호출자가 저장소를 지목하지 않을 때 받는 저장소입니다.
  *
- * 둘인 이유는 동시에 살아 있는 레벨이 둘이기 때문입니다. 플레이 중인 것과, world.c가 레벨
- * 사슬을 걸을 때 쓰는 임시 ::Level입니다. 셋째는 새로운 무언가일 것이고, 그것을 그냥 지나가게
- * 두는 대신 ::DIAG_LEVEL_SLOTS가 말해 줍니다.
+ * *저장 공간 자체는 이제 ::BrushStore의 것이며*, 이것은 그 인스턴스 하나입니다.
+ * ::level_load와 ::level_release가 쓰는 것입니다. 그것이 바꾸는 것은 바이트가 어디 있는지가
+ * 아니라 그것이 *누구의 것인지*입니다. ::LVL_BRUSH_SLOTS는 *프로세스* 안에서 몇 개의 브러시
+ * 레벨이 살아 있을 수 있는지에 대한 천장이었고, 이제 저장소당 천장입니다. 자기 레벨을 원하는
+ * 두 번째 소비자는 두 번째 저장소를 가지며 어느 쪽도 상대를 굶길 수 없습니다. brushstore.h를
+ * 참조하십시오.
  *
- * ::Level의 필드가 아니라 풀인 이유는 ::BrushMap이 Level의 24KB에 대해 420KB이고 Level이 테스트
- * 묶음 전반에서 스택 지역 변수이기 때문입니다. ::Level::brushes의 설명을 참조하십시오. 힙이
- * 아니라 풀인 이유는 이곳의 무엇도 그것을 해제할 소멸자를 갖고 있지 않고, 로드된 뒤 버려지는
- * 레벨이 예외가 아니라 평범한 경우이기 때문입니다.
+ * *그럼에도 기본값이 있는 이유.* 압도적인 경우는 한 벌의 레벨을 돌리는 프로그램이며, 이
+ * 프로젝트에는 그 프로그램에 해당하는 ::level_load 호출이 31개 있습니다. 그 전부가 저장소를
+ * 지목하게 만드는 것은 답이 하나인 사실의 사본 31개를 만드는 일이며, pools.h가 audio·post·menu를
+ * 있던 자리에 두는 근거로 펴는 논지를 모듈이 아니라 호출자에 적용한 것입니다. 이전과 다른 점은
+ * 이것이 이제 *그* 저장소가 아니라 *하나의* 저장소라는 것이며, 다른 무언가가 이미 레벨을
+ * 로드했다는 이유로 거절되는 일이 없다는 것입니다.
  */
-#define LVL_BRUSH_SLOTS 2
-static BrushMap g_brush_pool[LVL_BRUSH_SLOTS];
+static BrushStore g_default_store;
+
+/** @brief NULL means the default. One place decides, so no caller has to. / NULL이면 기본값입니다. 한 곳이 결정하므로 어떤 호출자도 결정하지 않아도 됩니다. */
+static BrushStore *store_or_default(BrushStore *bs) {
+    return bs ? bs : &g_default_store;
+}
 
 /* WHAT IDENTIFIES THE HOLDER OF A SLOT, and the whole of this change is that it
    is no longer a `Level *`.
@@ -937,14 +951,15 @@ static BrushMap g_brush_pool[LVL_BRUSH_SLOTS];
 
    일련번호는 한 번 발급되고 재사용되지 않으므로, 낡은 키는 어느 것과도 맞지 않고 그저 주장이
    아닐 뿐입니다. 이곳의 무엇도 Level이 어디 사는지 기록하지 않으며, 그것이 "그 Level이 아직
-   살아 있는가"를 이 파일이 결코 답하지 않아도 되게 만듭니다. */
-static unsigned g_brush_key[LVL_BRUSH_SLOTS];
+   살아 있는가"를 이 파일이 결코 답하지 않아도 되게 만듭니다.
 
-/* Never 0: 0 is what `Level l = {0}` holds and has to mean "no claim".
-   0이 되지 않습니다. 0은 `Level l = {0}`이 가진 값이며 "주장 없음"을 뜻해야 합니다. */
-static unsigned g_brush_next_key = 1;
+   The key table and the serial counter are fields of ::BrushStore now rather
+   than file-scope arrays here; the reasoning above is why they are serials, and
+   brushstore.h is why they moved.
+   키 표와 일련번호 계수기는 이제 이곳의 파일 스코프 배열이 아니라 ::BrushStore의 필드입니다.
+   위의 논거는 그것들이 왜 일련번호인지에 대한 것이고, 왜 옮겨 갔는지는 brushstore.h입니다. */
 
-static BrushMap *brush_slot_for(Level *out) {
+static BrushMap *brush_slot_for(BrushStore *bs, Level *out) {
     /* The slot this Level already holds, so reloading the running level -- a
        restart, a hot reload -- reuses its own storage rather than taking the
        scan's. Asked first, and asked of the key rather than of the address.
@@ -953,13 +968,25 @@ static BrushMap *brush_slot_for(Level *out) {
        그리고 가장 먼저 묻습니다. */
     if (out->brush_key)
         for (int i = 0; i < LVL_BRUSH_SLOTS; i++)
-            if (g_brush_key[i] == out->brush_key) return &g_brush_pool[i];
+            if (bs->key[i] == out->brush_key) return &bs->map[i];
 
     for (int i = 0; i < LVL_BRUSH_SLOTS; i++) {
-        if (g_brush_key[i]) continue;
-        g_brush_key[i] = g_brush_next_key++;
-        out->brush_key = g_brush_key[i];
-        return &g_brush_pool[i];
+        if (bs->key[i]) continue;
+
+        /* Stepped past 0 here rather than by an init call, because 0 is what a
+           zeroed store starts at and 0 must never be issued -- it is what
+           `Level l = {0}` holds and has to mean "no claim". Doing it at the
+           point of issue is what keeps `static BrushStore s;` a valid empty
+           store with nothing to call on it.
+           초기화 호출이 아니라 이곳에서 0을 넘깁니다. 0은 0으로 초기화된 저장소가 시작하는
+           값이며 결코 발급되어서는 안 됩니다. `Level l = {0}`이 가진 값이자 "주장 없음"을
+           뜻해야 하기 때문입니다. 발급 시점에 처리하는 것이 `static BrushStore s;`를 아무것도
+           호출할 필요 없는 유효한 빈 저장소로 유지하는 방법입니다. */
+        if (!bs->next_key) bs->next_key = 1;
+
+        bs->key[i]     = bs->next_key++;
+        out->brush_key = bs->key[i];
+        return &bs->map[i];
     }
 
     /* Full, and THE NEWCOMER IS REFUSED rather than an incumbent evicted.
@@ -993,12 +1020,15 @@ static BrushMap *brush_slot_for(Level *out) {
     return 0;
 }
 
-void level_release(Level *l) {
+void level_release(Level *l) { level_release_in(0, l); }
+
+void level_release_in(BrushStore *bs, Level *l) {
     if (!l) return;
+    BrushStore *st = store_or_default(bs);
 
     if (l->brush_key)
         for (int i = 0; i < LVL_BRUSH_SLOTS; i++)
-            if (g_brush_key[i] == l->brush_key) { g_brush_key[i] = 0; break; }
+            if (st->key[i] == l->brush_key) { st->key[i] = 0; break; }
 
     /* Both, and in this order does not matter -- what matters is that neither
        is left behind. A Level that gave back its slot but kept the pointer is
@@ -1487,7 +1517,7 @@ static void brush_ents_of(Level *out, const BrushMap *bm) {
     }
 }
 
-static int load_brush_level(const char *name, Level *out) {
+static int load_brush_level(BrushStore *bs, const char *name, Level *out) {
     int len = 0;
     const char *text = data_map(name, &len);
     if (!text) return 0;                     /* no .map of that name */
@@ -1498,7 +1528,7 @@ static int load_brush_level(const char *name, Level *out) {
        남은 슬롯이 없으므로 이것은 오늘은 브러시 레벨이 아닙니다. 0을 반환하면 ::level_load가
        텍스트 로더로 내려가고, 텍스트도 없는 이름은 로드 자체가 실패하며 그것은 플레이어를
        있던 자리에 둡니다. */
-    BrushMap *bm = brush_slot_for(out);
+    BrushMap *bm = brush_slot_for(bs, out);
     if (!bm) return 0;
 
     if (!brush_parse(text, len, bm)) return 0;
@@ -1625,7 +1655,9 @@ static int brush_ray(const Level *l, v3 origin, v3 dir, float max_dist,
     return out->start_solid || out->hit;
 }
 
-int level_load(const char *name, Level *out) {
+int level_load(const char *name, Level *out) { return level_load_in(0, name, out); }
+
+int level_load_in(BrushStore *bs, const char *name, Level *out) {
     /* The baked light belongs to the level it was traced against, and a new
        level puts different walls between the same coordinates and a lamp.
        Dropped here rather than by the caller because this is the one place a
@@ -1648,7 +1680,7 @@ int level_load(const char *name, Level *out) {
        내려가는 경로는 그 이동이 진행되는 동안 arena와 vault, 그리고 가져온 Doom 맵들이 계속
        동작하게 합니다. */
     out->brushes = 0;
-    if (load_brush_level(name, out)) return 1;
+    if (load_brush_level(store_or_default(bs), name, out)) return 1;
 
     int found = level_parse_text(name, out);
 

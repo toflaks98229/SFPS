@@ -90,6 +90,22 @@ typedef struct MeshBuf  MeshBuf;
 typedef struct MdlRange MdlRange;
 typedef struct BrushMap BrushMap;
 
+/**
+ * @brief Where the brush maps loaded levels point at actually live.
+ *
+ * ENGLISH: Forward-declared and never defined here, on purpose. The definition
+ * needs ::BrushMap by value and therefore brush.h, and this header is inside
+ * pools.h -> world.h -- so defining it here would push brush.h into every
+ * translation unit that touches a ::World. brushstore.h holds the definition and
+ * only the files that allocate a store include it.
+ *
+ * 한국어: 의도적으로 전방 선언만 하고 이곳에서 정의하지 않습니다. 정의에는 값으로서의
+ * ::BrushMap이, 따라서 brush.h가 필요합니다. 그런데 이 헤더는 pools.h -> world.h 안에 있으므로
+ * 이곳에서 정의하면 ::World에 닿는 모든 번역 단위로 brush.h가 밀려듭니다. 정의는
+ * brushstore.h가 담으며, 저장소를 할당하는 파일만 그것을 포함합니다.
+ */
+typedef struct BrushStore BrushStore;
+
 /* --- Capacity limits / 용량 제한 --- */
 
 #define LVL_MAX_SECTORS 64     ///< @brief Maximum sectors per level. / 레벨당 최대 섹터 수.
@@ -1396,8 +1412,10 @@ typedef struct {
      * A POINTER, and it has to be. ::BrushMap is 420KB against this struct's
      * 24KB, and Levels are stack locals all over the test suite -- world.c
      * keeps one to walk the level chain, steptest.c has twenty. Embedding it
-     * overflows the stack before anything runs. The storage is a small pool in
-     * level.c; running out of it is reported through ::DIAG_LEVEL_SLOTS.
+     * overflows the stack before anything runs. The storage is a ::BrushStore,
+     * which a caller owns -- ::level_load puts one in a default store and
+     * ::level_load_in takes the caller's; running out of a store's slots is
+     * reported through ::DIAG_LEVEL_SLOTS.
      *
      * @note ZERO MEANS SECTORS, which is what `Level l = {0}` gives. Every
      *       fixture that builds a Level field by field therefore stays a sector
@@ -1439,7 +1457,9 @@ typedef struct {
      * 포인터이며 그럴 수밖에 없습니다. ::BrushMap은 이 구조체의 24KB에 대해 420KB이고, Level은
      * 테스트 묶음 곳곳에서 스택 지역 변수입니다. world.c는 레벨 사슬을 걷기 위해 하나를 두고,
      * steptest.c에는 스무 개가 있습니다. 값으로 넣으면 무엇이 실행되기도 전에 스택이 넘칩니다.
-     * 저장 공간은 level.c의 작은 풀이며, 고갈은 ::DIAG_LEVEL_SLOTS로 보고됩니다.
+     * 저장 공간은 호출자가 소유하는 ::BrushStore입니다. ::level_load는 기본 저장소에 넣고
+     * ::level_load_in은 호출자의 것을 받으며, 한 저장소의 슬롯 고갈은 ::DIAG_LEVEL_SLOTS로
+     * 보고됩니다.
      *
      * @note 0이면 섹터이며, `Level l = {0}`이 주는 값입니다. 따라서 필드를 하나씩 채워 Level을
      *       만드는 모든 픽스처는 이 필드의 존재를 모른 채 섹터 레벨로 남습니다.
@@ -1589,6 +1609,57 @@ typedef struct {
 int level_load(const char *name, Level *out);
 
 /**
+ * @brief ::level_load, into a store the caller owns.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] bs   Where a brush level's geometry is put. NULL means the
+ *                     default store, which is exactly what ::level_load passes.
+ * @param[in]     name Level name, as ::level_load takes it.
+ * @param[out]    out  The level.
+ * @return As ::level_load.
+ *
+ * THE ONLY DIFFERENCE IS WHOSE SLOTS GET USED. Everything else -- the .map-first
+ * search order, the fall through to levels.txt, leaving `out` untouched on a
+ * name that does not resolve -- is the same code and the same contract.
+ *
+ * This exists because ::LVL_BRUSH_SLOTS used to be a budget for the PROCESS. An
+ * editor holding a level beside the running game was a third live level against
+ * a pool of two, and it was refused. Against its own store it is the first.
+ *
+ * @note Release into the SAME store with ::level_release_in. A level released
+ *       against the wrong store keeps its slot in the right one, which is a
+ *       leak of 420KB that nothing reports.
+ * @note Sector levels never touch a store at all -- they have no brushes -- so
+ *       a caller that only loads levels.txt levels may pass NULL forever and
+ *       never allocate one.
+ *
+ * 한국어
+ * ------
+ * @brief 호출자가 소유한 저장소에 로드하는 ::level_load입니다.
+ * @param[in,out] bs   브러시 레벨의 지오메트리가 놓일 곳. NULL이면 기본 저장소이며,
+ *                     ::level_load가 넘기는 것이 정확히 그것입니다.
+ * @param[in]     name ::level_load가 받는 것과 같은 레벨 이름.
+ * @param[out]    out  레벨.
+ * @return ::level_load와 같습니다.
+ *
+ * *유일한 차이는 누구의 슬롯을 쓰는가입니다.* 그 밖의 모든 것(.map 우선 검색 순서, levels.txt로
+ * 내려가는 경로, 해석되지 않는 이름에 대해 `out`을 건드리지 않는 것)은 같은 코드이고 같은
+ * 계약입니다.
+ *
+ * 이것이 존재하는 이유는 ::LVL_BRUSH_SLOTS가 한때 *프로세스*의 예산이었기 때문입니다. 실행 중인
+ * 게임 곁에 레벨을 쥔 에디터는 슬롯 둘짜리 풀에 대한 세 번째 살아 있는 레벨이었고 거절되었습니다.
+ * 자기 저장소에 대해서는 첫 번째입니다.
+ *
+ * @note *같은* 저장소에 ::level_release_in으로 반납하십시오. 엉뚱한 저장소에 대해 반납된 레벨은
+ *       올바른 저장소에서 슬롯을 계속 쥐고 있으며, 그것은 아무도 보고하지 않는 420KB의
+ *       누수입니다.
+ * @note 섹터 레벨은 브러시가 없으므로 저장소를 전혀 건드리지 않습니다. levels.txt 레벨만 로드하는
+ *       호출자는 영원히 NULL을 넘기고 저장소를 한 번도 할당하지 않아도 됩니다.
+ */
+int level_load_in(BrushStore *bs, const char *name, Level *out);
+
+/**
  * @brief Gives back the brush slot a level holds, and forgets its geometry.
  *
  * ENGLISH
@@ -1596,10 +1667,11 @@ int level_load(const char *name, Level *out);
  * @param[in,out] l Level to release. Safe on one that holds no slot, and safe
  *                  to call twice.
  *
- * THE PAIR TO THE GRANT ::level_load MAKES. There are ::LVL_BRUSH_SLOTS of
- * them and no destructor anywhere in this project runs by itself, so a Level
- * that is about to go out of scope has to say so or its slot is claimed until
- * the process ends. world.c's level-chain scan is the case this was written
+ * THE PAIR TO THE GRANT ::level_load MAKES. There are ::LVL_BRUSH_SLOTS of them
+ * per store and no destructor anywhere in this project runs by itself, so a
+ * Level that is about to go out of scope has to say so or its slot is claimed
+ * for as long as that store exists -- which for the default store is until the
+ * process ends. world.c's level-chain scan is the case this was written
  * for: it loads up to ::WORLD_STAGE_MAX_HOPS levels into one stack local and
  * then returns.
  *
@@ -1616,9 +1688,10 @@ int level_load(const char *name, Level *out);
  * @brief 레벨이 보유한 브러시 슬롯을 반납하고 그 지오메트리를 잊습니다.
  * @param[in,out] l 반납할 레벨. 슬롯이 없어도 안전하며 두 번 호출해도 안전합니다.
  *
- * ::level_load가 하는 부여에 대응하는 짝입니다. 슬롯은 ::LVL_BRUSH_SLOTS개뿐이고 이
+ * ::level_load가 하는 부여에 대응하는 짝입니다. 슬롯은 저장소당 ::LVL_BRUSH_SLOTS개뿐이고 이
  * 프로젝트의 어떤 소멸자도 저절로 실행되지 않으므로, 스코프를 벗어나려는 Level은 그 사실을
- * 말해야 합니다. 그러지 않으면 슬롯은 프로세스가 끝날 때까지 점유됩니다. 이 함수가 쓰인
+ * 말해야 합니다. 그러지 않으면 슬롯은 그 저장소가 존재하는 동안 계속 점유되며, 기본 저장소의
+ * 경우 그것은 프로세스가 끝날 때까지입니다. 이 함수가 쓰인
  * 계기는 world.c의 레벨 사슬 스캔입니다. 하나의 스택 지역 변수에 최대
  * ::WORLD_STAGE_MAX_HOPS개의 레벨을 로드한 뒤 반환합니다.
  *
@@ -1629,6 +1702,40 @@ int level_load(const char *name, Level *out);
  *       비우는 일이 아니며, 반납된 레벨도 섹터 레벨이 답할 수 있는 모든 질문에 답합니다.
  */
 void level_release(Level *l);
+
+/**
+ * @brief ::level_release, against a store the caller owns.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] bs Store the level was loaded into. NULL means the default
+ *                   store, which is what ::level_release passes.
+ * @param[in,out] l  Level to release. Safe on one that holds no slot, and safe
+ *                   to call twice.
+ *
+ * @note Pairs with ::level_load_in and must name the SAME store. Releasing
+ *       against the wrong one clears ::Level::brushes and ::Level::brush_key --
+ *       so the level is correctly a sector level afterwards -- but leaves the
+ *       slot held in the store that actually granted it, and nothing will ever
+ *       reclaim it. The pairing is a caller contract because the alternative is
+ *       a back-pointer from every ::Level to its store, and a pointer to a store
+ *       is exactly the kind of claim ::Level::brush_key exists to avoid.
+ *
+ * 한국어
+ * ------
+ * @brief 호출자가 소유한 저장소에 대해 수행하는 ::level_release입니다.
+ * @param[in,out] bs 그 레벨이 로드된 저장소. NULL이면 기본 저장소이며 ::level_release가 넘기는
+ *                   것이 그것입니다.
+ * @param[in,out] l  반납할 레벨. 슬롯이 없어도 안전하며 두 번 호출해도 안전합니다.
+ *
+ * @note ::level_load_in과 짝을 이루며 *같은* 저장소를 지목해야 합니다. 엉뚱한 저장소에 대해
+ *       반납하면 ::Level::brushes와 ::Level::brush_key는 비워지므로 그 레벨은 이후 올바르게 섹터
+ *       레벨이 되지만, 실제로 슬롯을 부여한 저장소에서는 그 슬롯이 계속 점유되고 무엇도 그것을
+ *       회수하지 않습니다. 이 짝맞춤이 호출자의 계약인 이유는, 대안이 모든 ::Level에서 자기
+ *       저장소로 향하는 역포인터이고, 저장소를 가리키는 포인터야말로 ::Level::brush_key가
+ *       피하려고 존재하는 바로 그 종류의 주장이기 때문입니다.
+ */
+void level_release_in(BrushStore *bs, Level *l);
 
 /**
  * @brief Recomputes one sector's cached bounding box from its points.

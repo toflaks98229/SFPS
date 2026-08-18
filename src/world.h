@@ -767,6 +767,56 @@ typedef struct {
 
     /** @brief Non-zero once the level mesh has been uploaded at least once. / 레벨 메시가 최소 한 번 업로드되었으면 0이 아닙니다. */
     int geometry_uploaded;
+
+    /**
+     * @brief Where this world's brush levels are stored. NULL means the default.
+     *
+     * ENGLISH
+     * -------
+     * A POINTER, and it has to be. A ::BrushStore is 840KB against this
+     * struct's 122KB, and a ::World is copyable and is a stack local in the
+     * test suite -- embedding one would end both of those properties. This
+     * points at storage somebody else owns, exactly as ::Level::brushes points
+     * into that storage.
+     *
+     * WHAT IT IS FOR. ::LVL_BRUSH_SLOTS used to be a budget for the process, so
+     * a second ::World beside the running one was a third live level against a
+     * pool of two and was refused. pools.h describes that trap for the spawned
+     * contents of a run -- "an editor that wanted to preview a level beside the
+     * running game would be previewing INTO the running game" -- and fixed it
+     * for the pools. The level's own geometry was the half left over. This is
+     * that half.
+     *
+     * @note NULL is the ordinary case and costs nothing: ::world_init leaves it
+     *       so, and every existing caller keeps the behaviour it had. Only
+     *       something that genuinely wants a second independent world names a
+     *       store, through ::world_init_in.
+     * @note Copying a ::World copies this pointer, which is right -- a copy
+     *       refers to the same storage, and ::Level::brushes in the copy already
+     *       points into it.
+     *
+     * 한국어
+     * ------
+     * @brief 이 월드의 브러시 레벨이 저장되는 곳. NULL이면 기본 저장소입니다.
+     *
+     * *포인터이며 그럴 수밖에 없습니다.* ::BrushStore는 이 구조체의 122KB에 대해 840KB이고,
+     * ::World는 복사 가능하며 테스트 묶음에서 스택 지역 변수입니다. 값으로 넣으면 그 두 성질이
+     * 모두 끝납니다. 이것은 다른 누군가가 소유한 저장 공간을 가리키며, ::Level::brushes가 그
+     * 저장 공간 안을 가리키는 것과 정확히 같습니다.
+     *
+     * *무엇을 위한 것인가.* ::LVL_BRUSH_SLOTS는 프로세스의 예산이었으므로, 실행 중인 것 곁의 두
+     * 번째 ::World는 슬롯 둘짜리 풀에 대한 세 번째 살아 있는 레벨이었고 거절되었습니다. pools.h가
+     * 한 판의 플레이가 생성하는 내용물에 대해 그 함정을 서술하며("실행 중인 게임 옆에서 레벨을
+     * 미리 보려는 에디터는 실행 중인 게임 *안으로* 미리 보게 됩니다") 풀에 대해서는 그것을
+     * 고쳤습니다. 레벨 자신의 지오메트리가 남은 절반이었습니다. 이것이 그 절반입니다.
+     *
+     * @note NULL이 평범한 경우이며 비용이 없습니다. ::world_init이 그대로 두고, 기존의 모든
+     *       호출자는 가지고 있던 동작을 유지합니다. 진짜로 독립적인 두 번째 월드를 원하는
+     *       것만이 ::world_init_in을 통해 저장소를 지목합니다.
+     * @note ::World를 복사하면 이 포인터가 복사되며 그것이 옳습니다. 복사본은 같은 저장 공간을
+     *       가리키고, 복사본의 ::Level::brushes는 이미 그 안을 가리키고 있습니다.
+     */
+    BrushStore *store;
 } World;
 
 /* ------------------------------------------------------------ entering one */
@@ -865,6 +915,41 @@ typedef enum {
  *       재시작이 하나의 함수가 만들어 낸 상태에서 출발합니다.
  */
 void world_init(World *w);
+
+/**
+ * @brief ::world_init, with the brush storage this world's levels will use.
+ *
+ * ENGLISH
+ * -------
+ * @param[out] w  Zeroed and seeded, exactly as ::world_init leaves it.
+ * @param[in]  bs Store for this world's brush levels. NULL is the default
+ *                store, which makes this identical to ::world_init.
+ *
+ * FOR A SECOND WORLD, and that is the whole of it. One world needs nothing here
+ * -- ::world_init is that call, and every existing caller is that case. A
+ * program that wants two independent worlds gives each its own store, and
+ * neither can take the last slot from the other or reload the other's geometry.
+ *
+ * @warning `bs` must outlive `w`, because ::Level::brushes points inside it.
+ *          Give it static storage or make it a field of something that lives as
+ *          long as the world does.
+ *
+ * 한국어
+ * ------
+ * @brief 이 월드의 레벨이 사용할 브러시 저장소와 함께 수행하는 ::world_init입니다.
+ * @param[out] w  ::world_init이 남기는 것과 정확히 같이 0으로 초기화되고 설정됩니다.
+ * @param[in]  bs 이 월드의 브러시 레벨을 위한 저장소. NULL이면 기본 저장소이며, 그 경우 이
+ *                함수는 ::world_init과 동일합니다.
+ *
+ * *두 번째 월드를 위한 것이며* 그것이 전부입니다. 월드가 하나라면 이곳에서 필요한 것이 없습니다.
+ * ::world_init이 그 호출이고 기존의 모든 호출자가 그 경우입니다. 독립적인 월드 둘을 원하는
+ * 프로그램은 각각에 자기 저장소를 주며, 어느 쪽도 상대의 마지막 슬롯을 가져가거나 상대의
+ * 지오메트리를 다시 로드할 수 없습니다.
+ *
+ * @warning `bs`는 `w`보다 오래 살아야 합니다. ::Level::brushes가 그 내부를 가리키기 때문입니다.
+ *          정적 저장 기간을 주거나, 월드만큼 오래 사는 무언가의 필드로 만드십시오.
+ */
+void world_init_in(World *w, BrushStore *bs);
 
 /**
  * @brief Loads a level and puts everything that belongs to one into place.

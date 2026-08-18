@@ -943,9 +943,19 @@ static void progress_boot(PlayerProgress *out) {
     }
 }
 
-void world_init(World *w) {
+void world_init(World *w) { world_init_in(w, 0); }
+
+void world_init_in(World *w, BrushStore *bs) {
     World zero = {0};
     *w = zero;
+
+    /* AFTER the clear, or it would be cleared. NULL is the default store and is
+       what the zeroing already produced, so the ordinary path assigns nothing
+       meaningful -- this line exists for the caller that named one.
+       초기화 *뒤*여야 합니다. 그러지 않으면 함께 지워집니다. NULL이 기본 저장소이고 0으로
+       비우는 것이 이미 그 값을 만들었으므로 평범한 경로에서는 의미 있는 대입이 아닙니다. 이
+       줄은 저장소를 지목한 호출자를 위해 있습니다. */
+    w->store = bs;
 
     /* The declared spawn, overwritten by player_spawn on the first load. Here
        so that a World is never observably uninitialised -- a caller that reads
@@ -1015,7 +1025,7 @@ int world_load_level(World *w, const char *name, WorldEnter how) {
        먼저 파싱하며, 성공하기 전까지는 아무것도 건드리지 않습니다. 알 수 없는 대상(오타
        또는 절반만 제작된 맵)은 플레이어를 빈 공간에 떨어뜨리는 대신 있던 자리에 두어야
        합니다. */
-    if (!level_load(want, &w->level)) return 0;
+    if (!level_load_in(w->store, want, &w->level)) return 0;
 
     /* The sectors just changed, so the mesh built from them is stale. Raised
        here rather than rebuilt here: this module does not know what a Scene is.
@@ -1222,6 +1232,18 @@ static int stage_walk(const char *root, const char *name,
             return 1;
         }
 
+        /* THE DEFAULT STORE, deliberately, even for a world that named its own.
+           The scratch is transient -- taken here and given back by the caller
+           before the frame ends -- and it never becomes a world's level, so it
+           has no reason to occupy a slot in that world's storage. Loading it
+           into the default store also means a world with its own store contends
+           with nothing at all here, where before the scan and the running level
+           shared one pool of two.
+           호출자가 자기 저장소를 지목한 월드에 대해서도 *의도적으로* 기본 저장소를 씁니다.
+           임시 레벨은 이곳에서 잡혔다가 프레임이 끝나기 전에 호출자가 돌려주며, 결코 어떤
+           월드의 레벨이 되지 않으므로 그 월드의 저장 공간에서 슬롯을 차지할 이유가 없습니다.
+           기본 저장소에 로드하면 자기 저장소를 가진 월드는 이곳에서 아무것과도 경쟁하지
+           않습니다. 이전에는 스캔과 실행 중인 레벨이 슬롯 둘짜리 풀 하나를 공유했습니다. */
         if (!level_load(at, scan)) return 0;    /* a broken link in the chain */
 
         grant_weapons_of(scan, &p);

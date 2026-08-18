@@ -260,6 +260,20 @@ typedef enum {
  *       *어떻게* 달성되는지가 아니라 플레이어가 *무엇을* 원하는지를 기술하는 채로
  *       유지됩니다.
  */
+/**
+ * @brief How many notches a volume row has, and what one notch is worth.
+ *
+ * ENGLISH: Eleven, so the ends are exactly OFF and exactly full and the nine
+ * between them are round numbers a player can name. A finer slider would be
+ * more precise about a quantity nobody measures.
+ *
+ * 한국어: 열하나입니다. 양끝이 정확히 무음과 정확히 최대가 되고 그 사이 아홉이 플레이어가
+ * 이름 붙일 수 있는 반올림된 숫자가 됩니다. 더 촘촘한 슬라이더는 아무도 재지 않는 양에 대해
+ * 더 정밀할 뿐입니다.
+ */
+#define MENU_VOL_STEPS    11
+#define MENU_VOL_PER_STEP 10
+
 typedef struct {
     int display;    /**< A ::DisplayMode. / ::DisplayMode 값. */
     int pixel;      /**< A ::GfxPixelPreset. / ::GfxPixelPreset 값. */
@@ -267,6 +281,31 @@ typedef struct {
     int scanlines;  /**< Non-zero to draw CRT scanlines. / CRT 주사선을 그리려면 0이 아닌 값. */
     int dither;     /**< A ::GfxDither. / ::GfxDither 값. */
     int pattern;    /**< A ::GfxDitherPattern. / ::GfxDitherPattern 값. */
+
+    /**
+     * @brief Overall loudness, as a STEP rather than a percentage. 0 is silent.
+     *
+     * ENGLISH
+     * -------
+     * An index into ::MENU_VOL_STEPS, exactly like every other ROW_VALUE field
+     * here -- the menu moves an int between 0 and a count and knows nothing
+     * about what the int means, which is what lets one row implementation serve
+     * a display mode and a volume alike. Multiply by ::MENU_VOL_PER_STEP for the
+     * 0-100 figure ::audio_set_volume wants.
+     *
+     * 한국어
+     * ------
+     * @brief 전체 음량. 백분율이 아니라 *단계*입니다. 0이면 무음입니다.
+     *
+     * ::MENU_VOL_STEPS에 대한 인덱스이며, 이곳의 다른 모든 ROW_VALUE 필드와 정확히 같습니다.
+     * 메뉴는 0과 개수 사이의 int를 움직일 뿐 그 int가 무엇을 뜻하는지 모르며, 그것이 하나의 행
+     * 구현이 디스플레이 모드와 음량을 똑같이 처리할 수 있게 하는 것입니다. ::audio_set_volume이
+     * 원하는 0-100 값은 ::MENU_VOL_PER_STEP을 곱해 얻습니다.
+     */
+    int master;
+
+    /** @brief Sound-effect loudness, under ::master. Same units. / 효과음 음량. ::master 아래에 놓입니다. 단위 동일. */
+    int sfx;
 } MenuSettings;
 
 /* --- Lifecycle / 수명 주기 --- */

@@ -88,6 +88,14 @@ static const char *const DISPLAYS[] = { "WINDOWED", "BORDERLESS" };
 static const char *const PIXELS[]   = { "CHUNKY", "NORMAL", "FINE" };
 static const char *const DITHERS[]  = { "HEAVY", "NORMAL", "LIGHT", "OFF" };
 static const char *const PATTERNS[] = { "BAYER", "NOISE" };
+/* One label per notch. Spelled out rather than formatted at draw time: this
+   project has no snprintf and menu_row_text returns a `const char *` that has to
+   outlive the call, so a table is both the cheaper and the only easy answer.
+   눈금마다 라벨 하나입니다. 그릴 때 포매팅하지 않고 적어 둡니다. 이 프로젝트에는 snprintf가
+   없고 menu_row_text는 호출보다 오래 살아야 하는 `const char *`를 반환하므로, 표가 더 싼
+   답이자 유일하게 쉬운 답입니다. */
+static const char *const VOLUMES[] = { "OFF", "10", "20", "30", "40", "50",
+                                       "60", "70", "80", "90", "100" };
 
 /* Each name table must have exactly one entry per value the enum can take. A
    short table would index out of bounds the first time the player cycled onto
@@ -133,6 +141,8 @@ static const Row SETTINGS_ROWS[] = {
     { "SCANLINES",   ROW_VALUE, 0, FIELD(scanlines), 2,                  OFF_ON   },
     { "DITHER",      ROW_VALUE, 0, FIELD(dither),    GFX_DITHER_COUNT,   DITHERS  },
     { "PATTERN",     ROW_VALUE, 0, FIELD(pattern),   GFX_PATTERN_COUNT,  PATTERNS },
+    { "MASTER VOL",  ROW_VALUE, 0, FIELD(master),    MENU_VOL_STEPS,     VOLUMES  },
+    { "SFX VOL",     ROW_VALUE, 0, FIELD(sfx),       MENU_VOL_STEPS,     VOLUMES  },
     { "BACK",        ROW_SCREEN, MENU_ROOT, 0, 0, 0 },
 };
 
@@ -154,6 +164,12 @@ static MenuSettings g_set = {
     .scanlines = 1,
     .dither    = GFX_DITHER_NORMAL,
     .pattern   = GFX_PATTERN_BAYER,
+    /* Full, both of them, so a player who never opens this menu hears exactly
+       what the game sounded like before the rows existed.
+       둘 다 최대입니다. 이 메뉴를 한 번도 열지 않는 플레이어는 이 행들이 생기기 전의 게임과
+       정확히 같은 소리를 듣습니다. */
+    .master    = MENU_VOL_STEPS - 1,
+    .sfx       = MENU_VOL_STEPS - 1,
 };
 
 /* --- Static helpers / 정적 헬퍼 --- */

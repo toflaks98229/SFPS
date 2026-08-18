@@ -636,6 +636,32 @@ void audio_reload(void) {
    플레이어의 귀 위치입니다. 게임 스레드 전용입니다. */
 static v3 g_listener;
 
+/* --- volume ----------------------------------------------------------------
+ * Game thread only, exactly like g_listener above, and for the same reason: the
+ * mixer never reads either. A voice stores the gain it was handed and never
+ * looks outward again, so scaling at the moment of play keeps the per-sample
+ * path untouched and needs no lock of its own.
+ *
+ * WHAT THAT COSTS, stated rather than discovered: a sound already playing keeps
+ * the loudness it started with. Every effect here is a fraction of a second, so
+ * the longest a change can take to be heard in full is one sound -- and paying
+ * for the alternative would mean the mixer reading two globals per sample.
+ *
+ * 게임 스레드 전용이며, 위의 g_listener와 정확히 같은 이유입니다. 믹서는 둘 중 어느 것도 읽지
+ * 않습니다. 보이스는 건네받은 게인을 저장하고 다시는 바깥을 보지 않으므로, 재생 시점에
+ * 조정하면 샘플별 경로를 건드리지 않고 자체 락도 필요 없습니다.
+ *
+ * *그 대가*를 발견이 아니라 명시로 적습니다. 이미 재생 중인 소리는 시작할 때의 음량을
+ * 유지합니다. 이곳의 모든 효과음이 1초 미만이므로 변경이 온전히 들리기까지 걸리는 최대 시간은
+ * 소리 하나이며, 대안을 택하는 대가는 믹서가 샘플마다 전역 둘을 읽는 것입니다. */
+static int g_vol_master = 100;
+static int g_vol_sfx    = 100;
+
+void audio_set_volume(int master, int sfx) {
+    g_vol_master = master < 0 ? 0 : (master > 100 ? 100 : master);
+    g_vol_sfx    = sfx    < 0 ? 0 : (sfx    > 100 ? 100 : sfx);
+}
+
 void audio_listener(v3 pos) { g_listener = pos; }
 
 static void play_gain(const char *name, int gain) {
@@ -667,6 +693,14 @@ static void play_gain(const char *name, int gain) {
     Voice *V = &g_voices[slot];
     V->snd  = s;
     V->pos  = 0;
+    /* The volume rows land HERE and nowhere else. `gain` is the recipe's own
+       level as the caller asked for it; the two settings scale it, and the
+       clamp that was already here still has the last word.
+       음량 행이 도달하는 곳은 *이곳*이며 그 밖에는 없습니다. `gain`은 호출자가 요청한 그대로의
+       레시피 자체 레벨이고, 두 설정이 그것을 조정하며, 이미 있던 제한이 여전히 마지막 말을
+       합니다. */
+    gain = gain * g_vol_master / 100;
+    gain = gain * g_vol_sfx    / 100;
     V->gain = gain < 0 ? 0 : (gain > 100 ? 100 : gain);
     V->rng  = 0x2545f491u + (unsigned)slot * 2654435761u;
     for (int k = 0; k < MAX_LAYERS; k++) { V->phase[k] = 0.0f; V->hold[k] = 0.0f; }

@@ -1280,6 +1280,16 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
 
         gfx_apply_live_settings();
 
+        /* The volume rows, read the same way and for the same reason: a setting
+           that needs no signal to change is applied by reading it every frame,
+           so moving the slider is audible on the next sound rather than on the
+           next event that happens to notify something.
+           음량 행이며, 같은 방식으로 같은 이유에서 읽습니다. 변경에 신호가 필요 없는 설정은
+           매 프레임 읽어서 적용하므로, 슬라이더를 움직이면 무언가에 알리는 다음 사건이
+           아니라 다음 소리에서 들립니다. */
+        audio_set_volume(menu_settings()->master * MENU_VOL_PER_STEP,
+                         menu_settings()->sfx    * MENU_VOL_PER_STEP);
+
         RECT cr; GetClientRect(g_wnd, &cr);
         int vw = cr.right - cr.left, vh = cr.bottom - cr.top;
         if (vh < 1) vh = 1;

@@ -92,6 +92,33 @@ void audio_shutdown(void);
 void audio_play(const char *name, int gain);
 
 /**
+ * @brief Sets overall and effect loudness, 0-100 each.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] master Scales everything. 0 is silence.
+ * @param[in] sfx    Scales effects, under `master`. Both are applied.
+ *
+ * @note Applied when a sound STARTS, not per sample. A sound already playing
+ *       keeps the loudness it began with; every effect here is a fraction of a
+ *       second, so the longest a change takes to be heard in full is one sound.
+ *       The alternative is the mixer reading two globals per sample.
+ * @note Game thread only, like ::audio_listener. The mixer never reads these.
+ *
+ * 한국어
+ * ------
+ * @brief 전체 음량과 효과음 음량을 설정합니다. 각각 0-100입니다.
+ * @param[in] master 모든 것을 조정합니다. 0이면 무음입니다.
+ * @param[in] sfx    `master` 아래에서 효과음을 조정합니다. 둘 다 적용됩니다.
+ *
+ * @note 샘플마다가 아니라 소리가 *시작될 때* 적용됩니다. 이미 재생 중인 소리는 시작할 때의
+ *       음량을 유지합니다. 이곳의 모든 효과음이 1초 미만이므로 변경이 온전히 들리기까지 걸리는
+ *       최대 시간은 소리 하나입니다. 대안은 믹서가 샘플마다 전역 둘을 읽는 것입니다.
+ * @note ::audio_listener와 마찬가지로 게임 스레드 전용입니다. 믹서는 이 값을 읽지 않습니다.
+ */
+void audio_set_volume(int master, int sfx);
+
+/**
  * @brief Sets where the player's ears are, in world metres.
  *
  * ENGLISH

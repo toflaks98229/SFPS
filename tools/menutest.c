@@ -210,9 +210,21 @@ int main(void) {
 
             const char *first = v;
             /* Step through at most a generous number of values; every row must
-               return to its starting label well inside that. */
+               return to its starting label well inside that.
+
+               THE BOUND HAS TO EXCEED THE WIDEST VALUE ROW, and it is written
+               against that row rather than guessed. It was a bare 8, which was
+               generous while the widest row was DITHER's four -- and then the
+               volume rows arrived with eleven notches and the check failed on
+               content it was supposed to be checking. Naming the widest row
+               here means the next one to grow takes this with it.
+               상한은 *가장 넓은 값 행*보다 커야 하며, 추측이 아니라 그 행을 기준으로
+               적습니다. 이전에는 맨 8이었고 가장 넓은 행이 DITHER의 넷이던 동안에는
+               넉넉했습니다. 그러다 눈금 열한 개짜리 음량 행이 도착했고, 검사가 정작
+               검사해야 할 콘텐츠에서 실패했습니다. 가장 넓은 행을 이곳에 이름으로 두면
+               다음에 넓어지는 행이 이 값을 함께 데려갑니다. */
             int returned = 0;
-            for (int k = 1; k <= 8; k++) {
+            for (int k = 1; k <= MENU_VOL_STEPS + 4; k++) {
                 menu_adjust(+1);
                 menu_take_action();
                 const char *now;

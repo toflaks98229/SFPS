@@ -103,6 +103,44 @@
  */
 #define PSX_SNAP_COARSE 2.0f
 
+/**
+ * @brief How much affine texture swim to use. See ::rd_affine.
+ *
+ * ENGLISH
+ * -------
+ * NOT 1.0, and the reason is this project's geometry rather than taste. The
+ * warp scales with how much of the screen a polygon covers, and a brush level
+ * has single faces bigger than a PlayStation drew in a whole room -- a wall
+ * here is one quad where that hardware would have had a dozen. At 1.0 those
+ * faces crease along their diagonal hard enough to read as a broken renderer.
+ *
+ * The number is what a corridor wall looks right at when walked past, which is
+ * the same way ::PSX_SNAP_COARSE was chosen. Enough that a floor seen at a
+ * glancing angle visibly slides; not so much that a doorway bends.
+ *
+ * @note Here rather than in the menu on purpose, for now. It is the same class
+ *       of value as the snap grid -- something the game HAS rather than
+ *       something a player sets -- and the two should be exposed together if
+ *       either is.
+ *
+ * 한국어
+ * ------
+ * @brief 어파인 텍스처 헤엄을 얼마나 쓸지. ::rd_affine을 참조하십시오.
+ *
+ * *1.0이 아니며*, 이유는 취향이 아니라 이 프로젝트의 지오메트리입니다. 왜곡은 폴리곤이 화면을
+ * 얼마나 덮는지에 비례하는데, 브러시 레벨은 플레이스테이션이 방 하나에 그리던 것보다 큰 단일
+ * 면을 가집니다. 이곳의 벽 하나가 그 하드웨어라면 열몇 개였을 것을 사각형 하나로 씁니다.
+ * 1.0에서는 그런 면들이 대각선을 따라 충분히 세게 접혀 고장 난 렌더러로 읽힙니다.
+ *
+ * 이 값은 복도 벽을 지나쳐 걸을 때 알맞아 보이는 값이며, ::PSX_SNAP_COARSE가 정해진 방식과
+ * 같습니다. 비스듬히 본 바닥이 눈에 띄게 미끄러질 만큼은 되고, 출입구가 휘어질 만큼은 아닙니다.
+ *
+ * @note 당분간 의도적으로 메뉴가 아니라 이곳에 둡니다. 스냅 격자와 같은 부류의 값이며, 플레이어가
+ *       설정하는 것이 아니라 게임이 *지닌* 것입니다. 둘 중 하나를 노출한다면 함께 노출해야
+ *       합니다.
+ */
+#define PSX_AFFINE 0.55f
+
 /* --- moving light ----------------------------------------------------------
  *
  * ENGLISH
@@ -1680,6 +1718,14 @@ void scene_frame(const World *w, Scene *sc, int vw, int vh, int frozen) {
         rd_snap((float)sw / PSX_SNAP_COARSE, (float)sh / PSX_SNAP_COARSE);
     }
 
+    /* Set beside the snap and released beside it, because the two are halves of
+       one look: the vertices wobble and the texture between them swims. Turning
+       on either alone reads as a fault in the renderer rather than as a period.
+       스냅 곁에서 설정하고 곁에서 해제합니다. 둘은 하나의 외형을 이루는 절반들이기
+       때문입니다. 정점이 흔들리고 그 사이의 텍스처가 헤엄칩니다. 둘 중 하나만 켜면 시대가
+       아니라 렌더러의 결함으로 읽힙니다. */
+    rd_affine(PSX_AFFINE);
+
     /* Recoil rides on top of the player's own pitch and springs back. */
     float aim_pitch = w->pitch + w->weapon.recoil;
 
@@ -1857,6 +1903,12 @@ void scene_frame(const World *w, Scene *sc, int vw, int vh, int frozen) {
        UI는 원해상도로 그려지며 흔들려서는 안 됩니다. 성긴 격자에 스냅된 텍스트는
        글리프의 행 전체를 잃습니다. */
     rd_snap(0.0f, 0.0f);
+
+    /* And the UI does not swim either. A glyph atlas is where a UV off by one
+       texel fetches the neighbouring letter.
+       UI도 헤엄치지 않습니다. 글리프 아틀라스는 UV가 한 텍셀만 어긋나도 옆 글자를 가져오는
+       곳입니다. */
+    rd_affine(0.0f);
 
     /* The HUD is skipped on the title screen: health and ammo belong to a run,
        and showing them before one has started says the game is already in

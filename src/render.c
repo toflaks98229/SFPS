@@ -595,8 +595,40 @@ static const char *VS_SRC =
 "uniform mat4 uMVP;\n"
 "uniform vec2 uSnap;\n"
 "out vec3 vPos; out vec3 vNrm; out vec2 vUV; out vec3 vLit;\n"
+/* THE SAME UV, INTERPOLATED THE OTHER WAY.
+ *
+ * `vUV` above is interpolated perspective-correctly, which is what every GPU
+ * since the late nineties does and what the PlayStation could not: it had no
+ * per-pixel divide, so it stepped texture coordinates linearly across a
+ * triangle in SCREEN space. On a large polygon seen at an angle that is
+ * visibly wrong -- the texture swims and creases along the diagonal the
+ * triangle was split on -- and it is the single most recognisable artifact of
+ * the era. `uSnap` and the dither pass already reproduce two of the other
+ * three; this is the one that was missing.
+ *
+ * TWO VARYINGS RATHER THAN ONE, because the interpolation qualifier is fixed
+ * at compile time and the strength has to be adjustable: a level built from
+ * TrenchBroom brushes has faces far larger than anything the hardware being
+ * imitated could draw, so full affine on this geometry warps more than it
+ * evokes. The fragment shader mixes the two by `uAffine`, which is the only
+ * way to have a dial at all.
+ *
+ * 같은 UV를 다른 방식으로 보간한 것입니다.
+ *
+ * 위의 `vUV`는 원근 보정 보간이며, 90년대 후반 이후의 모든 GPU가 하는 일이자 플레이스테이션이
+ * *할 수 없었던* 일입니다. 픽셀당 나눗셈이 없었으므로 텍스처 좌표를 삼각형을 가로질러 *화면*
+ * 공간에서 선형으로 밟았습니다. 비스듬히 본 큰 폴리곤에서 그것은 눈에 띄게 틀리며(텍스처가
+ * 헤엄치고 삼각형이 나뉜 대각선을 따라 접힙니다) 그 시대의 가장 알아보기 쉬운 아티팩트입니다.
+ * `uSnap`과 디더 패스가 나머지 셋 중 둘을 이미 재현하고 있으며, 이것이 빠져 있던 하나입니다.
+ *
+ * 하나가 아니라 *두 개*의 varying인 이유는 보간 한정자가 컴파일 시점에 고정되는데 강도는 조절
+ * 가능해야 하기 때문입니다. TrenchBroom 브러시로 만든 레벨은 흉내 내려는 하드웨어가 그릴 수
+ * 있던 것보다 훨씬 큰 면을 가지므로, 이 지오메트리에 전면 어파인을 적용하면 연상시키기보다
+ * 일그러뜨립니다. 프래그먼트 셰이더가 `uAffine`으로 둘을 섞으며, 그것이 조절 손잡이를 갖는
+ * 유일한 방법입니다. */
+"noperspective out vec2 vUVa;\n"
 "void main(){\n"
-"  vPos=aPos; vNrm=aNrm; vUV=aUV; vLit=aLit;\n"
+"  vPos=aPos; vNrm=aNrm; vUV=aUV; vUVa=aUV; vLit=aLit;\n"
 "  vec4 p=uMVP*vec4(aPos,1.0);\n"
 /* w <= 0 is behind the eye, where NDC is meaningless and the division would
    mirror the vertex across the screen. Those vertices are clipped anyway, so
@@ -1072,6 +1104,15 @@ static const char *FS_PROC =
 static const char *FS_SRC =
 "#version 330 core\n"
 "in vec3 vPos; in vec3 vNrm; in vec2 vUV; in vec3 vLit;\n"
+"noperspective in vec2 vUVa;\n"
+/* 0 is the perspective-correct texturing every other engine does; 1 is the
+ * PlayStation's. A uniform rather than a constant for the reason uSnap is one:
+ * the two can be compared side by side while the game runs, which is most of
+ * how a value like this gets chosen.
+ * 0은 다른 모든 엔진이 하는 원근 보정 텍스처링이고 1은 플레이스테이션의 것입니다. 상수가
+ * 아니라 유니폼인 이유는 uSnap이 그런 이유와 같습니다. 게임이 도는 동안 둘을 나란히 비교할 수
+ * 있으며, 이런 값이 정해지는 방법의 대부분이 그것입니다. */
+"uniform float uAffine;\n"
 "uniform sampler2D uTex;\n"
 "uniform vec3 uEye;\n"
 "uniform int uMode;\n"
@@ -1126,7 +1167,14 @@ static const char *FS_MAIN =
 "  vec3 n=normalize(vNrm);\n"
 /* UVs now arrive per vertex, so extruded silhouettes can carry a real
    parameterisation instead of everything being guessed from world position. */
-"  vec2 uv=vUV;\n"
+/* NOT applied to uMode==3 above, which samples vUV directly. Text is drawn in
+   screen coordinates, so there is no perspective to be wrong about and the two
+   interpolations agree -- but a glyph atlas is the one place where a UV off by
+   a texel picks up the neighbouring letter.
+   위의 uMode==3에는 적용하지 *않습니다*. 그 분기는 vUV를 직접 샘플링합니다. 텍스트는 화면
+   좌표로 그려지므로 틀릴 원근이 없고 두 보간이 일치합니다. 다만 글리프 아틀라스는 UV가 한
+   텍셀만 어긋나도 옆 글자를 집어 오는 유일한 곳입니다. */
+"  vec2 uv=mix(vUV,vUVa,uAffine);\n"
 /* One lookup either way: sampled from a texture, or computed from the UV.
    Alpha carries gloss in both, so the lighting below does not care which. */
 "  vec4 s = (uProc==0) ? texture(uTex,uv)\n"
@@ -1536,6 +1584,7 @@ static GLint  g_u_nlights, g_u_lpos, g_u_lcol;
    않습니다. 방이 두 번 밝혀질 뿐이고 그것은 "밝다"로 읽힙니다. */
 static int    g_n_lights;
 static GLint  g_u_snap;
+static GLint  g_u_affine;
 static GLint  g_u_proc, g_u_pcol, g_u_pscale, g_u_pparam;
 static GLint  g_u_time;
 
@@ -1576,6 +1625,7 @@ void rd_init(void) {
     g_u_mvp   = glGetUniformLocation(g_prog, "uMVP");
     g_u_eye   = glGetUniformLocation(g_prog, "uEye");
     g_u_snap    = glGetUniformLocation(g_prog, "uSnap");
+    g_u_affine  = glGetUniformLocation(g_prog, "uAffine");
     g_u_nlights = glGetUniformLocation(g_prog, "uNumLights");
     g_u_lpos    = glGetUniformLocation(g_prog, "uLightPos");
     g_u_lcol    = glGetUniformLocation(g_prog, "uLightCol");
@@ -1620,6 +1670,12 @@ void rd_snap(float grid_w, float grid_h) {
        그대로 전달하면 반 픽셀 단위로 스냅되어, 명시되지 않은 이유로 효과가 절반이
        됩니다. */
     glUniform2f(g_u_snap, grid_w * 0.5f, grid_h * 0.5f);
+}
+
+void rd_affine(float amount) {
+    if (amount < 0.0f) amount = 0.0f;
+    if (amount > 1.0f) amount = 1.0f;
+    glUniform1f(g_u_affine, amount);
 }
 
 void rd_lights(const float *pos_radius, const float *col_power, int n) {

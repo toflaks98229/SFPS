@@ -1173,6 +1173,52 @@ int rd_light_count(void);
 void rd_snap(float grid_w, float grid_h);
 
 /**
+ * @brief How much of the PlayStation's affine texturing to use, 0 to 1.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] amount 0 leaves the perspective-correct texturing every modern GPU
+ *                   does; 1 is the hardware being imitated, which stepped UVs
+ *                   linearly in screen space because it had no per-pixel
+ *                   divide. Clamped, so a caller may hand over a raw setting.
+ *
+ * THE THIRD OF FOUR, and the one that was missing. ::rd_snap reproduces the
+ * vertex wobble, post.c's dither and 15-bit quantisation reproduce the colour,
+ * and this is the texture swim -- the artifact that shows up on any large
+ * polygon seen at an angle and the one most people would name first.
+ *
+ * @note NOT free of consequence on this geometry. A brush level has faces far
+ *       larger than anything a PlayStation drew, and the warp scales with the
+ *       polygon, so 1.0 reads as a bug rather than as a period. The value the
+ *       game ships with is scene.c's ::PSX_AFFINE, chosen the way
+ *       ::PSX_SNAP_COARSE was: by looking at it.
+ * @note Applies to every textured mode except ::RD_TEXT, which samples the UV
+ *       directly. Text is already in screen coordinates, so the two
+ *       interpolations agree -- but a glyph atlas is where a UV off by a texel
+ *       fetches the next letter, so it is left alone rather than left to chance.
+ *
+ * 한국어
+ * ------
+ * @brief 플레이스테이션의 어파인 텍스처링을 얼마나 쓸지, 0에서 1까지.
+ * @param[in] amount 0이면 모든 현대 GPU가 하는 원근 보정 텍스처링을 유지하고, 1이면 흉내 내려는
+ *                   하드웨어 자신입니다. 픽셀당 나눗셈이 없어 UV를 화면 공간에서 선형으로
+ *                   밟았습니다. 값을 제한하므로 호출자는 설정값을 그대로 넘겨도 됩니다.
+ *
+ * *넷 중 세 번째*이자 빠져 있던 하나입니다. ::rd_snap이 정점 흔들림을, post.c의 디더와 15비트
+ * 양자화가 색을 재현하며, 이것이 텍스처 헤엄입니다. 비스듬히 본 큰 폴리곤이면 어디서나 드러나는
+ * 아티팩트이자 대부분의 사람이 가장 먼저 이름을 댈 그것입니다.
+ *
+ * @note 이 지오메트리에서 *대가가 없지 않습니다.* 브러시 레벨은 플레이스테이션이 그리던 것보다
+ *       훨씬 큰 면을 가지며 왜곡은 폴리곤 크기에 비례하므로, 1.0은 시대가 아니라 결함으로
+ *       읽힙니다. 게임이 출하하는 값은 scene.c의 ::PSX_AFFINE이며, ::PSX_SNAP_COARSE가 정해진
+ *       방식대로 눈으로 보고 골랐습니다.
+ * @note ::RD_TEXT를 제외한 모든 텍스처 모드에 적용됩니다. 그 모드는 UV를 직접 샘플링합니다.
+ *       텍스트는 이미 화면 좌표이므로 두 보간이 일치하지만, 글리프 아틀라스는 UV가 한 텍셀만
+ *       어긋나도 다음 글자를 가져오는 곳이므로 우연에 맡기지 않고 그대로 둡니다.
+ */
+void rd_affine(float amount);
+
+/**
  * @brief Sets the clock procedural materials animate against, in seconds.
  *
  * ENGLISH

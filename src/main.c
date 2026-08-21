@@ -92,6 +92,7 @@
 #include "menu.h"     /* the ESC menu: pause, settings, restart, quit */
 #include "font.h"
 #include "audio.h"
+#include "music.h"   /* the background music, and which piece plays */
 #include "data.h"
 #include "decal.h"    /* decal_init/decal_free -- the pool's lifetime, not its draw */
 #include "fx.h"       /* fx_reload -- what a hot reload does to live particles */
@@ -1288,7 +1289,28 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
            매 프레임 읽어서 적용하므로, 슬라이더를 움직이면 무언가에 알리는 다음 사건이
            아니라 다음 소리에서 들립니다. */
         audio_set_volume(menu_settings()->master * MENU_VOL_PER_STEP,
-                         menu_settings()->sfx    * MENU_VOL_PER_STEP);
+                         menu_settings()->sfx    * MENU_VOL_PER_STEP,
+                         menu_settings()->music  * MENU_VOL_PER_STEP);
+
+        /* WHICH track, and it is stated as a CONDITION rather than fired as an
+           event -- music_play is idempotent precisely so this can be. The title
+           screen has its own piece; a brute alive is the closest thing this
+           bestiary has to a boss (120hp against the next-toughest 40, and the
+           only monster that is slower than the player); everything else is
+           ordinary play.
+           *어느* 트랙인지이며, 사건으로 발화하지 않고 *조건*으로 진술합니다. music_play가
+           멱등인 것이 바로 이것을 가능하게 하기 위함입니다. 타이틀 화면은 자기 곡을 가지고,
+           살아 있는 브루트는 이 도감이 가진 보스에 가장 가까운 것이며(다음으로 강한 것이
+           40일 때 120hp이고, 플레이어보다 느린 유일한 몬스터입니다), 그 밖은 평상시
+           플레이입니다. */
+        music_play(g_world.run.title ? MUSIC_TITLE :
+                   world_boss_present(&g_world) ? MUSIC_BOSS : MUSIC_LEVEL);
+
+        /* REAL seconds, not world time: the music keeps playing behind a pause
+           menu and across the between-levels screen. See music.h.
+           월드 시간이 아니라 *실제* 초입니다. 음악은 일시정지 메뉴 뒤에서도 레벨 사이
+           화면에서도 계속 재생됩니다. music.h를 참조하십시오. */
+        music_update(dt);
 
         RECT cr; GetClientRect(g_wnd, &cr);
         int vw = cr.right - cr.left, vh = cr.bottom - cr.top;

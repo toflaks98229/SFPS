@@ -38,7 +38,7 @@ typedef struct {
 static Baked g_baked[DATA_COUNT] = {
     BAKED(ASSET_MODELS), BAKED(ASSET_RECIPES), BAKED(ASSET_SOUNDS),
     BAKED(ASSET_MESHES), BAKED(ASSET_LEVELS),  BAKED(ASSET_SPRITES),
-    BAKED(ASSET_EFFECTS), BAKED(ASSET_MAPS),
+    BAKED(ASSET_EFFECTS), BAKED(ASSET_MUSIC), BAKED(ASSET_MAPS),
 };
 
 /* Same argument as FILENAMES below, one step earlier: a row missing here shifts
@@ -205,6 +205,7 @@ static const char *FILENAMES[DATA_COUNT] = {
     "assets\\levels.txt",
     0,                        /* 스프라이트는 .png에서 구워지므로 파일 없음 */
     "assets\\effects.txt",
+    "assets\\music\\music.txt",
     /* 맵은 파일이 하나가 아니라 여럿이므로 이 표에 담을 수 없습니다. ::data_map이 이름으로
        경로를 만들어 직접 읽습니다.
        Maps are many files rather than one, so they cannot sit in this table.

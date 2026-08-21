@@ -30,6 +30,22 @@ enum DataAsset {
     DATA_LEVELS,      /**< 레벨 레이아웃 및 엔티티 */
     DATA_SPRITES,     /**< PNG에서 변환된 팔레트 인덱스 스프라이트. DATA_MESHES와 마찬가지로 감시할 파일이 없습니다. */
     DATA_EFFECTS,     /**< 파티클 이펙트 레시피 (fx.c). 감시 대상 파일이 있습니다. */
+
+    /**
+     * @brief Note streams for the music, one track per `t` line.
+     *
+     * ENGLISH: Notes, not audio. Freedoom ships MIDI and this project has no
+     * synthesiser to play one with, so the parsing happens at bake time and
+     * what lands here is a flat list of times, pitches and durations that
+     * music.c walks and audio.c's oscillators sound. See
+     * assets/music/import-freedoom-music.py.
+     *
+     * 한국어: 오디오가 아니라 *음표*입니다. Freedoom은 MIDI를 제공하고 이 프로젝트에는
+     * 그것을 연주할 신시사이저가 없으므로, 파싱은 베이크 시점에 일어나고 이곳에 도착하는
+     * 것은 시각·음높이·길이의 평평한 목록입니다. music.c가 그것을 훑고 audio.c의
+     * 오실레이터가 소리를 냅니다.
+     */
+    DATA_MUSIC,
     /**
      * @brief Every assets\maps\*.map packed into one blob. Read with ::data_map.
      *

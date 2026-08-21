@@ -12,6 +12,7 @@
  */
 
 #include "../src/audio.h"
+#include "../src/music.h"   /* the note streams, checked upstream of the mixer */
 #include "../src/data.h"
 #include "../src/txt.h"
 
@@ -369,6 +370,74 @@ static int check_played(void) {
     return missing;
 }
 
+/* --- the music ------------------------------------------------------------
+ *
+ * Parsing only, and that is the honest limit of what this file can reach:
+ * sndtest never calls audio_init, so audio_dev_lock finds no device and
+ * audio_note returns before it touches a voice. What CAN be checked here is
+ * everything upstream of the mixer -- that the baked stream parsed, that each
+ * track got its own notes, and that switching tracks is a decision rather than
+ * a restart. Those are the parts that fail silently; a mixer that is not
+ * running is obvious the moment anybody listens.
+ *
+ * 파싱만이며, 그것이 이 파일이 닿을 수 있는 정직한 한계입니다. sndtest는 audio_init을 결코
+ * 호출하지 않으므로 audio_dev_lock이 장치를 찾지 못하고 audio_note는 보이스를 건드리기 전에
+ * 반환합니다. 이곳에서 검사할 수 있는 것은 믹서보다 위쪽 전부입니다. 구워진 스트림이
+ * 파싱되었는지, 각 트랙이 자기 음표를 받았는지, 트랙 전환이 재시작이 아니라 결정인지입니다.
+ * 조용히 실패하는 부분이 그것들입니다. 믹서가 돌지 않는 것은 누구든 들어 보면 즉시 드러납니다. */
+static int music_ok(int cond, const char *what, int *bad) {
+    printf("  %-56s %s\n", what, cond ? "ok" : "FAIL");
+    if (!cond) (*bad)++;
+    return cond;
+}
+
+static int check_music(void) {
+    int bad = 0;
+    printf("\nmusic\n");
+
+    int t = music_note_count(MUSIC_TITLE);
+    int l = music_note_count(MUSIC_LEVEL);
+    int b = music_note_count(MUSIC_BOSS);
+    printf("      notes: title %d, level %d, boss %d\n", t, l, b);
+
+    music_ok(t > 0 && l > 0 && b > 0, "every track parsed some notes", &bad);
+
+    /* Each track is its own slice. Two tracks reporting the same count would be
+       the symptom of a `t` line that did not open a new one.
+       각 트랙은 자기 구간입니다. 두 트랙이 같은 개수를 보고하는 것은 새 구간을 열지 못한
+       `t` 줄의 증상입니다. */
+    music_ok(t != l && l != b, "and they are separate slices, not one shared", &bad);
+
+    music_play(MUSIC_LEVEL);
+    music_ok(music_now() == MUSIC_LEVEL, "asking for a track selects it", &bad);
+
+    music_play(MUSIC_BOSS);
+    music_ok(music_now() == MUSIC_BOSS, "and switching switches", &bad);
+
+    /* Idempotent: the frame loop states "boss music" every frame, so a call that
+       restarted the track would hold its first bar forever.
+       멱등입니다. 프레임 루프가 매 프레임 "보스 음악"이라고 진술하므로, 트랙을 다시 시작하는
+       호출이라면 첫 마디를 영원히 붙잡고 있게 됩니다. */
+    music_play(MUSIC_BOSS);
+    music_update(0.5f);
+    music_play(MUSIC_BOSS);
+    music_update(0.5f);
+    music_ok(music_now() == MUSIC_BOSS, "and asking again is not a restart", &bad);
+
+    /* A whole loop, in steps, with no device under it. Nothing here may run off
+       the end of the note array when the clock wraps -- the title track is seven
+       seconds, so fifteen seconds of stepping crosses the loop point twice.
+       장치 없이 한 바퀴 전체를 단계적으로 돌립니다. 시계가 순환할 때 음표 배열 끝을 넘어서는
+       일이 없어야 합니다. 타이틀 트랙이 7초이므로 15초를 진행하면 순환 지점을 두 번 넘습니다. */
+    music_play(MUSIC_TITLE);
+    for (int i = 0; i < 900; i++) music_update(0.016f);
+    music_ok(music_now() == MUSIC_TITLE, "and a full loop survives with no device open", &bad);
+
+    music_play(MUSIC_NONE);
+    music_ok(music_now() == MUSIC_NONE, "and it can be stopped", &bad);
+    return bad;
+}
+
 int main(int argc, char **argv) {
     int want_wav = 0;
     const char *one = 0;
@@ -391,6 +460,8 @@ int main(int argc, char **argv) {
     if (!one) fails += check_capacity();
     if (!one) fails += check_alphabet();
     if (!one) fails += check_distance();
+
+    fails += check_music();
 
     printf(fails ? "\n%d problem(s)\n" : "\nall sounds produced audio\n", fails);
     return fails != 0;

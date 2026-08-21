@@ -1404,6 +1404,14 @@ void world_restart(World *w) {
     run_reset(&w->run, 0);
 }
 
+int world_boss_present(const World *w) {
+    for (int i = 0, n = enemy_count(&w->pools); i < n; i++) {
+        const Enemy *e = enemy_at(&w->pools, i);
+        if (e->health > 0 && e->type == MON_BRUTE) return 1;
+    }
+    return 0;
+}
+
 void world_shake(World *w, float amount) {
     if (amount <= 0.0f) return;
     if (amount > WORLD_SHAKE_MAX) amount = WORLD_SHAKE_MAX;

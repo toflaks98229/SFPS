@@ -116,7 +116,50 @@ void audio_play(const char *name, int gain);
  *       최대 시간은 소리 하나입니다. 대안은 믹서가 샘플마다 전역 둘을 읽는 것입니다.
  * @note ::audio_listener와 마찬가지로 게임 스레드 전용입니다. 믹서는 이 값을 읽지 않습니다.
  */
-void audio_set_volume(int master, int sfx);
+/**
+ * @brief Voices reserved for music, out of the mixer's total.
+ *
+ * ENGLISH: Four, leaving eight for effects. The split exists because the voice
+ * allocator evicts the OLDEST when it runs out, and a music note is always
+ * older than the shot that just fired -- one shared pool has the music cut the
+ * gunfire. See the note beside SFX_VOICES in audio.c.
+ *
+ * 한국어: 넷이며 효과음에 여덟이 남습니다. 이 분할이 존재하는 이유는 보이스 할당기가 부족할 때
+ * 가장 *오래된* 것을 밀어내는데 음악 음표는 방금 발사된 총성보다 언제나 오래되기 때문입니다.
+ * 풀을 공유하면 음악이 총성을 끊습니다. audio.c의 SFX_VOICES 곁 주석을 참조하십시오.
+ */
+#define MUSIC_VOICES 4
+
+void audio_set_volume(int master, int sfx, int music);
+
+/**
+ * @brief Sounds one bare note. music.c's only way into the mixer.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] wave   0 square, 1 saw, 2 sine, 3 noise -- as a recipe layer's.
+ * @param[in] freq   Hz. Held for the whole note; there is no sweep.
+ * @param[in] dur_ms How long it sounds.
+ * @param[in] gain   0-100, before the master and music settings scale it.
+ *
+ * @note Takes a MUSIC voice and can only evict another note, never an effect.
+ * @note A note is built as a one-layer recipe, so ::audio_mix renders it with
+ *       the same oscillator and envelope code every sound effect uses. That is
+ *       why music needed no changes to the mixer at all.
+ *
+ * 한국어
+ * ------
+ * @brief 맨 음표 하나를 소리 냅니다. music.c가 믹서로 들어가는 유일한 통로입니다.
+ * @param[in] wave   0 사각파, 1 톱니, 2 사인, 3 노이즈. 레시피 레이어와 같습니다.
+ * @param[in] freq   Hz. 음표 내내 유지되며 스윕이 없습니다.
+ * @param[in] dur_ms 지속 시간.
+ * @param[in] gain   0-100. 마스터와 음악 설정이 조정하기 전의 값입니다.
+ *
+ * @note *음악* 보이스를 가져가며, 다른 음표만 밀어낼 수 있을 뿐 효과음은 결코 밀어내지 못합니다.
+ * @note 음표는 1레이어 레시피로 만들어지므로 ::audio_mix가 모든 효과음이 쓰는 것과 같은
+ *       오실레이터·엔벨로프 코드로 렌더링합니다. 그래서 음악에 믹서 변경이 전혀 필요 없었습니다.
+ */
+void audio_note(int wave, int freq, int dur_ms, int gain);
 
 /**
  * @brief Sets where the player's ears are, in world metres.

@@ -143,6 +143,7 @@ static const Row SETTINGS_ROWS[] = {
     { "PATTERN",     ROW_VALUE, 0, FIELD(pattern),   GFX_PATTERN_COUNT,  PATTERNS },
     { "MASTER VOL",  ROW_VALUE, 0, FIELD(master),    MENU_VOL_STEPS,     VOLUMES  },
     { "SFX VOL",     ROW_VALUE, 0, FIELD(sfx),       MENU_VOL_STEPS,     VOLUMES  },
+    { "BGM VOL",     ROW_VALUE, 0, FIELD(music),     MENU_VOL_STEPS,     VOLUMES  },
     { "BACK",        ROW_SCREEN, MENU_ROOT, 0, 0, 0 },
 };
 
@@ -170,6 +171,7 @@ static MenuSettings g_set = {
        정확히 같은 소리를 듣습니다. */
     .master    = MENU_VOL_STEPS - 1,
     .sfx       = MENU_VOL_STEPS - 1,
+    .music     = MENU_VOL_STEPS - 3,   /* under the effects: it is a background */
 };
 
 /* --- Static helpers / 정적 헬퍼 --- */

@@ -21,7 +21,8 @@ $sets = @(
     @{ Name = 'ASSET_RECIPES'; File = 'assets\textures.txt' },
     @{ Name = 'ASSET_SOUNDS';  File = 'assets\sounds.txt'   },
     @{ Name = 'ASSET_LEVELS';  File = 'assets\levels.txt'   },
-    @{ Name = 'ASSET_EFFECTS'; File = 'assets\effects.txt'  }
+    @{ Name = 'ASSET_EFFECTS'; File = 'assets\effects.txt'  },
+    @{ Name = 'ASSET_MUSIC';   File = 'assets\music\music.txt' }
 )
 
 # Wavefront .obj -> the integer mesh text the game parses.

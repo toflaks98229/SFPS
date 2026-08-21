@@ -1355,6 +1355,44 @@ int world_frozen(const World *w, int paused);
 void world_shake(World *w, float amount);
 
 /**
+ * @brief Is something big alive right now?
+ *
+ * ENGLISH
+ * -------
+ * @param[in] w The world.
+ * @return Non-zero while a boss-grade monster is standing.
+ *
+ * THERE IS NO BOSS FLAG, and this deliberately does not add one. The bestiary
+ * has five monsters and one of them is plainly the heavy: a brute has 120hp
+ * against the next-toughest 40, is the only one slower than the player, and is
+ * the tallest thing in the game. "A brute is up" is what a player already reads
+ * as the fight getting serious, so deriving the answer from the pool costs
+ * nothing and cannot fall out of step with a flag nobody remembered to set.
+ *
+ * @note Asked every frame by the frame loop and answered by a scan of the
+ *       monster pool, which is bounded by ::ENEMY_MAX and cheap. If a later
+ *       bestiary needs a real boss the answer moves into ::MonType and this
+ *       function keeps its signature.
+ *
+ * 한국어
+ * ------
+ * @brief 지금 큰 것이 살아 있는가?
+ * @param[in] w 월드.
+ * @return 보스급 몬스터가 서 있는 동안 0이 아닌 값.
+ *
+ * *보스 플래그가 없으며* 이 함수는 의도적으로 만들지 않습니다. 도감에는 몬스터가 다섯 있고 그중
+ * 하나가 명백히 중량급입니다. 브루트는 다음으로 강한 것이 40일 때 120hp이고, 플레이어보다 느린
+ * 유일한 몬스터이며, 게임에서 가장 큽니다. "브루트가 떴다"는 것은 플레이어가 이미 전투가
+ * 심각해졌다고 읽는 신호이므로, 답을 풀에서 유도하면 비용이 들지 않고 아무도 세우는 것을 잊지
+ * 않은 플래그와 어긋날 일도 없습니다.
+ *
+ * @note 프레임 루프가 매 프레임 묻고 몬스터 풀 스캔으로 답합니다. ::ENEMY_MAX로 제한되어 있어
+ *       저렴합니다. 이후의 도감이 진짜 보스를 필요로 하면 답은 ::MonType으로 옮겨 가고 이 함수는
+ *       시그니처를 유지합니다.
+ */
+int world_boss_present(const World *w);
+
+/**
  * @brief Advances the world by one frame.
  *
  * ENGLISH

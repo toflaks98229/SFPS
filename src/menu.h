@@ -306,6 +306,9 @@ typedef struct {
 
     /** @brief Sound-effect loudness, under ::master. Same units. / 효과음 음량. ::master 아래에 놓입니다. 단위 동일. */
     int sfx;
+
+    /** @brief Music loudness, under ::master. Same units. / 음악 음량. ::master 아래에 놓입니다. 단위 동일. */
+    int music;
 } MenuSettings;
 
 /* --- Lifecycle / 수명 주기 --- */

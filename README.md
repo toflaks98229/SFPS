@@ -20,7 +20,7 @@ Models, materials, sounds and levels are all authored as text and hot-reload
 into the running game.
 
 ```
-392,192 / 1,474,560 bytes   (26.6% used)
+410,112 / 1,474,560 bytes   (27.81% used)
 ```
 
 ## Build

@@ -108,6 +108,42 @@ static int   g_parsed;
 // 활성 보이스
 static Voice            g_voices[MAX_VOICES];
 
+/* --- the voice split -------------------------------------------------------
+ * MUSIC GETS ITS OWN, and the reason is the allocator right below: when every
+ * voice is busy it evicts the OLDEST, and a music track is a stream of notes
+ * that are always older than the shotgun that just fired. Sharing one pool
+ * would have the music cut the gunfire, or -- with the eviction the other way
+ * -- a firefight cut the music. Neither is a balance anybody can tune.
+ *
+ * Splitting means each is guaranteed its own and neither can starve the other.
+ * The cost is that a very busy soundscape now runs out of SFX voices sooner
+ * (eight instead of twelve), which is the right thing to spend: the twelfth
+ * simultaneous sound effect is inaudible under the eleven others, and a
+ * dropped bar of music is not.
+ *
+ * 음악은 *자기 보이스*를 가지며, 이유는 바로 아래의 할당기입니다. 모든 보이스가 사용 중이면
+ * 가장 *오래된* 것을 밀어내는데, 음악 트랙은 방금 발사된 샷건보다 언제나 오래된 음표의
+ * 흐름입니다. 풀을 공유하면 음악이 총성을 끊거나, 축출 방향이 반대라면 총격전이 음악을
+ * 끊습니다. 어느 쪽도 누군가 조율할 수 있는 균형이 아닙니다.
+ *
+ * 분할하면 각자 자기 몫을 보장받고 어느 쪽도 상대를 굶길 수 없습니다. 대가는 아주 분주한
+ * 음향에서 SFX 보이스가 더 일찍 바닥난다는 것입니다(열둘이 아니라 여덟). 그것이 쓸 만한
+ * 대가입니다. 열두 번째 동시 효과음은 나머지 열하나 밑에서 들리지 않지만, 빠진 음악 한 마디는
+ * 들립니다. */
+#define SFX_VOICES (MAX_VOICES - MUSIC_VOICES)
+_Static_assert(SFX_VOICES > 0, "MUSIC_VOICES must leave room for sound effects");
+
+/* One recipe per music voice, rewritten when that voice takes a note.
+   Voice::snd is a POINTER, so a note cannot be a local -- it has to outlive the
+   call that started it. One per voice rather than a shared ring because a voice
+   only ever reads its own, so nothing can rewrite a recipe out from under a
+   note that is still sounding.
+   음악 보이스마다 레시피 하나이며, 그 보이스가 음표를 받을 때 덮어씁니다. Voice::snd는
+   *포인터*이므로 음표는 지역 변수일 수 없습니다. 그것을 시작한 호출보다 오래 살아야 합니다.
+   공유 링이 아니라 보이스당 하나인 이유는, 보이스가 오직 자기 것만 읽으므로 아직 울리고 있는
+   음표 밑에서 레시피가 다시 쓰이는 일이 없기 때문입니다. */
+static Sound g_note[MUSIC_VOICES];
+
 /* --- 정적 함수 선언 --- */
 static void parse_sounds(void);
 static void parse_text(const char *text, int want_layers);
@@ -656,10 +692,67 @@ static v3 g_listener;
  * 소리 하나이며, 대안을 택하는 대가는 믹서가 샘플마다 전역 둘을 읽는 것입니다. */
 static int g_vol_master = 100;
 static int g_vol_sfx    = 100;
+static int g_vol_music  = 100;
 
-void audio_set_volume(int master, int sfx) {
+void audio_set_volume(int master, int sfx, int music) {
     g_vol_master = master < 0 ? 0 : (master > 100 ? 100 : master);
     g_vol_sfx    = sfx    < 0 ? 0 : (sfx    > 100 ? 100 : sfx);
+    g_vol_music  = music  < 0 ? 0 : (music  > 100 ? 100 : music);
+}
+
+void audio_note(int wave, int freq, int dur_ms, int gain) {
+    if (dur_ms <= 0 || freq <= 0) return;
+    if (!audio_dev_lock()) return;
+
+    /* Music voices only, and the oldest of those loses. Unlike an effect, a
+       note that gets evicted is one the piece needed -- but four voices is
+       four voices, and the importer already reduced the arrangement to fit.
+       What arrives here past that is a chord the reduction let through.
+       음악 보이스만이며, 그중 가장 오래된 것이 밀립니다. 효과음과 달리 밀려난 음표는 곡에
+       필요했던 음표입니다. 그러나 네 보이스는 네 보이스이고, 임포터가 이미 편곡을 그에 맞게
+       줄였습니다. 그것을 지나 이곳에 도착하는 것은 축소가 통과시킨 화음입니다. */
+    int slot = -1, oldest = SFX_VOICES, oldest_pos = -1;
+    for (int i = SFX_VOICES; i < MAX_VOICES; i++) {
+        if (!g_voices[i].snd) { slot = i; break; }
+        if (g_voices[i].pos > oldest_pos) { oldest_pos = g_voices[i].pos; oldest = i; }
+    }
+    if (slot < 0) slot = oldest;
+
+    /* A note is a ONE-LAYER RECIPE with no sweep: f0 == f1, so the pitch holds.
+       Everything render_voice already does -- the oscillator, the envelope, the
+       gain -- applies unchanged, which is why music needed no mixer changes.
+       음표는 스윕이 없는 *1레이어 레시피*입니다. f0 == f1이므로 음높이가 유지됩니다.
+       render_voice가 이미 하는 모든 것(오실레이터, 엔벨로프, 게인)이 그대로 적용되며, 그래서
+       음악에 믹서 변경이 필요 없었습니다. */
+    Sound *S = &g_note[slot - SFX_VOICES];
+    S->name[0] = 0;
+    S->pcm_at  = 0;
+    S->pcm_n   = 0;
+    S->n       = 1;
+
+    Layer *L = &S->layers[0];
+    L->wave = (short)(wave & 3);
+    L->ms   = (short)(dur_ms > 32767 ? 32767 : dur_ms);
+    L->f0   = L->f1 = (short)(freq > 32767 ? 32767 : freq);
+    /* A short attack keeps a square wave from clicking on every note; the decay
+       runs the whole length so a note fades rather than stopping dead.
+       짧은 어택이 사각파가 음표마다 딸깍거리지 않게 하고, 디케이가 전체 길이에 걸쳐 진행되어
+       음표가 뚝 끊기지 않고 사그라듭니다. */
+    L->atk  = 6;
+    L->dec  = L->ms;
+    L->vol  = 100;
+
+    gain = gain * g_vol_master / 100;
+    gain = gain * g_vol_music  / 100;
+
+    Voice *V = &g_voices[slot];
+    V->snd  = S;
+    V->pos  = 0;
+    V->gain = gain < 0 ? 0 : (gain > 100 ? 100 : gain);
+    V->rng  = 0x2545f491u + (unsigned)slot * 2654435761u;
+    for (int k = 0; k < MAX_LAYERS; k++) { V->phase[k] = 0.0f; V->hold[k] = 0.0f; }
+
+    audio_dev_unlock();
 }
 
 void audio_listener(v3 pos) { g_listener = pos; }
@@ -683,8 +776,12 @@ static void play_gain(const char *name, int gain) {
     const Sound *s = find_sound(name);
     if (!s || (!s->n && s->pcm_n <= 0)) { audio_dev_unlock(); return; }
 
+    /* SFX_VOICES, not MAX_VOICES: the tail of the array belongs to the music
+       and an effect must never evict a note out of it. See the split above.
+       MAX_VOICES가 아니라 SFX_VOICES입니다. 배열의 뒤쪽은 음악의 것이며 효과음이 그곳에서
+       음표를 밀어내서는 안 됩니다. 위의 분할을 참조하십시오. */
     int slot = -1, oldest = -1, oldest_pos = -1;
-    for (int i = 0; i < MAX_VOICES; i++) {
+    for (int i = 0; i < SFX_VOICES; i++) {
         if (!g_voices[i].snd) { slot = i; break; }
         if (g_voices[i].pos > oldest_pos) { oldest_pos = g_voices[i].pos; oldest = i; }
     }

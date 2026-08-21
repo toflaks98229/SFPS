@@ -668,6 +668,16 @@ static int level_parse_text(const char *name, Level *out) {
 
         if (txt_is(t, len, "s")) {
             cur = 0;
+            /* Reported BEFORE the room is refused, in the shape the light
+               cap below already uses: ask whether the cap was hit, then ask
+               whether there is room. Two statements rather than an else,
+               because `found` gates both and an else would have to repeat it.
+               See ::DIAG_SECTOR_CAP.
+               방이 거절되기 *전에* 보고하며, 아래의 광원 상한이 이미 쓰는 형태를 따릅니다.
+               상한에 닿았는지 먼저 묻고, 그다음 자리가 있는지 묻습니다. else가 아니라 문장
+               둘인 이유는 `found`가 양쪽을 막고 있어 else가 그것을 다시 써야 하기
+               때문입니다. ::DIAG_SECTOR_CAP을 참조하십시오. */
+            if (found && out->n_sectors >= LVL_MAX_SECTORS) DIAG(DIAG_SECTOR_CAP);
             if (found && out->n_sectors < LVL_MAX_SECTORS) {
                 cur = &out->sectors[out->n_sectors++];
 
@@ -782,6 +792,16 @@ static int level_parse_text(const char *name, Level *out) {
                 if (!ok) { p = save; break; }
                 p = txt_read_int(p, &z, &ok);
                 if (!ok) { p = save; break; }
+                /* `cur` rather than `found`: a sector the `s` handler above
+                   refused leaves `cur` null, and those points belong to a room
+                   already counted as missing. Reporting them again would charge
+                   one fault twice and send the reader to the wrong constant.
+                   See ::DIAG_POINT_CAP.
+                   `found`이 아니라 `cur`입니다. 위의 `s` 처리기가 거절한 섹터는 `cur`을 널로
+                   남기며, 그 점들은 이미 사라진 것으로 계수된 방의 것입니다. 다시 보고하면
+                   하나의 결함에 두 번 값을 매기고 읽는 사람을 엉뚱한 상수로 보내게
+                   됩니다. ::DIAG_POINT_CAP을 참조하십시오. */
+                if (cur && cur->n >= LVL_MAX_PTS) DIAG(DIAG_POINT_CAP);
                 if (cur && cur->n < LVL_MAX_PTS) {
                     cur->pts[cur->n * 2 + 0] = (short)x;
                     cur->pts[cur->n * 2 + 1] = (short)z;
@@ -1046,7 +1066,7 @@ static void brush_start_of(Level *out, const BrushMap *bm) {
     for (int i = 0; i < bm->n_ents; i++) {
         const BrushEnt *e = &bm->ents[i];
         const char *cn = brush_ent_value(e, "classname");
-        if (!cn || !txt_is(cn, 17, "info_player_start")) continue;
+        if (!cn || !txt_eq(cn, "info_player_start")) continue;
 
         v3 o;
         if (!brush_ent_point(e, "origin", &o)) continue;
@@ -1107,7 +1127,18 @@ static void brush_lights_of(Level *out, const BrushMap *bm) {
     for (int i = 0; i < bm->n_ents; i++) {
         const BrushEnt *e = &bm->ents[i];
         const char *cn = brush_ent_value(e, "classname");
-        if (!cn || !txt_is(cn, 5, "light")) continue;
+        /* ::txt_eq, not ::txt_is with a length. The length form stops comparing
+           where the literal ends, so this read `light` and accepted
+           `light_fluoro`, `light_torch_small` and every other member of Quake's
+           lamp family as a point light with this one's fields -- which the
+           imported maps have not carried yet and would the first time one did.
+           Nine sites had that shape; see the note on ::txt_eq.
+           길이를 넘기는 ::txt_is가 아니라 ::txt_eq입니다. 길이 형태는 리터럴이 끝나는
+           곳에서 비교를 멈추므로, 이 줄은 `light`를 읽으면서 `light_fluoro`,
+           `light_torch_small`을 비롯한 Quake 등 계열 전부를 이곳의 필드를 가진 점광원으로
+           받아들였습니다. 가져온 맵들이 아직 그것을 나르지 않았을 뿐이며, 하나라도 나르는
+           순간 그렇게 됩니다. 아홉 곳이 그 형태였습니다. ::txt_eq의 설명을 참조하십시오. */
+        if (!cn || !txt_eq(cn, "light")) continue;
 
         v3 o;
         if (!brush_ent_point(e, "origin", &o)) continue;
@@ -1230,9 +1261,9 @@ static int key_for(const BrushEnt *e) {
         for (int i = 0; v[i] >= '0' && v[i] <= '9'; i++) m = m * 10 + (v[i] - '0');
         return m & (KEY_RED | KEY_BLUE | KEY_YELLOW);
     }
-    if (txt_is(v, 3, "red"))    return KEY_RED;
-    if (txt_is(v, 4, "blue"))   return KEY_BLUE;
-    if (txt_is(v, 6, "yellow")) return KEY_YELLOW;
+    if (txt_eq(v, "red"))    return KEY_RED;
+    if (txt_eq(v, "blue"))   return KEY_BLUE;
+    if (txt_eq(v, "yellow")) return KEY_YELLOW;
     return KEY_NONE;
 }
 
@@ -1265,7 +1296,7 @@ static void brush_triggers_of(Level *out, BrushMap *bm, TagPool *tp) {
         int n = 0;
         while (PRE[n] && cn[n] == PRE[n]) n++;
         if (PRE[n]) continue;
-        if (txt_is(cn, 12, "trigger_hurt")) continue;
+        if (txt_eq(cn, "trigger_hurt")) continue;
         if (e->n_brushes < 1) continue;
 
         /* Walked into, not bumped into. Cleared before anything can trace
@@ -1311,7 +1342,7 @@ static void brush_hazards_of(Level *out, BrushMap *bm) {
     for (int i = 0; i < bm->n_ents; i++) {
         const BrushEnt *e = &bm->ents[i];
         const char *cn = brush_ent_value(e, "classname");
-        if (!cn || !txt_is(cn, 12, "trigger_hurt")) continue;
+        if (!cn || !txt_eq(cn, "trigger_hurt")) continue;
         if (e->n_brushes < 1) continue;
 
         for (int k = 0; k < e->n_brushes; k++)
@@ -1332,7 +1363,7 @@ static void brush_doors_of(Level *out, const BrushMap *bm, TagPool *tp) {
     for (int i = 0; i < bm->n_ents; i++) {
         const BrushEnt *e = &bm->ents[i];
         const char *cn = brush_ent_value(e, "classname");
-        if (!cn || !txt_is(cn, 9, "func_door")) continue;
+        if (!cn || !txt_eq(cn, "func_door")) continue;
         if (e->n_brushes < 1) continue;          /* a door with no leaf */
 
         if (out->n_doors >= LVL_MAX_DOORS) { DIAG(DIAG_DOOR_CAP); continue; }
@@ -1550,7 +1581,7 @@ static int load_brush_level(BrushStore *bs, const char *name, Level *out) {
        내는 일입니다. */
     for (int i = 0; i < bm->n_ents; i++) {
         const char *cn = brush_ent_value(&bm->ents[i], "classname");
-        if (!cn || !txt_is(cn, 10, "worldspawn")) continue;
+        if (!cn || !txt_eq(cn, "worldspawn")) continue;
         const char *nx = brush_ent_value(&bm->ents[i], "next");
         if (nx && nx[0]) copy_name(out->next, sizeof(out->next), nx, -1);
         break;

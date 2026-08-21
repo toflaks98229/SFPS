@@ -539,6 +539,17 @@ static void draw_pass(const Pools *pl, int blend, v3 cam_right, v3 cam_up) {
     }
 }
 
+/* Beside ::fx_draw rather than beside the declarations at the top, because the
+   mb_init it pairs with is inside fx_draw, and a pair that is read together is
+   a pair that stays together.
+   선언부가 아니라 ::fx_draw 곁입니다. 짝을 이루는 mb_init이 fx_draw 안에 있으며, 함께 읽히는
+   짝이 함께 남는 짝이기 때문입니다. */
+void fx_free(void) {
+    if (!g_buf_ready) return;
+    mb_free(&g_buf);
+    g_buf_ready = 0;
+}
+
 void fx_draw(const Pools *pl, mat4 vp, v3 cam_right, v3 cam_up) {
     DIAG_WANT_WORLD_PASS(post_in_world_pass());
 

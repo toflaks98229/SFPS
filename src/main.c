@@ -1494,7 +1494,11 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
     if (!demo_file_close(&g_demo))
         MessageBoxA(0, "The demo could not be written.", "SFPS", MB_ICONERROR);
 
-    /* Pairs every mb_init in scene_init, and level_buf's below. The process is
+    /* Pairs every mb_init the program made: ::scene_init's, and the two
+       modules that build their own buffer on first draw rather than at
+       start-up. fx's was the one missing -- it allocated inside ::fx_draw and
+       nothing here answered it, which is exactly the drift this paragraph
+       warns about happening to the paragraph itself. The process is
        about to exit and the OS would reclaim all of it anyway, but render.h
        states the contract and this file is the one people copy from when they
        add a buffer -- leaving it unpaired here is how it stops being kept
@@ -1502,7 +1506,10 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
        This paragraph sat above demo_close() until the demo plumbing moved out,
        which is how a comment ends up explaining the call that happens to follow
        it rather than the one it was written for.
-       scene_init의 모든 mb_init과 짝을 맞춥니다. 프로세스가 곧
+       프로그램이 만든 모든 mb_init과 짝을 맞춥니다. ::scene_init의 것들, 그리고 시작 시점이
+       아니라 첫 그리기에서 자기 버퍼를 만드는 두 모듈의 것입니다. 빠져 있던 것은 fx였습니다.
+       ::fx_draw 안에서 할당하는데 이곳에서 답하는 것이 없었으며, 이 문단이 경고하는 바로 그
+       어긋남이 이 문단 자신에게 일어난 것입니다. 프로세스가 곧
        종료되므로 OS가 어차피 전부 회수하지만, render.h가 계약을 명시하고 있으며 새
        버퍼를 추가하는 사람이 참고하는 파일이 바로 이 파일입니다. 이곳에서 짝을 맞추지
        않으면 그 계약은 어디에서도 지켜지지 않게 됩니다.
@@ -1510,6 +1517,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
        설명하려던 호출이 아니라 우연히 뒤에 오는 호출을 설명하게 되는 방식이 그것입니다. */
     scene_free(&scene);
     decal_free();
+    fx_free();
 
     post_shutdown();
     audio_shutdown();

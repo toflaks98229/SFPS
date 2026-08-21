@@ -108,7 +108,22 @@ typedef struct BrushStore BrushStore;
 
 /* --- Capacity limits / 용량 제한 --- */
 
+/* Overridable by the build so a second binary can be compiled with caps the
+   shipped levels overrun, the same way LIGHT_CACHE_SLOTS and MAX_CACHED are.
+   Both refusals below them -- the sector the loader has no slot for, the point
+   that does not fit an outline -- report through ::DIAG_SECTOR_CAP and
+   ::DIAG_POINT_CAP, and a counter whose branch no binary reaches is a counter
+   nobody has seen work. dm03 is 59 sectors against 64 and its largest outline
+   is 38 against 48, so nothing here overflows on its own.
+   build.ps1이 출하 레벨이 초과하는 상한으로 두 번째 바이너리를 컴파일할 수 있도록
+   재정의를 허용합니다. LIGHT_CACHE_SLOTS와 MAX_CACHED가 그러한 것과 같습니다. 아래 두
+   거절(로더에 자리가 없는 섹터, 외곽선에 들어가지 못하는 점)은 ::DIAG_SECTOR_CAP과
+   ::DIAG_POINT_CAP으로 보고하며, 어떤 바이너리도 도달하지 않는 분기를 가진 카운터는
+   아무도 동작을 본 적 없는 카운터입니다. dm03은 64에 대해 섹터 59개이고 가장 큰 외곽선은
+   48에 대해 38이므로, 이곳의 무엇도 저절로 넘치지 않습니다. */
+#ifndef LVL_MAX_SECTORS
 #define LVL_MAX_SECTORS 64     ///< @brief Maximum sectors per level. / 레벨당 최대 섹터 수.
+#endif
 /* Raised from 32 when the first imported Doom level was measured against it.
    Hand-authored sectors here are four to eight points; a room somebody drew in
    a Doom editor is whatever shape the walls took, and dm03's largest is 38.
@@ -119,7 +134,9 @@ typedef struct BrushStore BrushStore;
    4~8점이지만, Doom 에디터에서 그린 방은 벽이 이룬 모양 그대로이고 dm03의 최대는
    38입니다. 38이 아니라 48인 이유는, 이 값이 섹터당 점당 2바이트의 .bss 비용일 뿐이며
    오늘의 맵에 정확히 맞춘 상한은 내일의 맵에서 실패하기 때문입니다. */
+#ifndef LVL_MAX_PTS
 #define LVL_MAX_PTS     48     ///< @brief Maximum vertices per sector. / 섹터당 최대 정점 수.
+#endif
 #define LVL_MAX_ENTS    64     ///< @brief Maximum entities per level. / 레벨당 최대 엔티티 수.
 
 /* HOW MANY NUMBERS AN ENTITY MAY CARRY beyond its position. Three because that

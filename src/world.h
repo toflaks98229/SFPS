@@ -809,8 +809,8 @@ typedef struct {
      * Those were two separate call sites, each remembering to rebuild for its
      * own reason, and a third mover of sectors would have been a third. This is
      * one flag, raised by whatever moved them and consumed in one place by
-     * ::world_take_geometry -- which is also what keeps this module from having
-     * to know that a Scene exists.
+     * ::world_take_geometry_scope -- which is also what keeps this module from
+     * having to know that a Scene exists.
      *
      * 한국어
      * ------
@@ -822,7 +822,7 @@ typedef struct {
      *
      * 이전에는 두 개의 별개 호출 지점이 각자의 이유로 재생성을 기억하고 있었고, 섹터를
      * 움직이는 세 번째 시스템이 생기면 세 번째가 되었을 것입니다. 이제는 플래그 하나이며,
-     * 움직인 쪽이 세우고 ::world_take_geometry가 한 곳에서 소비합니다. 그것이 또한 이
+     * 움직인 쪽이 세우고 ::world_take_geometry_scope가 한 곳에서 소비합니다. 그것이 또한 이
      * 모듈이 Scene의 존재를 알지 않아도 되게 하는 장치입니다.
      */
     /* A ::WorldGeom rather than a flag, so the consumer can tell "a level was
@@ -1444,39 +1444,6 @@ int world_boss_present(const World *w);
  */
 int world_step(World *w, const Input *in, float aspect, float dt);
 
-/**
- * @brief Claims the pending level-geometry rebuild, if there is one.
- *
- * ENGLISH
- * -------
- * @param[in,out] w       The world.
- * @param[out]    dynamic Receives what to pass ::scene_build_level as its
- *                        `dynamic` argument: 0 the first time, so the mesh is
- *                        created, and 1 afterwards, so an existing allocation
- *                        is replaced. May be NULL.
- * @return Non-zero if the drawn geometry must be rebuilt now.
- *
- * @note "Take", not "test": the flag is cleared and the upload is recorded as
- *       having happened, so a caller that asks must then rebuild. That is the
- *       trade for the caller never having to work out `dynamic` itself, which
- *       was previously a literal 0 at one call site and a literal 1 at two
- *       others.
- *
- * 한국어
- * ------
- * @brief 대기 중인 레벨 지오메트리 재생성 요청이 있으면 가져옵니다.
- * @param[in,out] w       월드.
- * @param[out]    dynamic ::scene_build_level의 `dynamic` 인자로 넘길 값을 받습니다. 첫
- *                        번째는 0이어서 메시가 생성되고, 이후는 1이어서 기존 할당이
- *                        교체됩니다. NULL이어도 됩니다.
- * @return 지금 그려지는 지오메트리를 다시 만들어야 하면 0이 아닙니다.
- *
- * @note "검사"가 아니라 "가져오기"입니다. 플래그가 지워지고 업로드가 일어난 것으로
- *       기록되므로, 물어본 호출자는 반드시 재생성해야 합니다. 그것이 호출자가 `dynamic`을
- *       스스로 따지지 않아도 되는 것의 대가입니다. 그 값은 이전에 한 호출 지점에서는 리터럴
- *       0이었고 다른 두 곳에서는 리터럴 1이었습니다.
- */
-int world_take_geometry(World *w, int *dynamic);
 
 /**
  * @enum WorldGeom
@@ -1494,14 +1461,19 @@ int world_take_geometry(World *w, int *dynamic);
  * invalidates only what it moves. Saying which is what lets ::scene_frame's
  * neighbour ::scene_rebuild_moving do the cheap one.
  *
- * @note ORDERED, and the order is what makes ::world_take_geometry's
- *       escalation a `max` rather than a decision. A door that moves in the
- *       same frame a level loads must not downgrade the load's whole rebuild to
- *       a partial one, and taking the larger of the two says so without anyone
- *       having to remember it.
- * @note ::WORLD_GEOM_NONE is 0, so the old `if (world_take_geometry(...))`
- *       reads exactly as it did and tools\steptest.c's assertions did not have
- *       to change.
+ * @note ORDERED, and the order is what lets ::World::geometry_dirty escalate by
+ *       comparison rather than by decision -- ::world_step raises it to
+ *       ::WORLD_GEOM_MOVING only when it is currently lower. A door that moves
+ *       in the same frame a level loads must not downgrade the load's whole
+ *       rebuild to a partial one, and taking the larger of the two says so
+ *       without anyone having to remember it.
+ * @note ::WORLD_GEOM_NONE is 0, so a caller that only wants to know WHETHER
+ *       anything is pending can still write `if (world_take_geometry_scope(...))`
+ *       and read it the way the one-bit flag read. That is what the wrapper
+ *       this enum replaced existed to provide, and why it is gone: a second
+ *       entry point answering a narrower version of the same question is a
+ *       second thing to keep correct, and the only caller left for it was a
+ *       test.
  *
  * 한국어
  * ------
@@ -1516,12 +1488,16 @@ int world_take_geometry(World *w, int *dynamic);
  * 무효화합니다. 어느 쪽인지 말하는 것이 ::scene_rebuild_moving이 값싼 쪽을 택할 수 있게
  * 합니다.
  *
- * @note *순서가 있으며*, 그 순서가 ::world_take_geometry의 승격을 판단이 아니라 `max`로
- *       만듭니다. 레벨이 로드되는 바로 그 프레임에 움직인 문이 로드의 전체 재생성을 부분
+ * @note *순서가 있으며*, 그 순서가 ::World::geometry_dirty를 판단이 아니라 비교로
+ *       승격할 수 있게 합니다. ::world_step은 현재 값이 더 낮을 때만 ::WORLD_GEOM_MOVING으로
+ *       올립니다. 레벨이 로드되는 바로 그 프레임에 움직인 문이 로드의 전체 재생성을 부분
  *       재생성으로 격하시켜서는 안 되며, 둘 중 큰 쪽을 취하는 것이 아무도 그것을 기억하지
  *       않아도 그렇게 말해 줍니다.
- * @note ::WORLD_GEOM_NONE이 0이므로 기존의 `if (world_take_geometry(...))`가 그대로 읽히며,
- *       tools\steptest.c의 단언도 바꿀 필요가 없었습니다.
+ * @note ::WORLD_GEOM_NONE이 0이므로, 대기 중인 것이 있는지만 알고 싶은 호출자는 여전히
+ *       `if (world_take_geometry_scope(...))`로 쓰고 1비트 플래그처럼 읽을 수 있습니다. 이
+ *       열거형이 대체한 래퍼가 제공하려던 것이 바로 그것이며, 그것이 사라진 이유도
+ *       그것입니다. 같은 질문의 더 좁은 판에 답하는 두 번째 진입점은 올바르게 유지해야 할
+ *       두 번째 대상이며, 그것에 남은 유일한 호출자는 테스트였습니다.
  */
 typedef enum {
     WORLD_GEOM_NONE = 0, /**< Nothing to do. / 할 일 없음. */
@@ -1534,23 +1510,39 @@ typedef enum {
  *
  * ENGLISH
  * -------
- * ::world_take_geometry with the scope kept rather than flattened. Same
- * clearing, same `dynamic`, same "take rather than test" contract.
- *
  * @param[in,out] w       The world.
- * @param[out]    dynamic As ::world_take_geometry. May be NULL.
+ * @param[out]    dynamic Receives what to pass ::scene_build_level as its
+ *                        `dynamic` argument: 0 the first time, so the mesh is
+ *                        created, and 1 afterwards, so an existing allocation
+ *                        is replaced. May be NULL.
  * @return ::WORLD_GEOM_NONE when there is nothing pending, otherwise how much.
+ *
+ * @note "Take", not "test": the flag is cleared and the upload is recorded as
+ *       having happened, so a caller that asks must then rebuild. That is the
+ *       trade for the caller never having to work out `dynamic` itself, which
+ *       was previously a literal 0 at one call site and a literal 1 at two
+ *       others.
+ * @note This is the whole of the interface. A wrapper that flattened the scope
+ *       to a yes/no stood beside it until its last non-test caller went away;
+ *       see the second note on ::WorldGeom for why it did not survive that.
  *
  * 한국어
  * ------
  * @brief 대기 중인 재생성을 가져오며, 그중 얼마가 낡았는지 함께 말합니다.
  *
- * 범위를 뭉개지 않고 유지하는 ::world_take_geometry입니다. 비우는 방식도, `dynamic`도,
- * "검사가 아니라 가져오기"라는 계약도 같습니다.
- *
  * @param[in,out] w       월드.
- * @param[out]    dynamic ::world_take_geometry와 같습니다. NULL이어도 됩니다.
+ * @param[out]    dynamic ::scene_build_level의 `dynamic` 인자로 넘길 값을 받습니다. 첫
+ *                        번째는 0이어서 메시가 생성되고, 이후는 1이어서 기존 할당이
+ *                        교체됩니다. NULL이어도 됩니다.
  * @return 대기 중인 것이 없으면 ::WORLD_GEOM_NONE, 아니면 그 범위.
+ *
+ * @note "검사"가 아니라 "가져오기"입니다. 플래그가 지워지고 업로드가 일어난 것으로
+ *       기록되므로, 물어본 호출자는 반드시 재생성해야 합니다. 그것이 호출자가 `dynamic`을
+ *       스스로 따지지 않아도 되는 것의 대가입니다. 그 값은 이전에 한 호출 지점에서는 리터럴
+ *       0이었고 다른 두 곳에서는 리터럴 1이었습니다.
+ * @note 이것이 인터페이스의 전부입니다. 범위를 예/아니오로 뭉개는 래퍼가 곁에 있었으나,
+ *       테스트가 아닌 마지막 호출자가 사라지면서 함께 사라졌습니다. 그것이 살아남지 못한
+ *       이유는 ::WorldGeom의 두 번째 참고 사항을 보십시오.
  */
 WorldGeom world_take_geometry_scope(World *w, int *dynamic);
 

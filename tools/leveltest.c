@@ -9,7 +9,8 @@
 #include <math.h>
 #include <time.h>
 #include "level.h"
-#include "txt.h"    /* txt_is -- compare a fixed-width name to a literal */
+#include "txt.h"    /* txt_is, and txt_to_int, which every number below goes through */
+#include <limits.h> /* INT_MAX / INT_MIN, the two values the saturation lands on */
 #include "player.h"
 /* Builds real geometry to check winding and spans, so it needs the renderer's
    CPU-side half and MdlRange by value. level.h forward-declares both rather
@@ -414,6 +415,21 @@ _Static_assert(WANT_LAMPS > RD_MAX_LIGHTS,
 _Static_assert(WANT_LAMPS <= LVL_MAX_LIGHTS,
                "a level may no longer declare more lamps than the shader holds"
                " -- the two caps have been tied together again");
+/* A ROOM PER LAMP, so this fixture spends a sector on each one too -- which is
+   a claim on a second cap, and it was not being made. A build with
+   LVL_MAX_SECTORS below WANT_LAMPS wrote sixteen sectors into an array that
+   held eight and took the segfault, with nothing to say the fixture had
+   outgrown the format. It is the same argument as the assert above it: the
+   realistic way this breaks is somebody lowering a cap, and that should land
+   here naming the reason.
+   등마다 방 하나이므로 이 픽스처는 등마다 섹터도 하나씩 씁니다. 이는 두 번째 상한에 대한
+   주장이며 그동안 제기되지 않고 있었습니다. LVL_MAX_SECTORS가 WANT_LAMPS보다 낮은 빌드는
+   여덟 개를 담는 배열에 섹터 열여섯 개를 기록하고 segfault를 냈으며, 픽스처가 형식보다
+   커졌다고 말해 주는 것은 아무것도 없었습니다. 위 검사와 같은 논거입니다. 이것이 깨지는
+   현실적인 경로는 누군가 상한을 낮추는 것이며, 그것은 이유를 말하며 이곳에 도착해야
+   합니다. */
+_Static_assert(WANT_LAMPS <= LVL_MAX_SECTORS,
+               "one room per lamp: the fixture needs a sector for each");
 
 static void many_lamp_checks(void) {
     Level l;
@@ -518,6 +534,185 @@ static void light_cache_checks(void) {
     /* Left empty for whatever runs next, so one test cannot lend another its
        readings. */
     level_light_cache_reset();
+}
+
+/* The two refusals in the text loader that had no counter behind them.
+ *
+ * ENGLISH
+ * -------
+ * A sector past ::LVL_MAX_SECTORS and a point past ::LVL_MAX_PTS were both
+ * dropped in silence while every cap beside them -- doors, entities, lights,
+ * triggers, hazards -- reported. ::DIAG_SECTOR_CAP and ::DIAG_POINT_CAP close
+ * that, and this is what proves they close it: a counter whose branch no
+ * binary reaches is a counter nobody has seen work.
+ *
+ * The shipped caps cannot be reached by the shipped levels -- that is what
+ * makes them adequate caps -- so build.ps1 compiles leveltest_tinycaps with
+ * both forced down, the same bargain textest_tinycache and leveltest_tinylcache
+ * already make. This function asserts the OPPOSITE thing in each binary, and
+ * decides which from the constants rather than from an #ifdef: they are visible
+ * here because this file and level.c are compiled with the same -D.
+ *
+ * What is required of both is the same and is the important part: a loader that
+ * ran out of room must still produce a SELF-CONSISTENT level. Dropping the
+ * surplus is allowed. Ending up with more sectors than the array holds, or an
+ * outline longer than its own storage, is not -- and that is the failure the
+ * silence used to hide.
+ *
+ * 한국어
+ * ------
+ * 텍스트 로더에서 뒤에 카운터가 없던 두 거절입니다.
+ *
+ * ::LVL_MAX_SECTORS를 넘은 섹터와 ::LVL_MAX_PTS를 넘은 점은 둘 다 조용히 버려졌습니다.
+ * 그 곁의 모든 상한(문, 엔티티, 광원, 트리거, 위험 지형)이 보고하는 동안에 말입니다.
+ * ::DIAG_SECTOR_CAP과 ::DIAG_POINT_CAP이 그것을 막으며, 이 함수가 그것을 증명합니다.
+ * 어떤 바이너리도 도달하지 않는 분기를 가진 카운터는 아무도 동작을 본 적 없는 카운터입니다.
+ *
+ * 출하 상한은 출하 레벨이 도달할 수 없습니다. 그것이 그 상한을 충분한 상한으로 만드는
+ * 것입니다. 그래서 build.ps1이 둘 다 낮춘 leveltest_tinycaps를 컴파일하며, 이는
+ * textest_tinycache와 leveltest_tinylcache가 이미 맺고 있는 것과 같은 거래입니다. 이
+ * 함수는 각 바이너리에서 *서로 반대되는 것*을 단언하며, 어느 쪽인지를 #ifdef가 아니라
+ * 상수로부터 결정합니다. 이 파일과 level.c가 같은 -D로 컴파일되므로 상수가 이곳에서
+ * 보입니다.
+ *
+ * 양쪽에 요구되는 것은 같고 그것이 중요한 부분입니다. 자리가 모자랐던 로더도 여전히
+ * *자기 자신과 일관된* 레벨을 내놓아야 합니다. 초과분을 버리는 것은 허용됩니다. 배열이
+ * 담는 것보다 많은 섹터로 끝나거나 자기 저장 공간보다 긴 외곽선으로 끝나는 것은 허용되지
+ * 않으며, 침묵이 감추고 있던 실패가 바로 그것입니다.
+ */
+/* Every number in a level file comes through ::txt_to_int.
+ *
+ * ENGLISH
+ * -------
+ * It accumulated into a signed int with no bound on how many digits it would
+ * accept -- ::txt_is_number takes a run of any length -- so `9999999999` in a
+ * hand-edited levels.txt was signed overflow, which is undefined rather than
+ * merely wrong. The fix saturates, and these state where.
+ *
+ * The interesting cases are the two ends. INT_MIN has no positive counterpart,
+ * so a reader that negates its magnitude has the same undefined behaviour one
+ * step later, and the value that reaches it -- `-2147483648` -- is one an
+ * author can plausibly type after a copy-paste.
+ *
+ * 한국어
+ * ------
+ * 레벨 파일의 모든 숫자가 ::txt_to_int를 지나갑니다.
+ *
+ * 이 함수는 몇 자리까지 받을지에 대한 제한 없이 부호 있는 int에 누적했습니다.
+ * ::txt_is_number가 임의 길이의 숫자 나열을 받기 때문입니다. 그래서 손으로 고친
+ * levels.txt의 `9999999999`는 부호 있는 오버플로였고, 이는 단지 틀린 것이 아니라 정의되지
+ * 않은 동작입니다. 수정은 포화시키며, 아래가 그 지점을 진술합니다.
+ *
+ * 흥미로운 것은 양 끝입니다. INT_MIN에는 대응하는 양수가 없으므로, 절댓값을 부정하는
+ * 판독기는 한 걸음 뒤에 같은 정의되지 않은 동작을 갖게 됩니다. 그리고 그곳에 도달하는 값인
+ * `-2147483648`은 제작자가 복사·붙여넣기 뒤에 충분히 칠 만한 값입니다.
+ */
+static void number_checks(void) {
+    static const struct { const char *text; int want; const char *what; } CASES[] = {
+        { "0",                     0,       "zero" },
+        { "1300",                  1300,    "an ordinary push speed" },
+        { "-450",                  -450,    "and an ordinary negative height" },
+        { "2147483647",            INT_MAX, "INT_MAX exactly" },
+        { "-2147483648",           INT_MIN, "INT_MIN exactly, which has no positive twin" },
+        { "2147483648",            INT_MAX, "one past INT_MAX saturates" },
+        { "-2147483649",           INT_MIN, "one past INT_MIN saturates" },
+        { "99999999999999999999",  INT_MAX, "twenty digits saturate" },
+        { "-99999999999999999999", INT_MIN, "and twenty negative ones" },
+    };
+
+    for (int i = 0; i < (int)(sizeof(CASES)/sizeof(CASES[0])); i++) {
+        int len = 0;
+        while (CASES[i].text[len]) len++;
+        okd(txt_to_int(CASES[i].text, len) == CASES[i].want, CASES[i].what,
+            txt_to_int(CASES[i].text, len), CASES[i].want);
+    }
+
+    /* The gate in front of it still calls all of those numbers, and only
+       numbers. Saturating was chosen over rejecting precisely so this did not
+       have to change -- a length limit here would stop a parse at a digit.
+       그 앞의 관문은 여전히 그 전부를 숫자라고 부르며, 숫자만 그렇게 부릅니다. 거부가 아니라
+       포화를 고른 것이 바로 이것을 바꾸지 않아도 되게 하기 위함입니다. 이곳의 길이 제한은
+       파싱을 숫자 앞에서 멈추게 합니다. */
+    ok(txt_is_number("99999999999999999999", 20),
+       "a number too big to hold is still a number to the parser");
+    ok(!txt_is_number("-", 1), "a lone minus is not");
+    ok(!txt_is_number("12a", 3), "and neither is a digit run with a letter in it");
+}
+
+static void cap_checks(void) {
+    static const char *NAMES[] = { "arena", "vault", "dm03" };
+
+    /* Shipped caps, spelled out rather than inferred, so this reads as the
+       claim it is: nothing the project ships comes near either one.
+       추론하지 않고 명시한 출하 상한이며, 그래야 이것이 곧 주장으로 읽힙니다. 이
+       프로젝트가 출하하는 무엇도 둘 중 어느 것에도 근접하지 않습니다. */
+    int shipped = (LVL_MAX_SECTORS >= 64 && LVL_MAX_PTS >= 48);
+
+    int sec_fired = 0, pt_fired = 0;
+
+    for (int i = 0; i < (int)(sizeof(NAMES)/sizeof(NAMES[0])); i++) {
+        int before_s = diag_count(DIAG_SECTOR_CAP);
+        int before_p = diag_count(DIAG_POINT_CAP);
+
+        Level l;
+        if (!level_load(NAMES[i], &l)) {
+            printf("    (no level '%s')\n", NAMES[i]);
+            continue;
+        }
+
+        int ds = diag_count(DIAG_SECTOR_CAP) - before_s;
+        int dp = diag_count(DIAG_POINT_CAP)  - before_p;
+        sec_fired += ds;
+        pt_fired  += dp;
+
+        /* Required of every binary: what came out fits what it came out of.
+           모든 바이너리에 요구되는 것입니다. 나온 것은 그것이 나온 곳에 들어맞습니다. */
+        okd(l.n_sectors <= LVL_MAX_SECTORS, "sectors fit the array", l.n_sectors,
+            LVL_MAX_SECTORS);
+
+        int longest = 0, at_cap = 0;
+        for (int s = 0; s < l.n_sectors; s++) {
+            if (l.sectors[s].n > longest) longest = l.sectors[s].n;
+            if (l.sectors[s].n >= LVL_MAX_PTS) at_cap = 1;
+        }
+        okd(longest <= LVL_MAX_PTS, "every outline fits its storage", longest,
+            LVL_MAX_PTS);
+
+        /* The counter and the state have to agree. A report with no truncated
+           sector behind it is a counter firing on the wrong branch, which is
+           worse than no counter -- it sends the reader to a constant that was
+           never the problem.
+           카운터와 상태가 일치해야 합니다. 잘려 나간 섹터 없이 나온 보고는 엉뚱한 분기에서
+           발생한 카운터이며, 카운터가 없는 것보다 나쁩니다. 문제였던 적 없는 상수로 읽는
+           사람을 보내기 때문입니다. */
+        if (ds > 0)
+            okd(l.n_sectors == LVL_MAX_SECTORS,
+                "a reported sector overflow left the array full", l.n_sectors,
+                LVL_MAX_SECTORS);
+        if (dp > 0)
+            ok(at_cap, "a reported point overflow left an outline at the cap");
+
+        printf("    %-6s %2d sectors (cap %d), longest outline %2d (cap %d),"
+               " DIAG %d/%d\n",
+               NAMES[i], l.n_sectors, LVL_MAX_SECTORS, longest, LVL_MAX_PTS,
+               ds, dp);
+
+        level_release(&l);
+    }
+
+    if (shipped) {
+        okd(sec_fired == 0, "no shipped level runs out of sectors", sec_fired, 0);
+        okd(pt_fired  == 0, "and none runs out of outline points",  pt_fired,  0);
+    } else {
+        /* The whole reason this binary exists. If either of these goes red, the
+           report is not reachable and the shipped assertions above are asserting
+           that an unreachable thing did not happen.
+           이 바이너리가 존재하는 이유 전부입니다. 둘 중 하나라도 빨간불이면 그 보고는 도달
+           불가능하며, 위의 출하 단언은 도달할 수 없는 일이 일어나지 않았다고 단언하고 있는
+           셈입니다. */
+        ok(sec_fired > 0, "the forced sector cap is reported, not swallowed");
+        ok(pt_fired  > 0, "and so is the forced point cap");
+    }
 }
 
 int main(void) {
@@ -927,15 +1122,35 @@ int main(void) {
         Level zero = {0};
         big = zero;
         /* A full grid of overlapping squares -- every sector touching its
-           neighbours, which is the expensive arrangement. */
-        for (int gz = 0; gz < 8; gz++) {
-            for (int gx = 0; gx < 8; gx++) {
+           neighbours, which is the expensive arrangement.
+
+           The side is DERIVED from the cap rather than written as 8. It was 8
+           because the cap is 64, which is the same coupling as writing the cap
+           out twice: a build with a smaller LVL_MAX_SECTORS ran this loop past
+           the end of the array, and gcc said so the first time one existed
+           (-Waggressive-loop-optimizations, "iteration 1 invokes undefined
+           behavior"). The comment above already claims this fixture sits at
+           the format's limit; deriving it is what makes the claim true in
+           every build rather than in the one it was written in.
+
+           변의 길이를 8이라고 쓰지 않고 상한에서 *유도*합니다. 8이었던 것은 상한이
+           64이기 때문이며, 이는 상한을 두 번 적어 두는 것과 같은 결합입니다. 더 작은
+           LVL_MAX_SECTORS로 빌드하면 이 루프가 배열 끝을 넘어갔고, 그런 빌드가 처음
+           생겼을 때 gcc가 그렇게 말했습니다(-Waggressive-loop-optimizations, "반복 1이
+           정의되지 않은 동작을 유발합니다"). 위 주석은 이미 이 픽스처가 형식의 한계에
+           있다고 주장합니다. 유도하는 것이 그 주장을, 그것이 작성된 빌드에서만이 아니라
+           모든 빌드에서 참이게 만듭니다. */
+        int side = 1;
+        while ((side + 1) * (side + 1) <= LVL_MAX_SECTORS) side++;
+
+        for (int gz = 0; gz < side; gz++) {
+            for (int gx = 0; gx < side; gx++) {
                 Sector *s = &big.sectors[big.n_sectors++];
                 short x0 = (short)(gx * 300 - 1200), z0 = (short)(gz * 300 - 1200);
                 short x1 = (short)(x0 + 400),        z1 = (short)(z0 + 400);
                 short p[8] = { x0,z0,  x1,z0,  x1,z1,  x0,z1 };
                 for (int i = 0; i < 8; i++) s->pts[i] = p[i];
-                s->n = 4;
+                s->n = 4;   /* four, and LVL_MAX_PTS is never below that */
                 s->floor = (short)((gx + gz) * 20);
                 s->ceil = 600;
             }
@@ -1278,6 +1493,23 @@ int main(void) {
     {
         printf("\n  --- baked-light cache ---\n");
         light_cache_checks();
+    }
+
+    /* --- the caps that used to fail in silence ---------------------------
+       Last, because it loads every level again and a counter reading is only
+       as clean as what ran before it -- these compare deltas, but a level left
+       loaded by an earlier section would still be paying for its own bake.
+       마지막입니다. 모든 레벨을 다시 로드하며, 카운터 읽기는 그 앞에 실행된 것만큼만
+       깨끗합니다. 이 검사들이 증분을 비교하기는 하지만, 앞 절이 로드된 채 남긴 레벨은
+       여전히 자기 베이크 비용을 치르고 있게 됩니다. */
+    {
+        printf("\n  --- the number reader every level goes through ---\n");
+        number_checks();
+    }
+
+    {
+        printf("\n  --- capacity reports from the text loader ---\n");
+        cap_checks();
     }
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall level checks passed\n", fails);

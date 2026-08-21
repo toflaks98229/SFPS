@@ -471,18 +471,43 @@ int main(void) {
         fixture(&w, 0);
         w.geometry_dirty = 0;
 
+        /* Against the SCOPE, which is what main.c switches on. These used to
+           call a wrapper that flattened the answer to yes/no, and it survived
+           only because these four lines were its last callers -- a second
+           entry point kept alive by the test for it. Comparing to
+           ::WORLD_GEOM_NONE says the same thing and says it about the value
+           the game actually reads.
+           main.c가 분기하는 대상인 *범위*에 대해 단언합니다. 이전에는 답을 예/아니오로
+           뭉개는 래퍼를 호출했고, 그 래퍼는 이 네 줄이 마지막 호출자였기 때문에만 살아
+           있었습니다. 자신을 위한 테스트가 살려 두는 두 번째 진입점이었습니다.
+           ::WORLD_GEOM_NONE과 비교하면 같은 것을 말하되, 게임이 실제로 읽는 값에 대해
+           말하게 됩니다. */
         int dynamic = -1;
-        ok(!world_take_geometry(&w, &dynamic), "a settled world asks for no rebuild");
+        ok(world_take_geometry_scope(&w, &dynamic) == WORLD_GEOM_NONE,
+           "a settled world asks for no rebuild");
 
         w.geometry_dirty = 1;
-        ok(world_take_geometry(&w, &dynamic) && dynamic == 0,
+        ok(world_take_geometry_scope(&w, &dynamic) != WORLD_GEOM_NONE && dynamic == 0,
            "the first rebuild CREATES the mesh");
-        ok(!world_take_geometry(&w, &dynamic),
+        ok(world_take_geometry_scope(&w, &dynamic) == WORLD_GEOM_NONE,
            "and taking it once is taking it -- twice does not rebuild twice");
 
         w.geometry_dirty = 1;
-        ok(world_take_geometry(&w, &dynamic) && dynamic == 1,
+        ok(world_take_geometry_scope(&w, &dynamic) != WORLD_GEOM_NONE && dynamic == 1,
            "every rebuild after that replaces an existing allocation");
+
+        /* The scope the flattened answer could not carry, asserted now that
+           there is somewhere to put it: a raised flag comes back as the scope
+           it was raised to, not merely as "something".
+           뭉개진 답이 나를 수 없던 범위이며, 이제 둘 곳이 생겼으므로 단언합니다. 세워진
+           플래그는 그저 "무언가"가 아니라 세워진 그 범위로 돌아옵니다. */
+        w.geometry_dirty = WORLD_GEOM_MOVING;
+        ok(world_take_geometry_scope(&w, &dynamic) == WORLD_GEOM_MOVING,
+           "a door's rebuild comes back as MOVING, not as ALL");
+
+        w.geometry_dirty = WORLD_GEOM_ALL;
+        ok(world_take_geometry_scope(&w, &dynamic) == WORLD_GEOM_ALL,
+           "and a load's comes back as ALL");
     }
 
     /* --- restart ------------------------------------------------------------

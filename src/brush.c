@@ -237,7 +237,22 @@ static int parse_float(const char *s, int len, float *out) {
         int esign = 1, e = 0, edig = 0;
         i++;
         if (i < len && (s[i] == '+' || s[i] == '-')) { esign = (s[i] == '-') ? -1 : 1; i++; }
-        while (i < len && s[i] >= '0' && s[i] <= '9') { e = e * 10 + (s[i] - '0'); i++; edig++; }
+        /* Clamped INSIDE the loop. The clamp below runs after it, which is one
+           statement too late: `1e99999999999` overflowed a signed int on the
+           way to being told it did not matter, and signed overflow is exactly
+           the thing a compiler is allowed to assume away. The digits still have
+           to be CONSUMED either way -- stopping early would leave them to be
+           read as the next token -- so the guard skips the arithmetic rather
+           than the loop.
+           루프 *안에서* 제한합니다. 아래의 제한은 루프 뒤에 실행되므로 한 문장 늦습니다.
+           `1e99999999999`는 그것이 중요하지 않다는 말을 듣기까지 가는 동안 부호 있는 int를
+           넘쳤고, 부호 있는 오버플로는 컴파일러가 없는 셈 쳐도 되는 바로 그것입니다. 어느
+           쪽이든 숫자는 *소비되어야* 하므로(일찍 멈추면 그것들이 다음 토큰으로 읽힙니다),
+           보호 장치는 루프가 아니라 산술을 건너뜁니다. */
+        while (i < len && s[i] >= '0' && s[i] <= '9') {
+            if (e < 1000) e = e * 10 + (s[i] - '0');
+            i++; edig++;
+        }
         if (!edig) return 0;
         /* Clamped rather than looped: past this the result is infinity or zero
            whatever the exact exponent was, and an unclamped loop on a hostile
@@ -346,6 +361,53 @@ static int copy_fits(char *dst, int cap, const char *src, int len) {
     return txt_copy(dst, cap, src, len) == len;
 }
 
+/**
+ * @brief Whether a point is one a .map can describe.
+ *
+ * ENGLISH
+ * -------
+ * ORDERED COMPARISONS, and that is the whole implementation. `>` and `<` are
+ * both false for a NaN, so this rejects NaN and both infinities without naming
+ * them and without pulling in math.h -- which matters, because there is no
+ * other NaN check anywhere in this source tree and adding the first one should
+ * not also add a header.
+ *
+ * They get here. ::parse_float accumulates the mantissa in a double, so a run
+ * of four hundred digits is an infinity rather than an error, and the cross
+ * product of two infinite edges is `inf - inf`, which is a NaN. That NaN then
+ * passed `nlen <= 0.0f` -- false for NaN, as every comparison with one is --
+ * and became a face normal, a bounding box, and a surface the player collides
+ * with at a position no test can predict.
+ *
+ * ::BRUSH_MAX_COORD is the bound because it is already this file's answer to
+ * "how big is the world a .map can describe"; a point outside it is outside
+ * what ::brush_face_poly's starting quad covers.
+ *
+ * 한국어
+ * ------
+ * @brief 점이 .map이 기술할 수 있는 것인지 여부.
+ *
+ * *순서 비교*이며 그것이 구현의 전부입니다. `>`와 `<`는 NaN에 대해 둘 다 거짓이므로, 이
+ * 함수는 NaN과 두 무한대를 이름 부르지 않고 math.h도 끌어오지 않고 거부합니다. 이는
+ * 중요합니다. 이 소스 트리 어디에도 다른 NaN 검사가 없으며, 첫 번째를 추가하면서 헤더까지
+ * 추가할 일은 아니기 때문입니다.
+ *
+ * 그것들은 이곳에 도달합니다. ::parse_float는 가수를 double에 누적하므로 400자리 숫자 나열은
+ * 오류가 아니라 무한대이고, 무한한 두 모서리의 외적은 `inf - inf`이며 그것은 NaN입니다. 그
+ * NaN은 `nlen <= 0.0f`를 통과했고(NaN과의 모든 비교가 그렇듯 거짓입니다) 면의 법선이,
+ * 바운딩 박스가, 그리고 어떤 테스트도 예측할 수 없는 위치에서 플레이어가 부딪히는 표면이
+ * 되었습니다.
+ *
+ * 경계가 ::BRUSH_MAX_COORD인 이유는 그것이 이미 "map이 기술할 수 있는 세계는 얼마나 큰가"에
+ * 대한 이 파일의 답이기 때문입니다. 그 바깥의 점은 ::brush_face_poly의 시작 사각형이 덮는
+ * 범위 바깥입니다.
+ */
+static int coord_ok(v3 p) {
+    return p.x > -BRUSH_MAX_COORD && p.x < BRUSH_MAX_COORD
+        && p.y > -BRUSH_MAX_COORD && p.y < BRUSH_MAX_COORD
+        && p.z > -BRUSH_MAX_COORD && p.z < BRUSH_MAX_COORD;
+}
+
 /* Reads `x y z )`, the opening bracket having been consumed already. */
 static int read_point(Lex *L, v3 *out) {
     float x, y, z;
@@ -409,6 +471,17 @@ static int parse_face(Lex *L, BrushMap *m, int store) {
     v3 nm = v3cross(v3sub(mp[0], mp[1]), v3sub(mp[2], mp[1]));
     float nlen = v3len(nm);
 
+    /* A point the format cannot describe is routed into the path this function
+       already has for a plane that bounds nothing, rather than given a second
+       one. Both outcomes are "this face is not usable"; one exit is easier to
+       keep correct than two, and it means the note further down about dropping
+       a degenerate plane covers this case too.
+       형식이 기술할 수 없는 점은 두 번째 경로를 주는 대신, 이 함수가 아무것도 한정하지 않는
+       평면에 대해 이미 가지고 있는 경로로 보냅니다. 두 결과 모두 "이 면은 쓸 수 없다"이며,
+       출구가 하나면 둘일 때보다 올바르게 유지하기 쉽습니다. 아래에 있는 축퇴된 평면을
+       버린다는 설명이 이 경우까지 포괄하게 된다는 뜻이기도 합니다. */
+    if (!coord_ok(mp[0]) || !coord_ok(mp[1]) || !coord_ok(mp[2])) nlen = 0.0f;
+
     float ua[3], va[3], uoff = 0, voff = 0, rot = 0, us = 1, vs = 1;
     int valve;
     {
@@ -437,7 +510,7 @@ static int parse_face(Lex *L, BrushMap *m, int store) {
         /* `uoff voff rot xs ys` -- axes derived from the plane. */
         if (!lex_num(L, &uoff) || !lex_num(L, &voff) || !lex_num(L, &rot) ||
             !lex_num(L, &us) || !lex_num(L, &vs)) return 0;
-        if (nlen <= 0.0f) return 0;
+        if (!(nlen > 0.0f)) return 0;
         std_axes(v3scale(nm, 1.0f / nlen), rot, ua, va);
     }
 
@@ -462,7 +535,15 @@ static int parse_face(Lex *L, BrushMap *m, int store) {
        축퇴된 평면은(세 점이 한 직선 위) 아무것도 한정하지 않으므로 버려도 잃는 것이
        없습니다. 브러시가 닫히기 위해 그것을 필요로 했다면 ::brush_face_poly의 닫힘 검사가
        보고하고, 필요로 하지 않았다면 그 면은 불필요했으므로 없는 것이 옳습니다. */
-    if (nlen <= 0.0f) return 1;
+    /* NEGATED rather than `<= 0`, and the difference is NaN: every comparison
+       with one is false, so `nlen <= 0.0f` waved a NaN through to become a
+       normal. The points are checked above, but this is the gate the rest of
+       the function trusts and it should not depend on where the value came
+       from.
+       `<= 0`이 아니라 부정 형태이며 차이는 NaN입니다. NaN과의 모든 비교는 거짓이므로
+       `nlen <= 0.0f`는 NaN을 법선이 되도록 통과시켰습니다. 점은 위에서 검사하지만, 이것은
+       함수의 나머지가 신뢰하는 관문이며 값이 어디에서 왔는지에 의존해서는 안 됩니다. */
+    if (!(nlen > 0.0f)) return 1;
     if (!store) return 1;
 
     if (m->n_faces >= BR_MAX_TOTAL_FACES) { DIAG(DIAG_BRUSH_CAP); return 1; }
@@ -790,15 +871,10 @@ void brush_face_uv(const BrushFace *f, v3 p, float tex_w, float tex_h,
     *v = (mv / f->vscale + f->voff) / h;
 }
 
-static int str_eq(const char *a, const char *b) {
-    while (*a && *a == *b) { a++; b++; }
-    return *a == *b;
-}
-
 const char *brush_ent_value(const BrushEnt *e, const char *key) {
     if (!e || !key) return 0;
     for (int i = 0; i < e->n_keys; i++)
-        if (str_eq(e->keys[i], key)) return e->vals[i];
+        if (txt_eq(e->keys[i], key)) return e->vals[i];
     return 0;
 }
 
@@ -1448,7 +1524,7 @@ static const char *const NODRAW[] = { "__TB_empty", "clip", "skip", "trigger" };
 int brush_tex_nodraw(const char *tex) {
     if (!tex) return 1;
     for (int i = 0; i < (int)(sizeof(NODRAW) / sizeof(NODRAW[0])); i++)
-        if (str_eq(tex, NODRAW[i])) return 1;
+        if (txt_eq(tex, NODRAW[i])) return 1;
     return 0;
 }
 
@@ -1463,7 +1539,7 @@ static void push_range(MdlRange *r, int *n, int max, const char *tex,
                        int first, int count) {
     if (count <= 0) return;
 
-    if (*n > 0 && str_eq(r[*n - 1].mat, tex)) {
+    if (*n > 0 && txt_eq(r[*n - 1].mat, tex)) {
         r[*n - 1].count += count;
         return;
     }

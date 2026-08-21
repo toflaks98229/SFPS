@@ -326,6 +326,65 @@ typedef enum {
     DIAG_TRACE_EVENTS,
     DIAG_ENT_CAP,
 
+    /**
+     * @brief A level declared more sectors than ::LVL_MAX_SECTORS holds; the
+     *        surplus was dropped.
+     *
+     * ENGLISH: The room is simply not there. The player walks to where a wall
+     * was drawn and continues through it, and the sectors that DID fit are
+     * unaffected -- which is what makes this hard to read backwards: the level
+     * looks finished right up to the point where it stops. Every neighbouring
+     * cap in the text loader already reported and this one did not, so a map
+     * one sector over the line was the single failure this module could not
+     * explain. The number to raise is ::LVL_MAX_SECTORS in level.h.
+     *
+     * Only the text loader can raise it. A .map carries brushes rather than
+     * sectors, so ::Level::n_sectors is written in exactly one place.
+     *
+     * 한국어: 그 방은 그저 없습니다. 플레이어는 벽이 그려진 자리까지 걸어가 그대로
+     * 통과하며, 들어간 섹터들은 멀쩡합니다. 이것이 거꾸로 읽기 어려운 이유가 그것입니다.
+     * 레벨은 멈춘 지점 직전까지 완성된 것처럼 보입니다. 텍스트 로더의 이웃하는 모든 상한은
+     * 이미 보고하고 있었고 이것만 그러지 않았으므로, 섹터 하나 초과한 맵은 이 모듈이
+     * 설명하지 못하는 유일한 실패였습니다. 올려야 할 값은 level.h의 ::LVL_MAX_SECTORS입니다.
+     *
+     * 이것을 발생시킬 수 있는 것은 텍스트 로더뿐입니다. .map은 섹터가 아니라 브러시를
+     * 나르므로, ::Level::n_sectors를 기록하는 곳은 정확히 한 곳입니다.
+     */
+    DIAG_SECTOR_CAP,
+
+    /**
+     * @brief A sector outline named more points than ::LVL_MAX_PTS holds; the
+     *        tail was dropped.
+     *
+     * ENGLISH: Worse than a missing room, because the room is still THERE. The
+     * outline closes between the last point that fit and the first one, so the
+     * floor, the ceiling and the walls are all built from a polygon the author
+     * never drew -- a room with a corner sliced off, colliding and drawing
+     * consistently with its own wrong shape. Nothing about it looks like a
+     * capacity fault, which is the whole argument for a counter. Raised once
+     * per point dropped, the same as ::DIAG_ENT_CAP.
+     *
+     * The number to raise is ::LVL_MAX_PTS in level.h, and it has a CEILING
+     * above it: ::MB_MAX_SILHOUETTE in render.h. Past that, ::mb_polygon
+     * refuses the outline whole and the cap moves somewhere this counter cannot
+     * see -- the floor and ceiling vanish while the walls remain. Nothing
+     * checks the two constants against each other today, so raising one means
+     * reading the other.
+     *
+     * 한국어: 사라진 방보다 나쁜데, 방은 여전히 그 자리에 있기 때문입니다. 외곽선은 들어간
+     * 마지막 점과 첫 점 사이를 이으며 닫히므로, 바닥과 천장과 벽이 모두 제작자가 그린 적 없는
+     * 다각형으로 만들어집니다. 모서리가 잘려 나간 방이며, 자신의 틀린 모양과 일관되게
+     * 충돌하고 그려집니다. 그 어느 것도 용량 결함처럼 보이지 않으며, 그것이 카운터를 두는
+     * 논거 전부입니다. ::DIAG_ENT_CAP과 마찬가지로 버려진 점마다 한 번씩 발생합니다.
+     *
+     * 올려야 할 값은 level.h의 ::LVL_MAX_PTS이며, 그 위에 *천장*이 하나 더 있습니다.
+     * render.h의 ::MB_MAX_SILHOUETTE입니다. 그것을 넘으면 ::mb_polygon이 외곽선을 통째로
+     * 거부하며, 상한은 이 카운터가 볼 수 없는 곳으로 옮겨갑니다. 바닥과 천장이 사라지고 벽만
+     * 남습니다. 오늘 두 상수를 서로 대조하는 장치는 없으므로, 한쪽을 올릴 때는 다른 쪽을
+     * 읽어야 합니다.
+     */
+    DIAG_POINT_CAP,
+
     DIAG_COUNT          /**< Number of counters. / 카운터의 개수. */
 } DiagKind;
 

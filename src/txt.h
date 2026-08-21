@@ -39,6 +39,14 @@
 #ifndef TXT_H
 #define TXT_H
 
+/* INT_MAX and INT_MIN, for the saturation in ::txt_to_int. limits.h is one of
+   the freestanding headers C11 requires, so this costs nothing at runtime and
+   nothing in portability -- it is available even where stdio.h is not.
+   ::txt_to_int의 포화 연산을 위한 INT_MAX와 INT_MIN입니다. limits.h는 C11이 프리스탠딩
+   구현에도 요구하는 헤더이므로 런타임 비용도 이식성 비용도 없습니다. stdio.h가 없는 곳에도
+   있습니다. */
+#include <limits.h>
+
 /* --- Scanning / 스캔 --- */
 
 /**
@@ -169,6 +177,53 @@ static inline int txt_is(const char *tok, int len, const char *lit) {
  * @note 가변 길이 숫자 목록의 끝을 찾는 데 사용되므로, "-" 하나만 있는 경우는
  *       0으로 취급하지 않고 거부합니다.
  */
+/**
+ * @brief Whether two null-terminated strings are equal.
+ *
+ * ENGLISH
+ * -------
+ * The companion ::txt_is could not be. That one compares a TOKEN -- a pointer
+ * and a length cut out of a larger buffer -- against a literal, which is the
+ * right shape for a parser walking text in place. Handed a null-terminated
+ * string and the literal's own length instead, it answers a different question:
+ * it stops at `len` and never looks at what follows, so `light` matches
+ * `light_torch_small` and `func_door` matches `func_door_secret`. Both are real
+ * Quake classnames, and this project imports Quake maps.
+ *
+ * That call shape read as equality at nine sites and was prefix matching at all
+ * nine. This is what those sites meant.
+ *
+ * @note brush.c had this function, spelled `str_eq` and file-local, for exactly
+ *       the sites that could not use ::txt_is. It is here now so there is one.
+ * @note Where a prefix really is wanted the code says so out loud: see the
+ *       PREFIX table in level.c's brush_ents_of, and demo_file.c's `-record`,
+ *       which advances past the match it made.
+ *
+ * 한국어
+ * ------
+ * @brief 널로 끝나는 두 문자열이 같은지 여부.
+ *
+ * 짝인 ::txt_is는 이것이 될 수 없었습니다. 그쪽은 *토큰*(더 큰 버퍼에서 잘라낸 포인터와
+ * 길이)을 리터럴과 비교하며, 이는 텍스트를 제자리에서 훑는 파서에 맞는 형태입니다. 대신 널로
+ * 끝나는 문자열과 리터럴 자신의 길이를 건네면 다른 질문에 답합니다. `len`에서 멈추고 그
+ * 뒤를 결코 보지 않으므로 `light`가 `light_torch_small`에, `func_door`가
+ * `func_door_secret`에 일치합니다. 둘 다 실재하는 Quake classname이며, 이 프로젝트는 Quake
+ * 맵을 가져옵니다.
+ *
+ * 그 호출 형태는 아홉 곳에서 같음으로 읽혔고 아홉 곳 모두에서 접두사 일치였습니다. 이것이 그
+ * 자리들이 뜻하던 바입니다.
+ *
+ * @note brush.c에 `str_eq`라는 이름의 파일 지역 함수로 이것이 있었습니다. ::txt_is를 쓸 수
+ *       없는 바로 그런 자리들을 위해서였습니다. 이제 이곳에 있으므로 하나뿐입니다.
+ * @note 정말로 접두사를 원하는 곳에서는 코드가 그렇게 말합니다. level.c의 brush_ents_of에
+ *       있는 PREFIX 표와, 일치한 만큼 포인터를 전진시키는 demo_file.c의 `-record`를
+ *       보십시오.
+ */
+static inline int txt_eq(const char *a, const char *b) {
+    while (*a && *a == *b) { a++; b++; }
+    return *a == *b;
+}
+
 static inline int txt_is_number(const char *tok, int len) {
     int i = (tok[0] == '-') ? 1 : 0;
     /* A bare "-" has no digits and is not a number.
@@ -407,12 +462,53 @@ static inline int txt_append_int(char *dst, int cap, int pos, int value) {
  *          조용히 오버플로됩니다.
  */
 static inline int txt_to_int(const char *tok, int len) {
-    int sign = 1, i = 0, v = 0;
-    if (tok[0] == '-') { sign = -1; i = 1; }
+    int negative = (tok[0] == '-');
+    int i = negative ? 1 : 0;
     /* Horner's method: shift the running value up a decimal place per digit.
        호너의 방법입니다. 숫자마다 누적값을 10진수 한 자리씩 올립니다. */
-    for (; i < len; i++) v = v * 10 + (tok[i] - '0');
-    return v * sign;
+    /* UNSIGNED and SATURATING, because the signed version was undefined
+       behaviour on any input long enough to overflow -- and nothing upstream
+       bounds the length. ::txt_is_number accepts a run of digits of any size,
+       so `9999999999` in a level file or a hand-edited effects.txt was `v * 10`
+       past INT_MAX, which the compiler is entitled to assume cannot happen.
+       At -Os that is not a theoretical entitlement: it is licence to keep the
+       value in a register it has already proved monotonic.
+
+       Saturating rather than rejecting. A refusal would have to travel back
+       through ::txt_read_int as "not a number", which rewinds the stream and
+       stops the parse at a digit -- turning a typo into a level that loads
+       half. Every caller narrows the result anyway (`(short)v` at most of
+       them), so a clamped value lands where an absurd one would have.
+
+       부호 없는 연산과 포화입니다. 부호 있는 판본은 넘칠 만큼 긴 입력에 대해 정의되지 않은
+       동작이었고, 상류의 무엇도 길이를 제한하지 않기 때문입니다. ::txt_is_number는 임의
+       길이의 숫자 나열을 받아들이므로, 레벨 파일이나 손으로 고친 effects.txt의
+       `9999999999`는 INT_MAX를 넘는 `v * 10`이었으며 컴파일러는 그런 일이 일어날 수 없다고
+       가정할 자격이 있습니다. -Os에서 그것은 이론적 자격이 아닙니다. 이미 단조 증가임을
+       증명한 레지스터에 값을 계속 두어도 된다는 허가입니다.
+
+       거부가 아니라 포화입니다. 거부는 ::txt_read_int를 통해 "숫자가 아님"으로 되돌아가야
+       하고, 그러면 스트림이 되감기며 파싱이 숫자 앞에서 멈춥니다. 오타 하나가 절반만
+       로드되는 레벨이 됩니다. 어차피 모든 호출자가 결과를 좁히므로(대부분 `(short)v`),
+       제한된 값은 터무니없는 값이 갔을 자리에 갑니다. */
+    unsigned limit = negative ? (unsigned)INT_MAX + 1u : (unsigned)INT_MAX;
+    unsigned v = 0;
+
+    for (; i < len; i++) {
+        unsigned d = (unsigned)(tok[i] - '0');
+        if (v > (limit - d) / 10u) { v = limit; break; }
+        v = v * 10u + d;
+    }
+
+    /* INT_MIN spelled out rather than negated. Its magnitude does not fit in an
+       int, so `-(int)v` on the saturated negative value would be the same
+       undefined behaviour one line after fixing it.
+       INT_MIN을 부정 연산이 아니라 그대로 씁니다. 그 절댓값은 int에 들어가지 않으므로,
+       포화된 음수 값에 `-(int)v`를 쓰면 방금 고친 것과 같은 정의되지 않은 동작이 한 줄
+       뒤에 다시 생깁니다. */
+    if (!negative) return (int)v;
+    if (v == (unsigned)INT_MAX + 1u) return INT_MIN;
+    return -(int)v;
 }
 
 /**

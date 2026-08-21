@@ -49,8 +49,54 @@ static Baked g_baked[DATA_COUNT] = {
 _Static_assert(sizeof(g_baked) / sizeof(g_baked[0]) == DATA_COUNT,
                "g_baked needs exactly one entry per DataAsset");
 
+/**
+ * @brief The asset id, or a row that exists when the caller named one that
+ *        does not.
+ *
+ * ENGLISH
+ * -------
+ * ONE PLACE DECIDES, so no accessor has to. Every function in this file
+ * indexes a table of DATA_COUNT rows with the id it was handed -- ::g_baked
+ * here, ::FILENAMES and ::g_slots in the hot-reload half below -- and each of
+ * them was free to disagree about what an id outside the enum meant.
+ * ::data_baked clamped and the two beside it did not, so the SHIPPED build was
+ * bounded and the authoring build read past the end of a table for the same
+ * call. A difference in memory safety between the two binaries is the one
+ * difference this file exists to prevent.
+ *
+ * The single cast is what makes it one comparison: negative ids wrap to a
+ * value above DATA_COUNT and are caught by the same test as ids that are too
+ * large.
+ *
+ * @note WHICH row it lands on is not the point and is deliberately left where
+ *       it was. An id outside the enum is a caller with a bug, not a data
+ *       condition to recover from; the contract is only that the return value
+ *       indexes something that exists.
+ *
+ * 한국어
+ * ------
+ * @brief 에셋 식별자, 또는 호출자가 존재하지 않는 것을 지목했을 때 존재하는 행.
+ *
+ * *한 곳이 결정하므로* 어떤 접근자도 결정하지 않아도 됩니다. 이 파일의 모든 함수가 건네받은
+ * 식별자로 DATA_COUNT개짜리 표를 인덱싱합니다. 이곳의 ::g_baked, 아래 핫 리로드 절반의
+ * ::FILENAMES와 ::g_slots입니다. 그리고 각자가 열거형 바깥의 식별자가 무엇을 뜻하는지에 대해
+ * 서로 다른 말을 할 수 있었습니다. ::data_baked는 제한했고 그 곁의 둘은 그러지 않았으므로,
+ * *배포* 빌드는 경계가 있고 제작 빌드는 같은 호출에 대해 표 끝을 넘어 읽었습니다. 두 바이너리
+ * 사이의 메모리 안전성 차이는 이 파일이 막으려고 존재하는 바로 그 차이입니다.
+ *
+ * 캐스트 하나가 이것을 비교 하나로 만듭니다. 음수 식별자는 DATA_COUNT보다 큰 값으로
+ * 순환하므로, 너무 큰 식별자와 같은 검사에 걸립니다.
+ *
+ * @note *어느* 행에 떨어지는지는 요점이 아니며 의도적으로 있던 자리에 둡니다. 열거형 바깥의
+ *       식별자는 복구할 데이터 상황이 아니라 결함이 있는 호출자이며, 계약은 반환값이 존재하는
+ *       무언가를 가리킨다는 것뿐입니다.
+ */
+static int row_or_default(int which) {
+    return ((unsigned)which >= (unsigned)DATA_COUNT) ? DATA_LEVELS : which;
+}
+
 const char *data_baked(int which) {
-    if ((unsigned)which >= (unsigned)DATA_COUNT) which = DATA_LEVELS;
+    which = row_or_default(which);
     Baked *b = &g_baked[which];
     if (b->text) return b->text;
 
@@ -318,6 +364,15 @@ static int reload(Slot *s) {
 }
 
 const char *data_text(int which) {
+    /* FIRST, because both tables below are indexed by it. This is the line the
+       release build has had all along through ::data_baked; without it here,
+       the two builds answered the same call differently -- one bounded, one
+       reading whatever followed ::FILENAMES.
+       두 표 모두 이 값으로 인덱싱되므로 가장 먼저입니다. 릴리스 빌드는 ::data_baked를 통해
+       줄곧 이 줄을 가지고 있었습니다. 이곳에 없으면 두 빌드가 같은 호출에 다르게 답합니다.
+       한쪽은 경계가 있고 한쪽은 ::FILENAMES 뒤에 오는 것을 읽습니다. */
+    which = row_or_default(which);
+
     if (!FILENAMES[which]) return data_baked(which);
 
     Slot *s = &g_slots[which];
@@ -329,6 +384,21 @@ const char *data_text(int which) {
 }
 
 int data_from_file(int which) {
+    /* REJECTED rather than clamped, unlike ::data_text above, and the two
+       differ because the questions do. "Give me this asset's text" has to
+       return a string and so needs a row that exists. "Is this asset coming
+       from a live file" has an honest answer for an id that names no asset,
+       and it is no -- clamping would report on a DIFFERENT asset's state and
+       call it this one's. It is also what the release build answers for every
+       id, which is the shape of the truth here: nothing is live.
+       위의 ::data_text와 달리 제한하지 않고 *거절*하며, 질문이 다르기 때문에 둘이
+       다릅니다. "이 에셋의 텍스트를 달라"는 문자열을 돌려주어야 하므로 존재하는 행이
+       필요합니다. "이 에셋이 살아 있는 파일에서 오고 있는가"는 어떤 에셋도 지목하지 않는
+       식별자에 대해 정직한 답을 가지며, 그 답은 아니오입니다. 제한하면 *다른* 에셋의
+       상태를 보고하면서 이것의 것이라고 부르게 됩니다. 릴리스 빌드가 모든 식별자에 대해
+       내놓는 답이기도 하며, 이곳의 진실이 그 모양입니다. 살아 있는 것은 없습니다. */
+    if ((unsigned)which >= (unsigned)DATA_COUNT) return 0;
+
     if (!FILENAMES[which]) return 0;
     Slot *s = &g_slots[which];
     if (!s->resolved) data_text(which);      /* 첫 로드 강제 */

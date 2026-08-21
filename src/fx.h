@@ -355,6 +355,45 @@ void fx_draw(const Pools *pl, mat4 vp, v3 cam_right, v3 cam_up);
 void fx_reload(Pools *pl);
 
 /**
+ * @brief Releases the vertex buffer ::fx_draw allocates on its first call.
+ *
+ * ENGLISH
+ * -------
+ * The pair ::fx_draw's lazy mb_init never had. decal.c holds the identical
+ * shape -- a file-scope MeshBuf, a ready flag, and a free that clears both --
+ * and it is the one this follows.
+ *
+ * @note The process is about to exit and the OS reclaims the allocation
+ *       either way. It is paired anyway for the reason main.c states beside
+ *       ::scene_free: render.h declares that every ::mb_init has an ::mb_free,
+ *       and a contract kept everywhere except here is one that stops being
+ *       kept at all. A reader adding the next buffer copies what they find.
+ * @note Safe to call when ::fx_draw never ran, and safe to call twice. The
+ *       ready flag is cleared, so a later ::fx_draw allocates again rather
+ *       than drawing through a freed pointer.
+ * @note Needs no GL context. The ::Mesh beside the buffer is left to the
+ *       context teardown, which is what decal.c does with its two.
+ *
+ * 한국어
+ * ------
+ * @brief ::fx_draw가 첫 호출에서 할당하는 정점 버퍼를 해제합니다.
+ *
+ * ::fx_draw의 지연 mb_init이 갖지 못했던 짝입니다. decal.c가 동일한 형태를 가지고 있으며
+ * (파일 스코프 MeshBuf, 준비 플래그, 그리고 둘 다 지우는 해제 함수) 이것이 따르는 것이
+ * 그 형태입니다.
+ *
+ * @note 프로세스가 곧 종료되며 어느 쪽이든 OS가 할당을 회수합니다. 그럼에도 짝을 맞추는
+ *       이유는 main.c가 ::scene_free 곁에서 밝히는 것과 같습니다. render.h가 모든
+ *       ::mb_init에 ::mb_free가 있다고 선언하며, 이곳만 빼고 지켜지는 계약은 곧 어디에서도
+ *       지켜지지 않게 됩니다. 다음 버퍼를 추가하는 사람은 눈에 보이는 것을 베낍니다.
+ * @note ::fx_draw가 한 번도 실행되지 않았을 때 호출해도, 두 번 호출해도 안전합니다. 준비
+ *       플래그를 지우므로 이후의 ::fx_draw는 해제된 포인터로 그리는 대신 다시 할당합니다.
+ * @note GL 컨텍스트가 필요 없습니다. 버퍼 곁의 ::Mesh는 컨텍스트 정리에 맡기며, decal.c가
+ *       자신의 둘에 대해 하는 것이 그것입니다.
+ */
+void fx_free(void);
+
+/**
  * @brief How many particles are currently alive. For tests and the debug HUD.
  *
  * 한국어

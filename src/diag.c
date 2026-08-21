@@ -136,7 +136,9 @@ static const char *const DIAG_NAMES[DIAG_COUNT] = {
     "lvlslot",  /* DIAG_LEVEL_SLOTS  */
     "demofull", /* DIAG_DEMO_FULL    */
     "traceev",  /* DIAG_TRACE_EVENTS */
-    "ent"       /* DIAG_ENT_CAP      */
+    "ent",      /* DIAG_ENT_CAP      */
+    "sector",   /* DIAG_SECTOR_CAP   */
+    "secpt"     /* DIAG_POINT_CAP    */
 };
 
 /* A name table shorter than the enum would read past its end the first time

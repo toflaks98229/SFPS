@@ -492,11 +492,11 @@ static void test_entities(void) {
     checki(M2.n_brushes, 2, "two brushes in the file");
 
     const char *cn = brush_ent_value(&M2.ents[0], "classname");
-    check(cn && txt_is(cn, 10, "worldspawn"), "entity 0 is worldspawn");
+    check(cn && txt_eq(cn, "worldspawn"), "entity 0 is worldspawn");
     checki(M2.ents[0].n_brushes, 1, "worldspawn owns the room");
 
     const char *nx = brush_ent_value(&M2.ents[0], "next");
-    check(nx && txt_is(nx, 5, "vault"), "an unknown key is carried through");
+    check(nx && txt_eq(nx, "vault"), "an unknown key is carried through");
     check(brush_ent_value(&M2.ents[0], "nope") == 0, "an absent key reads as NULL");
 
     /* A point entity owns nothing, and its origin converts the same way a
@@ -588,6 +588,135 @@ static void test_malformed(void) {
 
     checki(brush_parse("", -1, &M2),0, "empty text is not a map");
     checki(brush_parse(0, -1, &M2),0, "and neither is nothing at all");
+}
+
+/* --- numbers a .map should not be able to say ----------------------------
+ *
+ * ENGLISH
+ * -------
+ * The parser reads numbers from a file an author edits, and an editor that
+ * crashes or a hand-typed digit too many are both ordinary. What is not
+ * ordinary is what those used to produce: ::parse_float accumulated a mantissa
+ * in a double, so four hundred digits was an infinity rather than an error, and
+ * it accumulated an EXPONENT in a signed int with the clamp one statement too
+ * late, so `1e99999999999` was undefined behaviour before anything looked at
+ * it. An infinite point makes an infinite edge, the cross product of two of
+ * those is `inf - inf` -- a NaN -- and `nlen <= 0.0f` is false for a NaN, so it
+ * became a face normal and a surface the player collides with.
+ *
+ * These are the inputs, and the property asserted is the one that matters and
+ * holds for all of them: whatever the file says, every number this module
+ * STORES is finite. Whether a particular fixture drops the face or refuses the
+ * map is not pinned down -- both are honest answers to "this is not a map" and
+ * pinning it would be asserting today's implementation rather than the rule.
+ *
+ * 한국어
+ * ------
+ * 파서는 제작자가 편집하는 파일에서 숫자를 읽으며, 죽는 에디터도 손으로 하나 더 친 숫자도
+ * 평범한 일입니다. 평범하지 않은 것은 그것들이 만들어 내던 결과입니다. ::parse_float는
+ * 가수를 double에 누적했으므로 400자리는 오류가 아니라 무한대였고, *지수*는 부호 있는
+ * int에 누적하면서 제한이 한 문장 늦었으므로 `1e99999999999`는 무엇이 그것을 보기도 전에
+ * 정의되지 않은 동작이었습니다. 무한한 점은 무한한 모서리를 만들고, 그 둘의 외적은
+ * `inf - inf` 곧 NaN이며, `nlen <= 0.0f`는 NaN에 대해 거짓이므로 그것이 면의 법선이 되고
+ * 플레이어가 부딪히는 표면이 되었습니다.
+ *
+ * 아래가 그 입력들이며, 단언하는 성질은 중요한 그 하나이고 전부에 대해 성립합니다. 파일이
+ * 무엇이라 말하든 이 모듈이 *저장하는* 모든 숫자는 유한합니다. 특정 픽스처가 면을 버리는지
+ * 맵을 거부하는지는 고정하지 않습니다. 둘 다 "이것은 맵이 아니다"에 대한 정직한 답이며,
+ * 고정하는 것은 규칙이 아니라 오늘의 구현을 단언하는 일입니다.
+ */
+
+/* Ordered comparisons only, the same trick brush.c's coord_ok uses: both are
+   false for a NaN, so this needs no math.h to reject one.
+   순서 비교뿐이며 brush.c의 coord_ok가 쓰는 것과 같은 기법입니다. 둘 다 NaN에 대해
+   거짓이므로 NaN을 거부하는 데 math.h가 필요 없습니다. */
+static int finite_f(float f) { return f > -1e30f && f < 1e30f; }
+static int finite_v(v3 p) { return finite_f(p.x) && finite_f(p.y) && finite_f(p.z); }
+
+static int all_finite(const BrushMap *m) {
+    for (int i = 0; i < m->n_faces; i++) {
+        if (!finite_v(m->faces[i].normal)) return 0;
+        if (!finite_f(m->faces[i].dist))   return 0;
+        if (!finite_v(m->faces[i].uaxis) || !finite_v(m->faces[i].vaxis)) return 0;
+    }
+    for (int i = 0; i < m->n_brushes; i++)
+        if (!finite_v(m->brushes[i].min) || !finite_v(m->brushes[i].max)) return 0;
+    return 1;
+}
+
+#define D40  "9999999999999999999999999999999999999999"
+#define D400 D40 D40 D40 D40 D40 D40 D40 D40 D40 D40
+
+static void test_hostile_numbers(void) {
+    printf("\nnumbers a .map should not be able to say\n");
+
+    /* An exponent past anything a double can mean. The clamp in parse_float
+       only ever saw a value the accumulation had already overflowed. */
+    static const char HUGE_EXP[] =
+        "{\n"
+        "\"classname\" \"worldspawn\"\n"
+        "{\n"
+        "( -64 -64 1e99999999999 ) ( -64 64 1e99999999999 ) ( 64 64 1e99999999999 )"
+            " wall_brick " V_FLAT "\n"
+        P_BOTTOM " wall_brick " V_FLAT "\n"
+        P_WEST   " wall_brick " V_XW   "\n"
+        P_EAST   " wall_brick " V_XW   "\n"
+        P_SOUTH  " wall_brick " V_YW   "\n"
+        P_NORTH  " wall_brick " V_YW   "\n"
+        "}\n"
+        "}\n";
+    brush_parse(HUGE_EXP, -1, &M2);
+    check(all_finite(&M2), "an absurd exponent stores nothing infinite");
+
+    /* A mantissa long enough to reach infinity without an exponent at all. */
+    static const char HUGE_DIGITS[] =
+        "{\n"
+        "\"classname\" \"worldspawn\"\n"
+        "{\n"
+        "( -64 -64 " D400 " ) ( -64 64 " D400 " ) ( 64 64 " D400 " )"
+            " wall_brick " V_FLAT "\n"
+        P_BOTTOM " wall_brick " V_FLAT "\n"
+        P_WEST   " wall_brick " V_XW   "\n"
+        P_EAST   " wall_brick " V_XW   "\n"
+        P_SOUTH  " wall_brick " V_YW   "\n"
+        P_NORTH  " wall_brick " V_YW   "\n"
+        "}\n"
+        "}\n";
+    brush_parse(HUGE_DIGITS, -1, &M2);
+    check(all_finite(&M2), "four hundred digits store nothing infinite");
+
+    /* Finite, representable, and outside the world the format describes.
+       ::BRUSH_MAX_COORD is 16384. */
+    static const char OUT_OF_RANGE[] =
+        "{\n"
+        "\"classname\" \"worldspawn\"\n"
+        "{\n"
+        "( -64 -64 99999999 ) ( -64 64 99999999 ) ( 64 64 99999999 )"
+            " wall_brick " V_FLAT "\n"
+        P_BOTTOM " wall_brick " V_FLAT "\n"
+        P_WEST   " wall_brick " V_XW   "\n"
+        P_EAST   " wall_brick " V_XW   "\n"
+        P_SOUTH  " wall_brick " V_YW   "\n"
+        P_NORTH  " wall_brick " V_YW   "\n"
+        "}\n"
+        "}\n";
+    int ents = brush_parse(OUT_OF_RANGE, -1, &M2);
+    check(all_finite(&M2), "a point past the world bound stores nothing infinite");
+    if (ents > 0) {
+        /* Kept the map: then the offending face is gone and the box is the one
+           the five good faces describe, not one stretched to the horizon.
+           맵을 유지했다면 문제의 면은 사라졌고, 상자는 지평선까지 늘어난 것이 아니라 온전한
+           다섯 면이 기술하는 것입니다. */
+        checki(M2.brushes[0].n_faces, 5, "and the face it named is dropped");
+        check(M2.brushes[0].max.y < 1000.0f, "and the box is not stretched to it");
+    }
+
+    /* Still a map afterwards: the hardening must not have turned a legal file
+       into a rejected one.
+       그 뒤에도 여전히 맵입니다. 이 강화가 적법한 파일을 거부되는 파일로 바꾸지 않아야
+       합니다. */
+    checki(brush_parse(CUBE_VALVE, -1, &M2), 1, "an ordinary cube still parses");
+    check(all_finite(&M2), "and stores nothing infinite either");
 }
 
 /* --- capacity ------------------------------------------------------------
@@ -728,7 +857,7 @@ static void test_bounded_parse(void) {
 
     checki(brush_parse(TWO, FIRST, &M2), 1, "a length stops at the first map");
     const char *cn = brush_ent_value(&M2.ents[0], "classname");
-    check(cn && txt_is(cn, 10, "worldspawn"), "and it is the right one");
+    check(cn && txt_eq(cn, "worldspawn"), "and it is the right one");
 
     checki(brush_parse(TWO, -1, &M2), 2, "without one, both are read as one map");
 }
@@ -767,7 +896,7 @@ static void test_atrium(void) {
     check(M2.n_brushes >= 11, "and the room is all there");
 
     const char *cn = brush_ent_value(&M2.ents[0], "classname");
-    check(cn && txt_is(cn, 10, "worldspawn"), "entity 0 is worldspawn");
+    check(cn && txt_eq(cn, "worldspawn"), "entity 0 is worldspawn");
 
     /* THE SAME LESSON A THIRD TIME. This named ten, and then the floor was cut
        into four pieces to make a hole for the lava -- the level doing an
@@ -788,8 +917,8 @@ static void test_atrium(void) {
     for (int i = 0; i < M2.n_ents; i++) {
         const char *k = brush_ent_value(&M2.ents[i], "classname");
         if (!k) continue;
-        if (txt_is(k, 9, "func_door")) door = i;
-        if (txt_is(k, 5, "light")) lights++;
+        if (txt_eq(k, "func_door")) door = i;
+        if (txt_eq(k, "light")) lights++;
     }
     check(door >= 0, "there is a func_door");
     checki(door >= 0 ? M2.ents[door].n_brushes : -1, 1, "and it owns the leaf");
@@ -1108,6 +1237,7 @@ int main(void) {
     test_entities();
     test_unbounded();
     test_malformed();
+    test_hostile_numbers();
     test_bounded_parse();
     test_atrium();
     test_bake_matches();

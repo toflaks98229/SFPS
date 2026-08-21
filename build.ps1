@@ -13,11 +13,13 @@
 # Usage:  .\build.ps1            release build
 #         .\build.ps1 -Debug     -O0 -g, console window, symbols kept
 #         .\build.ps1 -Run       build then launch
+#         .\build.ps1 -Test      build the tools and run every self-checking one
 
 param(
     [switch]$Debug,
     [switch]$Run,
     [switch]$Tools,   # also build tools\*.c
+    [switch]$Test,    # build tools\*.c and RUN the self-checking ones; fail on any
     [string]$Tool,    # build and launch just this tool, e.g. -Tool modelview
     [switch]$Portable # check which src\*.c still need windows.h, and nothing else
 )
@@ -163,6 +165,44 @@ $sources = Get-ChildItem (Join-Path $root 'src') -Filter *.c | ForEach-Object { 
 # that guesses at the contents of source files is a rule with no way to state
 # itself, and adding a library here is one line at the moment you create it.
 $toolLibNames = @('ui')
+
+# --- undefined behaviour, made loud in the builds that can afford it -------
+#
+# TRAP MODE, and not by preference. w64devkit ships no libubsan and no libasan
+# -- `-fsanitize=undefined` on its own fails at the link with `cannot find
+# -lubsan`, and so does the address sanitizer. What DOES work is
+# -fsanitize-undefined-trap-on-error, which emits a `ud2` at each check instead
+# of a call into a runtime that is not there. No library, no diagnostic text:
+# the process dies at the instruction that was about to do the undefined thing,
+# and a debugger names the line.
+#
+# A crash with no message is a poor error report, and it is still far better
+# than what it replaces. This project's number readers accumulated into signed
+# ints with nothing bounding the digit count, so `9999999999` in a hand-edited
+# level file was signed overflow -- which at -Os is not a wrong answer but a
+# licence for the optimiser to assume the loop it sits in cannot run that far.
+# Verified rather than assumed: before the fix, txt_to_int on twenty digits
+# trapped here.
+#
+# NOT in the release build. The checks cost size, and the 1.44MB budget is the
+# one thing this project cannot trade for anything.
+#
+# 트랩 모드이며 취향이 아닙니다. w64devkit에는 libubsan도 libasan도 없습니다.
+# `-fsanitize=undefined`만 주면 `cannot find -lubsan`으로 링크에 실패하며 주소 새니타이저도
+# 마찬가지입니다. 동작하는 것은 -fsanitize-undefined-trap-on-error이며, 검사마다 존재하지
+# 않는 런타임 호출 대신 `ud2`를 냅니다. 라이브러리도 진단 문구도 없습니다. 프로세스는
+# 정의되지 않은 일을 하려던 바로 그 명령에서 죽고, 디버거가 줄 번호를 알려 줍니다.
+#
+# 메시지 없는 크래시는 나쁜 오류 보고이며, 그럼에도 그것이 대체하는 것보다는 훨씬 낫습니다.
+# 이 프로젝트의 숫자 판독기들은 자릿수를 제한하는 것 없이 부호 있는 int에 누적했으므로, 손으로
+# 고친 레벨 파일의 `9999999999`는 부호 있는 오버플로였습니다. -Os에서 그것은 틀린 답이
+# 아니라, 그 루프가 그렇게까지 돌 수 없다고 최적화기가 가정해도 된다는 허가입니다.
+# 가정하지 않고 확인했습니다. 수정 전에는 스무 자리에 대한 txt_to_int가 이곳에서
+# 트랩했습니다.
+#
+# 릴리스 빌드에는 넣지 않습니다. 검사는 크기를 소모하며, 1.44MB 예산은 이 프로젝트가 무엇과도
+# 바꿀 수 없는 유일한 것입니다.
+$ubsan = @('-fsanitize=undefined', '-fsanitize-undefined-trap-on-error')
 $toolLibs = $toolLibNames | ForEach-Object { Join-Path $root "tools\$_.c" }
 foreach ($lib in $toolLibs) {
     if (-not (Test-Path $lib)) { throw "Tool library missing: $lib" }
@@ -174,7 +214,7 @@ if ($Debug) {
     # silhouette or a material updates the running game. Both are compiled out
     # entirely in release, so they cost nothing in the shipped exe.
     $flags = @('-std=c11','-O0','-g','-Wall','-Wextra','-mconsole',
-               '-DDEBUG_HUD','-DHOT_RELOAD')
+               '-DDEBUG_HUD','-DHOT_RELOAD') + $ubsan
 } else {
     # Deliberately NOT -fdata-sections. On this target it stops zero-filled
     # statics from reaching .bss: every one of them gets its own .data$name
@@ -264,8 +304,14 @@ function Invoke-ToolBuild([string]$name, [string[]]$extraDefines = @(),
     # 받아 "입력이 표준 입력에서 온다"고 보고했는데, 그 말은 플래그도 이 줄도 지목하지 않습니다.
     [string[]]$hot = @()
     if (-not $noHotReload) { $hot = @('-DHOT_RELOAD') }
+    # $ubsan here as well as in -Debug, and this is the half that matters more:
+    # the tools are what -Test runs, so a check that trips turns a passing suite
+    # into a named crash instead of a wrong answer nobody looks at.
+    # -Debug뿐 아니라 이곳에도 $ubsan을 넣으며, 더 중요한 절반이 이쪽입니다. -Test가
+    # 실행하는 것이 도구들이므로, 걸린 검사는 통과하는 스위트를 아무도 보지 않는 틀린 답이
+    # 아니라 이름이 붙은 크래시로 바꿉니다.
     & $gcc '-std=c11' '-O1' '-g' '-Wall' '-Wextra' '-mconsole' @hot `
-           @extraDefines `
+           @ubsan @extraDefines `
            '-I' (Join-Path $root 'src') `
            $src @shared -o $script:lastToolExe `
            '-lopengl32' '-lgdi32' '-luser32' '-lwinmm' '-lm' | Out-Null
@@ -276,8 +322,19 @@ function Invoke-ToolBuild([string]$name, [string[]]$extraDefines = @(),
 # Variants: the same test source built again with a capacity forced small
 # enough that its overflow path actually executes. Keyed by tool name so the
 # -Tools sweep picks them up automatically.
+#
+# The value is a LIST, because one source can have more than one branch that
+# only a forced constant reaches and they do not have to be reachable at the
+# same time -- leveltest has two, and a single small-caps binary would be
+# asserting about a light cache in a level cut down to eight sectors.
+#
+# 값이 *목록*인 이유는, 한 소스가 강제된 상수로만 도달하는 분기를 여럿 가질 수 있고 그것들이
+# 동시에 도달 가능할 필요는 없기 때문입니다. leveltest에 둘이 있으며, 작은 상한 하나로 합친
+# 바이너리는 여덟 개 섹터로 잘려 나간 레벨에서 라이트 캐시에 대해 단언하게 됩니다.
 $toolVariants = @{
-    'textest' = @{ Defines = @('-DMAX_CACHED=4'); Suffix = '_tinycache' }
+    'textest' = @(
+        @{ Defines = @('-DMAX_CACHED=4'); Suffix = '_tinycache' }
+    )
 
     # The baked-light cache, forced smaller than the level that fills it needs.
     # That level is arena, not the much larger dm03: the cache only ever holds
@@ -291,7 +348,38 @@ $toolVariants = @{
     # 하나도 없기 때문입니다. arena는 키 353개를 원하므로 256 슬롯이면 도중에 넘치고,
     # "테이블이 가득 참: 그래도 판정하고, 저장하지 않고, 센다" 경로가 결코 실행되지 않는
     # 대신 실행됩니다.
-    'leveltest' = @{ Defines = @('-DLIGHT_CACHE_SLOTS=256'); Suffix = '_tinylcache' }
+    # The level loader's own two caps, forced under what the shipped levels
+    # need. dm03 is 59 sectors, so 32 truncates it while leaving arena's 9 and
+    # vault's 3 intact -- both directions in one binary. dm03's longest outline
+    # is 38, so 8 truncates that too and leaves the 4-point fixtures alone.
+    #
+    # 32 rather than something smaller because leveltest builds its own levels
+    # too: many_lamp_checks lays out one room per lamp and wants 16 sectors, and
+    # the worst-case rebuild grid fills the cap by construction. A cap under
+    # WANT_LAMPS is now a compile error naming the fixture rather than a
+    # segfault inside it. Until DIAG_SECTOR_CAP and
+    # DIAG_POINT_CAP were added, those two refusals were the only ones in the
+    # text loader that dropped their surplus without saying so -- and a counter
+    # is only worth having if some binary reaches the branch that raises it.
+    # leveltest's cap_checks asserts the opposite in each binary, the same way
+    # overflow_checks does for the light cache.
+    #
+    # 레벨 로더 자신의 두 상한이며, 출하 레벨이 필요로 하는 것보다 낮게 강제합니다. arena는
+    # dm03은 섹터 59개이므로 32면 그것이 잘리고 arena의 9개와 vault의 3개는 온전히 남습니다.
+    # 한 바이너리에서 양쪽 방향을 모두 봅니다. dm03의 가장 긴 외곽선은 38이므로 8이면 그것도
+    # 잘리고 4점짜리 픽스처들은 건드리지 않습니다.
+    #
+    # 더 작은 값이 아니라 32인 이유는 leveltest가 자기 레벨도 만들기 때문입니다.
+    # many_lamp_checks는 등마다 방 하나를 놓아 섹터 16개를 원하고, 최악 재생성 격자는 구성상
+    # 상한을 채웁니다. WANT_LAMPS보다 낮은 상한은 이제 그 안에서의 segfault가 아니라 픽스처를
+    # 지목하는 컴파일 오류입니다. DIAG_SECTOR_CAP과 DIAG_POINT_CAP이 추가되기 전까지 그 두 거절은 텍스트 로더에서
+    # 초과분을 말없이 버리는 유일한 것이었으며, 카운터는 어떤 바이너리가 그것을 올리는 분기에
+    # 도달할 때에만 가질 가치가 있습니다. leveltest의 cap_checks가 각 바이너리에서 서로 반대되는
+    # 것을 단언하며, overflow_checks가 라이트 캐시에 대해 하는 것과 같습니다.
+    'leveltest' = @(
+        @{ Defines = @('-DLIGHT_CACHE_SLOTS=256'); Suffix = '_tinylcache' }
+        @{ Defines = @('-DLVL_MAX_SECTORS=32', '-DLVL_MAX_PTS=8'); Suffix = '_tinycaps' }
+    )
 
     # THE SHIPPED DATA PATH, which no other binary here takes. Every tool is a
     # HOT_RELOAD build, so data_map reads assets\maps\<name>.map off disk and
@@ -310,7 +398,9 @@ $toolVariants = @{
     #
     # 옆에 assets\가 없는 디렉터리에서 실행해도 통과하며, 그것이 주장의 전부입니다. 레벨은
     # 실행 파일 *안에* 있고, 플로피는 파일 하나를 나릅니다.
-    'tracetest' = @{ Defines = @(); Suffix = '_baked'; NoHotReload = $true }
+    'tracetest' = @(
+        @{ Defines = @(); Suffix = '_baked'; NoHotReload = $true }
+    )
 }
 
 if ($Tool) {
@@ -334,8 +424,15 @@ if ($Tool) {
     $wanted = $script:lastToolExe
 
     if ($toolVariants.ContainsKey($Tool)) {
-        $v = $toolVariants[$Tool]
-        Invoke-ToolBuild $Tool $v.Defines $v.Suffix ([bool]$v.NoHotReload)
+        # @() around the lookup: a one-element list comes back unwrapped in
+        # Windows PowerShell, and foreach over a scalar hashtable would iterate
+        # its ENTRIES rather than the variant.
+        # 조회를 @()로 감쌉니다. Windows PowerShell에서는 원소 하나짜리 목록이 풀린 채
+        # 돌아오며, 스칼라 해시테이블에 대한 foreach는 변형이 아니라 그 *항목들*을
+        # 순회하게 됩니다.
+        foreach ($v in @($toolVariants[$Tool])) {
+            Invoke-ToolBuild $Tool $v.Defines $v.Suffix ([bool]$v.NoHotReload)
+        }
     }
 
     Write-Host "`nLaunching $Tool..." -ForegroundColor Cyan
@@ -482,7 +579,43 @@ if ($Debug) {
     & (Join-Path $root 'size.ps1') -UpdateDocs
 }
 
-if ($Tools) {
+# ------------------------------------------------------------------ -Test --
+#
+# WHICH tools\*.c are not tests. Everything else is built AND RUN, and a
+# non-zero exit fails the build.
+#
+# The list names the EXCEPTIONS rather than the tests, because the two go stale
+# in opposite directions and only one of them matters. A new test that nobody
+# adds to a list is a test that never runs, and it announces nothing -- which is
+# the failure this whole switch exists to end. A new interactive tool that
+# nobody excludes hangs the run on the first go and gets fixed in a minute.
+#
+# Listed by name for the reason $toolLibNames gives: a build script that guesses
+# at the contents of source files is a rule with no way to state itself. The
+# reason strings are the statement, and the check below refuses a stale entry.
+#
+# 어떤 tools\*.c가 테스트가 아닌지입니다. 그 밖의 전부는 빌드되고 *실행되며*, 0이 아닌 종료
+# 코드는 빌드를 실패시킵니다.
+#
+# 목록이 테스트가 아니라 *예외*를 적는 이유는, 둘이 서로 반대 방향으로 낡고 그중 하나만
+# 중요하기 때문입니다. 아무도 목록에 넣지 않은 새 테스트는 결코 실행되지 않는 테스트이며
+# 아무것도 알리지 않습니다. 이 스위치가 끝내려고 존재하는 실패가 바로 그것입니다. 아무도
+# 제외하지 않은 새 대화형 도구는 첫 실행에서 멈추고 1분 만에 고쳐집니다.
+#
+# 이름으로 적는 이유는 $toolLibNames가 밝히는 것과 같습니다. 소스 파일의 내용을 추측하는
+# 빌드 스크립트는 스스로를 진술할 방법이 없는 규칙입니다. 이유 문자열이 그 진술이며, 아래의
+# 검사가 낡은 항목을 거부합니다.
+$notTests = @{
+    'mapedit'    = 'draws levels with the mouse; a window and a person'
+    'modeledit'  = 'draws weapon outlines with the mouse; likewise'
+    'mapview'    = 'walks through a .map to look at it'
+    'modelview'  = 'looks at a model and tunes where the view model sits'
+    'dithershot' = 'renders a level to a PNG so the look can be judged by eye'
+    'levelbench' = 'measures what the spatial queries cost; reports, asserts nothing'
+    'sprdump'    = 'writes the sprite atlas to a PPM for eyeballing'
+}
+
+if ($Tools -or $Test) {
     Get-ChildItem (Join-Path $root 'tools') -Filter *.c |
       Where-Object { $toolLibNames -notcontains $_.BaseName } |
       ForEach-Object {
@@ -493,10 +626,132 @@ if ($Tools) {
         # real build never reaches, so the branch that only runs on overflow is
         # exercised too. See $toolVariants.
         if ($toolVariants.ContainsKey($toolName)) {
-            $v = $toolVariants[$toolName]
-            Invoke-ToolBuild $toolName $v.Defines $v.Suffix ([bool]$v.NoHotReload)
+            foreach ($v in @($toolVariants[$toolName])) {
+                Invoke-ToolBuild $toolName $v.Defines $v.Suffix ([bool]$v.NoHotReload)
+            }
         }
     }
+}
+
+if ($Test) {
+    # A stale exception is a tool somebody renamed or deleted, and the entry it
+    # left behind now excludes nothing while reading as though it excludes
+    # something. Same argument as -Portable's $stale, and the same verdict.
+    # 낡은 예외는 누군가 이름을 바꾸거나 지운 도구이며, 남겨진 항목은 이제 아무것도 제외하지
+    # 않으면서 무언가를 제외하는 것처럼 읽힙니다. -Portable의 $stale과 같은 논거이고 같은
+    # 판정입니다.
+    $sourceNames = Get-ChildItem (Join-Path $root 'tools') -Filter *.c |
+                   ForEach-Object { $_.BaseName }
+    $staleSkips = $notTests.Keys | Where-Object { $sourceNames -notcontains $_ }
+    if ($staleSkips) {
+        throw ("These are excluded from -Test but no longer exist: " +
+               ($staleSkips -join ', '))
+    }
+
+    # The variants too. leveltest_tinycaps is the ONLY binary that reaches the
+    # sector and point cap reports, so a run that skipped it would be a run that
+    # never executed the branch those counters exist for.
+    # 변형도 함께입니다. leveltest_tinycaps는 섹터와 점 상한 보고에 도달하는 유일한
+    # 바이너리이므로, 그것을 건너뛴 실행은 그 카운터들이 존재하는 이유인 분기를 한 번도
+    # 실행하지 않은 실행입니다.
+    $testExes = @()
+    foreach ($name in ($sourceNames | Sort-Object)) {
+        if ($toolLibNames -contains $name) { continue }
+        if ($notTests.ContainsKey($name))  { continue }
+        $testExes += $name
+        if ($toolVariants.ContainsKey($name)) {
+            foreach ($v in @($toolVariants[$name])) { $testExes += "$name$($v.Suffix)" }
+        }
+    }
+
+    Write-Host "`nRunning $($testExes.Count) self-checking binaries" -ForegroundColor Cyan
+    foreach ($skip in ($notTests.Keys | Sort-Object)) {
+        Write-Host ("  {0,-16} not run  ({1})" -f $skip, $notTests[$skip]) -ForegroundColor DarkGray
+    }
+    Write-Host ""
+
+    # FROM build\, and it is not a preference. plat_exe_dir walks back from the
+    # executable's own path -- drop the file, drop the separator, drop build\ --
+    # so a binary run from anywhere else resolves assets\ against the wrong
+    # parent, finds nothing, and silently falls back to the baked copy. maptest
+    # compares the file against the baked copy, so it would be comparing the
+    # baked copy with itself and reporting a failure that is really the runner's.
+    # build\에서 실행하며 이는 취향이 아닙니다. plat_exe_dir는 실행 파일 자신의 경로에서
+    # 거슬러 올라갑니다(파일, 구분자, build\를 차례로 버림). 따라서 다른 곳에서 실행된
+    # 바이너리는 엉뚱한 부모를 기준으로 assets\를 찾고, 찾지 못하면 조용히 구워 넣은 사본으로
+    # 되돌아갑니다. maptest는 파일을 구워 넣은 사본과 비교하므로, 구워 넣은 사본을 자기
+    # 자신과 비교하면서 실제로는 실행기의 것인 실패를 보고하게 됩니다.
+    $logDir = Join-Path $outDir 'testlog'
+    if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Force $logDir | Out-Null }
+
+    $failedTests = @()
+    foreach ($name in $testExes) {
+        $exePath = Join-Path $outDir "$name.exe"
+        if (-not (Test-Path $exePath)) { throw "-Test wants $exePath and the sweep did not build it" }
+
+        $log = Join-Path $logDir "$name.log"
+        $proc = Start-Process -FilePath $exePath -WorkingDirectory $outDir `
+                              -NoNewWindow -PassThru `
+                              -RedirectStandardOutput $log `
+                              -RedirectStandardError (Join-Path $logDir "$name.err")
+
+        # Touching .Handle is not superstition and not a no-op. Start-Process
+        # -PassThru hands back a Process object that never opened a handle of
+        # its own, and once the process exits Windows has nothing left to ask:
+        # .ExitCode comes back EMPTY, `$proc.ExitCode -eq 0` is false, and every
+        # test in the run is reported as having failed while its log says it
+        # passed. Reading .Handle here makes the object hold one, so the exit
+        # code survives the exit. This is the first thing this switch got wrong.
+        # .Handle을 건드리는 것은 미신도 아니고 아무 일도 하지 않는 것도 아닙니다.
+        # Start-Process -PassThru가 돌려주는 Process 객체는 자기 핸들을 연 적이 없으며,
+        # 프로세스가 종료되고 나면 Windows에 더 물어볼 것이 남지 않습니다. .ExitCode가 *빈
+        # 값*으로 돌아오고, `$proc.ExitCode -eq 0`이 거짓이 되며, 로그에는 통과라고 적혀
+        # 있는데 실행 중인 모든 테스트가 실패로 보고됩니다. 이곳에서 .Handle을 읽으면 객체가
+        # 핸들을 보유하게 되어 종료 코드가 종료 이후까지 살아남습니다. 이 스위치가 처음
+        # 저지른 잘못이 그것입니다.
+        $null = $proc.Handle
+
+        # A bounded wait, because the cost of getting the exception list wrong is
+        # otherwise a build that never returns. Two minutes is far past the
+        # slowest of these (tracetest, a few seconds) and far short of forever.
+        # 제한된 대기입니다. 그러지 않으면 예외 목록을 잘못 적었을 때의 대가가 결코 돌아오지
+        # 않는 빌드이기 때문입니다. 2분은 이 중 가장 느린 것(tracetest, 몇 초)보다 훨씬 길고
+        # 영원보다는 훨씬 짧습니다.
+        if (-not $proc.WaitForExit(120000)) {
+            $proc.Kill()
+            $failedTests += "$name (timed out; interactive?)"
+            Write-Host ("  {0,-22} TIMEOUT" -f $name) -ForegroundColor Red
+            continue
+        }
+
+        # The parameterless wait after the timed one, which MSDN asks for: the
+        # overload with a timeout returns as soon as the process is gone and
+        # does not promise the object's async state has caught up with it.
+        # 시간 제한이 있는 대기 뒤의 인자 없는 대기이며, MSDN이 요구하는 것입니다. 시간
+        # 제한이 있는 오버로드는 프로세스가 사라지자마자 반환하며, 객체의 비동기 상태가
+        # 그것을 따라잡았다고 약속하지 않습니다.
+        $proc.WaitForExit()
+
+        $summary = ''
+        if (Test-Path $log) {
+            $lines = @(Get-Content $log | Where-Object { $_.Trim() })
+            if ($lines.Count) { $summary = $lines[-1].Trim() }
+        }
+
+        if ($proc.ExitCode -eq 0) {
+            Write-Host ("  {0,-22} ok       {1}" -f $name, $summary) -ForegroundColor DarkGray
+        } else {
+            $failedTests += "$name (exit $($proc.ExitCode))"
+            Write-Host ("  {0,-22} FAILED   {1}" -f $name, $summary) -ForegroundColor Red
+            Write-Host "    see $log" -ForegroundColor Red
+        }
+    }
+
+    if ($failedTests) {
+        throw ("$($failedTests.Count) of $($testExes.Count) failed: " +
+               ($failedTests -join ', '))
+    }
+    Write-Host "`n  all $($testExes.Count) passed" -ForegroundColor Green
 }
 
 if ($Run) {

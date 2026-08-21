@@ -1609,10 +1609,6 @@ int world_step(World *w, const Input *in, float aspect, float dt) {
     return frozen;
 }
 
-int world_take_geometry(World *w, int *dynamic) {
-    return world_take_geometry_scope(w, dynamic) != WORLD_GEOM_NONE;
-}
-
 WorldGeom world_take_geometry_scope(World *w, int *dynamic) {
     if (!w->geometry_dirty) return WORLD_GEOM_NONE;
     WorldGeom scope = (WorldGeom)w->geometry_dirty;

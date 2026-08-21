@@ -786,10 +786,75 @@ static int make_monster(Pools *pl, const Level *l, int type,
     float f, c;
     if (!level_ground(l, x, z, from_y, 1e9f, &f, &c)) return 0;
 
-    if (pl->enemy.count >= ENEMY_MAX) { DIAG(DIAG_ENEMY_CAP); return 0; }
+    /* WHICH SLOT, and until this existed the answer was always "the next one".
+     *
+     * A corpse keeps its slot: nothing ever clears ::Enemy::active once a
+     * monster has been made, and ::enemy_reset -- the only thing that puts
+     * `count` back to zero -- is on the level-load path and nowhere else. So a
+     * wave mode spent ENEMY_MAX on bodies. Measured on spire, which has five
+     * spawners and is the level the game starts on: wave 1 leaves 18 slots
+     * used, wave 2 leaves 48, and wave 3 fills all 64. From that point nothing
+     * could spawn again for the rest of the level.
+     *
+     * pools.h states what every pool here does when it fills -- "a fixed array,
+     * a cap chosen so a frame never allocates, and oldest-first eviction when
+     * it fills" -- and lists this one among them. It was the one that did not.
+     * This is it keeping the promise the others keep.
+     *
+     * ONLY CORPSES ARE EVICTED. A living monster vanishing to make room for
+     * another is a fight the player was having and then was not, and the cap
+     * has to keep meaning something for the things that are still moving. A
+     * room of sixty-four live monsters still refuses, and still says so.
+     *
+     * @note `anim` is age plus a fixed offset under 2*pi that ::make_monster
+     *       gives each monster to desync its walk cycle, so "oldest" is oldest
+     *       to within a few seconds rather than exactly. In an arena the
+     *       corpses in the pool are minutes apart; the offset cannot reorder
+     *       them and buying exactness would cost a field in every Enemy.
+     *
+     * 한국어: 어느 칸을 쓸 것인가이며, 이것이 생기기 전의 답은 언제나 "다음 칸"이었습니다.
+     *
+     * 시체는 자기 칸을 계속 가집니다. 몬스터가 만들어진 뒤 ::Enemy::active를 지우는 것은
+     * 아무것도 없고, `count`를 0으로 되돌리는 유일한 ::enemy_reset은 레벨 로드 경로에만
+     * 있습니다. 그래서 웨이브 모드는 ENEMY_MAX를 시체에 썼습니다. 스포너가 다섯이고 게임이
+     * 시작하는 레벨인 spire에서 측정했습니다. 웨이브 1이 18칸, 웨이브 2가 48칸을 쓰고,
+     * 웨이브 3이 64칸을 모두 채웁니다. 그 시점부터 그 레벨이 끝날 때까지 아무것도 생성될 수
+     * 없었습니다.
+     *
+     * pools.h는 이곳의 모든 풀이 가득 찼을 때 무엇을 하는지 밝히며("고정 배열, 프레임이 결코
+     * 할당하지 않도록 고른 상한, 그리고 가득 찼을 때 가장 오래된 것부터 버리는 축출") 이
+     * 풀도 그 목록에 넣습니다. 그러지 않던 유일한 것이 이것이었습니다. 이제 다른 풀들이
+     * 지키는 약속을 함께 지킵니다.
+     *
+     * 축출 대상은 *시체뿐*입니다. 살아 있는 몬스터가 다른 몬스터의 자리를 위해 사라지는 것은
+     * 플레이어가 하고 있던 전투가 갑자기 없어지는 일이며, 상한은 여전히 움직이는 것들에
+     * 대해 의미를 가져야 합니다. 살아 있는 몬스터 예순넷인 방은 여전히 거절하고, 여전히
+     * 그렇게 말합니다.
+     *
+     * @note `anim`은 나이에 ::make_monster가 걸음 주기를 어긋내려고 각 몬스터에 주는 2*pi
+     *       미만의 고정 오프셋을 더한 값입니다. 따라서 "가장 오래된"은 정확히가 아니라 몇 초
+     *       이내로 오래된 것입니다. 아레나에서 풀에 있는 시체들은 몇 분씩 떨어져 있어 그
+     *       오프셋이 순서를 뒤집을 수 없고, 정확성을 사려면 Enemy마다 필드 하나를 치러야
+     *       합니다.
+     */
+    Enemy *m;
+    if (pl->enemy.count < ENEMY_MAX) {
+        m = &pl->enemy.m[pl->enemy.count++];
+    } else {
+        int   oldest_i = -1;
+        float oldest_a = -1.0f;
+        for (int i = 0; i < ENEMY_MAX; i++) {
+            if (pl->enemy.m[i].state != E_DEAD) continue;
+            if (pl->enemy.m[i].anim > oldest_a) {
+                oldest_a = pl->enemy.m[i].anim;
+                oldest_i = i;
+            }
+        }
+        if (oldest_i < 0) { DIAG(DIAG_ENEMY_CAP); return 0; }
+        m = &pl->enemy.m[oldest_i];
+    }
 
     const MonType *S = &TYPES[type];
-    Enemy *m = &pl->enemy.m[pl->enemy.count++];
     Enemy zero = {0};
     *m = zero;
     m->type   = (short)type;
@@ -920,8 +985,46 @@ static int spawners_update(Pools *pl, const Level *l, v3 player_eye, float dt)
             for (int k = 0; k < n; k++) {
                 if (s->left == 0) break;
                 if (s->max_alive > 0 && enemy_alive(pl) >= s->max_alive) break;
-                if (!make_monster(pl, l, s->type, s->pos.x, s->pos.y, s->pos.z))
+
+                if (!make_monster(pl, l, s->type, s->pos.x, s->pos.y, s->pos.z)) {
+                    /* A REFUSAL THAT COSTS NOTHING NEVER ENDS. The budget used
+                       to be left untouched here, and ::enemy_wave_done asks
+                       whether every spawner is done owing -- `s->active &&
+                       s->left != 0`. So a spawner that could not deliver kept
+                       what it owed, the wave could never complete, and the run
+                       stopped on that wave for good. Measured before the
+                       eviction above existed: the wave counter sat on 3 for
+                       twelve minutes while the spawners retried twenty-odd
+                       times a minute.
+
+                       The two reasons for a refusal are told apart here rather
+                       than in ::make_monster, because only one of them is
+                       temporary. A room of living monsters is a queue -- the
+                       same thing `max_alive` above treats as "not now", and the
+                       budget is kept so the group still arrives once there is
+                       room. Anything else is a spawn point that does not work,
+                       which no amount of waiting will fix, so it costs one of
+                       the budget and the spawner runs itself down instead of
+                       holding the wave open forever.
+
+                       거절에 값이 없으면 그 거절은 끝나지 않습니다. 이전에는 이곳에서 예산을
+                       건드리지 않았고, ::enemy_wave_done은 모든 스포너가 빚을 갚았는지를
+                       묻습니다(`s->active && s->left != 0`). 그래서 배달하지 못한 스포너가
+                       빚을 그대로 안고 있었고, 웨이브는 결코 완료될 수 없었으며, 플레이는 그
+                       웨이브에 영구히 멈췄습니다. 위의 축출이 있기 전에 측정한 결과, 웨이브
+                       계수기가 12분 동안 3에 머무는 동안 스포너들은 분당 스무 번 남짓 다시
+                       시도했습니다.
+
+                       거절의 두 이유를 ::make_monster가 아니라 이곳에서 구분하는 이유는 둘 중
+                       하나만 일시적이기 때문입니다. 살아 있는 몬스터로 가득한 방은 대기열이며,
+                       이는 위의 `max_alive`가 "지금은 아님"으로 다루는 것과 같습니다. 자리가
+                       생기면 무리가 여전히 도착하도록 예산을 유지합니다. 그 밖의 것은 동작하지
+                       않는 생성 지점이고 아무리 기다려도 고쳐지지 않으므로, 예산 하나를
+                       치르고 스포너가 웨이브를 영원히 열어 두는 대신 스스로 소진되게 합니다. */
+                    if (enemy_alive(pl) < ENEMY_MAX && s->left > 0) s->left--;
                     break;
+                }
+
                 made = 1;
                 if (s->left > 0) s->left--;
             }

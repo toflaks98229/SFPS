@@ -632,6 +632,7 @@ $notTests = @{
     'modelview'  = 'looks at a model and tunes where the view model sits'
     'dithershot' = 'renders a level to a PNG so the look can be judged by eye'
     'levelbench' = 'measures what the spatial queries cost; reports, asserts nothing'
+    'soaktest'   = 'runs the frame loop for twenty minutes and prints what it cost'
     'sprdump'    = 'writes the sprite atlas to a PPM for eyeballing'
 }
 

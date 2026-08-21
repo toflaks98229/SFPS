@@ -74,6 +74,8 @@
 #include "font.h"
 #include "decal.h"
 #include "menu.h"
+#include "audio.h"    /* audio_init: a restart plays sounds, and the mixer is the
+                        one thread this file would otherwise never start */
 #include "diag.h"
 
 #define VW 640
@@ -217,6 +219,19 @@ int main(int argc, char **argv) {
     HDC   dc  = GetDC(wnd);
     HGLRC rc  = gl_make_context(dc);
     if (!rc) { printf("  gl_make_context FAILED\n"); return 1; }
+
+    /* A REAL DEVICE, because leaving it shut is how the first version of this
+       file measured a game with no audio in it and called the result flat. The
+       mixer is a second thread holding a lock the game thread takes on every
+       sound; nothing else here exercises that. A machine without a device is
+       reported rather than worked around -- the numbers below are then simply
+       about less than they claim.
+       실제 장치를 엽니다. 닫아 두는 것은 이 파일의 첫 판본이 오디오가 없는 게임을 재고
+       그 결과를 평탄하다고 부른 방식이기 때문입니다. 믹서는 게임 스레드가 모든 소리마다
+       잡는 락을 함께 쥔 두 번째 스레드이며, 이곳의 다른 무엇도 그것을 실행하지 않습니다.
+       장치가 없는 기계는 우회하지 않고 보고합니다. 그러면 아래의 숫자들은 주장하는 것보다
+       적은 것에 대한 숫자일 뿐입니다. */
+    if (!audio_init()) printf("  (no audio device -- the mixer is not in these numbers)\n");
 
     rd_init();
     decal_init();
@@ -452,9 +467,119 @@ int main(int argc, char **argv) {
                w.run.wave, enemy_count(&w.pools), ENEMY_MAX);
     }
 
+    /* --- phase 4: restarting, over and over ------------------------------
+       ENGLISH: a restart is not a level load with a different name -- it is
+       world_load_level into the SAME Level struct, which is the one path that
+       reuses its brush slot rather than claiming a new one (see
+       Level::brush_key), and the one that runs run_reset afterwards. Whatever
+       a restart fails to put back is therefore invisible to phase 2, which
+       only ever loaded a different level next.
+       This calls it the way main.c does: restart, then take the geometry scope
+       and rebuild, then play a few frames.
+
+       한국어: 재시작은 이름이 다른 레벨 로드가 아닙니다. *같은* Level 구조체로 들어가는
+       world_load_level이며, 새 슬롯을 청구하지 않고 자기 브러시 슬롯을 재사용하는 유일한
+       경로이고(::Level::brush_key 참조) 그 뒤에 run_reset을 실행하는 유일한 경로입니다.
+       따라서 재시작이 되돌려 놓지 못한 것은, 다음에 언제나 *다른* 레벨을 로드한 2단계에는
+       보이지 않습니다.
+       이곳은 main.c가 부르는 방식 그대로 부릅니다. 재시작하고, 지오메트리 범위를 가져와
+       다시 만들고, 몇 프레임을 진행합니다. */
+    {
+        /* Long enough between restarts that the run has something to leave
+           behind -- monsters spawned and killed, particles in the air, decals
+           on the walls, sounds playing. Restarting from an empty room measures
+           a restart with nothing to undo, which is the easy half.
+           재시작 사이가 충분히 길어서 그 플레이가 남길 것이 생깁니다. 생성되고 죽은
+           몬스터, 공중의 입자, 벽의 자국, 재생 중인 소리입니다. 빈 방에서 재시작하는 것은
+           되돌릴 것이 없는 재시작을 재는 것이며, 그것은 쉬운 절반입니다. */
+        const int restarts = 200, settle = 180;
+
+        printf("\n  --- %d restarts, %d frames of play each ---\n", restarts, settle);
+        printf("\n  %5s %10s %10s %10s | %8s | %s\n",
+               "n", "restart/ms", "build/ms", "frame/ms", "rss/KB", "diag deltas");
+        printf("  %s\n",
+               "----------------------------------------------------------------------");
+
+        world_load_level(&w, "spire", WORLD_ENTER_NEW);
+        w.run.title = 0;
+        {
+            int dyn; world_take_geometry_scope(&w, &dyn);
+            scene_build_level(&scene, &w.level, dyn);
+        }
+
+        double first_r = 0, last_r = 0, first_f = 0, last_f = 0;
+        for (int r = 1; r <= restarts; r++) {
+            int s0 = diag_count(DIAG_LEVEL_SLOTS);
+            int t0d = diag_count(DIAG_TEX_CACHE);
+            int l0 = diag_count(DIAG_LIGHT_CACHE);
+            int v0 = diag_count(DIAG_VERTEX_BUF);
+            int m0 = diag_count(DIAG_MAT_RANGES);
+            int d0 = diag_count(DIAG_DOOR_STALE);
+
+            double a = now_ms();
+            world_restart(&w);
+            double b = now_ms();
+
+            int dyn;
+            switch (world_take_geometry_scope(&w, &dyn)) {
+            case WORLD_GEOM_ALL:    scene_build_level(&scene, &w.level, dyn); break;
+            case WORLD_GEOM_MOVING: scene_rebuild_moving(&scene, &w.level);   break;
+            case WORLD_GEOM_NONE:   break;
+            }
+            double c2 = now_ms();
+
+            w.run.title = 0;
+            double play = 0;
+            for (int i = 0; i < settle; i++, frame++) {
+                double s, d;
+                one_frame(&w, &scene, frame, &s, &d);
+                play += s + d;
+
+                if ((i % 6) == 0) {
+                    for (int k = 0; k < enemy_count(&w.pools); k++) {
+                        const Enemy *m = enemy_at(&w.pools, k);
+                        if (m && m->active && m->state != E_DEAD) {
+                            enemy_hurt(&w.pools, k, 999, v3f(0, 0, 1));
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (r == 1) { first_r = b - a; first_f = play / settle; }
+            last_r = b - a; last_f = play / settle;
+
+            if (r <= 3 || (r % 50) == 0 || r == restarts) {
+                printf("  %5d %10.3f %10.3f %10.3f | %8ld |",
+                       r, b - a, c2 - b, play / settle, working_kb());
+                int ds = diag_count(DIAG_LEVEL_SLOTS) - s0;
+                int dt2 = diag_count(DIAG_TEX_CACHE) - t0d;
+                int dl2 = diag_count(DIAG_LIGHT_CACHE) - l0;
+                int dv2 = diag_count(DIAG_VERTEX_BUF) - v0;
+                int dm2 = diag_count(DIAG_MAT_RANGES) - m0;
+                int dd2 = diag_count(DIAG_DOOR_STALE) - d0;
+                if (ds)  printf(" lvlslot+%d", ds);
+                if (dt2) printf(" texcache+%d", dt2);
+                if (dl2) printf(" lcache+%d", dl2);
+                if (dv2) printf(" vtx+%d", dv2);
+                if (dm2) printf(" ranges+%d", dm2);
+                if (dd2) printf(" doorstale+%d", dd2);
+                printf(" [mons %d fx %d]", enemy_count(&w.pools),
+                       fx_live_count(&w.pools));
+                printf("\n");
+                fflush(stdout);
+            }
+        }
+        printf("\n  restart  %.3f -> %.3f ms  (%+.1f%%)\n", first_r, last_r,
+               100.0 * (last_r - first_r) / (first_r ? first_r : 1.0));
+        printf("  frame    %.3f -> %.3f ms  (%+.1f%%)\n", first_f, last_f,
+               100.0 * (last_f - first_f) / (first_f ? first_f : 1.0));
+    }
+
     scene_free(&scene);
     decal_free();
     fx_free();
+    audio_shutdown();
     post_shutdown();
     return 0;
 }

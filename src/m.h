@@ -106,6 +106,74 @@ static inline float clampf(float v, float lo, float hi) {
     return v < lo ? lo : (v > hi ? hi : v);
 }
 
+/**
+ * @brief Mixes an integer into a well-spread one. Deterministic, stateless.
+ *
+ * ENGLISH
+ * -------
+ * HERE RATHER THAN IN tex.c, and the reason is a module cycle rather than a
+ * claim that a bit mixer is geometry. It lived in tex.c, and sprite.c wanted
+ * four lines of it for surface grain -- so sprite.c included tex.h while tex.c
+ * included sprite.h for the imported wall images, and the two modules could not
+ * be read or moved without each other. One four-line helper was the whole of
+ * that. Neither module owns it; the header both of them already include does.
+ *
+ * The constants are the ones tex.c has always used, unchanged, so every
+ * material and every sheet generates exactly the image it did before. That is
+ * not a nicety: these are BAKED assets, and a different mixer is a different
+ * game with no diff to show for it.
+ *
+ * @param[in] x Any value; adjacent inputs give unrelated outputs.
+ * @return The mixed value, over the whole unsigned range.
+ * @note Not a random number generator. There is no state and no sequence --
+ *       the same input always gives the same output, which is the property
+ *       procedural generation needs and a generator does not have.
+ *
+ * 한국어
+ * ------
+ * @brief 정수를 잘 흩어진 정수로 섞습니다. 결정적이며 상태가 없습니다.
+ *
+ * tex.c가 아니라 이곳에 있으며, 이유는 비트 혼합기가 기하학이라는 주장이 아니라 모듈
+ * 순환입니다. 이것은 tex.c에 있었고 sprite.c가 표면 잡티를 위해 그 네 줄을 원했습니다.
+ * 그래서 sprite.c는 tex.h를 포함했고 tex.c는 가져온 벽 이미지를 위해 sprite.h를 포함했으며,
+ * 두 모듈은 서로 없이는 읽을 수도 옮길 수도 없게 되었습니다. 네 줄짜리 헬퍼 하나가 그
+ * 전부였습니다. 어느 모듈의 것도 아니며, 둘 다 이미 포함하고 있는 헤더의 것입니다.
+ *
+ * 상수는 tex.c가 줄곧 써 온 것 그대로이므로, 모든 재질과 모든 시트가 이전과 정확히 같은
+ * 이미지를 만듭니다. 이는 사소한 배려가 아닙니다. 이것들은 *구워진* 에셋이며, 다른 혼합기는
+ * 보여 줄 diff 없이 달라진 게임입니다.
+ *
+ * @param[in] x 임의의 값. 인접한 입력은 서로 무관한 출력을 냅니다.
+ * @return 섞인 값이며 부호 없는 전 범위에 걸칩니다.
+ * @note 난수 생성기가 아닙니다. 상태도 수열도 없습니다. 같은 입력은 언제나 같은 출력을
+ *       내며, 그것이 절차적 생성이 필요로 하고 생성기는 갖지 못한 성질입니다.
+ */
+static inline unsigned m_hash(unsigned x) {
+    x ^= x >> 16; x *= 0x7feb352du;
+    x ^= x >> 15; x *= 0x846ca68bu;
+    x ^= x >> 16; return x;
+}
+
+/**
+ * @brief ::m_hash as a float in [0, 1).
+ *
+ * ENGLISH
+ * -------
+ * @param[in] x Any value.
+ * @return A value in [0, 1), from the top 24 bits -- the mantissa a float has,
+ *         so every result is exact and no two inputs collide through rounding.
+ *
+ * 한국어
+ * ------
+ * @brief ::m_hash를 [0, 1) 구간의 float로 낸 것.
+ * @param[in] x 임의의 값.
+ * @return [0, 1) 구간의 값이며 상위 24비트에서 옵니다. float가 가진 가수 비트 수이므로 모든
+ *         결과가 정확하고, 반올림 때문에 두 입력이 충돌하는 일이 없습니다.
+ */
+static inline float m_hashf(unsigned x) {
+    return (m_hash(x) >> 8) * (1.0f / 16777216.0f);
+}
+
 /* --- Vector construction and arithmetic / 벡터 생성 및 산술 --- */
 
 /**

@@ -91,13 +91,12 @@ typedef struct {
 
 /* ------------------------------------------------------------------ noise */
 
-unsigned tex_hash(unsigned x) {
-    x ^= x >> 16; x *= 0x7feb352du;
-    x ^= x >> 15; x *= 0x846ca68bu;
-    x ^= x >> 16; return x;
-}
-
-float tex_hashf(unsigned x) { return (tex_hash(x) >> 8) * (1.0f / 16777216.0f); }
+/* tex_hash and tex_hashf moved to m.h as ::m_hash and ::m_hashf, unchanged.
+   They were this file's, and sprite.c wanted them -- which made two modules
+   depend on each other over four lines. See the note on ::m_hash.
+   tex_hash와 tex_hashf는 ::m_hash와 ::m_hashf로 m.h에 옮겨 갔으며 내용은 그대로입니다.
+   이 파일의 것이었는데 sprite.c가 그것을 원했고, 그 탓에 두 모듈이 네 줄 때문에 서로에게
+   의존하게 되었습니다. ::m_hash의 설명을 참조하십시오. */
 
 /* Value noise: hash the four lattice corners and smoothstep between them. */
 static float noise2(float x, float y, unsigned seed) {
@@ -107,10 +106,10 @@ static float noise2(float x, float y, unsigned seed) {
     fy = fy * fy * (3.0f - 2.0f * fy);
 
     unsigned b = seed * 0x9e3779b9u;
-    float n00 = tex_hashf(b + ix * 374761393u + iy * 668265263u);
-    float n10 = tex_hashf(b + (ix+1) * 374761393u + iy * 668265263u);
-    float n01 = tex_hashf(b + ix * 374761393u + (iy+1) * 668265263u);
-    float n11 = tex_hashf(b + (ix+1) * 374761393u + (iy+1) * 668265263u);
+    float n00 = m_hashf(b + ix * 374761393u + iy * 668265263u);
+    float n10 = m_hashf(b + (ix+1) * 374761393u + iy * 668265263u);
+    float n01 = m_hashf(b + ix * 374761393u + (iy+1) * 668265263u);
+    float n11 = m_hashf(b + (ix+1) * 374761393u + (iy+1) * 668265263u);
 
     float a = n00 + (n10 - n00) * fx;
     float c = n01 + (n11 - n01) * fx;
@@ -212,7 +211,7 @@ static void run_op(const Op *o, Px *px, int x, int y, unsigned seed) {
         int xo = (x + (row & 1) * (bw / 2)) & (SIZE - 1);
         px->bw = bw; px->bh = bh; px->m = m;
         px->lx = xo % bw; px->ly = y % bh;
-        px->cell = tex_hash(row * 73856093u + (xo / bw) * 19349663u);
+        px->cell = m_hash(row * 73856093u + (xo / bw) * 19349663u);
         px->edge = px->lx < m || px->ly < m ||
                    px->lx >= bw - m || px->ly >= bh - m;
         break;
@@ -240,7 +239,7 @@ static void run_op(const Op *o, Px *px, int x, int y, unsigned seed) {
 
     case OP_GRAIN: {
         if (px->edge) break;
-        float d = (tex_hashf(x * 374761393u + y * 668265263u + seed) - 0.5f)
+        float d = (m_hashf(x * 374761393u + y * 668265263u + seed) - 0.5f)
                 * (a[0] / 100.0f);
         px->r += d; px->g += d; px->b += d;
         break;
@@ -259,7 +258,7 @@ static void run_op(const Op *o, Px *px, int x, int y, unsigned seed) {
 
     case OP_MORTAR: {
         if (!px->edge) break;
-        float n = tex_hashf(x * 7919u + y * 104729u + seed) * (a[3] / 255.0f);
+        float n = m_hashf(x * 7919u + y * 104729u + seed) * (a[3] / 255.0f);
         px->r = a[0] / 255.0f + n;
         px->g = a[1] / 255.0f + n;
         px->b = a[2] / 255.0f + n;

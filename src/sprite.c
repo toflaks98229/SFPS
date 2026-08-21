@@ -31,7 +31,11 @@
 #include "enemy.h"        /* MON_* -- the atlas row order */
 #include "weapon.h"       /* WP_TYPES and wp_stats -- the viewmodel row order */
 #include "pickup.h"       /* PK_* -- the pickup atlas order */
-#include "tex.h"          /* tex_hashf, for a little surface grain */
+#include "m.h"            /* m_hashf -- surface grain. It used to come from
+                             tex.h, which made sprite and tex mutually dependent
+                             over one helper. See the note on ::m_hash.
+                             m_hashf(표면 잡티)입니다. 이전에는 tex.h에서 왔고, 그
+                             탓에 sprite와 tex가 헬퍼 하나 때문에 서로 의존했습니다. */
 #include <math.h>
 
 /* ------------------------------------------------------------ SDF helpers */
@@ -1584,7 +1588,7 @@ GLuint sprite_atlas(void) {
                     int a = creature_pixel(type, fr, nx, ny, rgb);
 
                     if (a) {
-                        float n = tex_hashf((unsigned)(x*131 + y*977 + fr*613 + type*29)) - 0.5f;
+                        float n = m_hashf((unsigned)(x*131 + y*977 + fr*613 + type*29)) - 0.5f;
                         for (int k = 0; k < 3; k++) {
                             float c = rgb[k] + n * 16.0f;
                             rgb[k] = (unsigned char)(c < 0 ? 0 : c > 255 ? 255 : c);

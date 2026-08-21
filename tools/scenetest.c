@@ -534,6 +534,44 @@ int main(void) {
     ok(pass_after == pass_before,
        "no pass landed on the wrong side of post_end");
 
+    /* --- and the guard is not merely silent -------------------------------
+       ENGLISH: the check above is a NEGATIVE. It passes when nothing reported,
+       which is also exactly what a guard wired to nothing does -- and the flag
+       behind these guards has just moved from post.c to diag.c, so "nothing
+       reported" was one broken link away from meaning "nothing is watching".
+
+       This drives the boundary by hand and claims the wrong half on each side.
+       Both must report. It exercises the whole chain the move rearranged:
+       post_begin and post_end announce, diag holds the answer, the guard reads
+       it. Nothing is drawn -- the guards are the thing under test here, not the
+       draw routines that call them.
+
+       한국어: 위의 검사는 *부정형*입니다. 아무것도 보고하지 않으면 통과하는데, 그것은
+       아무것에도 연결되지 않은 가드가 하는 일과 정확히 같습니다. 그리고 이 가드들 뒤의
+       플래그는 방금 post.c에서 diag.c로 옮겨 갔으므로, "아무것도 보고하지 않았다"는 연결
+       하나만 끊어지면 "아무도 지켜보지 않는다"를 뜻하게 될 참이었습니다.
+
+       이 검사는 경계를 손으로 움직이며 양쪽에서 반대쪽 절반을 주장합니다. 둘 다 보고해야
+       합니다. 이 이동이 재배치한 사슬 전체를 실행합니다. post_begin과 post_end가 알리고,
+       diag가 답을 보유하고, 가드가 그것을 읽습니다. 아무것도 그리지 않습니다. 이곳에서
+       시험 대상은 가드이지 그것을 호출하는 그리기 루틴이 아닙니다. */
+    {
+        int before = diag_count(DIAG_PASS_ORDER);
+        post_begin();               /* the frame is in the world half now */
+        DIAG_WANT_UI_PASS();        /* so claiming the UI half is wrong */
+        int ui_claimed_in_world = diag_count(DIAG_PASS_ORDER) - before;
+
+        before = diag_count(DIAG_PASS_ORDER);
+        post_end(VW, VH);           /* and now it is in the UI half */
+        DIAG_WANT_WORLD_PASS();     /* so claiming the world half is wrong */
+        int world_claimed_in_ui = diag_count(DIAG_PASS_ORDER) - before;
+
+        ok(ui_claimed_in_world == 1,
+           "a UI-pass claim inside the world pass is reported");
+        ok(world_claimed_in_ui == 1,
+           "and a world-pass claim after post_end is reported too");
+    }
+
     scene_free(&scene);
     decal_free();
     post_shutdown();

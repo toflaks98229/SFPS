@@ -95,6 +95,36 @@ static short    g_buf[NBUF][FRAMES];
    같습니다. 그 위의 설명을 참조하십시오. */
 static LONG g_running;
 
+/* Whether ::g_lock has been initialised, which is NOT what ::g_ready says.
+ *
+ * ENGLISH
+ * -------
+ * g_ready is raised LAST in ::audio_init, after the mixer starts; g_lock is
+ * initialised well before that. Between the two, ::audio_init can still fail --
+ * CreateThread is the case that exists -- and the shutdown it calls on the way
+ * out found g_ready clear and left the critical section undeleted. One flag
+ * cannot answer both "may a caller enter the lock" and "does the lock exist";
+ * they are true over different spans and the failure path is the span between.
+ *
+ * Game thread only. The mixer never reads it, so it needs none of the atomic
+ * treatment g_ready and g_running get.
+ *
+ * 한국어
+ * ------
+ * @brief ::g_lock이 초기화되었는지 여부이며, 이는 ::g_ready가 말하는 것과 다릅니다.
+ *
+ * g_ready는 믹서가 시작된 뒤 ::audio_init에서 *가장 마지막*에 올라가지만, g_lock은 그보다
+ * 훨씬 앞에서 초기화됩니다. 그 사이에서 ::audio_init은 여전히 실패할 수 있으며(실재하는
+ * 경우가 CreateThread입니다), 나가는 길에 호출하는 종료 함수는 g_ready가 내려간 것을 보고
+ * 임계 영역을 삭제하지 않은 채 떠났습니다. 플래그 하나로 "호출자가 락에 들어가도 되는가"와
+ * "락이 존재하는가"에 둘 다 답할 수 없습니다. 둘은 서로 다른 구간에서 참이며, 실패 경로가
+ * 바로 그 사이 구간입니다.
+ *
+ * 게임 스레드 전용입니다. 믹서는 이것을 읽지 않으므로 g_ready나 g_running이 받는 원자적
+ * 처리가 필요 없습니다.
+ */
+static int g_lock_made;
+
 
 /**
  * @brief Reads a cross-thread flag, and everything the writer wrote before it.
@@ -158,6 +188,13 @@ void audio_dev_unlock(void) {
 static DWORD WINAPI mixer_thread(LPVOID param) {
     (void)param;
     while (flag_get(&g_running)) {
+        /* Inside the loop and before the wait, so the stall holds the thread
+           where it is dangerous: past the g_running test, with the device and
+           the lock still ahead of it.
+           루프 *안*이며 대기 *앞*입니다. 그래야 지연이 스레드를 위험한 자리에 붙듭니다.
+           g_running 검사를 이미 지났고, 장치와 락은 아직 앞에 있는 자리입니다. */
+        if (AUDIO_MIXER_STALL_MS) Sleep(AUDIO_MIXER_STALL_MS);
+
         WaitForSingleObject(g_event, 100);
         for (int i = 0; i < NBUF; i++) {
             if (!(g_hdr[i].dwFlags & WHDR_DONE)) continue;
@@ -190,12 +227,28 @@ int audio_init(void) {
     }
 
     InitializeCriticalSection(&g_lock);
+    g_lock_made = 1;
 
     for (int i = 0; i < NBUF; i++) {
         g_hdr[i].lpData         = (LPSTR)g_buf[i];
         g_hdr[i].dwBufferLength = FRAMES * 2;
-        waveOutPrepareHeader(g_dev, &g_hdr[i], sizeof(WAVEHDR));
-        waveOutWrite(g_dev, &g_hdr[i], sizeof(WAVEHDR));
+
+        /* CHECKED, because the mixer's whole loop is built on WHDR_DONE and a
+           header that was never prepared never carries it. Unchecked, a driver
+           that refused one buffer left this function returning success over a
+           mixer that would spin on WaitForSingleObject forever and never write
+           a sample -- silence with a running thread behind it, which reads as
+           "this machine has no sound" rather than as a fault.
+           검사합니다. 믹서의 루프 전체가 WHDR_DONE 위에 서 있고, 준비된 적 없는 헤더는
+           결코 그것을 달지 않기 때문입니다. 검사하지 않으면, 버퍼 하나를 거절한 드라이버에
+           대해 이 함수가 성공을 반환하고 그 뒤에서 믹서는 WaitForSingleObject를 영원히
+           돌면서 샘플을 하나도 쓰지 않습니다. 스레드가 돌고 있는 무음이며, 결함이 아니라
+           "이 기계에는 소리가 없다"로 읽힙니다. */
+        if (waveOutPrepareHeader(g_dev, &g_hdr[i], sizeof(WAVEHDR)) != MMSYSERR_NOERROR ||
+            waveOutWrite(g_dev, &g_hdr[i], sizeof(WAVEHDR)) != MMSYSERR_NOERROR) {
+            audio_shutdown();
+            return 0;
+        }
     }
 
     flag_set(&g_running, 1);
@@ -227,13 +280,50 @@ void audio_shutdown(void) {
        않으면 이미 검사를 통과한 호출이 삭제된 락에 진입하게 됩니다. 아래에서 믹서를
        정지시키고 합류시키므로, 이 값이 해제된 뒤에는 어떤 스레드도 락에 다시 도달할
        수 없습니다. */
-    int was_ready = flag_get(&g_ready);
     flag_set(&g_ready, 0);
 
     flag_set(&g_running, 0);
     if (g_thread) {
         SetEvent(g_event);
-        WaitForSingleObject(g_thread, 500);
+
+        /* THE RESULT IS THE PRECONDITION FOR EVERYTHING BELOW, and it was being
+           thrown away. The paragraph above says "the mixer is stopped and
+           joined below" -- but a join with a timeout is not a join, it is an
+           attempt, and 500ms is a deadline the mixer can miss: waveOutWrite is
+           a driver call and a driver can block. Past that deadline this
+           function used to carry on regardless and free three things the mixer
+           may still be using. Two of them turn out to be re-gated -- the mixer
+           re-tests g_ready inside audio_dev_lock, so it does not enter the
+           deleted critical section by the ordinary route, and waveOutWrite to a
+           closed device returns an error rather than faulting. The third is
+           not: CloseHandle on g_event, which the mixer is waiting inside. Nor
+           is the window where it passed the g_ready test and was preempted
+           before reaching EnterCriticalSection.
+           None of that is worth doing. The process is exiting; the OS reclaims
+           the device and the lock either way, and a mixer that outlives this
+           call by a few milliseconds writing into a buffer nobody will hear is
+           the harmless outcome. Returning early leaves g_thread and g_dev set,
+           so a caller that tries again re-waits rather than assuming the first
+           attempt worked -- and g_ready is already down, so no new caller can
+           reach the lock in the meantime.
+
+           결과가 아래 모든 것의 전제 조건인데 그것을 버리고 있었습니다. 위 문단은 "아래에서
+           믹서를 정지시키고 합류시킨다"고 말하지만, 시간 제한이 있는 합류는 합류가 아니라
+           *시도*이며 500ms는 믹서가 놓칠 수 있는 기한입니다. waveOutWrite는 드라이버 호출이고
+           드라이버는 막힐 수 있습니다. 그 기한을 넘기면 이 함수는 개의치 않고 진행하여,
+           믹서가 아직 쓰고 있을 수 있는 세 가지를 해제했습니다. 그중 둘은 다시 막혀
+           있습니다. 믹서는 audio_dev_lock 안에서 g_ready를 다시 검사하므로 평범한 경로로는
+           삭제된 임계 영역에 들어가지 않고, 닫힌 장치에 대한 waveOutWrite는 죽지 않고 오류를
+           반환합니다. 세 번째는 그렇지 않습니다. 믹서가 그 안에서 기다리고 있는 g_event에
+           대한 CloseHandle입니다. g_ready 검사를 통과하고 EnterCriticalSection에 닿기 전에
+           선점된 창도 마찬가지입니다.
+           그중 무엇도 할 가치가 없습니다. 프로세스는 종료 중이고 OS가 어느 쪽이든 장치와
+           락을 회수하며, 이 호출보다 몇 밀리초 더 살아 아무도 듣지 않을 버퍼에 쓰는 믹서는
+           무해한 결말입니다. 일찍 반환하면 g_thread와 g_dev가 설정된 채 남으므로, 다시
+           시도하는 호출자는 첫 시도가 성공했다고 가정하는 대신 다시 기다립니다. 그리고
+           g_ready는 이미 내려가 있으므로 그동안 새 호출자가 락에 도달할 수 없습니다. */
+        if (WaitForSingleObject(g_thread, 500) != WAIT_OBJECT_0) return;
+
         CloseHandle(g_thread);
         g_thread = 0;
     }
@@ -244,8 +334,17 @@ void audio_shutdown(void) {
         waveOutClose(g_dev);
         g_dev = 0;
     }
-    /* Safe now: the mixer has been joined and the gate is shut. */
-    if (was_ready) DeleteCriticalSection(&g_lock);
+    /* Safe now: the mixer has been JOINED -- not merely asked to stop, which is
+       what the early return above is for -- and the gate is shut.
+       g_lock_made rather than the old `was_ready`, because g_ready is raised
+       after this lock exists and an init that failed in between left it
+       undeleted. See the note on ::g_lock_made.
+       이제 안전합니다. 믹서는 멈추라는 *요청*을 받은 것이 아니라 실제로 *합류*했으며(요청만
+       된 경우를 위한 것이 위의 조기 반환입니다) 게이트는 닫혔습니다.
+       기존의 `was_ready`가 아니라 g_lock_made인 이유는, g_ready가 이 락이 생긴 뒤에 올라가고
+       그 사이에 실패한 초기화가 락을 삭제되지 않은 채 남겼기 때문입니다. ::g_lock_made의
+       설명을 참조하십시오. */
+    if (g_lock_made) { DeleteCriticalSection(&g_lock); g_lock_made = 0; }
     CloseHandle(g_event);
     g_event = 0;
 }

@@ -49,6 +49,7 @@
 #include <windows.h>
 
 #include "audio.h"
+#include "audio_dev.h"   /* audio_dev_lock, and AUDIO_MIXER_STALL_MS the stall check prints */
 
 #define ITERATIONS 20000
 
@@ -208,6 +209,88 @@ int main(void) {
 
         audio_shutdown();            /* double shutdown */
         ok(1, "a second shutdown is harmless");
+    }
+
+    /* --- the join that does not join --------------------------------------
+       ENGLISH: audio_shutdown gives the mixer 500ms and then, until this was
+       fixed, carried on regardless: it closed the device the mixer was writing
+       to, unprepared the headers it held, and deleted the critical section it
+       was inside. No machine reaches that on purpose -- a driver has to block
+       -- so build.ps1 forces it with -DAUDIO_MIXER_STALL_MS past the deadline
+       and this is what that binary exists to run.
+
+       WHAT THIS DOES AND DOES NOT SHOW. It reaches the branch, which nothing
+       did before, and it pins the contract that branch has to keep: shutdown
+       returns on the deadline rather than on the mixer, the module is shut to
+       new callers, and nothing crashes -- all of it under the sanitizer the
+       tools build with.
+
+       It is NOT a regression test for the teardown itself, and saying so is the
+       point of this paragraph: the pre-fix code passes it too. What that code
+       did wrong was invisible from out here, because the two things it freed
+       are both re-gated on g_ready. The mixer re-tests that flag inside
+       audio_dev_lock, so it never enters the deleted critical section by the
+       ordinary route, and waveOutWrite to a closed device returns an error
+       rather than faulting. What is left is a narrow window -- a mixer that
+       passed the gate and was preempted before entering the lock -- and
+       CloseHandle on the event it is waiting inside. Both are real and neither
+       is reachable from a test that can only call the public functions.
+
+       In the normal build the stall is zero, the mixer stops immediately, and
+       the checks below assert the opposite: the join succeeds and the device
+       is actually torn down.
+
+       한국어: audio_shutdown은 믹서에 500ms를 주고, 이것이 고쳐지기 전까지는 그 뒤로도
+       개의치 않고 진행했습니다. 믹서가 쓰고 있는 장치를 닫고, 들고 있는 헤더를 해제하고,
+       들어가 있는 임계 영역을 삭제했습니다. 어떤 기계도 일부러 그곳에 도달하지 않으므로
+       (드라이버가 막혀야 합니다) build.ps1이 -DAUDIO_MIXER_STALL_MS로 기한을 넘기도록
+       강제하며, 이 함수가 그 바이너리가 실행하려고 존재하는 것입니다.
+
+       이것이 보여 주는 것과 보여 주지 못하는 것. 이 검사는 그 갈래에 *도달*하며, 그것을
+       한 것은 이전에 아무것도 없었습니다. 그리고 그 갈래가 지켜야 할 계약을 고정합니다.
+       종료 함수가 믹서가 아니라 기한에 맞춰 반환하고, 모듈이 새 호출자에게 닫히며, 무엇도
+       죽지 않는다는 것입니다. 전부 도구가 함께 빌드하는 새니타이저 아래에서입니다.
+
+       그러나 이것은 정리 과정 자체에 대한 *회귀 테스트가 아니며*, 그렇게 말하는 것이 이
+       문단의 요점입니다. 수정 전 코드도 이것을 통과합니다. 그 코드가 잘못한 일은 이곳에서
+       보이지 않았습니다. 해제하던 두 가지가 모두 g_ready로 다시 막혀 있기 때문입니다.
+       믹서는 audio_dev_lock 안에서 그 플래그를 다시 검사하므로 평범한 경로로는 삭제된 임계
+       영역에 결코 들어가지 않고, 닫힌 장치에 대한 waveOutWrite는 죽지 않고 오류를
+       반환합니다. 남는 것은 좁은 창(게이트를 통과하고 락에 들어가기 전에 선점된 믹서)과,
+       믹서가 그 안에서 기다리고 있는 이벤트에 대한 CloseHandle입니다. 둘 다 실재하며, 둘 다
+       공개 함수만 호출할 수 있는 테스트에서는 도달할 수 없습니다.
+
+       일반 빌드에서는 지연이 0이고 믹서가 즉시 멈추므로, 아래 검사가 그 반대를 단언합니다.
+       합류가 성공하고 장치가 실제로 정리됩니다. */
+    {
+        if (!audio_init()) {
+            printf("  (no audio device; the stuck-mixer check needs one)\n");
+        } else {
+            audio_play("shot", 100);
+            Sleep(50);               /* let the mixer get into a pass */
+
+            DWORD t0 = GetTickCount();
+            audio_shutdown();
+            DWORD spent = GetTickCount() - t0;
+
+            /* Bounded either way. The stalled mixer must cost the deadline and
+               not the stall; the ordinary one must cost neither.
+               어느 쪽이든 유계입니다. 지연된 믹서는 지연 시간이 아니라 기한만큼 들어야 하고,
+               평범한 믹서는 둘 다 들지 않아야 합니다. */
+            ok(spent < 1500, "shutdown returns on a deadline, not on the mixer");
+            printf("    stall=%dms, shutdown took %lums\n",
+                   (int)AUDIO_MIXER_STALL_MS, (unsigned long)spent);
+
+            /* Closed to new callers whichever branch it took: the gate is shut
+               before the join is attempted, so this holds even when the join
+               failed and the teardown was skipped.
+               어느 갈래를 탔든 새 호출자에게는 닫혀 있습니다. 게이트는 합류를 시도하기
+               전에 닫히므로, 합류가 실패해 정리를 건너뛴 경우에도 성립합니다. */
+            ok(audio_dev_lock() == 0, "and the module is shut to new callers");
+
+            audio_play("shot", 100);   /* must not crash either way */
+            ok(1, "and a play after it is still a safe no-op");
+        }
     }
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall audio threading checks passed\n", fails);

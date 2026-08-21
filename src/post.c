@@ -28,7 +28,13 @@
 
 #include "post.h"
 #include "gl.h"
-#include "render.h"   /* rd_use -- this pass binds its own program and must
+#include "render.h"
+#include "diag.h"      /* DIAG_PASS_WORLD/DIAG_PASS_UI -- this file is where the
+                        frame changes halves, so it is the one that announces it.
+                        Compiles to nothing in release.
+                        DIAG_PASS_WORLD/DIAG_PASS_UI입니다. 프레임이 절반을 바꾸는
+                        곳이 이 파일이므로, 그것을 알리는 것도 이 파일입니다.
+                        릴리스에서는 아무것도 컴파일되지 않습니다. */   /* rd_use -- this pass binds its own program and must
                          put the renderer's back before returning. */
 
 /* --- Shader source generation / 셰이더 소스 생성 --- */
@@ -86,23 +92,6 @@ static int    g_w, g_h;
 static int    g_ready;
 /** @brief Runtime on/off, independent of whether the path exists. / 경로 존재 여부와 무관한 런타임 on/off. */
 static int    g_on = 1;
-/**
- * @brief Set between post_begin and post_end: the frame is in the world pass.
- *
- * Tracked even when the effect is OFF. The boundary is a property of the
- * frame's structure, not of whether the pixelisation happens to be enabled --
- * a draw that belongs in the UI pass is misplaced either way, and a guard
- * that only fires with the effect on would miss it exactly when the developer
- * had toggled it off to see something clearly.
- *
- * post_begin과 post_end 사이에 설정되며, 프레임이 월드 패스에 있음을 뜻합니다.
- *
- * 효과가 *꺼져* 있어도 추적합니다. 경계는 픽셀화 활성화 여부가 아니라 프레임 구조의
- * 속성입니다. UI 패스에 속해야 할 그리기는 어느 쪽이든 잘못 놓인 것이며, 효과가 켜져
- * 있을 때만 발동하는 가드는 개발자가 무언가를 명확히 보려고 효과를 꺼 둔 바로 그
- * 순간에 이를 놓치게 됩니다.
- */
-static int    g_in_world;
 
 /* --- Shaders / 셰이더 --- */
 
@@ -1073,7 +1062,7 @@ int post_init(int width, int height) {
 
 int post_enabled(void) { return g_ready && g_on; }
 
-int post_in_world_pass(void) { return g_in_world; }
+
 
 void post_set_dither(float levels, float grain, float noise) {
     /* Clamped rather than trusted: one level makes `steps` zero and every
@@ -1108,8 +1097,13 @@ void post_size(int *w, int *h) {
 void post_set_enabled(int on) { g_on = on ? 1 : 0; }
 
 float post_begin(void) {
-    /* Set regardless of whether the effect is on -- see g_in_world. */
-    g_in_world = 1;
+    /* Announced regardless of whether the effect is on: the boundary is about
+       WHICH HALF of the frame this is, and that is true with the pass switched
+       off. Compiles to nothing in release.
+       효과가 켜졌는지와 무관하게 알립니다. 경계는 이 프레임의 *어느 절반*인가에 대한
+       것이며, 그것은 패스가 꺼져 있어도 참입니다. 릴리스에서는 아무것도 컴파일되지
+       않습니다. */
+    DIAG_PASS_WORLD();
     if (!post_enabled()) return 0.0f;
     glBindFramebuffer(GL_FRAMEBUFFER, g_fbo);
     /* The world is rasterised at the FULL framebuffer size; the shader
@@ -1122,7 +1116,7 @@ float post_begin(void) {
 }
 
 void post_end(int win_w, int win_h) {
-    g_in_world = 0;
+    DIAG_PASS_UI();
     if (!post_enabled()) return;
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);

@@ -248,40 +248,5 @@ void tex_flush(void);
 
 /* --- Public function prototypes: noise / 공개 함수 프로토타입: 노이즈 --- */
 
-/**
- * @brief Deterministic hash noise, integer result.
- *
- * ENGLISH
- * -------
- * @param[in] x Input value to hash.
- * @return A well-scrambled unsigned integer.
- * @note The same input always gives the same texture, so no seed or lookup
- *       table has to be stored.
- *
- * 한국어
- * ------
- * @brief 결정론적 해시 노이즈이며 정수를 반환합니다.
- * @param[in] x 해시할 입력값.
- * @return 충분히 뒤섞인 부호 없는 정수.
- * @note 동일한 입력은 항상 동일한 텍스처를 만들어 내므로, 시드나 조회 테이블을
- *       저장할 필요가 없습니다.
- */
-unsigned tex_hash (unsigned x);
-
-/**
- * @brief Deterministic hash noise, normalised result.
- *
- * ENGLISH
- * -------
- * @param[in] x Input value to hash.
- * @return A value in the range [0, 1).
- *
- * 한국어
- * ------
- * @brief 결정론적 해시 노이즈이며 정규화된 값을 반환합니다.
- * @param[in] x 해시할 입력값.
- * @return [0, 1) 범위의 값.
- */
-float    tex_hashf(unsigned x);
 
 #endif

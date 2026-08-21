@@ -398,6 +398,26 @@ $toolVariants = @{
     #
     # 옆에 assets\가 없는 디렉터리에서 실행해도 통과하며, 그것이 주장의 전부입니다. 레벨은
     # 실행 파일 *안에* 있고, 플로피는 파일 하나를 나릅니다.
+    # audio_shutdown gives the mixer 500ms and then, until it was fixed, carried
+    # on regardless -- closing the device the mixer was writing to and deleting
+    # the critical section it was inside. Missing that deadline needs a driver
+    # to block, so no machine reaches the branch on purpose. AUDIO_MIXER_STALL_MS
+    # holds the mixer inside one pass for longer than the deadline and the branch
+    # runs. audiorace's own comment is careful about what that does and does not
+    # prove: it exercises the path and pins the bounded return, and the pre-fix
+    # code passes it too, because what that code freed was re-gated elsewhere.
+    #
+    # audio_shutdown은 믹서에 500ms를 주고, 고쳐지기 전까지는 그 뒤로도 개의치 않고
+    # 진행했습니다. 믹서가 쓰고 있는 장치를 닫고 믹서가 들어가 있는 임계 영역을 삭제했습니다.
+    # 그 기한을 놓치려면 드라이버가 막혀야 하므로 어떤 기계도 일부러 그 갈래에 도달하지
+    # 않습니다. AUDIO_MIXER_STALL_MS가 믹서를 기한보다 오래 한 패스 안에 붙들면 그 갈래가
+    # 실행됩니다. 그것이 무엇을 증명하고 무엇을 증명하지 못하는지에 대해서는 audiorace 자신의
+    # 주석이 신중하게 밝힙니다. 경로를 실행하고 유계 반환을 고정하며, 수정 전 코드도 이것을
+    # 통과합니다. 그 코드가 해제하던 것이 다른 곳에서 다시 막혀 있었기 때문입니다.
+    'audiorace' = @(
+        @{ Defines = @('-DAUDIO_MIXER_STALL_MS=2000'); Suffix = '_stuckmixer' }
+    )
+
     'tracetest' = @(
         @{ Defines = @(); Suffix = '_baked'; NoHotReload = $true }
     )

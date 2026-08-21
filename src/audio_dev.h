@@ -58,6 +58,42 @@
 #define FRAMES      512     ///< @brief 버퍼 당 프레임 수. 약 11.6ms에 해당하며, 약 46ms의 지연 시간을 가집니다.
 #define NBUF        4       ///< @brief 오디오 버퍼의 수.
 
+/* How long the mixer spends inside one pass before it looks at g_running again.
+ *
+ * ENGLISH
+ * -------
+ * ZERO in every build but one, and `if (0)` costs nothing. It exists because
+ * ::audio_shutdown's join has a 500ms deadline and the branch it takes when
+ * that deadline is missed is the branch no machine reaches on purpose -- a
+ * driver would have to block. Code that only runs when something has gone
+ * wrong is the code that goes untested, which is the same argument build.ps1
+ * makes for LIGHT_CACHE_SLOTS and MAX_CACHED; this is that argument applied to
+ * a deadline rather than to a table.
+ *
+ * Forced past the deadline, audiorace_stuckmixer asserts what the fix is
+ * for: that shutdown returns rather than closing the device and deleting the
+ * lock underneath a thread that is still inside both.
+ *
+ * 한국어
+ * ------
+ * @brief 믹서가 g_running을 다시 보기까지 한 번의 패스에 쓰는 시간.
+ *
+ * 하나를 뺀 모든 빌드에서 0이며 `if (0)`은 비용이 없습니다. 이것이 존재하는 이유는
+ * ::audio_shutdown의 합류에 500ms 기한이 있고, 그 기한을 놓쳤을 때 타는 갈래는 어떤 기계도
+ * 일부러 도달하지 않는 갈래이기 때문입니다. 드라이버가 막혀야만 합니다. 무언가 잘못되었을
+ * 때만 실행되는 코드가 곧 시험되지 않는 코드이며, 이는 build.ps1이 LIGHT_CACHE_SLOTS와
+ * MAX_CACHED에 대해 펴는 것과 같은 논거입니다. 표가 아니라 기한에 그 논거를 적용한 것이
+ * 이것입니다.
+ *
+ * 기한을 넘기도록 강제하면 audiorace_stuckmixer가 이 수정이 무엇을 위한 것인지 단언합니다.
+ * 종료 함수가, 여전히 장치와 락 안에 있는 스레드 밑에서 그 둘을 닫고 삭제하는 대신
+ * 반환한다는 것입니다.
+ */
+#ifndef AUDIO_MIXER_STALL_MS
+#define AUDIO_MIXER_STALL_MS 0
+#endif
+
+
 /**
  * @brief Mixes every live voice into one buffer. Called by the device.
  *

@@ -33,7 +33,6 @@
 #include "render.h"
 #include "data.h"
 #include "txt.h"
-#include "post.h"     /* post_in_world_pass -- the pass-boundary guard */
 #include "diag.h"
 
 /* --- Type definitions / 타입 정의 --- */
@@ -551,7 +550,7 @@ void fx_free(void) {
 }
 
 void fx_draw(const Pools *pl, mat4 vp, v3 cam_right, v3 cam_up) {
-    DIAG_WANT_WORLD_PASS(post_in_world_pass());
+    DIAG_WANT_WORLD_PASS();
 
     if (!g_buf_ready) {
         /* Sized for the worst case -- every particle alive at once -- so the

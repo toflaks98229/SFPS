@@ -47,7 +47,7 @@
 #include "pickup.h"
 #include "sprite.h"
 #include "font.h"
-#include "post.h"     /* post_in_world_pass -- the pass-boundary guards */
+#include "post.h"     /* post_begin/post_end/post_size -- this file drives the pass */
 #include "menu.h"     /* the rows the ESC menu draws, read rather than copied */
 #include "door.h"     /* the refusal notice, and the names of the key bits */
 #include "txt.h"      /* txt_append_int/_str: the HUD's numbers, without user32 */
@@ -671,7 +671,7 @@ void scene_rebuild_moving(Scene *s, const Level *l) {
 }
 
 void scene_draw_level(const Scene *s, mat4 vp, v3 eye) {
-    DIAG_WANT_WORLD_PASS(post_in_world_pass());
+    DIAG_WANT_WORLD_PASS();
 
     /* --- the level's own lamps are NOT uploaded here ---------------------
        They used to be, and for a while they had to be: lighting was eight
@@ -731,7 +731,7 @@ void scene_draw_level(const Scene *s, mat4 vp, v3 eye) {
 /* --------------------------------------------------------------- world pass */
 
 void scene_draw_enemies(Scene *s, const Pools *pl, mat4 vp, v3 eye, v3 cam_right) {
-    DIAG_WANT_WORLD_PASS(post_in_world_pass());
+    DIAG_WANT_WORLD_PASS();
 
     int n = enemy_count(pl);
     mb_reset(&s->enemy_buf);
@@ -793,7 +793,7 @@ void scene_draw_enemies(Scene *s, const Pools *pl, mat4 vp, v3 eye, v3 cam_right
 }
 
 void scene_draw_pickups(Scene *s, const Pools *pl, mat4 vp, v3 eye, v3 cam_right) {
-    DIAG_WANT_WORLD_PASS(post_in_world_pass());
+    DIAG_WANT_WORLD_PASS();
 
     int pn = pickup_count(pl);
     mb_reset(&s->pickup_buf);
@@ -824,7 +824,7 @@ void scene_draw_pickups(Scene *s, const Pools *pl, mat4 vp, v3 eye, v3 cam_right
 }
 
 void scene_draw_shots(Scene *s, const Pools *pl, mat4 vp, v3 cam_right, v3 cam_up) {
-    DIAG_WANT_WORLD_PASS(post_in_world_pass());
+    DIAG_WANT_WORLD_PASS();
 
     const int quads  = SHOT_HALOS + SHOT_CORES;
     const int stride = quads * 6;
@@ -995,7 +995,7 @@ static void ui_end(void) {
 
 void scene_draw_hud(Scene *s, int vw, int vh, const Level *l,
                     const Player *p, const Weapon *w) {
-    DIAG_WANT_UI_PASS(post_in_world_pass());
+    DIAG_WANT_UI_PASS();
 
     ui_begin(vw, vh);
 
@@ -1186,7 +1186,7 @@ void scene_draw_hud(Scene *s, int vw, int vh, const Level *l,
 }
 
 void scene_draw_win(Scene *s, int vw, int vh, const Player *p, const Weapon *w) {
-    DIAG_WANT_UI_PASS(post_in_world_pass());
+    DIAG_WANT_UI_PASS();
 
     ui_begin(vw, vh);
 
@@ -1223,7 +1223,7 @@ void scene_draw_win(Scene *s, int vw, int vh, const Player *p, const Weapon *w) 
 
 void scene_draw_between(Scene *s, int vw, int vh, const char *cleared,
                         const char *entering, float t, float total) {
-    DIAG_WANT_UI_PASS(post_in_world_pass());
+    DIAG_WANT_UI_PASS();
 
     ui_begin(vw, vh);
 
@@ -1280,7 +1280,7 @@ void scene_draw_between(Scene *s, int vw, int vh, const char *cleared,
 }
 
 void scene_draw_death(Scene *s, int vw, int vh, float since, int ready) {
-    DIAG_WANT_UI_PASS(post_in_world_pass());
+    DIAG_WANT_UI_PASS();
 
     ui_begin(vw, vh);
 
@@ -1323,7 +1323,7 @@ void scene_draw_death(Scene *s, int vw, int vh, float since, int ready) {
 }
 
 void scene_draw_title(Scene *s, int vw, int vh, float t) {
-    DIAG_WANT_UI_PASS(post_in_world_pass());
+    DIAG_WANT_UI_PASS();
 
     ui_begin(vw, vh);
 
@@ -1658,7 +1658,7 @@ static void draw_menu_hint(Scene *s, int vw, int vh, float cx) {
 }
 
 void scene_draw_menu(Scene *s, int vw, int vh) {
-    DIAG_WANT_UI_PASS(post_in_world_pass());
+    DIAG_WANT_UI_PASS();
 
     if (!menu_is_open()) return;
 
@@ -1699,7 +1699,7 @@ void scene_draw_menu(Scene *s, int vw, int vh) {
 }
 
 void scene_draw_proj(Scene *s, const Pools *pl, mat4 vp, v3 cam_right, v3 cam_up) {
-    DIAG_WANT_WORLD_PASS(post_in_world_pass());
+    DIAG_WANT_WORLD_PASS();
 
     int n = proj_count(pl), live = 0;
 

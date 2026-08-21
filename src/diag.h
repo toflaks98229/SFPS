@@ -647,10 +647,53 @@ int diag_summary(char *out, int cap);
  * 출시까지 살아남는 종류의 실수입니다. 이 매크로들이 대신 그것을 기록합니다. 카운터는
  * 다른 것들과 마찬가지로 HUD에 표시되며 릴리스에서는 비용이 없습니다.
  */
-#define DIAG_WANT_WORLD_PASS(in_world) \
-    do { if (!(in_world)) diag_report(DIAG_PASS_ORDER); } while (0)
-#define DIAG_WANT_UI_PASS(in_world) \
-    do { if  ((in_world)) diag_report(DIAG_PASS_ORDER); } while (0)
+/**
+ * @brief Records which half of the frame is being drawn.
+ *
+ * ENGLISH
+ * -------
+ * THE FLAG LIVES HERE NOW, and post.c only announces the transitions. It was a
+ * static in post.c behind a post_in_world_pass() accessor, which meant every
+ * module that wanted to CHECK the boundary had to include post.h to ask -- and
+ * fx.c and weaponview.c include nothing else from it. Two modules depended on
+ * the post-processing header to run an assertion that does not exist in the
+ * shipped build.
+ *
+ * It also cost the shipped build two stores. The flag was written in
+ * post_begin and post_end unconditionally while the only reader was a
+ * diagnostic that release compiles away. Announcing it through a macro means
+ * release writes nothing, because there is nothing left to write to.
+ *
+ * @param[in] in_world Non-zero from ::post_begin, zero from ::post_end.
+ *
+ * 한국어
+ * ------
+ * @brief 프레임의 어느 절반을 그리는 중인지 기록합니다.
+ *
+ * 이제 플래그가 이곳에 있으며 post.c는 전이만 알립니다. 이전에는 post_in_world_pass()
+ * 접근자 뒤의 post.c 정적 변수였고, 그 말은 경계를 *검사*하려는 모든 모듈이 묻기 위해
+ * post.h를 포함해야 했다는 뜻입니다. fx.c와 weaponview.c는 그 헤더에서 다른 무엇도 가져오지
+ * 않습니다. 두 모듈이, 출하 빌드에는 존재하지도 않는 단언을 실행하기 위해 후처리 헤더에
+ * 의존하고 있었습니다.
+ *
+ * 출하 빌드에 저장 두 번의 비용도 물렸습니다. 유일한 독자가 릴리스에서 사라지는 진단인데도
+ * 플래그는 post_begin과 post_end에서 조건 없이 기록되었습니다. 매크로로 알리면 릴리스는
+ * 아무것도 기록하지 않습니다. 기록할 대상 자체가 남지 않기 때문입니다.
+ *
+ * @param[in] in_world ::post_begin에서 0이 아니고, ::post_end에서 0입니다.
+ */
+void diag_pass_set(int in_world);
+
+/** @brief Which half the frame is in. / 프레임이 어느 절반에 있는지. */
+int diag_pass_in_world(void);
+
+#define DIAG_PASS_WORLD() diag_pass_set(1)
+#define DIAG_PASS_UI()    diag_pass_set(0)
+
+#define DIAG_WANT_WORLD_PASS() \
+    do { if (!diag_pass_in_world()) diag_report(DIAG_PASS_ORDER); } while (0)
+#define DIAG_WANT_UI_PASS() \
+    do { if  (diag_pass_in_world()) diag_report(DIAG_PASS_ORDER); } while (0)
 
 #else  /* release: every trace of this module disappears */
 
@@ -673,8 +716,17 @@ int diag_summary(char *out, int cap);
    패스 경계 가드도 마찬가지입니다. 호출 지점에서 인자가 함수 호출이므로, 버리지 않고
    void로 캐스트합니다. 평가하지 않으면서도 읽는 사람에게 미사용으로 보이지 않게 하기
    위함입니다. */
-#define DIAG_WANT_WORLD_PASS(in_world) ((void)0)
-#define DIAG_WANT_UI_PASS(in_world)    ((void)0)
+#define DIAG_WANT_WORLD_PASS() ((void)0)
+#define DIAG_WANT_UI_PASS()    ((void)0)
+
+/* The announcements go too, which is the point: the flag they wrote to was
+   read by nothing in this build, so post_begin and post_end kept a value
+   nobody could see. Now they keep nothing.
+   알림도 함께 사라지며 그것이 요점입니다. 그것들이 기록하던 플래그를 이 빌드에서는 아무도
+   읽지 않았으므로, post_begin과 post_end는 누구도 볼 수 없는 값을 유지하고 있었습니다.
+   이제는 아무것도 유지하지 않습니다. */
+#define DIAG_PASS_WORLD() ((void)0)
+#define DIAG_PASS_UI()    ((void)0)
 
 #endif /* DIAG_ENABLED */
 

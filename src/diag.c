@@ -189,6 +189,18 @@ void diag_report(DiagKind kind) {
     if (g_counts[kind] < 0x7fffffff) g_counts[kind]++;
 }
 
+/* Which half of the frame is being drawn, moved here from post.c so that a
+   module can check the boundary without depending on the post-processing
+   header to ask. Written only by ::post_begin and ::post_end, through the
+   DIAG_PASS_* macros, so it does not exist at all in a release build.
+   프레임의 어느 절반을 그리는 중인지이며, post.c에서 이곳으로 옮겼습니다. 모듈이 경계를
+   검사하기 위해 후처리 헤더에 의존하지 않아도 되게 하기 위함입니다. DIAG_PASS_* 매크로를
+   통해 ::post_begin과 ::post_end만 기록하므로, 릴리스 빌드에는 아예 존재하지 않습니다. */
+static int g_in_world;
+
+void diag_pass_set(int in_world) { g_in_world = in_world; }
+int  diag_pass_in_world(void)    { return g_in_world; }
+
 void diag_tick(void) {
     if (g_frame < 0x7fffffff) g_frame++;
 }

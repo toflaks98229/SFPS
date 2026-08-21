@@ -19,7 +19,6 @@
 #include "hook.h"     /* HOOK_* states the tether is drawn from */
 #include "sprite.h"   /* weapon_uv -- the view model's sprite atlas */
 #include "txt.h"      /* txt_copy */
-#include "post.h"     /* post_in_world_pass -- the pass-boundary guards */
 #include "diag.h"
 
 /* Material names are authored against LVL_MAT and looked up through tex_mat,
@@ -379,7 +378,7 @@ void wpview_draw_view(WeaponView *v, const Weapon *w, float aspect) {
        lighting, and a crisp weapon over a pixelated world reads as a bug.
        뷰 모델은 *월드* 패스에 속합니다. 장면의 조명을 공유하며, 픽셀화된 월드 위의
        선명한 무기는 버그처럼 보입니다. */
-    DIAG_WANT_WORLD_PASS(post_in_world_pass());
+    DIAG_WANT_WORLD_PASS();
 
     /* --- hand-drawn art REPLACES the model, when it exists ---------------
        One question, asked once a frame, answered by whether the files are
@@ -475,7 +474,7 @@ void wpview_draw_hud(WeaponView *v, const Weapon *w, float aspect, int hook_read
        unreadable, and the range brackets are one pixel wide.
        조준점은 *UI* 패스에 속합니다. 디더링되고 확대된 조준선은 읽을 수 없으며, 사거리
        괄호는 1픽셀 폭입니다. */
-    DIAG_WANT_UI_PASS(post_in_world_pass());
+    DIAG_WANT_UI_PASS();
     /* Drawn straight in clip space: uMVP only corrects for aspect so the
        crosshair stays square. */
     mat4 ndc = mat4_scale(v3f(1.0f / aspect, 1.0f, 1.0f));

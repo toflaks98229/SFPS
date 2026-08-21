@@ -38,7 +38,39 @@
 typedef enum {
     ROW_ACTION = 0,  /**< Runs a ::MenuAction. / ::MenuAction을 실행합니다. */
     ROW_SCREEN,      /**< Switches to another ::MenuScreen. / 다른 화면으로 전환합니다. */
-    ROW_VALUE        /**< Cycles an int in ::MenuSettings. / 설정의 정수 값을 순환시킵니다. */
+    ROW_VALUE,       /**< Cycles an int in ::MenuSettings. / 설정의 정수 값을 순환시킵니다. */
+
+    /**
+     * @brief A ROW_VALUE drawn as a bar rather than as a word.
+     *
+     * ENGLISH
+     * -------
+     * THE DIFFERENCE IS ENTIRELY PRESENTATIONAL. Input treats this exactly as
+     * ROW_VALUE -- the same cycling, the same wrap, the same right-click
+     * reverse -- because a volume IS an int in MenuSettings and nothing about
+     * moving it changes. What changes is that "70" is a number the player has
+     * to read and compare against the two rows above it, where a bar is a
+     * quantity they can see at a glance.
+     *
+     * Kept a KIND rather than a flag on ::Row so the drawing side has one
+     * question to ask and menu.c has one place to answer it. ::menu_row_slider
+     * is that answer; ::RowKind itself stays private, because scene.c has no
+     * business knowing how this module files its rows.
+     *
+     * 한국어
+     * ------
+     * @brief 단어가 아니라 막대로 그려지는 ROW_VALUE입니다.
+     *
+     * *차이는 전적으로 표현에 있습니다.* 입력은 이것을 ROW_VALUE와 정확히 같이 다룹니다. 같은
+     * 순환, 같은 되돌기, 같은 우클릭 역방향입니다. 음량은 MenuSettings의 정수이고 그것을 움직이는
+     * 일에 달라지는 것이 없기 때문입니다. 달라지는 것은, "70"은 플레이어가 읽어서 위의 두 행과
+     * 비교해야 하는 숫자인 반면 막대는 한눈에 보이는 양이라는 점입니다.
+     *
+     * ::Row의 플래그가 아니라 *종류*로 둔 것은 그리기 쪽이 물어볼 질문을 하나로, menu.c가 답할
+     * 곳을 하나로 하기 위함입니다. ::menu_row_slider가 그 답이며, ::RowKind 자체는 사설로
+     * 남습니다. scene.c가 이 모듈이 행을 어떻게 분류하는지 알아야 할 이유가 없습니다.
+     */
+    ROW_SLIDER
 } RowKind;
 
 /**
@@ -141,9 +173,9 @@ static const Row SETTINGS_ROWS[] = {
     { "SCANLINES",   ROW_VALUE, 0, FIELD(scanlines), 2,                  OFF_ON   },
     { "DITHER",      ROW_VALUE, 0, FIELD(dither),    GFX_DITHER_COUNT,   DITHERS  },
     { "PATTERN",     ROW_VALUE, 0, FIELD(pattern),   GFX_PATTERN_COUNT,  PATTERNS },
-    { "MASTER VOL",  ROW_VALUE, 0, FIELD(master),    MENU_VOL_STEPS,     VOLUMES  },
-    { "SFX VOL",     ROW_VALUE, 0, FIELD(sfx),       MENU_VOL_STEPS,     VOLUMES  },
-    { "BGM VOL",     ROW_VALUE, 0, FIELD(music),     MENU_VOL_STEPS,     VOLUMES  },
+    { "MASTER VOL",  ROW_SLIDER,0, FIELD(master),    MENU_VOL_STEPS,     VOLUMES  },
+    { "SFX VOL",     ROW_SLIDER,0, FIELD(sfx),       MENU_VOL_STEPS,     VOLUMES  },
+    { "BGM VOL",     ROW_SLIDER,0, FIELD(music),     MENU_VOL_STEPS,     VOLUMES  },
     { "BACK",        ROW_SCREEN, MENU_ROOT, 0, 0, 0 },
 };
 
@@ -197,6 +229,17 @@ static const Row *rows_of(MenuScreen s, int *count) {
     return 0;
 }
 
+/* A slider is a value row that draws differently, so everything about INPUT
+   has to treat the two alike. One predicate rather than three copies of the
+   same `||`, because three copies is how the next kind gets added to two of
+   them.
+   슬라이더는 다르게 그려지는 값 행이므로 *입력*에 관한 모든 것이 둘을 똑같이 다뤄야 합니다.
+   같은 `||`의 사본 셋이 아니라 술어 하나인 이유는, 사본이 셋이면 다음 종류가 그중 둘에만
+   추가되기 때문입니다. */
+static int is_value(const Row *r) {
+    return r->kind == ROW_VALUE || r->kind == ROW_SLIDER;
+}
+
 static int *field_of(const Row *r) {
     return (int *)((char *)&g_set + r->field);
 }
@@ -223,6 +266,34 @@ int menu_row_count(void) {
     return n;
 }
 
+int menu_row_slider(int row, float *fill) {
+    int n;
+    const Row *rs = rows_of(g_screen, &n);
+    if (fill) *fill = 0.0f;
+    if (!rs || row < 0 || row >= n) return 0;
+
+    const Row *r = &rs[row];
+    if (r->kind != ROW_SLIDER || r->values < 2) return 0;
+
+    /* Clamped on read, the same way menu_row_text clamps: a settings struct
+       handed in by the caller is not this module's to trust.
+       menu_row_text가 제한하는 것과 같은 방식으로 읽기 시에 제한합니다. 호출자가 넘긴 설정
+       구조체는 이 모듈이 신뢰할 수 있는 것이 아닙니다. */
+    int v = *field_of(r);
+    if (v < 0) v = 0;
+    if (v >= r->values) v = r->values - 1;
+
+    /* Over values-1 rather than values, so the top notch fills the bar
+       completely. Dividing by the count would leave a sliver unfilled at
+       maximum, which reads as "not quite all the way" on a control whose whole
+       job is to say how far along it is.
+       values가 아니라 values-1로 나눕니다. 그래야 최상단 눈금이 막대를 완전히 채웁니다.
+       개수로 나누면 최대에서 한 조각이 비어 남는데, 얼마나 진행되었는지를 말하는 것이 일의
+       전부인 컨트롤에서 그것은 "아직 끝까지는 아니다"로 읽힙니다. */
+    if (fill) *fill = (float)v / (float)(r->values - 1);
+    return 1;
+}
+
 const char *menu_row_text(int row, const char **value) {
     int n;
     const Row *rs = rows_of(g_screen, &n);
@@ -239,7 +310,7 @@ const char *menu_row_text(int row, const char **value) {
 
     const Row *r = &rs[row];
     if (value) {
-        if (r->kind == ROW_VALUE) {
+        if (is_value(r)) {
             int v = *field_of(r);
             /* Clamped on READ as well as on write. A settings struct handed in
                by the caller is not this module's to trust, and a value out of
@@ -347,7 +418,7 @@ int menu_click(float mx, float my, int vw, int vh, int right) {
        QUIT에서 오른쪽 클릭이 조용히 무시되면 고장 난 메뉴로 읽힙니다. */
     int n;
     const Row *rs = rows_of(g_screen, &n);
-    if (right && rs && rs[r].kind == ROW_VALUE) menu_adjust(-1);
+    if (right && rs && is_value(&rs[r])) menu_adjust(-1);
     else                                        menu_activate();
     return 1;
 }
@@ -383,7 +454,7 @@ void menu_adjust(int delta) {
     if (!rs || g_cursor < 0 || g_cursor >= n) return;
 
     const Row *r = &rs[g_cursor];
-    if (r->kind != ROW_VALUE || r->values < 1) return;
+    if (!is_value(r) || r->values < 1) return;
 
     int *f = field_of(r);
     int  v = *f + delta;
@@ -417,6 +488,7 @@ void menu_activate(void) {
         g_cursor = 0;
         break;
     case ROW_VALUE:
+    case ROW_SLIDER:
         /* ENTER cycles forward, so the main action key does something on
            every row. See the note on menu_activate in menu.h.
            ENTER는 앞으로 순환시키므로 주 실행 키가 모든 행에서 무언가를 합니다.

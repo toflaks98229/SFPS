@@ -494,6 +494,18 @@ static void scene_lights(const World *w, v3 eye) {
    어렵습니다. */
 #define MENU_LABEL_X   (-150.0f)
 #define MENU_VALUE_X     40.0f
+
+/* --- the volume sliders ----------------------------------------------------
+ * A bar is drawn where those rows' value text would otherwise sit, and the
+ * number follows it rather than being replaced by it: the bar says roughly how
+ * loud, the number says which notch, and somebody matching BGM against SFX
+ * needs the second. See ::menu_row_slider.
+ * 막대는 그 행들의 값 텍스트가 놓일 자리에 그려지고, 숫자는 대체되지 않고 그 뒤에 옵니다.
+ * 막대는 대략 얼마나 큰지를, 숫자는 어느 눈금인지를 말하며, BGM을 SFX에 맞추려는 사람에게
+ * 필요한 것은 후자입니다. ::menu_row_slider를 참조하십시오. */
+#define MENU_BAR_W      92.0f   ///< @brief Track width. / 트랙 너비.
+#define MENU_BAR_H       6.0f   ///< @brief Track height. / 트랙 높이.
+#define MENU_BAR_GAP    12.0f   ///< @brief Between the bar and its number. / 막대와 숫자 사이 간격.
 #define WIN_TITLE_SIZE  7.0f
 #define WIN_STAT_SIZE   2.2f
 #define WIN_HINT_SIZE   1.4f
@@ -1499,6 +1511,22 @@ static void draw_menu_notices(Scene *s, int vw, int vh, float cx, int rows) {
  * @brief Draws the menu's rows, with the highlighted one filled.
  * / 메뉴의 행들을 그리며, 선택된 행은 채워진 막대를 함께 그립니다.
  */
+/* One flat quad in HUD space. The highlight bar and both halves of a slider
+   are the same four steps -- reset, billboard, upload, draw -- and writing them
+   out three times is how the third one ends up with a stale colour.
+   HUD 공간의 평면 사각형 하나입니다. 강조 막대와 슬라이더의 양쪽 절반이 모두 같은 네 단계
+   (초기화, 빌보드, 업로드, 그리기)이며, 그것을 세 번 적어 두는 것이 세 번째가 낡은 색을 갖게
+   되는 방식입니다. */
+static void hud_quad(Scene *s, float x0, float y0, float x1, float y1,
+                     float r, float g, float b, float a) {
+    mb_reset(&s->hud_buf);
+    mb_billboard(&s->hud_buf, v3f((x0 + x1) * 0.5f, (y0 + y1) * 0.5f, 0),
+                 v3f(1,0,0), v3f(0,1,0), x1 - x0, y1 - y0);
+    mesh_upload(&s->hud_mesh, &s->hud_buf, 1);
+    rd_color(r, g, b, a);
+    mesh_draw(&s->hud_mesh);
+}
+
 static void draw_menu_rows(Scene *s, int vw, int vh, float cx, int rows, int cur) {
     for (int i = 0; i < rows; i++) {
         const char *value;
@@ -1521,17 +1549,45 @@ static void draw_menu_rows(Scene *s, int vw, int vh, float cx, int rows, int cur
            켜도 반드시 읽혀야 하는 유일한 화면입니다. 또한 막대는 행의 *클릭 가능한*
            범위를 보이게 합니다. 마우스로 메뉴를 조작하는데 강조 표시가 히트 박스보다
            좁으면, 아무것도 맞지 않는 클릭을 유도하게 됩니다. */
-        if (on) {
-            mb_reset(&s->hud_buf);
-            mb_billboard(&s->hud_buf,
-                         v3f((bx0 + bx1) * 0.5f, (by0 + by1) * 0.5f, 0),
-                         v3f(1,0,0), v3f(0,1,0), bx1 - bx0, by1 - by0);
-            mesh_upload(&s->hud_mesh, &s->hud_buf, 1);
-            rd_mode(RD_FLAT);
-            rd_color(1.0f, 0.85f, 0.30f, 0.16f);
-            mesh_draw(&s->hud_mesh);
+        /* Every quad this row wants, drawn together. RD_FLAT and the font
+           texture are swapped once for the group rather than once per quad,
+           because the restore below is the easiest thing in this loop to get
+           wrong and there should only be one of it.
+           이 행이 원하는 모든 사각형을 함께 그립니다. RD_FLAT과 폰트 텍스처를 사각형마다가
+           아니라 그룹마다 한 번 교체합니다. 아래의 복원이 이 루프에서 가장 틀리기 쉬운
+           것이고, 그것은 하나만 있어야 하기 때문입니다. */
+        float fill = 0.0f;
+        int   slider = menu_row_slider(i, &fill);
 
-            /* Back to text mode and the font: the bar above swapped both. */
+        if (on || slider) {
+            rd_mode(RD_FLAT);
+
+            if (on)
+                hud_quad(s, bx0, by0, bx1, by1, 1.0f, 0.85f, 0.30f, 0.16f);
+
+            if (slider) {
+                float x0 = cx + MENU_VALUE_X;
+                float cy = (by0 + by1) * 0.5f;
+                float y0 = cy - MENU_BAR_H * 0.5f, y1 = cy + MENU_BAR_H * 0.5f;
+
+                /* The empty track first, then the filled part over it. Drawing
+                   the whole track means a slider at zero is still a slider --
+                   an empty row would read as a setting that is missing rather
+                   than as one turned down.
+                   빈 트랙을 먼저, 그 위에 채워진 부분을 그립니다. 트랙 전체를 그리면 0인
+                   슬라이더도 여전히 슬라이더입니다. 빈 행은 꺼진 설정이 아니라 *없는*
+                   설정으로 읽힙니다. */
+                hud_quad(s, x0, y0, x0 + MENU_BAR_W, y1,
+                         0.30f, 0.30f, 0.34f, 0.55f);
+
+                if (fill > 0.0f)
+                    hud_quad(s, x0, y0, x0 + MENU_BAR_W * fill, y1,
+                             on ? 1.00f : 0.66f,
+                             on ? 0.85f : 0.62f,
+                             on ? 0.32f : 0.40f, 0.92f);
+            }
+
+            /* Back to text mode and the font: the quads above swapped both. */
             rd_mode(RD_TEXT);
             glBindTexture(GL_TEXTURE_2D, font_texture());
         }
@@ -1549,8 +1605,11 @@ static void draw_menu_rows(Scene *s, int vw, int vh, float cx, int rows, int cur
 
         text_run(s, cx + MENU_LABEL_X, y, MENU_ROW_SIZE, label, r, g, b, 1.0f);
 
-        if (value[0])
-            text_run(s, cx + MENU_VALUE_X, y, MENU_ROW_SIZE, value, r, g, b, 1.0f);
+        if (value[0]) {
+            float vx = cx + MENU_VALUE_X;
+            if (slider) vx += MENU_BAR_W + MENU_BAR_GAP;
+            text_run(s, vx, y, MENU_ROW_SIZE, value, r, g, b, 1.0f);
+        }
     }
 }
 

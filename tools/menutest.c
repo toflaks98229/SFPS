@@ -238,6 +238,82 @@ int main(void) {
         ok(all_cycle, "and cycles back round to where it started");
     }
 
+    /* --- the volume rows are bars ---------------------------------------
+       A slider is a value row that draws DIFFERENTLY, so the interesting
+       checks are the two halves of that sentence: input still treats it as a
+       value row -- the block above already walked every one of them, sliders
+       included -- and the drawing side is told something extra and true.
+
+       The fill is checked at both ENDS rather than somewhere in the middle,
+       because the ends are where an off-by-one lives: dividing by the value
+       COUNT instead of count-1 leaves the top notch short of full, which is
+       invisible in a spot check at half volume and obvious on the screen.
+
+       음량 행은 막대입니다. 슬라이더는 *다르게 그려지는* 값 행이므로, 흥미로운 검사는 그
+       문장의 두 절반입니다. 입력은 여전히 값 행으로 다루는가(위의 블록이 슬라이더를 포함해
+       모든 값 행을 이미 순회했습니다), 그리고 그리기 쪽은 무언가 추가적이고 참인 것을
+       전달받는가입니다.
+
+       채움은 중간이 아니라 *양 끝*에서 검사합니다. 하나 차이가 사는 곳이 끝이기 때문입니다.
+       count-1이 아니라 값의 *개수*로 나누면 최상단 눈금이 가득 차지 못하는데, 절반 음량에서
+       찔러 보는 검사로는 보이지 않고 화면에서는 명백합니다. */
+    {
+        int n = menu_row_count();
+        int bars = 0, plain = 0, bad = 0;
+
+        for (int i = 0; i < n; i++) {
+            float fill = -1.0f;
+            const char *value;
+            const char *label = menu_row_text(i, &value);
+
+            if (!menu_row_slider(i, &fill)) {
+                plain++;
+                /* Not a slider, and the out parameter must still be safe to
+                   read -- a caller should not have to test the return first. */
+                if (fill != 0.0f) bad++;
+                continue;
+            }
+            bars++;
+
+            /* A slider still NAMES its value: the number goes beside the bar
+               rather than being replaced by it. */
+            if (!label[0] || !value[0]) bad++;
+
+            while (menu_cursor() != i) menu_move(+1);
+
+            /* All the way down, then all the way up. STEPPING UNTIL IT READS
+               EMPTY rather than stepping a fixed number of times, because
+               menu_adjust WRAPS -- walking MENU_VOL_STEPS notches in either
+               direction lands exactly back where it started, which the first
+               version of this check did and then asserted it was at zero.
+               바닥까지 내렸다가 꼭대기까지 올립니다. 정해진 횟수만큼 이동하지 않고 *비었다고
+               읽힐 때까지* 이동합니다. menu_adjust가 *순환*하기 때문입니다. 어느 방향으로든
+               MENU_VOL_STEPS 눈금을 걸으면 정확히 출발점으로 돌아오며, 이 검사의 첫 판이
+               그렇게 해 놓고 0에 있다고 단언했습니다. */
+            for (int k = 0; k < MENU_VOL_STEPS; k++) {
+                menu_row_slider(i, &fill);
+                if (fill == 0.0f) break;
+                menu_adjust(-1);
+            }
+            menu_row_slider(i, &fill);
+            if (fill != 0.0f) bad++;
+
+            for (int k = 0; k < MENU_VOL_STEPS - 1; k++) menu_adjust(+1);
+            menu_row_slider(i, &fill);
+            if (fill < 0.999f || fill > 1.001f) bad++;
+        }
+
+        ok(bars == 3, "three settings rows ask to be drawn as bars");
+        ok(plain > 0, "and the rest of them do not");
+        ok(!bad, "a bar reads empty at the bottom and full at the top");
+
+        /* An out-of-range row answers rather than reading past the table, the
+           same contract menu_row_text keeps a few checks above. */
+        float f = -1.0f;
+        ok(!menu_row_slider(-1, &f) && f == 0.0f, "a negative row is not a bar");
+        ok(!menu_row_slider(n + 5, &f), "and neither is one past the end");
+    }
+
     /* --- the mouse ------------------------------------------------------- */
 
     /* A fixed viewport, so the coordinates below mean something. */

@@ -413,6 +413,43 @@ int menu_cursor(void);
  */
 const char *menu_row_text(int row, const char **value);
 
+/**
+ * @brief Is this row drawn as a bar, and how full is it?
+ *
+ * ENGLISH
+ * -------
+ * @param[in]  row  Row index on the current screen.
+ * @param[out] fill 0 at the bottom notch, 1 at the top. Set to 0 and ignored
+ *                  when the row is not a slider, so a caller may read it
+ *                  without testing the return first.
+ * @return Non-zero if the row wants a bar.
+ *
+ * @note PRESENTATION ONLY. A slider row is an ordinary value row in every other
+ *       respect -- ::menu_adjust moves it, ::menu_row_text still names its
+ *       value, ENTER still cycles it. This exists so the drawing side can show
+ *       a quantity as a quantity without menu.c having to expose how it files
+ *       its rows.
+ * @note The value text is still worth drawing beside the bar. A bar says
+ *       roughly how loud; a number says which notch, which is what somebody
+ *       matching two rows to each other needs.
+ *
+ * 한국어
+ * ------
+ * @brief 이 행은 막대로 그려지는가, 그리고 얼마나 찼는가?
+ * @param[in]  row  현재 화면에서의 행 인덱스.
+ * @param[out] fill 최하단 눈금에서 0, 최상단에서 1. 행이 슬라이더가 아니면 0으로 설정되고
+ *                  무시되므로, 호출자는 반환값을 먼저 검사하지 않고 읽어도 됩니다.
+ * @return 막대를 원하는 행이면 0이 아닌 값.
+ *
+ * @note *표현 전용입니다.* 슬라이더 행은 그 밖의 모든 면에서 평범한 값 행입니다.
+ *       ::menu_adjust가 움직이고, ::menu_row_text가 여전히 그 값을 이름 짓고, ENTER가 여전히
+ *       순환시킵니다. 이것이 존재하는 이유는, menu.c가 행을 어떻게 분류하는지 드러내지 않고도
+ *       그리기 쪽이 양을 양으로 보여 줄 수 있게 하기 위함입니다.
+ * @note 막대 곁에 값 텍스트도 그릴 가치가 있습니다. 막대는 대략 얼마나 큰지를 말하고, 숫자는
+ *       어느 눈금인지를 말합니다. 두 행을 서로 맞추려는 사람에게 필요한 것이 후자입니다.
+ */
+int menu_row_slider(int row, float *fill);
+
 /* --- Layout / 배치 --- */
 
 /**

@@ -751,6 +751,14 @@ static LRESULT CALLBACK wnd_proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
 
     case WM_LBUTTONUP:
+        /* Handed over unconditionally, without asking whether the menu is open
+           or whether it was dragging anything. It is safe either way, and the
+           alternative -- deciding here -- is a second copy of a question the
+           menu already answers, in the one place that would go stale first.
+           메뉴가 열려 있는지, 무언가를 끌고 있었는지 묻지 않고 무조건 넘깁니다. 어느 쪽이든
+           안전하며, 대안(이곳에서 판단하는 것)은 메뉴가 이미 답하는 질문의 두 번째 사본을
+           가장 먼저 낡을 자리에 두는 일입니다. */
+        menu_mouse_up();
         g_mouse_down = 0;
         return 0;
 

@@ -503,9 +503,16 @@ static void scene_lights(const World *w, v3 eye) {
  * 막대는 그 행들의 값 텍스트가 놓일 자리에 그려지고, 숫자는 대체되지 않고 그 뒤에 옵니다.
  * 막대는 대략 얼마나 큰지를, 숫자는 어느 눈금인지를 말하며, BGM을 SFX에 맞추려는 사람에게
  * 필요한 것은 후자입니다. ::menu_row_slider를 참조하십시오. */
-#define MENU_BAR_W      92.0f   ///< @brief Track width. / 트랙 너비.
-#define MENU_BAR_H       6.0f   ///< @brief Track height. / 트랙 높이.
 #define MENU_BAR_GAP    12.0f   ///< @brief Between the bar and its number. / 막대와 숫자 사이 간격.
+/* The bar's own rectangle is NOT here. It is a hit target, so menu.c owns it
+   and ::menu_row_bar_bounds answers for it -- the first version of these
+   sliders kept the width and height in this file and the result was a control
+   that looked draggable and could only be cycled, because the hit test had
+   nothing to test against.
+   막대 자신의 사각형은 이곳에 없습니다. 히트 대상이므로 menu.c가 소유하고
+   ::menu_row_bar_bounds가 답합니다. 이 슬라이더의 첫 판은 너비와 높이를 이 파일에 두었고, 그
+   결과는 드래그할 수 있어 보이는데 순환밖에 되지 않는 컨트롤이었습니다. 히트 판정에 판정할
+   대상이 없었기 때문입니다. */
 #define WIN_TITLE_SIZE  7.0f
 #define WIN_STAT_SIZE   2.2f
 #define WIN_HINT_SIZE   1.4f
@@ -1566,9 +1573,8 @@ static void draw_menu_rows(Scene *s, int vw, int vh, float cx, int rows, int cur
                 hud_quad(s, bx0, by0, bx1, by1, 1.0f, 0.85f, 0.30f, 0.16f);
 
             if (slider) {
-                float x0 = cx + MENU_VALUE_X;
-                float cy = (by0 + by1) * 0.5f;
-                float y0 = cy - MENU_BAR_H * 0.5f, y1 = cy + MENU_BAR_H * 0.5f;
+                float x0, y0, x1, y1;
+                menu_row_bar_bounds(i, vw, vh, &x0, &y0, &x1, &y1);
 
                 /* The empty track first, then the filled part over it. Drawing
                    the whole track means a slider at zero is still a slider --
@@ -1577,11 +1583,11 @@ static void draw_menu_rows(Scene *s, int vw, int vh, float cx, int rows, int cur
                    빈 트랙을 먼저, 그 위에 채워진 부분을 그립니다. 트랙 전체를 그리면 0인
                    슬라이더도 여전히 슬라이더입니다. 빈 행은 꺼진 설정이 아니라 *없는*
                    설정으로 읽힙니다. */
-                hud_quad(s, x0, y0, x0 + MENU_BAR_W, y1,
+                hud_quad(s, x0, y0, x1, y1,
                          0.30f, 0.30f, 0.34f, 0.55f);
 
                 if (fill > 0.0f)
-                    hud_quad(s, x0, y0, x0 + MENU_BAR_W * fill, y1,
+                    hud_quad(s, x0, y0, x0 + (x1 - x0) * fill, y1,
                              on ? 1.00f : 0.66f,
                              on ? 0.85f : 0.62f,
                              on ? 0.32f : 0.40f, 0.92f);
@@ -1607,7 +1613,13 @@ static void draw_menu_rows(Scene *s, int vw, int vh, float cx, int rows, int cur
 
         if (value[0]) {
             float vx = cx + MENU_VALUE_X;
-            if (slider) vx += MENU_BAR_W + MENU_BAR_GAP;
+            /* Past the bar's real right edge rather than past a width this file
+               believes in -- one of them is the truth and it is not this one.
+               이 파일이 믿는 너비가 아니라 막대의 실제 오른쪽 끝 너머입니다. 둘 중 하나가
+               진실이고 그것은 이쪽이 아닙니다. */
+            float sx0, sx1;
+            if (slider && menu_row_bar_bounds(i, vw, vh, &sx0, 0, &sx1, 0))
+                vx = sx1 + MENU_BAR_GAP;
             text_run(s, vx, y, MENU_ROW_SIZE, value, r, g, b, 1.0f);
         }
     }

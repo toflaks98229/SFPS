@@ -343,6 +343,25 @@ const char *menu_row_text(int row, const char **value) {
 #define TITLE_GAP   70.0f   /* above the first row */
 #define HINT_GAP    34.0f   /* below the last row */
 
+/* The slider bar, in the same block as the rows above and for the same reason:
+   it is a HIT TARGET, and a hit target whose extent is known only to the
+   drawing side cannot be dragged. That was the bug -- the bar was drawn from
+   constants in scene.c, so menu.c had nothing to test a click against and a
+   slider could only be cycled like the value row it used to be.
+   BAR_X names the same column scene.c puts value TEXT in. They are deliberately
+   equal and deliberately separate: the words are a layout question and belong
+   to the drawing, the bar is a target and belongs here.
+   슬라이더 막대이며, 위의 행들과 같은 블록에 같은 이유로 놓입니다. 이것은 *히트 대상*이고,
+   그리기 쪽만 범위를 아는 히트 대상은 드래그할 수 없습니다. 그것이 결함이었습니다. 막대가
+   scene.c의 상수로 그려졌으므로 menu.c에는 클릭을 판정할 대상이 없었고, 슬라이더는 예전의 값
+   행처럼 순환시키는 것밖에 할 수 없었습니다.
+   BAR_X는 scene.c가 값 *텍스트*를 놓는 것과 같은 열을 가리킵니다. 의도적으로 같은 값이고
+   의도적으로 별개입니다. 단어는 배치의 문제라 그리기의 것이고, 막대는 대상이라 이곳의
+   것입니다. */
+#define BAR_X       40.0f   /* from the centre: where the bar starts */
+#define BAR_W       92.0f   /* the track's full width */
+#define BAR_H        6.0f   /* the track's height */
+
 static float block_top(int vh) {
     int rows = menu_row_count();
     return vh * 0.5f - (rows * ROW_STEP) * 0.5f;
@@ -376,6 +395,56 @@ float menu_hint_y(int vw, int vh) {
     return block_top(vh) + menu_row_count() * ROW_STEP + HINT_GAP;
 }
 
+int menu_row_bar_bounds(int row, int vw, int vh,
+                        float *x0, float *y0, float *x1, float *y1) {
+    if (!menu_row_slider(row, 0)) return 0;
+
+    float rx0, ry0, rx1, ry1;
+    if (!menu_row_bounds(row, vw, vh, &rx0, &ry0, &rx1, &ry1)) return 0;
+
+    /* Centred in the row's own box, so the bar moves with the row it belongs
+       to and nothing here repeats ROW_STEP.
+       행 자신의 상자 안에 세로 중앙 정렬하므로, 막대가 자기 행을 따라 움직이고 이곳의
+       무엇도 ROW_STEP을 되풀이하지 않습니다. */
+    float cx = vw * 0.5f;
+    float cy = (ry0 + ry1) * 0.5f;
+    if (x0) *x0 = cx + BAR_X;
+    if (x1) *x1 = cx + BAR_X + BAR_W;
+    if (y0) *y0 = cy - BAR_H * 0.5f;
+    if (y1) *y1 = cy + BAR_H * 0.5f;
+    return 1;
+}
+
+/* Sets a slider from a mouse x, and this is what a bar is FOR: the notch you
+   point at is the notch you get. Rounding rather than truncating so the two
+   ends are reachable and each notch owns the half-step either side of it --
+   truncation would make the top notch need a click past the end of the bar.
+   Clamped rather than ignored outside, so a drag that runs off the end pins to
+   the end instead of stopping wherever it left.
+   마우스 x로 슬라이더를 설정하며, 막대가 존재하는 *이유*가 이것입니다. 가리킨 눈금이 얻는
+   눈금입니다. 잘라내지 않고 반올림하므로 양 끝에 도달할 수 있고 각 눈금이 양옆 반 칸을
+   가집니다. 잘라내면 최상단 눈금은 막대 끝 너머를 클릭해야 합니다. 바깥에서 무시하지 않고
+   제한하므로, 끝을 지나친 드래그는 벗어난 자리에 멈추지 않고 끝에 붙습니다. */
+static void slider_set_from_x(int row, float mx, int vw, int vh) {
+    float x0, x1;
+    if (!menu_row_bar_bounds(row, vw, vh, &x0, 0, &x1, 0)) return;
+
+    int n;
+    const Row *rs = rows_of(g_screen, &n);
+    if (!rs || row < 0 || row >= n) return;
+    const Row *r = &rs[row];
+    if (r->values < 2 || x1 <= x0) return;
+
+    float t = (mx - x0) / (x1 - x0);
+    if (t < 0.0f) t = 0.0f;
+    if (t > 1.0f) t = 1.0f;
+
+    int v = (int)(t * (float)(r->values - 1) + 0.5f);
+    if (v < 0) v = 0;
+    if (v >= r->values) v = r->values - 1;
+    *field_of(r) = v;
+}
+
 /* Which row contains a point, or -1. The one place that answers this. */
 static int row_at(float mx, float my, int vw, int vh) {
     int n = menu_row_count();
@@ -389,8 +458,31 @@ static int row_at(float mx, float my, int vw, int vh) {
 
 /* --- Input / 입력 --- */
 
+/* The row a drag is holding, or -1. A latch rather than a per-move hit test,
+   because a drag that only worked while the pointer stayed inside a six-pixel
+   tall bar is not a drag -- the hand moves vertically as it moves sideways, and
+   the control has to keep following.
+   드래그가 붙잡고 있는 행이며, 없으면 -1입니다. 이동마다 히트 판정을 하지 않고 래치를 두는
+   이유는, 포인터가 높이 6픽셀짜리 막대 안에 머무는 동안에만 동작하는 드래그는 드래그가 아니기
+   때문입니다. 손은 옆으로 움직이면서 위아래로도 움직이며, 컨트롤은 계속 따라가야 합니다. */
+static int g_drag = -1;
+
+void menu_mouse_up(void) { g_drag = -1; }
+
 int menu_hover(float mx, float my, int vw, int vh) {
-    if (!menu_is_open()) return -1;
+    if (!menu_is_open()) { g_drag = -1; return -1; }
+
+    /* A DRAG IN PROGRESS OWNS THE POINTER. Answered before the hit test, and
+       the row is not re-derived from `my` -- the held row keeps the pointer
+       even when it wanders off its own band, which is what makes this a drag
+       rather than a sequence of clicks that stop the moment the hand drifts.
+       진행 중인 드래그가 포인터를 소유합니다. 히트 판정보다 먼저 답하며, 행을 `my`로 다시
+       유도하지 않습니다. 붙잡힌 행이 자기 대역을 벗어나도 포인터를 계속 쥐며, 그것이 이것을
+       손이 흔들리는 순간 멈추는 클릭의 연속이 아니라 드래그로 만듭니다. */
+    if (g_drag >= 0) {
+        slider_set_from_x(g_drag, mx, vw, vh);
+        return g_drag;
+    }
 
     int r = row_at(mx, my, vw, vh);
     /* Only moved when the cursor is actually over a row, so drifting off the
@@ -418,6 +510,38 @@ int menu_click(float mx, float my, int vw, int vh, int right) {
        QUIT에서 오른쪽 클릭이 조용히 무시되면 고장 난 메뉴로 읽힙니다. */
     int n;
     const Row *rs = rows_of(g_screen, &n);
+
+    /* ON THE BAR, the notch you point at is the notch you get, and the button
+       stays held so the pointer can drag it. This is the whole difference
+       between a slider and the value row it is drawn instead of: cycling still
+       happens, but only where cycling is the only thing available.
+
+       Off the bar -- on the label, or in the space either side -- a slider
+       falls back to cycling, so the keyboard's behaviour and the mouse's agree
+       on every part of the row that is not the control itself.
+
+       Right-click never drags. It reverses one notch, which is what it does on
+       every other value row; a drag with the wrong button would be a second way
+       to do the same thing and a first way to do it by accident.
+
+       *막대 위에서는* 가리킨 눈금이 얻는 눈금이며, 버튼을 누른 채로 두면 포인터가 그것을 끌 수
+       있습니다. 이것이 슬라이더와, 그것 대신 그려지던 값 행 사이의 차이 전부입니다. 순환은
+       여전히 일어나지만 순환만이 유일한 선택지인 곳에서만 일어납니다.
+
+       막대 *바깥*(레이블 위나 양옆 여백)에서 슬라이더는 순환으로 물러나므로, 컨트롤 자체가
+       아닌 행의 모든 부분에서 키보드의 동작과 마우스의 동작이 일치합니다.
+
+       오른쪽 클릭은 결코 드래그하지 않습니다. 한 눈금 되돌리며, 그것은 다른 모든 값 행에서
+       하는 일과 같습니다. 엉뚱한 버튼으로 하는 드래그는 같은 일을 하는 두 번째 방법이자
+       실수로 하게 되는 첫 번째 방법입니다. */
+    float bx0, by0, bx1, by1;
+    if (!right && menu_row_bar_bounds(r, vw, vh, &bx0, &by0, &bx1, &by1) &&
+        mx >= bx0 && mx <= bx1) {
+        slider_set_from_x(r, mx, vw, vh);
+        g_drag = r;
+        return 1;
+    }
+
     if (right && rs && is_value(&rs[r])) menu_adjust(-1);
     else                                        menu_activate();
     return 1;
@@ -486,6 +610,9 @@ void menu_activate(void) {
     case ROW_SCREEN:
         g_screen = (MenuScreen)r->arg;
         g_cursor = 0;
+        /* The row under the pointer is not the row that was held.
+           포인터 아래의 행은 붙잡고 있던 행이 아닙니다. */
+        g_drag   = -1;
         break;
     case ROW_VALUE:
     case ROW_SLIDER:
@@ -507,6 +634,7 @@ MenuAction menu_take_action(void) {
 }
 
 void menu_close(void) {
+    g_drag = -1;
     g_screen = MENU_CLOSED;
     g_cursor = 0;
 }

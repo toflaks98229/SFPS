@@ -450,6 +450,51 @@ const char *menu_row_text(int row, const char **value);
  */
 int menu_row_slider(int row, float *fill);
 
+/**
+ * @brief Where a slider row's bar is, in the same coordinates as ::menu_row_bounds.
+ *
+ * ENGLISH
+ * -------
+ * @param[in]  row            Row index on the current screen.
+ * @param[in]  vw,vh          Viewport, as ::menu_row_bounds takes it.
+ * @param[out] x0,y0,x1,y1    The track's rectangle. Untouched when the row is
+ *                            not a slider.
+ * @return Non-zero if the row has a bar.
+ *
+ * @note HERE RATHER THAN IN THE DRAWING, because the bar is a hit target and a
+ *       target whose extent only the drawing knows cannot be clicked. The first
+ *       version of the sliders put these numbers in scene.c and the result was
+ *       a control that looked draggable and could only be cycled -- menu.c had
+ *       nothing to test a click against. Same argument as ::menu_row_bounds.
+ *
+ * 한국어
+ * ------
+ * @brief 슬라이더 행의 막대 위치이며, ::menu_row_bounds와 같은 좌표계입니다.
+ * @param[in]  row            현재 화면에서의 행 인덱스.
+ * @param[in]  vw,vh          ::menu_row_bounds가 받는 것과 같은 뷰포트.
+ * @param[out] x0,y0,x1,y1    트랙의 사각형. 행이 슬라이더가 아니면 건드리지 않습니다.
+ * @return 막대가 있는 행이면 0이 아닌 값.
+ *
+ * @note *그리기가 아니라 이곳에 있는 이유*는 막대가 히트 대상이고, 그리기만 범위를 아는 대상은
+ *       클릭할 수 없기 때문입니다. 슬라이더의 첫 판은 이 숫자들을 scene.c에 두었고, 그 결과는
+ *       드래그할 수 있어 보이는데 순환밖에 되지 않는 컨트롤이었습니다. menu.c에 클릭을 판정할
+ *       대상이 없었습니다. ::menu_row_bounds와 같은 논거입니다.
+ */
+int menu_row_bar_bounds(int row, int vw, int vh,
+                        float *x0, float *y0, float *x1, float *y1);
+
+/**
+ * @brief Tells the menu the mouse button came up, ending any drag.
+ *
+ * ENGLISH: Safe to call at any time, whether the menu is open or not and
+ * whether anything was being dragged or not, so the caller can hand every
+ * button-up over without deciding first.
+ *
+ * 한국어: 메뉴가 열려 있든 아니든, 무언가를 끌고 있었든 아니든 언제든 호출해도 안전하므로,
+ * 호출자는 먼저 판단하지 않고 모든 버튼 놓임을 그대로 넘기면 됩니다.
+ */
+void menu_mouse_up(void);
+
 /* --- Layout / 배치 --- */
 
 /**

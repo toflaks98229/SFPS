@@ -411,6 +411,97 @@ int main(void) {
         ok(menu_take_action() == MENU_ACT_NONE, "nor ask for anything");
     }
 
+    /* --- a slider is dragged, not cycled --------------------------------
+       The bug this covers: the bar was drawn from constants in scene.c, so
+       menu.c had nothing to test a click against and a slider could only be
+       cycled like the value row it is drawn instead of. It looked draggable
+       and was not, which is a worse control than the number it replaced.
+
+       So the checks are about POSITION carrying meaning: the notch you point
+       at is the notch you get, both ends are reachable, the pointer keeps the
+       row while the button is held, and letting go lets go.
+
+       슬라이더는 순환이 아니라 드래그됩니다. 이 검사가 덮는 결함은, 막대가 scene.c의 상수로
+       그려져 menu.c에 클릭을 판정할 대상이 없었고 슬라이더가 그것 대신 그려지던 값 행처럼
+       순환밖에 되지 않았다는 것입니다. 드래그할 수 있어 보이는데 아니었으며, 그것은 대체한
+       숫자보다 나쁜 컨트롤입니다.
+
+       그래서 검사는 *위치가 의미를 나른다*는 것에 관한 것입니다. 가리킨 눈금이 얻는 눈금이고,
+       양 끝에 도달할 수 있고, 버튼을 누른 동안 포인터가 행을 붙잡고 있고, 놓으면 놓입니다. */
+    {
+    menu_init(0);
+    menu_escape();
+    select_row("SETTINGS");
+    menu_activate();
+        int row = row_named("BGM VOL");
+        ok(row >= 0, "the settings offer a BGM VOL row");
+
+        float x0, y0, x1, y1;
+        ok(row >= 0 && menu_row_bar_bounds(row, VW, VH, &x0, &y0, &x1, &y1),
+           "and it reports a bar to click on");
+
+        if (row >= 0) {
+            float cy = (y0 + y1) * 0.5f;
+
+            /* The far left is the bottom notch, the far right the top. Both
+               ends have to be reachable by pointing at the bar's own edges --
+               a control you cannot take to zero or to full by aiming at its
+               ends is one you have to nudge, which is the thing a bar is for
+               not having to do. */
+            menu_click(x0 + 1.0f, cy, VW, VH, 0);
+            ok(menu_settings()->music == 0, "clicking the left end sets it to zero");
+
+            menu_click(x1 - 1.0f, cy, VW, VH, 0);
+            ok(menu_settings()->music == MENU_VOL_STEPS - 1,
+               "and the right end sets it to full");
+
+            /* The middle lands on the middle notch, so position is a value and
+               not merely a direction. */
+            menu_click((x0 + x1) * 0.5f, cy, VW, VH, 0);
+            int mid = menu_settings()->music;
+            ok(mid > 0 && mid < MENU_VOL_STEPS - 1, "and the middle lands between them");
+
+            /* THE DRAG. The button is still down from the click above, so a
+               move tracks -- and it tracks even when the pointer wanders off
+               the bar's own six-pixel band, which is what separates a drag
+               from a run of clicks. */
+            menu_hover(x0 + 1.0f, cy + 40.0f, VW, VH);
+            ok(menu_settings()->music == 0, "a held pointer drags it, even off the band");
+
+            menu_hover(x1 - 1.0f, cy - 40.0f, VW, VH);
+            ok(menu_settings()->music == MENU_VOL_STEPS - 1, "and keeps dragging back");
+
+            /* Letting go lets go: a move afterwards is an ordinary hover and
+               must not still be writing to the row. */
+            menu_mouse_up();
+            menu_hover(x0 + 1.0f, cy, VW, VH);
+            ok(menu_settings()->music == MENU_VOL_STEPS - 1,
+               "and releasing stops it following the pointer");
+
+            /* Off the bar, a slider still cycles -- so the label end of the row
+               behaves the way every other value row does and the keyboard and
+               the mouse agree everywhere that is not the control itself. */
+            float rx0, rx1;
+            menu_row_bounds(row, VW, VH, &rx0, 0, &rx1, 0);
+            int before = menu_settings()->music;
+            menu_click(rx0 + 2.0f, cy, VW, VH, 0);
+            ok(menu_settings()->music != before, "clicking the label still cycles it");
+            menu_mouse_up();
+
+            /* Right-click never drags; it reverses one notch like anywhere
+               else. */
+            before = menu_settings()->music;
+            menu_click((x0 + x1) * 0.5f, cy, VW, VH, 1);
+            ok(menu_settings()->music != before, "and right-click reverses rather than sets");
+            menu_mouse_up();
+        }
+
+        /* A row that is not a slider has no bar to ask about. */
+        int plain = row_named("PATTERN");
+        ok(plain < 0 || !menu_row_bar_bounds(plain, VW, VH, &x0, &y0, &x1, &y1),
+           "a row that is not a slider reports no bar");
+    }
+
     /* Right-click reverses a value, so a three-value row is one click away in
        either direction. */
     menu_init(0);

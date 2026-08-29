@@ -688,7 +688,83 @@ typedef struct {
  */
 #define LVL_SUN_SCALE (1.0f / 255.0f)
 
-#define LVL_MAT         16     ///< @brief Maximum length of a material or entity kind name. / 재질 또는 엔티티 종류 이름의 최대 길이.
+#define LVL_MAT         16     ///< @brief Maximum length of a material name. / 재질 이름의 최대 길이.
+
+/**
+ * @brief Maximum length of an ::Entity::kind, terminator included.
+ *
+ * ENGLISH
+ * -------
+ * SEPARATE FROM ::LVL_MAT BECAUSE THE TWO ARE BOUND BY DIFFERENT THINGS. A
+ * material name is bound at the far end by ::TEX_NAME_MAX, the key width of
+ * tex_mat's cache, and by ::BR_TEX, which is Quake's 15+nul because that is
+ * what a .map face stores. weaponview.c and textest both assert that
+ * relationship. Raising LVL_MAT to make room for an entity kind would drag
+ * the texture cache along behind it to buy space for names that are not
+ * textures -- `scratch`, at seven characters, is the longest material this
+ * project ships.
+ *
+ * A kind is bound by something else entirely, and it is NOT the classname.
+ * The classname has its family prefix stripped on the way in (see
+ * brush_ents_of in level.c), so what has to fit is the REMAINDER -- and for a
+ * spawner that remainder is `spawner_` plus a monster name, which enemy.c
+ * then strips again:
+ *
+ *     monster_spawner_water_spirit  ->  spawner_water_spirit  ->  20 + nul
+ *     ^^^^^^^^ level.c strips            ^^^^^^^^ enemy.c strips next
+ *
+ * Sharing ::LVL_MAT gave the kind fifteen characters, which fitted
+ * `spawner_caster` with ONE to spare. The first monster whose name ran past
+ * seven characters had a working `monster_<name>` and a
+ * `monster_spawner_<name>` that truncated; ::mon_type_for compares whole
+ * names, found nothing, and the spawner was dropped without a word. That is
+ * what ::DIAG_ENT_KIND now says out loud.
+ *
+ * 32 is not the smallest number that works today (21 is). It is chosen so a
+ * monster name may be as long as the FGD makes it look like it may be, and so
+ * the next long name is a truncation this file already anticipated rather than
+ * one it has to be edited for again. The cost is one name per entity -- about
+ * 1KB across a whole ::Level, in .bss, none of it on disk or per frame.
+ *
+ * @note leveltest asserts the invariant this number exists to hold: that every
+ *       monster the engine knows is placeable as `monster_spawner_<name>`. A
+ *       name too long fails there, at the table that named it, rather than in
+ *       a room that quietly never fills.
+ *
+ * 한국어
+ * ------
+ * @brief ::Entity::kind의 최대 길이. 종료 문자를 포함합니다.
+ *
+ * ::LVL_MAT와 분리하는 이유는 둘을 묶는 것이 서로 다르기 때문입니다. 재질 이름은 반대쪽 끝에서
+ * tex_mat 캐시의 키 폭인 ::TEX_NAME_MAX에, 그리고 .map의 면이 저장하는 형식이라 Quake의
+ * 15+널인 ::BR_TEX에 묶여 있습니다. weaponview.c와 textest가 그 관계를 단언합니다. 엔티티
+ * 종류를 위해 LVL_MAT를 올리는 것은, 텍스처가 아닌 이름들을 위한 자리를 사면서 텍스처 캐시를
+ * 뒤에 끌고 가는 일입니다. 이 프로젝트가 출하하는 가장 긴 재질은 일곱 글자 `scratch`입니다.
+ *
+ * 종류를 묶는 것은 전혀 다른 것이며, 그것은 classname이 *아닙니다*. classname은 들어오는 길에
+ * 계열 접두사가 떨어져 나가므로(level.c의 brush_ents_of 참조) 들어가야 하는 것은 *나머지*이고,
+ * 스포너의 경우 그 나머지는 `spawner_`에 몬스터 이름을 더한 것이며 enemy.c가 그것을 다시
+ * 뗍니다.
+ *
+ *     monster_spawner_water_spirit  ->  spawner_water_spirit  ->  20 + 널
+ *     ^^^^^^^^ level.c가 뗍니다          ^^^^^^^^ enemy.c가 다음으로 뗍니다
+ *
+ * ::LVL_MAT를 함께 쓰면 종류에 열다섯 글자가 주어졌고, 그것은 `spawner_caster`를 *한 글자*
+ * 남기고 담았습니다. 이름이 일곱 글자를 넘는 첫 몬스터는 `monster_<name>`은 동작하는데
+ * `monster_spawner_<name>`은 잘렸습니다. ::mon_type_for는 이름 전체를 비교하므로 아무것도 찾지
+ * 못했고, 스포너는 한마디도 없이 버려졌습니다. 그것을 이제 ::DIAG_ENT_KIND가 소리 내어
+ * 말합니다.
+ *
+ * 32는 오늘 동작하는 가장 작은 수가 아닙니다(그것은 21입니다). FGD가 그래도 될 것처럼 보이게
+ * 하는 만큼 몬스터 이름이 길어도 되도록, 그리고 다음번 긴 이름이 이 파일을 또 고쳐야 하는
+ * 절단이 아니라 이 파일이 이미 내다본 절단이 되도록 고른 값입니다. 비용은 엔티티마다 이름
+ * 하나이며 ::Level 전체로 약 1KB, .bss에 있고 디스크에도 프레임에도 없습니다.
+ *
+ * @note leveltest가 이 숫자의 존재 이유인 불변식을 단언합니다. 엔진이 아는 모든 몬스터는
+ *       `monster_spawner_<name>`으로 배치될 수 있어야 한다는 것입니다. 너무 긴 이름은 조용히
+ *       채워지지 않는 방이 아니라 그것을 이름 지은 표에서 실패합니다.
+ */
+#define LVL_KIND        32
 
 /**
  * @brief Maximum material runs a level's geometry can produce.
@@ -1333,7 +1409,7 @@ typedef struct {
  *       추가해도 이곳은 수정할 필요가 없습니다.
  */
 typedef struct {
-    char  kind[LVL_MAT];          /**< "spawn", "ammo", ... / "spawn", "ammo" 등. */
+    char  kind[LVL_KIND];          /**< "spawn", "ammo", ... / "spawn", "ammo" 등. */
     short x, z;                   /**< Position in 1/100 units. / 위치 (1/100 단위). */
 
     /**

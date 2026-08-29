@@ -755,7 +755,7 @@ static void place_entity(float x, float z) {
     if (g_level.n_ents >= LVL_MAX_ENTS) { status("entity limit", 0, 0); return; }
     snapshot();
     Entity *e = &g_level.ents[g_level.n_ents++];
-    set_str(e->kind, LVL_MAT, ENT_KINDS[g_ent_kind]);
+    set_str(e->kind, LVL_KIND, ENT_KINDS[g_ent_kind]);
     e->x = snap(x);
     e->z = snap(z);
     status("placed %s (%d total)", 0, g_level.n_ents);
@@ -1891,7 +1891,7 @@ static void draw_inspector(int w, int h) {
                 int col = k % 4, ncol = 4;
                 if (ui_button_strip(&g_ui, UI_IDX(k), ENT_KINDS[k], col, ncol, on)) {
                     snapshot();
-                    set_str(e->kind, LVL_MAT, ENT_KINDS[k]);
+                    set_str(e->kind, LVL_KIND, ENT_KINDS[k]);
                     g_dirty = 1;
                     status_s("entity -> %s", e->kind);
                 }

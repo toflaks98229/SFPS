@@ -115,8 +115,35 @@
    이 파일의 인자 순서를 따르는 txt_copy입니다. 호출 지점마다 교체하지 않고 이름을
    유지하는 이유는, 이곳에서는 "이 토큰을 저 필드에 복사한다"가 범용 헬퍼의 인자 네 개
    보다 잘 읽히기 때문입니다. */
-static void copy_name(char *dst, int cap, const char *src, int len) {
-    txt_copy(dst, cap, src, len);
+static int copy_name(char *dst, int cap, const char *src, int len) {
+    int n = txt_copy(dst, cap, src, len);
+
+    /* AND SAYS WHETHER ALL OF IT FITTED, like brush.c's copy_fits: this only
+       measures, the caller reports, so the two decisions stay apart. Most
+       callers here ignore the answer and are right to -- a material name that
+       does not fit draws the wrong texture, which is visible. The one caller
+       that must not ignore it is the entity kind, where truncation is invisible
+       by construction: the name is handed to another module to look up, and a
+       name that lost its tail simply is not found.
+
+       Fitted means the copy stopped for the reason the CALLER meant rather than
+       because the buffer ran out -- a counted copy when it wrote its whole
+       count, an uncounted one when the byte it stopped at was the terminator.
+       txt_copy's return alone cannot say this: a source that exactly fills the
+       buffer and one that overruns it both come back as `cap - 1`.
+
+       그리고 전부 들어갔는지 알려 줍니다. brush.c의 copy_fits와 같습니다. 이 함수는 재기만
+       하고 보고는 호출자가 하므로 두 판단이 분리되어 있습니다. 이곳의 호출자 대부분은 그
+       답을 무시하며 그래도 됩니다. 들어가지 못한 재질 이름은 엉뚱한 텍스처를 그리고, 그것은
+       눈에 보입니다. 무시해서는 안 되는 유일한 호출자는 엔티티 종류입니다. 그곳의 절단은
+       구조적으로 보이지 않습니다. 이름은 다른 모듈에 넘겨져 조회되며, 꼬리를 잃은 이름은
+       그저 발견되지 않습니다.
+
+       "들어갔다"는 것은 복사가 버퍼가 동나서가 아니라 *호출자가 의도한* 이유로 멈추었다는
+       뜻입니다. 개수를 준 복사는 그 개수를 다 썼을 때, 주지 않은 복사는 멈춘 자리의 바이트가
+       종료 문자였을 때입니다. txt_copy의 반환값만으로는 이것을 말할 수 없습니다. 버퍼를 꼭
+       채우는 원본과 넘치는 원본이 똑같이 `cap - 1`로 돌아오기 때문입니다. */
+    return (len >= 0) ? (n == len) : (src[n] == 0);
 }
 
 void level_bounds(Sector *s) {
@@ -605,7 +632,7 @@ static const char *parse_entity(const char *p, Level *out, int found) {
        엔티티 위도 어차피 지나가야 하며, 일찍 반환하면 줄 중간에 남게 됩니다. */
     if (found && out->n_ents < LVL_MAX_ENTS) {
         Entity *e = &out->ents[out->n_ents++];
-        copy_name(e->kind, LVL_MAT, kind, klen);
+        copy_name(e->kind, LVL_KIND, kind, klen);
         e->x = (short)x;
         e->z = (short)z;
         for (int i = 0; i < LVL_ENT_PARAMS; i++) e->p[i] = (short)par[i];
@@ -1629,7 +1656,15 @@ static void brush_ents_of(Level *out, const BrushMap *bm) {
         if (out->n_ents >= LVL_MAX_ENTS) { DIAG(DIAG_ENT_CAP); continue; }
         Entity *en = &out->ents[out->n_ents++];
 
-        copy_name(en->kind, LVL_MAT, kind, -1);
+        /* THE ONE COPY HERE WHOSE TRUNCATION NOBODY WOULD SEE. level.c never
+           learns what a kind means, so it cannot check that this one is real;
+           what it can check is that all of it arrived. See ::DIAG_ENT_KIND for
+           the classname that made this necessary and ::LVL_KIND for the budget.
+           이곳에서 절단되어도 아무도 보지 못할 유일한 복사입니다. level.c는 종류가 무엇을
+           뜻하는지 끝내 배우지 않으므로 이것이 실재하는지 검사할 수 없습니다. 검사할 수 있는
+           것은 전부 도착했는가입니다. 이것을 필요하게 만든 classname은 ::DIAG_ENT_KIND를,
+           예산은 ::LVL_KIND를 참조하십시오. */
+        if (!copy_name(en->kind, LVL_KIND, kind, -1)) DIAG(DIAG_ENT_KIND);
         en->x = (short)(o.x * 100.0f);
         en->z = (short)(o.z * 100.0f);
         en->y = (short)(o.y * 100.0f);

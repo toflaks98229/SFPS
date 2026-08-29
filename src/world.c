@@ -1951,7 +1951,7 @@ static void grant_weapons_of(const Level *l, PlayerProgress *out) {
     for (int i = 0; i < l->n_ents; i++) {
         const char *k = l->ents[i].kind;
         int n = 0;
-        while (n < LVL_MAT && k[n]) n++;
+        while (n < LVL_KIND && k[n]) n++;
 
         int wp = PK_WEAPON_WEAPON(pickup_kind_for_n(k, n));
         if (wp >= 0 && wp < WP_TYPES) out->owned[wp] = 1;

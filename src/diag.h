@@ -514,6 +514,46 @@ typedef enum {
      */
     DIAG_STORY_CAP,
 
+    /**
+     * @brief A brush entity's classname was longer than ::LVL_KIND holds, so the
+     *        kind it became was stored truncated.
+     *
+     * ENGLISH: NOT ::DIAG_ENT_CAP. That one means the level declared more
+     * markers than ::LVL_MAX_ENTS holds and the surplus was dropped: the number
+     * to raise is LVL_MAX_ENTS, and every kind that did get stored is intact.
+     * This one means a marker WAS stored and its kind is no longer the name the
+     * mapper wrote, so the module that owns that kind looks it up and does not
+     * find it. Reading one counter and finding the other cap was the real one
+     * would send the reader to the wrong number -- the same reason
+     * ::DIAG_MAPENT_CAP is not ::DIAG_BRUSH_CAP.
+     *
+     * What it looks like is nothing at all. `monster_spawner_water_spirit` is
+     * twenty characters after `monster_` comes off and became the kind
+     * `spawner_water_s`; enemy.c stripped `spawner_` and asked for `water_s`;
+     * ::mon_type_for compares whole names, returned -1, and the spawner was
+     * skipped without a word. The room simply never filled.
+     *
+     * The number to raise is ::LVL_KIND -- or the classname is too long, which
+     * is the same conversation held from the other end.
+     *
+     * 한국어: ::DIAG_ENT_CAP이 *아닙니다*. 그쪽은 레벨이 ::LVL_MAX_ENTS보다 많은 표식을
+     * 선언해 초과분이 버려졌다는 뜻이며, 올려야 할 숫자는 LVL_MAX_ENTS이고 저장된 종류는
+     * 모두 온전합니다. 이쪽은 표식이 저장되기는 *했는데* 그 종류가 더 이상 제작자가 쓴
+     * 이름이 아니라는 뜻이고, 그래서 그 종류를 소유한 모듈이 찾아보고도 찾지 못합니다.
+     * 한쪽 카운터를 읽고서 실제 원인이 다른 쪽 상한이었음을 알게 되는 일은 읽는 사람을
+     * 엉뚱한 숫자로 보냅니다. ::DIAG_MAPENT_CAP이 ::DIAG_BRUSH_CAP이 아닌 것과 같은
+     * 이유입니다.
+     *
+     * 그 모습은 아무것도 아닙니다. `monster_spawner_water_spirit`는 `monster_`를 뗀 뒤
+     * 스무 글자여서 종류 `spawner_water_s`가 되었고, enemy.c는 `spawner_`를 떼어
+     * `water_s`를 물었고, ::mon_type_for는 이름 전체를 비교하므로 -1을 돌려주었으며,
+     * 스포너는 한마디도 없이 건너뛰어졌습니다. 방은 그냥 채워지지 않았습니다.
+     *
+     * 올려야 할 숫자는 ::LVL_KIND입니다. 아니면 classname이 너무 긴 것이며, 그것은 같은
+     * 이야기를 반대쪽 끝에서 하는 것입니다.
+     */
+    DIAG_ENT_KIND,
+
     DIAG_COUNT          /**< Number of counters. / 카운터의 개수. */
 } DiagKind;
 

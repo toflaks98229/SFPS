@@ -21,6 +21,13 @@
 #include "render.h"
 #include "model.h"
 #include "diag.h"   /* diag_count -- the overflow report is the thing under test */
+/* mon_stats / mon_type_for: the far end of the entity-kind pipeline. A kind is
+   written in a .map, stored by level.c and resolved by enemy.c, and no single
+   module can check that the three agree.
+   mon_stats / mon_type_for: 엔티티 종류 파이프라인의 반대쪽 끝입니다. 종류는 .map에
+   적히고 level.c가 저장하며 enemy.c가 해석하는데, 그 셋이 일치하는지는 어느 한
+   모듈도 검사할 수 없습니다. */
+#include "enemy.h"
 
 static int fails;
 
@@ -1475,6 +1482,139 @@ int main(void) {
         okd(dirty == 0,
             "no entity picked up a number the level never offered it",
             dirty, 0);
+    }
+
+    /* --- every monster is placeable as a spawner --------------------------
+     *
+     * ENGLISH
+     * -------
+     * THE PIPELINE THIS CHECKS HAS THREE OWNERS AND NO MEETING POINT. The FGD
+     * offers `monster_spawner_<name>`; level.c strips `monster_` and stores the
+     * rest in ::LVL_KIND bytes; enemy.c strips `spawner_` and asks
+     * ::mon_type_for for the remainder, which compares whole names. Each step
+     * is correct on its own and none of them can see the budget the other two
+     * are spending, so the failure is a name that is simply too long and a
+     * marker that resolves to nothing.
+     *
+     * It fails SILENTLY, which is why it is worth a check rather than a
+     * playthrough: the spawner is skipped, the room stays empty, and the map
+     * still loads without complaint. `monster_spawner_water_spirit` is twenty
+     * characters after the first prefix comes off, was stored as
+     * `spawner_water_s` when the kind shared LVL_MAT at 16, and asked for a monster called
+     * `water_s`.
+     *
+     * Driven from ::MON_TYPES rather than from a list written here, so a
+     * monster added tomorrow is checked without this file being edited -- and a
+     * monster given a long name fails HERE, at the table that named it, rather
+     * than in a room that quietly never fills.
+     *
+     * 한국어
+     * ------
+     * 이 검사가 보는 파이프라인에는 주인이 셋 있고 그들이 만나는 자리가 없습니다. FGD는
+     * `monster_spawner_<name>`을 제공하고, level.c는 `monster_`를 떼어 나머지를 ::LVL_KIND
+     * 바이트에 저장하며, enemy.c는 `spawner_`를 떼어 남은 것을 ::mon_type_for에 묻고 그것은
+     * 이름 전체를 비교합니다. 각 단계는 저마다 옳고, 어느 것도 나머지 둘이 쓰고 있는 예산을
+     * 볼 수 없습니다. 그래서 그 실패는 그저 너무 긴 이름이고 아무것으로도 해석되지 않는
+     * 표식입니다.
+     *
+     * 이것은 *조용히* 실패하며, 그래서 플레이가 아니라 검사가 필요합니다. 스포너는
+     * 건너뛰어지고, 방은 비어 있고, 맵은 여전히 불평 없이 로드됩니다.
+     * `monster_spawner_water_spirit`는 첫 접두사를 뗀 뒤 스무 글자여서, 종류가 LVL_MAT를 함께 쓰며 16이던
+     * 시절 `spawner_water_s`로 저장되었고 `water_s`라는 몬스터를 물었습니다.
+     *
+     * 이곳에 적은 목록이 아니라 ::MON_TYPES에서 몰아가므로, 내일 추가되는 몬스터도 이 파일을
+     * 고치지 않고 검사됩니다. 그리고 긴 이름을 받은 몬스터는 조용히 채워지지 않는 방이
+     * 아니라 그것을 이름 지은 표에서, *이곳에서* 실패합니다.
+     */
+    {
+        printf("\n  --- spawner classnames survive the import ---\n");
+
+        /* The two prefixes, each measured from its own literal: a hand-written
+           8 here would be a third place for the same fact to live.
+           접두사 둘이며 각각 자기 리터럴에서 잽니다. 이곳에 손으로 쓴 8은 같은 사실이 사는
+           세 번째 자리가 됩니다. */
+        static const char MON_PRE[]  = "monster_";
+        static const char SPWN_PRE[] = "spawner_";
+        const int mp = (int)sizeof(MON_PRE)  - 1;
+        const int sp = (int)sizeof(SPWN_PRE) - 1;
+
+        int lost = 0, worst = 0;
+        const char *worst_name = "(none)";
+
+        for (int t = 0; t < MON_TYPES; t++) {
+            const char *name = mon_stats(t)->name;
+
+            /* What the mapper places, spelled the way the FGD offers it. */
+            char cn[128];
+            int pos = txt_append_str(cn, (int)sizeof(cn), 0,   MON_PRE);
+            pos     = txt_append_str(cn, (int)sizeof(cn), pos, SPWN_PRE);
+            pos     = txt_append_str(cn, (int)sizeof(cn), pos, name);
+
+            /* level.c: strip the family prefix, keep the rest in LVL_KIND.
+               This is copy_name's operation, run on copy_name's buffer. */
+            char kind[LVL_KIND];
+            txt_copy(kind, LVL_KIND, cn + mp, -1);
+
+            /* enemy.c: strip `spawner_` and resolve what is left. It wants
+               the prefix matched AND something after it. */
+            int named = txt_is(kind, sp, SPWN_PRE) && kind[sp];
+            int got   = named ? mon_type_for(kind + sp) : -1;
+
+            int need = pos - mp;      /* what had to fit, terminator apart */
+            if (need > worst) { worst = need; worst_name = name; }
+
+            if (got != t) {
+                printf("      %-30s -> kind '%s' -> %d, wanted %d\n",
+                       cn, kind, got, t);
+                lost++;
+            }
+        }
+
+        printf("      longest spawner kind: %d of %d bytes ('%s')\n",
+               worst, LVL_KIND - 1, worst_name);
+
+        okd(lost == 0,
+            "every monster is reachable as monster_spawner_<name>", lost, 0);
+
+        /* And the same question asked of the shipped levels, through the real
+           import rather than a reproduction of it. The check above proves the
+           BUDGET is wide enough for every monster; this one proves no level
+           actually authored a classname that overran it -- an item or a kind
+           this test does not know to build would be caught here and nowhere
+           else. Released after each load: there are only ::LVL_BRUSH_SLOTS
+           brush slots and holding four would evict rather than report.
+           그리고 같은 질문을 출하 레벨들에게, 재현이 아니라 실제 임포트를 통해 묻습니다. 위의
+           검사는 *예산*이 모든 몬스터에 대해 충분함을 증명하고, 이 검사는 어떤 레벨도 그것을
+           넘는 classname을 실제로 작성하지 않았음을 증명합니다. 이 테스트가 만들 줄 모르는
+           아이템이나 종류는 다른 어디도 아닌 이곳에서 잡힙니다. 로드마다 해제하는 이유는
+           브러시 슬롯이 ::LVL_BRUSH_SLOTS개뿐이어서, 넷을 쥐고 있으면 보고가 아니라 축출이
+           일어나기 때문입니다. */
+        {
+            static const char *const LEVELS[] = { "arena", "vault",
+                                                  "atrium", "lqdm1" };
+            const int n_levels = (int)(sizeof(LEVELS)/sizeof(LEVELS[0]));
+            int before = diag_count(DIAG_ENT_KIND), seen = 0;
+
+            for (int i = 0; i < n_levels; i++) {
+                Level el;
+                if (!level_load(LEVELS[i], &el)) continue;
+                seen++;
+                level_release(&el);
+            }
+
+            /* ALL of them, not one of them. `spire` was in this list and was
+               deleted, and `seen > 0` would have gone on passing while the
+               sweep quietly covered three levels instead of four -- the same
+               silence this whole change is about, one level up.
+               하나가 아니라 *전부*입니다. 이 목록에 있던 `spire`는 삭제되었고, `seen > 0`은
+               훑기가 넷이 아니라 셋을 덮는 동안에도 계속 통과했을 것입니다. 이 변경 전체가
+               다루는 바로 그 침묵이며, 한 단계 위에서 일어납니다. */
+            okd(seen == n_levels,
+                "the shipped levels load for the kind check", seen, n_levels);
+            okd(diag_count(DIAG_ENT_KIND) == before,
+                "and none of them authored a kind too long to store",
+                diag_count(DIAG_ENT_KIND) - before, 0);
+        }
     }
 
     /* --- the baked-light cache ------------------------------------------

@@ -299,7 +299,7 @@ int main(int argc, char **argv) {
        먼저 비웁니다) 텍스처 캐시는 그렇지 않습니다. tex_flush가 핫 리로드 경로에만 있기
        때문입니다. 드라이버가 붙들고 있는 것도 마찬가지입니다. */
     {
-        static const char *CHAIN[] = { "spire", "atrium", "vault", "dm03", "arena" };
+        static const char *CHAIN[] = { "lqdm1", "vault", "dm03", "arena" };
         const int CHAIN_N = (int)(sizeof(CHAIN) / sizeof(CHAIN[0]));
         const int laps = 20, settle = 120;
 
@@ -389,7 +389,7 @@ int main(int argc, char **argv) {
     {
         printf("\n  --- the arena, killing what spawns ---\n");
 
-        world_load_level(&w, "spire", WORLD_ENTER_NEW);
+        world_load_level(&w, WORLD_START_LEVEL, WORLD_ENTER_NEW);
         w.run.title = 0;
         /* A DEAD PLAYER FREEZES THE WORLD, and a frozen world is what the
            first version of this file measured without noticing: world_step
@@ -500,7 +500,7 @@ int main(int argc, char **argv) {
         printf("  %s\n",
                "----------------------------------------------------------------------");
 
-        world_load_level(&w, "spire", WORLD_ENTER_NEW);
+        world_load_level(&w, WORLD_START_LEVEL, WORLD_ENTER_NEW);
         w.run.title = 0;
         {
             int dyn; world_take_geometry_scope(&w, &dyn);

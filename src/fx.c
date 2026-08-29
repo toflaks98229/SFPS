@@ -73,6 +73,16 @@ typedef struct {
         a burst that smears. / 0이 아니면 반구에 균일하게, 정확히 하나의 속력으로
         퍼뜨려 가장자리가 읽히는 팽창하는 껍질을 만듭니다. */
     int   dome;
+    /** Non-zero to spread evenly around the RING perpendicular to the normal,
+        at one exact speed. `dome` is a shell and this is its equator: with
+        `face normal` the quads lie in that same plane, so a disc spawned
+        against a floor is a ring of light travelling out across it. The dome
+        cannot do this -- half its particles leave the ground.
+        / 0이 아니면 법선에 수직인 *고리*를 따라 정확히 하나의 속력으로 균일하게 퍼뜨립니다.
+        `dome`이 껍질이라면 이것은 그 적도입니다. `face normal`과 함께 쓰면 사각형들이 같은
+        평면에 눕게 되므로, 바닥에 대고 생성한 디스크는 바닥을 가로질러 퍼져 나가는 빛의
+        고리가 됩니다. 돔으로는 이것이 되지 않습니다. 입자의 절반이 지면을 떠납니다. */
+    int   disc;
     short drag;             /**< Speed lost per second, percent. / 초당 속도 손실 (퍼센트). */
     short spin;             /**< Roll rate, degrees per second. / 회전 속도 (초당 도). */
     short gravity;          /**< Downward acceleration, cm/s^2. / 하향 가속도 (cm/s^2). */
@@ -188,6 +198,7 @@ static void parse_defs(void) {
             cur->alpha0 = 100; cur->alpha1 = 0;
             cur->speed = 0;   cur->spread = 0;
             cur->spawn_r = 0; cur->drag = 0; cur->spin = 0;
+            cur->dome = 0; cur->disc = 0;
             cur->gravity = 0; cur->blend = FX_BLEND_ALPHA;
             cur->face = FX_FACE_CAMERA;
             continue;
@@ -216,6 +227,8 @@ static void parse_defs(void) {
             { p = txt_read_int(p, &v[0], &ok); if (ok) cur->spawn_r = (short)v[0]; }
         else if (txt_is(t, len, "dome"))
             p = txt_read_int(p, &cur->dome, &ok);
+        else if (txt_is(t, len, "disc"))
+            p = txt_read_int(p, &cur->disc, &ok);
         else if (txt_is(t, len, "drag"))
             { p = txt_read_int(p, &v[0], &ok); if (ok) cur->drag = (short)v[0]; }
         else if (txt_is(t, len, "spin"))
@@ -331,6 +344,16 @@ void fx_spawn_scaled(Pools *pl, const char *name, v3 pos, v3 normal, float scale
                                v3add(v3scale(t, s2 * cosf(phi)),
                                      v3scale(b, s2 * sinf(phi)))));
             sp = d->speed * 0.01f * scale;  /* no jitter: the edge is the point */
+        }
+        else if (d->disc) {
+            /* The dome's equator. Same fixed speed for the same reason -- the
+               edge is the point -- but the direction stays in the plane the
+               normal is perpendicular to, so nothing leaves the surface.
+               돔의 적도입니다. 같은 이유(가장자리가 요점입니다)로 속력도 고정이지만, 방향은
+               법선이 수직인 그 평면 안에 머무르므로 아무것도 표면을 떠나지 않습니다. */
+            float phi = frand(&pl->fx) * 6.2831853f;
+            dir = v3norm(v3add(v3scale(t, cosf(phi)), v3scale(b, sinf(phi))));
+            sp  = d->speed * 0.01f * scale;
         }
         else if (d->spread) {
             /* Scatter around the normal by up to the spread's own share of a

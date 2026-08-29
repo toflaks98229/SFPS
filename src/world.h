@@ -113,44 +113,145 @@
 #define WORLD_WAVE_BREAK 6.0f
 
 /**
- * @brief Medkits a cleared wave throws down.
+ * @brief How much slower the spawners run while a boss stands.
  *
  * ENGLISH
  * -------
- * TWO, and it is a count rather than an amount for a reason: ::PICKUP_HEALTH is
- * how much one medkit gives, and a wave that healed the player by a number
- * would be a second rule about what health is worth. Two of the thing that
- * already exists says the same and stays true when the medkit is retuned.
+ * A SLOWDOWN ADDED TO 1, so 2.0 is a third of the rate. See
+ * ::EnemyPool::spawn_slow for why it is expressed that way and why it is read
+ * every tick rather than saved and restored.
  *
- * The reward is also deliberately not a full heal. An arena where every wave
- * restores you is an arena where only the last wave can kill you, and the run
- * has no shape until then.
+ * THE PRESSURE DOES NOT DROP, IT MOVES. A boss fight suppresses the arena's own
+ * spawners because during it the monsters come from somewhere else: shooting a
+ * ward is what fills the room. That is what lets the player set the pace of
+ * their own fight -- burst the wards and meet the crowd during the groggy
+ * window, or clear as you go and spend longer at it -- and it is why leaving
+ * the spawners at full rate would make the fight the sum of two unrelated
+ * pressures rather than one the player is steering.
  *
  * 한국어
  * ------
- * @brief 정리된 웨이브가 떨어뜨리는 구급상자의 수.
+ * @brief 보스가 서 있는 동안 스포너가 얼마나 느려지는가.
  *
- * 둘이며, 양이 아니라 *개수*인 데에는 이유가 있습니다. ::PICKUP_HEALTH가 구급상자 하나가 주는
- * 양이고, 웨이브가 플레이어를 어떤 숫자만큼 회복시킨다면 그것은 체력의 값어치에 대한 두 번째
- * 규칙이 됩니다. 이미 존재하는 것의 두 개가 같은 말을 하면서, 구급상자를 다시 조율해도
- * 참으로 남습니다.
+ * *1에 더해지는 감속*이므로 2.0은 3분의 1 속도입니다. 왜 그렇게 표현하는지와 왜 저장했다
+ * 되돌리지 않고 매 틱 읽는지는 ::EnemyPool::spawn_slow를 참조하십시오.
  *
- * 보상은 또한 의도적으로 완전 회복이 아닙니다. 웨이브마다 회복시켜 주는 아레나는 마지막
- * 웨이브만이 플레이어를 죽일 수 있는 아레나이며, 그전까지 플레이는 아무 형태도 갖지 않습니다.
+ * *압박이 줄어드는 것이 아니라 옮겨 갑니다.* 보스전이 아레나 자신의 스포너를 억제하는 이유는,
+ * 그동안 몬스터가 다른 곳에서 오기 때문입니다. 결계핵을 쏘는 행위가 방을 채웁니다. 그것이
+ * 플레이어가 자기 전투의 박자를 정하게 하는 것이고(결계핵을 몰아쳐 터뜨리고 그로기 창에 무리를
+ * 상대하거나, 정리해 가며 나아가고 더 오래 걸리거나), 스포너를 온전한 속도로 두면 이 전투가
+ * 플레이어가 조종하는 하나가 아니라 무관한 두 압박의 합이 되는 이유입니다.
  */
-#define WORLD_WAVE_MEDKITS 2
+#define WORLD_BOSS_SPAWN_SLOW 2.0f
 
 /**
- * @brief Ammo boxes a cleared wave throws down, for weapons the player holds.
+ * @brief Endless mode: waves after a maw dies before the next one is due.
  *
- * ENGLISH: Only for owned weapons, because a box for a gun you have not found
- * is the one thing ::pickup_update refuses to collect -- it would lie on the
- * floor for the rest of the run looking like something you had missed.
+ * ENGLISH
+ * -------
+ * COUNTED FROM THE DEATH, not from a multiple of itself. A fight that outlasts
+ * this many waves would, on a multiple, schedule the next maw into a wave that
+ * has already passed -- so the moment the player finally won, the next one
+ * would arrive. Counting from the death makes a long fight push its own next
+ * appointment out, which is the behaviour a player would describe as "you get a
+ * breather".
  *
- * 한국어: 보유한 무기에 대해서만입니다. 찾지 못한 총의 상자는 ::pickup_update가 획득을 거부하는
- * 유일한 것이며, 플레이가 끝날 때까지 바닥에 남아 놓친 무언가처럼 보이게 됩니다.
+ * 한국어
+ * ------
+ * @brief 무한 모드에서 아귀가 죽은 뒤 다음 아귀까지의 웨이브 수.
+ *
+ * *자기 자신의 배수가 아니라 사망 시점에서부터 셉니다.* 배수로 하면 이만큼의 웨이브보다 오래
+ * 끄는 전투가 다음 아귀를 *이미 지나간* 웨이브에 예약하게 되고, 플레이어가 마침내 이긴 그
+ * 순간 다음 아귀가 도착합니다. 사망 시점에서부터 세면 긴 전투가 자신의 다음 약속을 밀어내며,
+ * 그것이 플레이어가 "한숨 돌릴 틈을 준다"고 말할 동작입니다.
  */
-#define WORLD_WAVE_AMMO 3
+#define WORLD_BOSS_EVERY 5
+
+/**
+ * @brief Story mode: the wave the first maw is allowed to arrive on.
+ *
+ * ENGLISH
+ * -------
+ * ONE WAVE, AND THE REASON IT IS NOT ZERO IS THAT THE ARENA CHANGED.
+ *
+ * This gate did not exist. ::step_boss raised the story maw on the first
+ * unfrozen frame, and the comment there argued for it: "the story arena IS the
+ * boss fight, and a player who has to survive to wave five to meet it is
+ * playing endless mode with a cutscene." That was exact reasoning about
+ * `glasstower` -- seven brushes, a ring of ward slots around a tower, nothing
+ * else in it. There was no room to be dropped into. The room WAS the fight.
+ *
+ * ::WORLD_BOSS_ARENA is `lqdm1` now: 807 brushes, three wave spawners,
+ * twenty-six pickups and 2,614 x 2,016 units of deathmatch map. Measured, the
+ * maw stood up one frame after the intro cutscene ended, at wave 1, with four
+ * wards already placed and five monsters already walking -- so the player met
+ * the boss before reaching a single weapon the map lays out, in a room they had
+ * not seen. The old comment's premise died with the old arena, and this is what
+ * replaces it.
+ *
+ * STILL NOT A WAVE GATE IN THE ENDLESS SENSE. Two is one wave, not five: long
+ * enough to pick up a gun and learn where the walls are, short enough that the
+ * story arena is still the boss fight rather than a survival mode with a
+ * cutscene. The sentence that rejected five is still right; it just was not
+ * about one.
+ *
+ * @note Compared against ::RunState::wave, which starts at 1 and becomes 2 when
+ *       the first wave is cleared and its breather has run out. So this reads
+ *       as "after the opening wave", not "two waves in".
+ *
+ * 한국어
+ * ------
+ * @brief 스토리 모드에서 첫 아귀가 도착할 수 있는 웨이브.
+ *
+ * *한 웨이브이며, 0이 아닌 이유는 아레나가 바뀌었기 때문입니다.*
+ *
+ * 이 관문은 없었습니다. ::step_boss는 정지가 풀린 첫 프레임에 스토리의 아귀를 세웠고, 그곳의
+ * 주석이 그것을 옹호했습니다. "스토리 아레나가 곧 보스전이며, 그것을 만나기 위해 5웨이브를
+ * 버텨야 하는 플레이어는 컷신이 붙은 무한 모드를 하고 있는 것이다." 그것은 `glasstower`에
+ * 대한 정확한 추론이었습니다. 브러시 일곱 개, 탑을 둘러싼 결계핵 자리의 고리, 그 밖에는
+ * 아무것도 없었습니다. 떨어질 방이라는 것이 없었습니다. 방이 *곧* 전투였습니다.
+ *
+ * ::WORLD_BOSS_ARENA는 이제 `lqdm1`입니다. 브러시 807개, 웨이브 스포너 셋, 획득물 스물여섯,
+ * 2,614 x 2,016 크기의 데스매치 맵입니다. 재어 보니 아귀는 인트로 컷신이 끝난 *한 프레임 뒤*에
+ * 일어섰습니다. 웨이브 1, 이미 배치된 결계핵 넷, 이미 걷고 있는 몬스터 다섯. 플레이어는 맵이
+ * 깔아 둔 무기 하나에 닿기도 전에, 본 적 없는 방에서 보스를 만났습니다. 옛 주석의 전제는 옛
+ * 아레나와 함께 죽었고, 이것이 그것을 대신합니다.
+ *
+ * *여전히 무한 모드적 의미의 웨이브 관문은 아닙니다.* 둘은 다섯이 아니라 한 웨이브입니다.
+ * 총 하나를 줍고 벽이 어디 있는지 익히기에는 충분하고, 스토리 아레나가 컷신 붙은 생존 모드가
+ * 아니라 여전히 보스전이기에는 짧습니다. 다섯을 거부한 그 문장은 여전히 옳습니다. 다만 그것은
+ * 하나에 대한 말이 아니었습니다.
+ */
+#define WORLD_BOSS_STORY_WAVE 2
+
+/* --- what a cleared wave pays -------------------------------------------
+ *
+ * ENGLISH
+ * -------
+ * WORLD_WAVE_MEDKITS and WORLD_WAVE_AMMO used to be here, two medkits and
+ * three boxes, and they are now `give health 2` and `give held 3` in
+ * assets\loot.txt. What moved is not the numbers -- they are the same numbers
+ * -- but where they can be changed from. A reward economy is tuned by playing
+ * it and moving it and playing it again, and a number that needs a rebuild
+ * between those steps is a number that gets moved once and then left.
+ *
+ * The reasoning they carried moved with them and is stated where they now
+ * live, which is also why it is not restated here: two copies of a rationale
+ * is how one of them comes to describe a number that is no longer the number.
+ * See ::LootReward, and the file's own header for the shape of the purse.
+ *
+ * 한국어
+ * ------
+ * WORLD_WAVE_MEDKITS와 WORLD_WAVE_AMMO가 이곳에 있었고, 구급상자 둘과 상자 셋이었으며,
+ * 이제 assets\loot.txt의 `give health 2`와 `give held 3`입니다. 옮겨 간 것은 숫자가
+ * 아니라(같은 숫자입니다) 그것을 어디에서 바꿀 수 있는가입니다. 보상 경제는 플레이해 보고
+ * 옮기고 다시 플레이해 보며 조율하는 것이며, 그 사이에 재빌드를 요구하는 숫자는 한 번
+ * 옮겨진 뒤 그대로 남는 숫자입니다.
+ *
+ * 그것들이 지니고 있던 근거도 함께 옮겨 가 지금 사는 곳에 적혀 있으며, 이곳에 다시 적지
+ * 않는 이유도 그것입니다. 근거의 사본이 둘이라는 것은 그중 하나가 더 이상 그 숫자가 아닌
+ * 숫자를 설명하게 되는 방식입니다. ::LootReward와 그 파일 자신의 머리글을 참조하십시오. */
+
 
 #include "level.h"
 #include "player.h"
@@ -282,37 +383,185 @@
  *
  * ENGLISH
  * -------
- * An ARENA, and it is terminal: `spire` carries no `next` and has no exit, so
- * the game the player boots into is one room and a wave counter. That is the
- * game this is becoming -- see ::RunState::wave.
+ * THE SAME ROOM THE GAME IS PLAYED IN, and it is one map because one map is
+ * what this game ships.
  *
- * @warning THIS IS NO LONGER THE HEAD OF THE CAMPAIGN. It was, and while it was
- *          "where the game starts" and "where the chain begins" were the same
- *          fact and one constant said both. They have come apart:
- *          ::world_progress_for_stage walks from HERE, so with an arena at the
- *          front it finds a chain of one and ::world_start_stage refuses every
- *          level of the old campaign. Those levels still load by name -- nothing
- *          has been deleted -- but nothing reaches them by walking forward.
+ * It was `spire`, a hand-authored arena kept solely to be the thing the title
+ * menu is drawn over. ::WORLD_BOSS_ARENA carried a note arguing exactly against
+ * pointing this at the arena -- "loading the arena to stand behind a menu would
+ * mean the room the player is about to be dropped into has already been walked
+ * through by nobody, and its spawners are one `title = 0` away from arming."
+ *
+ * BOTH HALVES OF THAT HAVE ANSWERS NOW.
+ *
+ * The spawners cannot arm from here. ::step_confirm is the only thing in the
+ * tree that clears ::RunState::title, and main.c's `screen_takes_press` returns
+ * 0 whenever a menu is open -- ::MENU_TITLE always is. The one path that
+ * reaches it is demo playback, which skips ::menu_open_title and drives
+ * recorded input, and a recording made in this room replays in this room.
+ * Choosing STORY does not reuse the backdrop either: ::world_begin loads the
+ * arena again with ::WORLD_ENTER_NEW, which is a fresh level and a cleared run.
+ *
+ * And "walked through by nobody" was an argument about `glasstower`, a
+ * seven-brush greybox tower nobody would want behind a menu. The arena is
+ * LibreQuake's Solstice now. A finished deathmatch map is a better backdrop
+ * than a room kept alive to be one.
+ *
+ * @warning THIS IS NO LONGER THE HEAD OF THE CAMPAIGN, and has not been since
+ *          before this edit. ::world_progress_for_stage walks from HERE, so
+ *          with an arena at the front it finds a chain of one.
  *          ::WORLD_CHAIN_ROOT is the other half, and the tests that check the
- *          progression machinery use it.
+ *          progression machinery use it. The old campaign levels still load by
+ *          name; nothing reaches them by walking forward.
  *
  * 한국어
  * ------
  * @brief 새 ::World가 시작하는 레벨.
  *
- * *아레나*이며 종착점입니다. `spire`는 `next`를 지니지 않고 출구도 없으므로, 플레이어가 부팅해
- * 들어가는 게임은 방 하나와 웨이브 계수기입니다. 이것이 이 프로젝트가 되어 가는 게임입니다.
- * ::RunState::wave를 참조하십시오.
+ * *게임이 플레이되는 바로 그 방*이며, 맵 하나인 이유는 이 게임이 출하하는 것이 맵 하나이기
+ * 때문입니다.
  *
- * @warning *이것은 더 이상 캠페인의 머리가 아닙니다.* 한때는 그러했고, 그동안에는 "게임이
- *          시작하는 곳"과 "사슬이 시작하는 곳"이 같은 사실이었으며 상수 하나가 둘 다를
- *          말했습니다. 이제 둘은 갈라졌습니다. ::world_progress_for_stage가 *이곳*에서부터
- *          걷는데, 앞에 아레나가 있으면 길이 1의 사슬을 찾고 ::world_start_stage는 옛 캠페인의
- *          모든 레벨을 거절합니다. 그 레벨들은 여전히 이름으로 로드되며 아무것도 삭제되지
- *          않았습니다. 다만 앞으로 걸어서 도달하는 것이 없을 뿐입니다. ::WORLD_CHAIN_ROOT가
- *          나머지 절반이며, 진행 기구를 검사하는 검사들이 그것을 씁니다.
+ * 이것은 `spire`였습니다. 타이틀 메뉴가 그 위에 그려질 대상이 되기 위해서만 유지되던, 손으로
+ * 만든 아레나입니다. ::WORLD_BOSS_ARENA에는 이곳을 아레나로 향하게 하는 것에 정확히 반대하는
+ * 각주가 달려 있었습니다. "메뉴 뒤에 세우려고 아레나를 로드하면, 플레이어가 곧 떨어질 방을
+ * 아무도 걸어 보지 않은 채 이미 지나간 것이 되고, 그 스포너들은 `title = 0` 하나 거리에서
+ * 장전을 기다리게 된다."
+ *
+ * *그 두 절반 모두 이제 답을 가지고 있습니다.*
+ *
+ * 스포너는 이곳에서 장전될 수 없습니다. 트리에서 ::RunState::title을 지우는 것은 ::step_confirm
+ * 하나뿐이고, main.c의 `screen_takes_press`는 메뉴가 열려 있으면 언제나 0을 반환하며
+ * ::MENU_TITLE은 언제나 열려 있습니다. 그곳에 도달하는 유일한 경로는 데모 재생이고, 그것은
+ * ::menu_open_title을 건너뛰며 기록된 입력을 구동합니다. 이 방에서 만든 기록은 이 방에서
+ * 재생됩니다. STORY를 골라도 배경을 재사용하지 않습니다. ::world_begin이 ::WORLD_ENTER_NEW로
+ * 아레나를 다시 로드하며, 그것은 새 레벨과 지워진 플레이입니다.
+ *
+ * 그리고 "아무도 걸어 보지 않은"은 `glasstower`에 대한 논거였습니다. 메뉴 뒤에 두고 싶지 않을
+ * 브러시 일곱 개짜리 그레이박스 탑입니다. 아레나는 이제 LibreQuake의 Solstice입니다. 완성된
+ * 데스매치 맵은, 배경이 되기 위해 살려 둔 방보다 나은 배경입니다.
  */
-#define WORLD_START_LEVEL "spire"
+/**
+ * @brief What ::WORLD_START_LEVEL is when nothing overrides it.
+ *
+ * ENGLISH
+ * -------
+ * SPLIT FROM THE NAME ABOVE so a build can boot somewhere else without editing
+ * the constant every test reads. It had one caller: build.ps1's dev build sent
+ * itself into the boss arena because there was no other way in, and a fight
+ * nothing can reach is a fight nobody can playtest.
+ *
+ * THAT OVERRIDE IS GONE, and this paragraph is what is left of it. ::MENU_TITLE
+ * landed, so the mode is chosen there and the arena is loaded by
+ * ::world_begin -- which is where "which room is which mode" belongs, because
+ * it is a fact about a run rather than about the binary. What this constant now
+ * names is only the backdrop the title screen is drawn over: a real level,
+ * loaded and frozen, for ::RunState::title's own reason.
+ *
+ * 한국어
+ * ------
+ * @brief 아무것도 덮어쓰지 않을 때 ::WORLD_START_LEVEL이 무엇인가.
+ *
+ * *위의 이름에서 갈라냈습니다.* 모든 테스트가 읽는 상수를 고치지 않고도 빌드가 다른 곳으로
+ * 부팅할 수 있게 하기 위함입니다. 호출자가 하나 있었습니다. build.ps1의 개발 빌드가 스스로를
+ * 보스 아레나로 보냈는데, 다른 입구가 없었기 때문입니다. 아무것도 도달할 수 없는 전투는 아무도
+ * 플레이테스트할 수 없는 전투입니다.
+ *
+ * *그 덮어쓰기는 사라졌고* 이 문단이 그것의 남은 자취입니다. ::MENU_TITLE이 들어왔으므로 모드는
+ * 그곳에서 정해지고 아레나는 ::world_begin이 로드합니다. "어느 방이 어느 모드인가"가 있어야 할
+ * 곳이 그곳입니다. 바이너리가 아니라 *플레이*에 대한 사실이기 때문입니다. 이제 이 상수가
+ * 이름 짓는 것은 타이틀 화면이 그 위에 그려지는 배경뿐입니다. ::RunState::title 자신의 이유에
+ * 따라 실제로 로드되어 정지한 레벨입니다.
+ */
+#define WORLD_START_DEFAULT "lqdm1"
+
+#ifndef WORLD_START_LEVEL
+#define WORLD_START_LEVEL WORLD_START_DEFAULT
+#endif
+
+/**
+ * @brief The room both modes are fought in.
+ *
+ * ENGLISH
+ * -------
+ * ONE ROOM, TWO MODES, and that is not an economy -- it is the constraint the
+ * whole of ::RunState::endless exists to satisfy. Story and endless are the
+ * same arena, so a level name cannot tell them apart, so the mode has to be a
+ * property of how the run was entered. See ::RunState::endless, and note that
+ * this constant is the reason it could not have been anything else.
+ *
+ * @note IT IS ::WORLD_START_DEFAULT NOW, and this note used to say the
+ *       opposite. It argued that loading the arena to stand behind a menu
+ *       "would mean the room the player is about to be dropped into has
+ *       already been walked through by nobody, and its spawners are one
+ *       `title = 0` away from arming." The spawners cannot arm from there --
+ *       see ::WORLD_START_DEFAULT for the path-by-path reason -- and the
+ *       aesthetic half was about `glasstower`. One map is what ships.
+ * @note Named here rather than passed in by main.c, because a test that starts
+ *       a run has to name the same room the game does. A tool spelling
+ *       the arena's name into its fixture is a second copy of a fact that moves.
+ *
+ * 한국어
+ * ------
+ * @brief 두 모드가 함께 치러지는 방.
+ *
+ * *방 하나에 모드 둘*이며, 이것은 절약이 아닙니다. ::RunState::endless 전체가 만족시키려고
+ * 존재하는 제약입니다. 스토리와 무한은 같은 아레나이므로 레벨 이름으로 둘을 구별할 수 없고,
+ * 따라서 모드는 플레이에 들어온 방식의 성질이어야 합니다. ::RunState::endless를 참조하시고, 이
+ * 상수가 그것이 다른 무엇일 수 없었던 이유임에 유의하십시오.
+ *
+ * @note *이제 ::WORLD_START_DEFAULT입니다.* 이 각주는 반대를 말하고 있었습니다. 스포너는
+ *       그곳에서 장전될 수 없으며(경로별 이유는 ::WORLD_START_DEFAULT를 참조하십시오), 미학에
+ *       대한 절반은 `glasstower`에 대한 것이었습니다. 출하되는 것은 맵 하나입니다.
+ * @note main.c가 넘겨주지 않고 이곳에서 이름 짓는 이유는, 플레이를 시작하는 테스트가 게임과
+ *       같은 방을 지목해야 하기 때문입니다. 픽스처에 아레나의 이름을 적어 넣는 도구는 움직이는
+ *       사실의 두 번째 사본입니다.
+ */
+/* WHY `lqdm1` AND NOT `glasstower`, WHICH THIS WAS FOR MOST OF ITS LIFE.
+ *
+ * glasstower is seven brushes. It was authored to prove the boss fight works --
+ * a ring of ward slots around a tower, at coordinates written by hand into a
+ * .map -- and it did that job. It is not a room anybody would want to fight
+ * fifteen waves in, and it was never claimed to be.
+ *
+ * `lqdm1` is LibreQuake's "Solstice" by ZungryWare, BSD-3, 807 brushes, and the
+ * map LibreQuake's own docs/deathmatch-setup-guide.txt tells a first-time host
+ * to start on. It won its slot inside that project by being finished: commit
+ * 8ae29a30, Dec 2023, "Detailed lqdm1; switched lqdm1 with lqdm11".
+ *
+ * THE MAP IT DISPLACED THERE IS THE MAP THIS GAME HAD IMPORTED. `lqdm11` and
+ * `lqdm13` are the pack's GREYBOXES and it is measurable rather than a matter
+ * of taste: 99.1% and 91.1% of their faces carry lq_dev.wad development
+ * textures, against 0.0-0.2% for every other map in the pack. They were chosen
+ * here by "the smallest file that fitted the caps", which is what the caps were
+ * for and is not a quality measure. Neither was ever entered by the game --
+ * WORLD_BOSS_ARENA pointed at glasstower and WORLD_START_LEVEL at spire -- so
+ * they cost 47KB of a 1.44MB budget to ship two rooms nobody could reach.
+ *
+ * WHY NOT A FAMOUS ONE. Because there is not one to have. Every famous arena in
+ * this lineage -- aerowalk, ztndm3, id's own dm2/dm4/dm6 -- is either unlicensed
+ * (which is all rights reserved) or GPL-2, and this game bakes its maps INTO the
+ * executable, so a copyleft map is a copyleft binary. README.md carries the
+ * survey. Within what a permissive licence actually allows, "most famous"
+ * has no answer and "the one the project itself puts forward" does.
+ *
+ * *왜 `glasstower`가 아니라 `lqdm1`인가.* glasstower는 브러시 일곱 개입니다. 보스 전투가
+ * 작동함을 증명하려고 만들어졌고 그 일을 해냈습니다. 웨이브 열다섯을 싸우고 싶은 방은 아니며,
+ * 그렇다고 주장된 적도 없습니다.
+ *
+ * `lqdm1`은 ZungryWare의 LibreQuake "Solstice"이고 BSD-3이며 브러시 807개이고, LibreQuake 자신의
+ * docs/deathmatch-setup-guide.txt가 처음 방을 여는 사람에게 시작하라고 말하는 맵입니다. 그
+ * 프로젝트 안에서 *완성되었다는 이유로* 그 자리를 얻었습니다.
+ *
+ * *그곳에서 그것이 밀어낸 맵이 이 게임이 가져왔던 맵입니다.* `lqdm11`과 `lqdm13`은 팩의
+ * *그레이박스*이며 이는 취향이 아니라 측정 가능한 사실입니다. 두 맵의 면 중 99.1%와 91.1%가
+ * lq_dev.wad 개발용 텍스처를 지니는 반면 팩의 다른 모든 맵은 0.0~0.2%입니다. 이곳에서 그것들이
+ * 선택된 기준은 "상한에 들어가는 가장 작은 파일"이었고, 그것은 상한이 하는 일이지 품질의
+ * 척도가 아닙니다.
+ *
+ * *왜 유명한 것이 아닌가.* 가질 수 있는 것이 없기 때문입니다. 이 계보의 유명한 아레나는 전부
+ * 라이선스가 없거나(모든 권리 유보와 같습니다) GPL-2이며, 이 게임은 맵을 실행 파일 *안에*
+ * 굽습니다. 따라서 카피레프트 맵은 카피레프트 바이너리입니다. */
+#define WORLD_BOSS_ARENA "lqdm1"
 
 /**
  * @brief Where the level text's `next` chain begins.
@@ -1278,10 +1527,75 @@ void world_progress_write(World *w, const PlayerProgress *p);
  *       죽은 채로 두는 메뉴 재시작은 각각 절반만 동작하는 별개의 경로가 됩니다.
  * @note ::run_reset을 통해 나머지 전부와 함께 ::RunState::restart_wanted도 지우므로, 손으로
  *       지우는 호출자가 없습니다.
+ * @note KEEPS ::RunState::endless, which is the one field ::run_reset's zeroing
+ *       is deliberately undone for. A retry is a retry of THIS game, not a
+ *       return to the menu that chose it -- and because story and endless are
+ *       the same room, an endless run that came back as a story one would look
+ *       identical until a banner appeared in a mode that has none.
+ * @note ::RunState::endless는 *유지합니다*. ::run_reset의 0 초기화를 의도적으로 되돌리는 유일한
+ *       필드입니다. 재시도는 *이* 게임의 재시도이지 그것을 고른 메뉴로 돌아가는 일이 아니며,
+ *       스토리와 무한이 같은 방이므로 스토리로 돌아온 무한 플레이는 그것을 갖지 않은 모드에
+ *       배너가 뜨기 전까지 똑같아 보입니다.
  * @note 커서를 건드리거나 메뉴를 닫지 않습니다. 그것들은 창을 소유한 쪽에 속하며, 이 호출보다
  *       앞이 아니라 뒤에 와야 합니다. `dead`가 방금 커서의 올바른 상태를 바꾸었기 때문입니다.
  */
 void world_restart(World *w);
+
+/**
+ * @brief Starts a run in the chosen mode, from the title screen.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] w       The world to start playing in.
+ * @param[in]     endless Non-zero for endless, zero for story. Becomes
+ *                        ::RunState::endless and nothing else reads the
+ *                        argument.
+ * @return 1 when the arena loaded. 0 when it did not, in which case the title
+ *         screen is still up and NOTHING has been started -- ::world_load_level
+ *         keeps the same contract about a level that will not parse, and a
+ *         player whose game did not begin must be left somewhere they can press
+ *         a key rather than in a void with no menu.
+ *
+ * THE ONE PLACE A MODE IS CHOSEN, which is why it is here rather than three
+ * lines in main.c. Three facts have to happen together and in order: the run is
+ * cleared, the mode is set on the cleared run, and the arena is loaded. Written
+ * out at the call site, the second would be the one that goes missing -- and
+ * the symptom is the quietest kind, an endless run with a story's banner and a
+ * respawn that never comes.
+ *
+ * @note ::WORLD_ENTER_NEW, always. Both modes begin with the boot belt at full
+ *       health, because neither is entered from anywhere: there is no previous
+ *       level to carry from and no checkpoint to replay, which is what
+ *       ::WORLD_ENTER_NEW means.
+ * @note Starts ::STORY_INTRO in story mode and not in endless, which is the
+ *       same gate ::BossLine is behind and stated in the same place -- a mode
+ *       decides what is said, and both of those decisions are made where the
+ *       mode is set rather than where the words are.
+ *
+ * 한국어
+ * ------
+ * @brief 타이틀 화면에서, 고른 모드로 플레이를 시작합니다.
+ * @param[in,out] w       플레이를 시작할 월드.
+ * @param[in]     endless 무한이면 0이 아닌 값, 스토리면 0. ::RunState::endless가 되며 그 밖에
+ *                        이 인자를 읽는 것은 없습니다.
+ * @return 아레나가 로드되면 1. 로드되지 않으면 0이며, 그 경우 타이틀 화면이 그대로 떠 있고
+ *         *아무것도* 시작되지 않습니다. ::world_load_level이 파싱되지 않는 레벨에 대해 지키는
+ *         것과 같은 계약이며, 게임이 시작되지 않은 플레이어는 메뉴도 없는 빈 공간이 아니라 키를
+ *         누를 수 있는 곳에 남아야 합니다.
+ *
+ * *모드가 정해지는 유일한 곳이며*, 그것이 main.c의 세 줄이 아니라 이곳인 이유입니다. 세 가지
+ * 사실이 함께, 순서대로 일어나야 합니다. 플레이가 지워지고, 지워진 플레이 위에 모드가 세워지고,
+ * 아레나가 로드됩니다. 호출 지점에 적어 두면 사라지는 것은 두 번째입니다. 그리고 그 증상은 가장
+ * 조용한 종류입니다. 스토리의 배너를 달고 결코 오지 않는 재소환을 가진 무한 플레이입니다.
+ *
+ * @note *언제나 ::WORLD_ENTER_NEW입니다.* 두 모드 모두 체력이 가득한 부팅 구성으로 시작합니다.
+ *       어느 쪽도 어딘가로부터 들어오는 것이 아니기 때문입니다. 이어받을 이전 레벨도, 재생할
+ *       체크포인트도 없으며, 그것이 ::WORLD_ENTER_NEW가 뜻하는 바입니다.
+ * @note 스토리 모드에서는 ::STORY_INTRO를 시작하고 무한에서는 하지 않습니다. ::BossLine이 놓인
+ *       것과 같은 게이트이며 같은 곳에서 진술됩니다. 무엇을 말할지는 모드가 정하고, 그 두 결정은
+ *       말이 있는 곳이 아니라 모드가 세워지는 곳에서 내려집니다.
+ */
+int world_begin(World *w, int endless);
 
 /**
  * @brief Whether the world is stopped this frame.
@@ -1293,10 +1607,11 @@ void world_restart(World *w);
  * @return Non-zero when nothing in the world may advance.
  *
  * @note Pure, and one definition for the several places that ask. The title
- *       screen, the win screen, the death screen and an open menu freeze
- *       exactly the same things, and the reason this is a function rather than
- *       four conditions is that four conditions repeated across call sites is
- *       how one of them ends up missing a site.
+ *       screen, the win screen, the death screen, a cutscene and an open menu
+ *       freeze exactly the same things, and the reason this is a function
+ *       rather than five conditions is that five conditions repeated across
+ *       call sites is how one of them ends up missing a site. The cutscene is
+ *       what that bought: it froze the world by being added to one expression.
  * @note ::world_step returns the value it used, so the renderer does not derive
  *       it a second time from state the step has since changed. Asking again
  *       after the step would hide the crosshair on the very frame the player
@@ -1310,9 +1625,10 @@ void world_restart(World *w);
  * @return 월드의 어떤 것도 진행할 수 없으면 0이 아닙니다.
  *
  * @note 부수 효과가 없으며, 이를 묻는 여러 곳을 위한 하나의 정의입니다. 타이틀 화면, 승리
- *       화면, 사망 화면, 열린 메뉴는 정확히 같은 것들을 정지시킵니다. 네 개의 조건이 아니라
- *       함수인 이유는, 여러 호출 지점에 반복되는 네 개의 조건은 그중 하나가 어느 한 곳을
- *       빠뜨리게 되는 지름길이기 때문입니다.
+ *       화면, 사망 화면, 컷신, 열린 메뉴는 정확히 같은 것들을 정지시킵니다. 다섯 개의 조건이
+ *       아니라 함수인 이유는, 여러 호출 지점에 반복되는 다섯 개의 조건은 그중 하나가 어느 한
+ *       곳을 빠뜨리게 되는 지름길이기 때문입니다. 컷신이 그 대가로 얻은 것입니다. 식 하나에
+ *       더해지는 것만으로 월드를 정지시켰습니다.
  * @note ::world_step이 자신이 사용한 값을 반환하므로, 렌더러가 그 사이 갱신이 바꿔 놓은
  *       상태로부터 이 값을 두 번째로 유도하지 않습니다. 갱신 이후에 다시 물으면 플레이어가
  *       죽은 바로 그 프레임에, 그에 해당하는 사망 화면이 나타나기 한 프레임 전에 조준점이

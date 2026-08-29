@@ -134,7 +134,7 @@ static int write_png(const char *path, const unsigned char *rgb, int w, int h) {
 /* --- the capture --------------------------------------------------------- */
 
 int main(int argc, char **argv) {
-    const char *level_name = (argc > 1) ? argv[1] : "arena";
+    const char *level_name = (argc > 1) ? argv[1] : "lqdm1";
 
     HINSTANCE inst = GetModuleHandleA(0);
     if (!gl_bootstrap(inst)) { printf("gl_bootstrap FAILED\n"); return 1; }

@@ -1,0 +1,272 @@
+# SFPS loot -- who drops what, how often, and where the reward lands
+#
+# Everything about an item ARRIVING is in this one file: the odds a kill leaves
+# something behind, what a cleared wave pays, the spot it is paid at, and the
+# specks that make any of it visible from across a room. It hot-reloads, so a
+# rate is retuned by saving this file and killing one more monster -- not by a
+# rebuild.
+#
+#   d <monster>          starts a monster's drop table
+#     chance <percent>   how often a kill leaves anything at all, 0..100
+#     item <name> <w>    one entry. <w> is its WEIGHT against the other items
+#                        in this table, not a count -- a kill that drops
+#                        anything drops exactly one thing
+#
+#   r                    starts the wave reward. There is one
+#     give <name> <n>    <n> OF this item, every cleared wave. A count here,
+#                        deliberately unlike `item` above, because a wave pays
+#                        a fixed purse and a kill rolls a die
+#     at <where>         altar | player | centre -- see below
+#     out <cm/s>         how hard the ring leaves the drop point
+#     up <cm/s>          and how hard upward
+#     altar <ms>         how long the drop point burns as a shrine. 0 for none
+#
+#   m                    the motes every floor item gives off. There is one
+#     rate <ms>          between one mote and the next, once it has settled
+#     hurry <ms>         between them while it is still announcing itself
+#     hold <ms>          how long `hurry` lasts, from the moment it arrives
+#     range <cm>         past which an item gives off nothing at all
+#
+# <name> is any name a level can place -- health, ammo, shotgunammo,
+# rapidammo, grenade, axe, redkey ... -- plus one that no level can:
+#
+#   held               ammo for a weapon the player is ACTUALLY HOLDING,
+#                      round-robin over the ones they own. A box for a gun you
+#                      have not found is the one thing pickup.c refuses to
+#                      collect, so it would lie there for the rest of the run
+#                      looking like something you had missed
+#
+# `at` decides where the reward lands, and the three answers are three
+# different games:
+#
+#   player   at your own feet, which is where you are looking when the room
+#            goes quiet. Diablo's drop
+#   altar    at an `altar` entity the map placed. The reward becomes a PLACE
+#            you go to, which is what makes the shrine worth lighting. Falls
+#            back to `player` in a map that placed none
+#   centre   the average of the arena's spawners, for a map that wants the
+#            middle of the room without marking it
+#
+# Every number is an integer. Unknown keywords are skipped rather than
+# rejected, so a file written for a newer build still loads in an older one --
+# the same bargain effects.txt makes.
+#
+# 한국어
+# ------
+# 아이템이 *도착하는* 것에 관한 모든 것이 이 파일 하나에 있습니다. 처치가 무언가를 남길
+# 확률, 정리된 웨이브가 지급하는 것, 그것이 지급되는 자리, 그리고 그 전부를 방 건너에서
+# 보이게 만드는 알갱이입니다. 핫 리로드되므로, 확률 조정은 재빌드가 아니라 이 파일을
+# 저장하고 몬스터를 하나 더 잡는 것으로 끝납니다.
+#
+# `item`은 *가중치*이고 `give`는 *개수*입니다. 처치는 주사위를 굴리고 웨이브는 정해진
+# 몫을 지급하기 때문이며, 두 가지를 같은 키워드로 적으면 그 차이가 사라집니다.
+
+# --- what a kill leaves behind ----------------------------------------------
+#
+# RATES, NOT AMOUNTS. Every entry below hands out something that already
+# exists -- one medkit, one box -- so retuning what a medkit is worth does not
+# silently retune what a hound is worth. The odds are the only thing here.
+#
+# The shape across the five is deliberate: the things that are dangerous pay,
+# and the things that are numerous do not. A hound arrives in threes and drops
+# almost nothing; a brute is a wall you spent ammunition on and hands most of
+# it back. Flat rates would make the hound the best thing in the game to farm.
+#
+# 확률이지 양이 아닙니다. 아래의 모든 항목은 이미 존재하는 것(구급상자 하나, 상자 하나)을
+# 내주므로, 구급상자의 값어치를 다시 조율해도 하운드의 값어치가 조용히 함께 바뀌지
+# 않습니다. 이곳에 있는 것은 확률뿐입니다.
+#
+# 다섯의 배분은 의도적입니다. 위험한 것이 지급하고 수가 많은 것은 지급하지 않습니다.
+# 하운드는 셋씩 오며 거의 아무것도 떨어뜨리지 않고, 브루트는 탄약을 쓴 벽이며 그 대부분을
+# 돌려줍니다. 균일한 확률은 하운드를 게임에서 가장 좋은 사냥감으로 만듭니다.
+
+# WATER SPIRIT: the baseline monster, and the baseline rate. It holds mid range
+# and sprays, so what it costs you is a bit of both -- and the split says so.
+# `d imp` still works: the name is a legacy alias and this table is read through
+# the same resolver a level is.
+# 물의 정령입니다. 기준 몬스터이자 기준 확률입니다. 중거리를 유지하며 난사하므로 앗아가는
+# 것이 양쪽 조금씩이며, 배분이 그렇게 말합니다. `d imp`도 여전히 동작합니다. 그 이름은 레거시
+# 별칭이고 이 표는 레벨과 같은 해석기로 읽히기 때문입니다.
+d water_spirit
+  chance 26
+  item held   3
+  item health 1
+
+# BRUTE: 120 health is a lot of ammunition. It hands most of it back, or this
+# becomes the monster you walk around.
+# BRUTE: 체력 120은 많은 탄약입니다. 그 대부분을 돌려주지 않으면 이것은 우회하는
+# 몬스터가 됩니다.
+d brute
+  chance 62
+  item held   3
+  item health 2
+
+# HOUND: fast, frail, and arrives in numbers. The low rate is what stops a pack
+# from being a supply drop.
+# HOUND: 빠르고 무르며 무리로 옵니다. 낮은 확률이 무리를 보급품으로 만들지 않게 합니다.
+d hound
+  chance 11
+  item health 1
+  item held   1
+
+# CASTER: the reason to keep moving, and health-leaning because what it costs
+# you is health rather than ammunition -- you close on it or you eat bolts.
+# CASTER: 계속 움직여야 하는 이유이며, 체력 쪽으로 기웁니다. 이것이 앗아가는 것은 탄약이
+# 아니라 체력이기 때문입니다. 붙거나 볼트를 맞거나입니다.
+d caster
+  chance 38
+  item health 3
+  item held   2
+
+# WRAITH: the same bargain as the caster, paid slightly better for being the
+# one you cannot simply walk up to.
+# WRAITH: 캐스터와 같은 거래이며, 그냥 걸어가서 칠 수 없는 유일한 상대인 만큼 조금 더
+# 후하게 지급합니다.
+d wraith
+  chance 44
+  item health 3
+  item held   2
+
+# --- the boss fight, and why both of its rows say zero ----------------------
+#
+# THESE TWO EXIST TO BE READ, not to change anything. Without them the maw and
+# its wards already drop nothing -- a monster with no `d` block has an empty
+# table -- so the lines below are the file saying it MEANT to, rather than the
+# next reader finding two monsters missing from a list and adding them.
+#
+# THE WARD IS NOT A KILL YOU ARE PAID FOR. It is the door to the groggy window,
+# and the fight is already built so that opening it fast fills the room --
+# WARD_SUMMON_DMG spits monsters out of it as it breaks. Paying for it as well
+# would make the fastest way to farm the arena the thing the fight is trying to
+# make you think twice about.
+#
+# THE MAW PAYS THROUGH `b` INSTEAD, which is a purse rather than a drop: it
+# lands on the altar, it burns for LOOT_BOSS_ALTAR, and it arrives whether or
+# not a die was rolled. A boss whose reward depended on a percentage would
+# sometimes pay nothing for the longest fight in the game.
+#
+# 이 둘은 무언가를 바꾸려는 것이 아니라 *읽히려고* 존재합니다. 이것들이 없어도 아귀와
+# 결계핵은 이미 아무것도 떨어뜨리지 않습니다. `d` 블록이 없는 몬스터는 빈 표를 가지기
+# 때문입니다. 그러므로 아래 줄들은, 다음에 읽는 사람이 목록에서 몬스터 둘이 빠진 것을 발견하고
+# 추가해 넣는 대신, 파일이 그렇게 *의도했다*고 말하는 것입니다.
+#
+# 결계핵은 대가를 받는 처치가 아닙니다. 그것은 그로기 창으로 가는 문이며, 이 전투는 그것을 빨리
+# 여는 것이 방을 채우도록 이미 설계되어 있습니다. WARD_SUMMON_DMG가 그것이 부서지는 동안
+# 몬스터를 토해 냅니다. 거기에 지급까지 하면, 아레나를 가장 빨리 파밍하는 방법이 곧 전투가
+# 망설이게 만들려는 그 행동이 됩니다.
+#
+# 아귀는 대신 `b`로 지급하며, 그것은 드롭이 아니라 *몫*입니다. 제단에 놓이고
+# LOOT_BOSS_ALTAR만큼 타오르며, 주사위를 굴렸는지와 무관하게 도착합니다. 보상이 확률에 달린
+# 보스는 게임에서 가장 긴 전투에 대해 때때로 아무것도 지급하지 않습니다.
+d ward
+  chance 0
+
+d maw
+  chance 0
+
+# --- what a beaten maw pays -------------------------------------------------
+#
+# ABSENT ON PURPOSE. There is no `b` block here, and loot.c's default for one is
+# not "nothing" -- it is the wave purse multiplied by LOOT_BOSS_MULTIPLE, thrown
+# a little harder, burning for LOOT_BOSS_ALTAR. That default is written as a
+# MULTIPLE rather than as its own numbers precisely so that retuning `r` below
+# carries the boss along with it; a `b` spelled out here would stop doing that
+# the first time somebody halved the wave reward, and the failure -- a boss
+# paying less than the wave before it -- reads as a bug in the fight rather than
+# as two lists that stopped agreeing.
+#
+# Open one the day the boss should pay something a wave never does: a weapon,
+# a different `at`, a longer burn. Until then, the derived answer is the honest
+# one and this paragraph is what stops it looking like an omission.
+#
+# 의도적으로 없습니다. 이곳에 `b` 블록이 없으며, 그에 대한 loot.c의 기본값은 "아무것도 없음"이
+# 아니라 아래 웨이브 몫에 LOOT_BOSS_MULTIPLE을 곱하고, 조금 더 세게 던지고,
+# LOOT_BOSS_ALTAR만큼 타오르는 것입니다. 그 기본값이 자기 숫자가 아니라 *배수*로 쓰인 이유가
+# 바로, 아래의 `r`을 다시 조율하면 보스도 함께 따라오게 하기 위함입니다. 이곳에 적어 넣은 `b`는
+# 누군가 웨이브 보상을 반으로 줄이는 첫 순간 그렇게 하기를 그만두며, 그 실패(직전 웨이브보다
+# 적게 지급하는 보스)는 서로 맞지 않게 된 두 목록이 아니라 전투의 버그로 읽힙니다.
+#
+# 보스가 웨이브는 결코 주지 않는 것을 지급해야 하는 날 하나를 여십시오. 무기, 다른 `at`, 더 긴
+# 연소 같은 것들입니다. 그때까지는 유도된 답이 정직한 답이며, 이 문단이 그것을 누락처럼 보이지
+# 않게 하는 것입니다.
+
+# --- what clearing a wave pays ----------------------------------------------
+#
+# `at altar` and not `at player`, which is what this used to be. A reward
+# thrown at your feet is collected without a decision; a reward that lands on a
+# shrine across the room is a decision -- go now and be caught reloading in the
+# open, or hold position and start the next wave without it. The breather is
+# WORLD_WAVE_BREAK long precisely so there is time to make it.
+#
+# A map that places no `altar` falls back to the old behaviour rather than
+# dropping the reward into a corner, so this is safe to leave switched on for
+# every level in the episode.
+#
+# `at player`가 아니라 `at altar`이며, 예전에는 전자였습니다. 발치에 던져진 보상은
+# 결정 없이 획득됩니다. 방 건너 제단에 놓인 보상은 결정입니다. 지금 가서 트인 곳에서
+# 재장전 중에 붙잡히거나, 자리를 지키고 그것 없이 다음 웨이브를 시작하거나입니다.
+# 휴식이 WORLD_WAVE_BREAK만큼인 것은 바로 그 결정을 내릴 시간을 주기 위해서입니다.
+#
+# `altar`를 배치하지 않은 맵은 보상을 구석에 떨어뜨리는 대신 예전 동작으로 되돌아가므로,
+# 에피소드의 모든 레벨에 켜 둔 채로 두어도 안전합니다.
+r
+  give health 2
+  give held   3
+  at    altar
+  out   340
+  up    420
+  altar 6000
+
+# --- what a floor item gives off --------------------------------------------
+#
+# WHAT THIS FIXES. A floor item is a small alpha-tested billboard standing in a
+# room lit to about 0.4, and the dither pass quantises what is left. At the far
+# end of a hall a medkit was four dark pixels -- the player did not decide not
+# to fetch it, they never saw it.
+#
+# IT IS PACED, NOT SIZED, and that is the whole difference from what this
+# replaced. There used to be a halo and a dynamic light here, tuned by how big
+# and how bright; both made the item into a lamp, which is the language this
+# game already spends on bolts and muzzle flash -- on the things that are about
+# to hurt you. What is left is small specks rising off it, and every number
+# below is a TIME rather than a size. Nothing here can make an item glow; it
+# can only make it give off more or fewer specks, sooner or later.
+#
+# `hurry` against `rate` is what answers "something just arrived". A steady
+# trickle says where an item IS and says it equally whether it has been there a
+# minute or landed this frame, so the arrival -- the one moment the player has
+# to be told about -- reads as nothing at all. Emitting four times as fast for
+# a beat and settling costs one float per item.
+#
+# `range` is not a look, it is a budget. Every effect in the game shares one
+# particle pool, and PICKUP_MAX items each emitting on a timer would spend it
+# on specks nobody can see before a caster's bolt could lay a trail. An item
+# past this distance keeps its timer running and simply does not spawn, so
+# walking into range does not detonate a backlog.
+#
+# 무엇을 고치는가. 바닥 아이템은 0.4 정도로 밝은 방에 서 있는 작은 알파 테스트 빌보드이며,
+# 디더 패스가 남은 것을 양자화합니다. 복도 저편의 구급상자는 어두운 픽셀 넷이었습니다.
+# 플레이어는 가지러 가지 *않기로* 한 것이 아니라 애초에 보지 못한 것입니다.
+#
+# *크기가 아니라 빈도로 조절되며*, 그것이 이전 것과의 차이 전부입니다. 이곳에는 헤일로와
+# 동적 광원이 있었고 얼마나 크고 얼마나 밝은지로 조정되었습니다. 둘 다 아이템을 등으로
+# 만들었는데, 그것은 이 게임이 이미 볼트와 총구 섬광에, 즉 당신을 아프게 할 것들에 쓰고
+# 있는 언어입니다. 남은 것은 아이템에서 피어오르는 작은 알갱이이며, 아래의 모든 숫자는
+# 크기가 아니라 *시간*입니다. 이곳의 무엇도 아이템을 빛나게 만들 수 없습니다. 알갱이를 더
+# 많이 또는 더 적게, 더 이르게 또는 더 늦게 내보내게 할 수 있을 뿐입니다.
+#
+# `rate`에 대한 `hurry`가 "방금 무언가 도착했다"에 답합니다. 일정한 흐름은 아이템이
+# *어디에* 있는지를 말하며, 1분 전부터 있었든 이번 프레임에 떨어졌든 똑같이 말합니다.
+# 그래서 도착이라는, 플레이어에게 반드시 알려야 할 그 한 순간이 아무것도 아닌 것으로
+# 읽힙니다. 잠깐 네 배로 빠르게 내보냈다가 가라앉히는 비용은 아이템당 float 하나입니다.
+#
+# `range`는 모양새가 아니라 예산입니다. 게임의 모든 이펙트가 입자 풀 하나를 공유하는데,
+# PICKUP_MAX개의 아이템이 각자 타이머로 내뿜으면 캐스터의 볼트가 궤적을 남기기도 전에
+# 아무도 볼 수 없는 알갱이에 그 풀을 다 씁니다. 이 거리 밖의 아이템은 타이머는 계속
+# 돌리되 생성만 하지 않으므로, 사거리 안으로 걸어 들어가도 밀린 것이 한꺼번에 터지지
+# 않습니다.
+m
+  rate   340
+  hurry  80
+  hold   1200
+  range  2200

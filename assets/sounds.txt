@@ -77,6 +77,50 @@ s phurt
 l 0  90  180  120   0  85  70     # a blunt grunt -- the player, not a monster
 l 3  70  600  200   0  70  40
 
+# --- the spawn portal ------------------------------------------------------
+#
+# TWO SOUNDS, AND THE PAIR IS THE POINT. `spawnwarn` sweeps UP and `spawnpop`
+# sweeps DOWN through the same register, so the second reads as the first
+# resolving rather than as a separate noise. That inversion is the only thing
+# telling the player the portal FINISHED rather than merely stopped, and it is
+# the same trick `pdie` and `win` use on each other.
+#
+# The warning is the one sound in this file that promises rather than reports.
+# Everything else fires because something already happened; this fires 0.55s
+# BEFORE it does (SPAWN_WARN_TIME), and it has to survive being heard from
+# behind while the player is busy. Hence the long attack: a swell is audible in
+# peripheral hearing where a transient is not, and it cannot be mistaken for a
+# gunshot somewhere off screen.
+#
+# Both are deliberately quieter than the weapons. Up to ENEMY_MAX_SPAWNERS of
+# these can be in flight at once and the mixer has twelve voices; a portal that
+# fought the shotgun for level would win an argument it should not be having.
+#
+# 소리는 둘이며, 그 *짝*이 핵심입니다. `spawnwarn`은 위로, `spawnpop`은 같은 음역을 타고
+# 아래로 쓸어내립니다. 그래서 두 번째 소리가 별개의 소음이 아니라 첫 번째의 *해결*로
+# 읽힙니다. 이 반전만이 플레이어에게 포탈이 그냥 멈춘 것이 아니라 *완결되었음*을 말해 주며,
+# `pdie`와 `win`이 서로에게 쓰는 것과 같은 기법입니다.
+#
+# 예고음은 이 파일에서 보고가 아니라 *약속*을 하는 유일한 소리입니다. 다른 모든 것은 이미
+# 무슨 일이 일어났기 때문에 울립니다. 이것은 그 일이 일어나기 0.55초 *전에*(SPAWN_WARN_TIME)
+# 울리며, 플레이어가 다른 일에 매여 있는 동안 등 뒤에서 들려도 살아남아야 합니다. 그래서 어택이
+# 깁니다. 부풀어 오르는 소리는 주변 청각에 걸리지만 순간음은 그렇지 않으며, 화면 밖 어딘가의
+# 총성으로 오해될 수도 없습니다.
+#
+# 둘 다 무기보다 의도적으로 조용합니다. 이것이 최대 ENEMY_MAX_SPAWNERS개까지 동시에 떠 있을 수
+# 있는데 믹서의 보이스는 열둘입니다. 샷건과 음량을 다투는 포탈은 해서는 안 될 논쟁에서 이기는
+# 셈입니다.
+
+s spawnwarn
+l 2 520  90  360  140 380  62    # sine swelling upward -- the charge building
+l 1 460  45  180   90 360  38    # saw underneath for body, an octave down
+l 3 300 700  260  120 180  22    # a breath of noise: the energy, not an impact
+
+s spawnpop
+l 3 260 1800 240    0 240  78    # the crack of arrival, falling fast
+l 0 220  900 110     0 200  60    # square sweeping DOWN -- the warning inverted
+l 2 300  240  60     8 280  52    # low sine settling: the thing has body now
+
 # --- pickups and the empty gun ------------------------------------------
 
 s pammo
@@ -179,3 +223,44 @@ s hland
 l 0 90   320   90   0  85  60     # a heavy thump
 l 3 140 1400  200   0 130  45     # the burst of the release
 l 2 220  180   60   8 210  40     # a low tail so the launch has follow-through
+
+# --- the boss opening and closing ---------------------------------------
+#
+# TWO SOUNDS, AND THE PAIR IS THE POINT, exactly as `spawnwarn` and `spawnpop`
+# are a pair: `bossopen` sweeps UP through a register and `bossward` sweeps
+# DOWN through the same one, so the second reads as the first being undone
+# rather than as an unrelated noise.
+#
+# THIS PAIR EXISTS BECAUSE THE BOSS CANNOT BE SEEN WHEN IT MATTERS. The maw is
+# anchored to a wall and the wards are scattered around the room, so the player
+# is by construction looking AWAY from it at the moment the last ward falls --
+# that is the whole design of the fight. A groggy window opened silently is a
+# window the player finds late, and there are only three of them.
+#
+# Louder than the portal pair and deliberately so. Those are "a thing to notice,
+# not a thing to react to yet", and there may be eight of them at once. There is
+# exactly one of these and it is the most important thing in the room.
+#
+# 한국어
+# ------
+# 두 소리이며 그 쌍이 요점입니다. `spawnwarn`과 `spawnpop`이 쌍인 것과 정확히 같습니다.
+# `bossopen`은 한 음역을 타고 *올라가고* `bossward`는 같은 음역을 타고 *내려가므로*, 두 번째가
+# 무관한 소음이 아니라 첫 번째가 되돌려지는 것으로 읽힙니다.
+#
+# 이 쌍이 존재하는 이유는 정작 중요한 순간에 보스를 볼 수 없기 때문입니다. 아귀는 벽에 고정되어
+# 있고 결계핵은 방 곳곳에 흩어져 있으므로, 마지막 결계핵이 쓰러지는 순간 플레이어는 구조적으로
+# 그것을 등지고 있습니다. 그것이 이 전투의 설계 전부입니다. 조용히 열린 그로기 창은 플레이어가
+# 늦게 발견하는 창이고, 그런 창은 셋뿐입니다.
+#
+# 포탈 쌍보다 크며 의도적입니다. 그쪽은 "반응할 것이 아니라 알아챌 것"이고 한 번에 여덟 개까지
+# 있을 수 있습니다. 이쪽은 정확히 하나이며 방에서 가장 중요한 것입니다.
+
+s bossopen
+l 2  90 1100  260   40  900  96    # sine climbing far -- something very large opening
+l 1  70  520  140   35  760  70    # saw an octave down, for the mass behind it
+l 3 180 1400  120    0  420  54    # noise breath: air moving, not an impact
+
+s bossward
+l 2 260  900   90 1100  900  92    # the same climb, run backwards
+l 1 140  760   70  520  760  68    # and its saw, likewise
+l 0 120  260   40  200  520  46    # square settling low: the thing has shut

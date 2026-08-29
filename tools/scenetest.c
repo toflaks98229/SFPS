@@ -440,6 +440,56 @@ int main(void) {
     ok(death_again == death_plain,
        "and closing it puts the frame back exactly as it was");
 
+    /* --- the title screen is a menu with the game's name over it ---------
+     *
+     * THREE PASSES IN ONE FRAME and the order between two of them is the
+     * point: scene_draw_menu washes the world for the screen it draws, and
+     * scene_draw_title goes OVER that wash because the name is the screen's own
+     * art rather than something the dim should push back. Drawn the other way
+     * round the title would be darkened by the menu it heads, and nothing but
+     * looking at it would say so.
+     *
+     * What is checkable from here is that all three combinations differ: a
+     * title with no menu, a title with the menu, and the pause root over a run.
+     * A title screen that had quietly stopped drawing its rows -- or its name --
+     * would collapse two of those together.
+     *
+     * *한 프레임에 세 개의 패스*이며 그중 둘 사이의 순서가 요점입니다. scene_draw_menu는 자신이
+     * 그리는 화면을 위해 월드를 씻어 내고, scene_draw_title은 그 워시 *위로* 갑니다. 이름은 그
+     * 어둡게 하기가 뒤로 밀어내야 할 것이 아니라 화면 자신의 아트이기 때문입니다. 반대로 그리면
+     * 제목이 자기가 머리글로 있는 메뉴에 의해 어두워지고, 그것을 말해 주는 것은 눈으로 보는 것뿐
+     * 입니다.
+     *
+     * 이곳에서 검사할 수 있는 것은 세 조합이 모두 다르다는 것입니다. 메뉴 없는 타이틀, 메뉴가 있는
+     * 타이틀, 그리고 플레이 위의 일시정지 최상위입니다. 조용히 행을 그리지 않게 된 타이틀 화면은
+     * (또는 이름을 그리지 않게 된 화면은) 그중 둘을 하나로 무너뜨립니다. */
+    printf("\n  --- the title screen ---\n");
+
+    clear_state(&w);
+    w.run.title      = 1;
+    w.run.title_time = 2.0f;       /* past the header's fade-in */
+    menu_close();
+    unsigned title_bare = frame_hash(&w, &scene, 1);
+
+    menu_open_title();
+    ok(menu_screen() == MENU_TITLE, "the title menu is the screen showing");
+    unsigned title_menu = frame_hash(&w, &scene, 1);
+    ok(title_bare != title_menu, "the title menu's rows are drawn over the title");
+
+    /* The locked row is DRAWN, not skipped -- a row nobody can see is a mode
+       nobody knows to want. Faint, so unlocking it changes the frame.
+       잠긴 행은 건너뛰어지지 않고 *그려집니다*. 아무도 볼 수 없는 행은 아무도 원할 줄 모르는
+       모드입니다. 흐리게 그려지므로 해금하면 프레임이 바뀝니다. */
+    menu_set_unlocked(MENU_UNLOCK_ENDLESS);
+    unsigned title_unlocked = frame_hash(&w, &scene, 1);
+    ok(title_menu != title_unlocked,
+       "and a locked row is drawn faintly rather than left out");
+    menu_set_unlocked(0);
+
+    menu_close();
+    ok(frame_hash(&w, &scene, 1) == title_bare,
+       "closing the title menu puts the frame back, so nothing leaked out of it");
+
     /* --- 6. a level's lamps are baked, not uploaded ----------------------
        The shader's light slots are for light that MOVES. A level's own lamps
        are compiled into its vertices when it loads, so putting them in the

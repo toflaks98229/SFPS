@@ -245,10 +245,244 @@ typedef struct MdlRange MdlRange;
  * 아무것도 아닌 것에 300KB를 쓰는 일입니다. 풀 방식은 한 맵이 단순한 브러시 여럿이고 다른
  * 맵이 복잡한 브러시 몇 개인 상황을, 어느 한쪽 상한을 다른 쪽 사정에 맞추지 않고 담습니다.
  */
-#define BR_MAX_TOTAL_FACES 4096
+/* Overridable by the build, the same way ::LVL_MAX_SECTORS and
+   ::LIGHT_CACHE_SLOTS are, and for a reason this file did not have until a map
+   nobody wrote arrived: these three are the only numbers that decide whether an
+   imported level loads whole, and "would it fit if they were bigger" is a
+   question a second binary can answer and a comment cannot. tools/mapcap.c is
+   that binary. See ::BR_MAX_BRUSHES for what the answer turned out to be.
+   ::LVL_MAX_SECTORS와 ::LIGHT_CACHE_SLOTS가 그러하듯 빌드가 재정의할 수 있습니다. 이 파일이
+   전에는 갖지 않았던 이유가 생겼습니다. 아무도 쓰지 않은 맵이 도착했기 때문입니다. 이 셋은
+   가져온 레벨이 온전히 로드되는지를 결정하는 유일한 숫자이며, "더 컸다면 들어갔을까"는 두
+   번째 바이너리가 답할 수 있고 주석은 답할 수 없는 질문입니다. tools/mapcap.c가 그
+   바이너리입니다. 답이 무엇이었는지는 ::BR_MAX_BRUSHES를 보십시오. */
+#ifndef BR_MAX_TOTAL_FACES
+#define BR_MAX_TOTAL_FACES 16384
+#endif
 
-#define BR_MAX_BRUSHES 512   ///< @brief Brushes per map. / 맵당 브러시 수.
-#define BR_MAX_ENTS     96   ///< @brief Entities per map, worldspawn included. / 맵당 엔티티 수. worldspawn 포함.
+/**
+ * @brief Brushes per map.
+ *
+ * ENGLISH
+ * -------
+ * THIS NUMBER HAD NO ARGUMENT FOR AS LONG AS IT EXISTED. It was 512 with a
+ * one-line description, and it was the cap that decided which imported maps
+ * could load -- eleven of thirteen LibreQuake deathmatch maps were refused by
+ * it. A cap that does the most refusing and carries the least reasoning is the
+ * one to measure first.
+ *
+ * WHAT WAS MEASURED. tools/mapcap.c loads every map this project ships and
+ * every map it considered, and reports what each one asks of every cap. Built
+ * with the caps opened wide, it says:
+ *
+ *     map        brushes   faces    ents    verts   runs   load
+ *     glasstower       7      42      25      252      4    0ms
+ *     lqdm13         244   1,555      83    8,946      6    2ms
+ *     lqdm11         425   2,564      90   15,411      4    3ms
+ *     lqdm2          607   3,677     104   20,211     17    5ms
+ *     lqdm1          737   4,340      83   24,957     24    5ms   <- the arena
+ *     lqdm4        1,180   7,166      91   42,267     20   12ms
+ *     lqdm3        2,191  13,124     111   71,142     53   20ms
+ *
+ * NOTHING MEASURED HERE IS A CEILING. A 2,191-brush map parses, builds and
+ * bakes its lighting in 19ms, costs 1.9MB of face pool, and asks the renderer
+ * for 53 draw calls.
+ *
+ * THE LAST COLUMN USED TO BE THE CEILING and is the reason this table was
+ * remeasured. ::brush_geometry emitted faces in brush order, so a run ended
+ * every time the material changed and the count grew FASTER than the brush
+ * count -- lqdm4 wanted 3,001 runs and lqdm3 more than the 4,096-entry probe
+ * could hold. Grouping the emission by material instead made a run the number
+ * of DISTINCT materials rather than the number of changes, and the same three
+ * maps fell to 17, 20 and 53. The cap that decided how big a map could be is
+ * now the cap furthest from being reached; see ::LVL_MAX_RANGES for what it
+ * bounds instead.
+ *
+ * WHY IT WAS 1024. Twice the value before it and 2.4x the widest map this
+ * project shipped at the time (lqdm11, 425). Set from the shipped content
+ * rather than from the biggest map that could be made to fit, because a cap
+ * chosen to admit one particular map is a cap that means nothing the day that
+ * map is replaced.
+ *
+ * AND THEN THAT DAY CAME, which is the point of having written it that way. The
+ * arena moved from `glasstower` to LibreQuake's `lqdm1` (Solstice), 807
+ * brushes, and 807 against 1024 is 79% -- inside the cap and outside the
+ * headroom rule tools/mapcap.c asserts, which wants a shipped map under three
+ * quarters so that the next edit to it is not the one that overruns. 2048 puts
+ * Solstice at 39%.
+ *
+ * NOT SIZED TO SOLSTICE EITHER. The same table above says what 2048 admits:
+ * lqdm2 (607) and lqdm4 (1180) with headroom to spare, and it stops short of
+ * lqdm3 (2191) -- which would want this at 4096 AND the face pool at 24576 AND
+ * ::BR_MAX_FACES raised, because two of its brushes carry 33 faces. That map is
+ * a decision with three caps and a scratch buffer attached; this one is a
+ * decision with 32KB attached.
+ *
+ * Costs 32 bytes a brush in each of ::LVL_BRUSH_SLOTS slots -- another 32KB of
+ * .bss, which is free on disk.
+ *
+ * THE FACE POOL HAD TO MOVE WITH IT, AND NOT BECAUSE SOLSTICE NEEDS IT.
+ * Solstice wants 4,746 of 8,192 faces, comfortably inside; the vertex buffer
+ * likewise at 24,957 of 49,152, and that one did not move. The face pool moved
+ * because six faces is the fewest a closed solid has, so 2,048 brushes cannot
+ * exist at all under a pool of 8,192 -- the pool would fill at ~1,365 brushes
+ * and the brush cap would sit unreachable behind it, refusing nothing, forever.
+ * See the _Static_assert below, which is what says so now instead of a
+ * paragraph. 16384 is the next power of two above 2048 * 6 = 12,288 and is
+ * still well under the 32,767 the short index allows.
+ *
+ * A cap raised because a neighbouring cap moved is usually a cap nobody
+ * measured. This is the exception that names itself: it is not sized to
+ * content, it is sized so the cap beside it can fire.
+ *
+ * Costs 32 bytes a brush in each of ::LVL_BRUSH_SLOTS slots -- 32KB for this
+ * change, which is the cheapest of the four caps that moved.
+ *
+ * 한국어
+ * ------
+ * @brief 맵당 브러시 수.
+ *
+ * *이 숫자는 존재하는 내내 논거가 없었습니다.* 한 줄짜리 설명과 함께 512였고, 가져온 맵 중
+ * 무엇이 로드될 수 있는지를 결정하는 상한이었습니다. LibreQuake 데스매치 맵 열셋 중 열하나가
+ * 이것에 거절당했습니다. 가장 많이 거절하면서 가장 적은 근거를 지닌 상한이 가장 먼저 재야 할
+ * 상한입니다.
+ *
+ * *무엇을 쟀는가.* tools/mapcap.c가 이 프로젝트가 출하하는 모든 맵과 검토한 모든 맵을 로드해,
+ * 각각이 모든 상한에 무엇을 요구하는지 보고합니다. 상한을 크게 열고 빌드하면 위의 표가 나옵니다.
+ *
+ * *여기서 잰 무엇도 천장이 아닙니다.* 브러시 2,191개짜리 맵이 19ms에 파싱되고 만들어지고
+ * 조명이 구워지며, 면 풀 1.9MB를 쓰고, 렌더러에 드로우 콜 53개를 요구합니다.
+ *
+ * *마지막 열이 예전에는 천장이었고*, 이 표를 다시 잰 이유가 그것입니다. ::brush_geometry는
+ * 면을 브러시 순서로 내보냈으므로 재질이 바뀔 때마다 구간이 끝났고, 그 수는 브러시 수보다
+ * *빠르게* 자랐습니다. lqdm4는 3,001구간을 원했고 lqdm3은 4,096칸짜리 프로브가 담을 수 있는
+ * 것보다 많이 원했습니다. 대신 내보내기를 재질별로 묶자 구간이 변화의 횟수가 아니라 *서로 다른*
+ * 재질의 수가 되었고, 같은 세 맵이 17, 20, 53으로 떨어졌습니다. 맵이 얼마나 커질 수 있는지를
+ * 결정하던 상한이 이제 가장 멀리 있는 상한입니다. 그것이 대신 무엇을 한정하는지는
+ * ::LVL_MAX_RANGES를 보십시오.
+ *
+ * *왜 1024였는가.* 그 앞 값의 두 배이자 당시 이 프로젝트가 출하하던 가장 넓은 맵(lqdm11,
+ * 425)의 2.4배였습니다. 들어맞게 만들 수 있는 가장 큰 맵이 아니라 *출하 콘텐츠*를 기준으로
+ * 정했습니다. 특정 맵 하나를 받아들이려고 고른 상한은 그 맵이 교체되는 날 아무 뜻도 없는
+ * 상한이기 때문입니다.
+ *
+ * *그리고 그날이 왔으며*, 그렇게 써 둔 이유가 바로 그것입니다. 아레나가 `glasstower`에서
+ * LibreQuake의 `lqdm1`(Solstice)로 옮겨 갔고 그것은 브러시 807개이며, 1024에 대한 807은
+ * 79%입니다. 상한 *안*이고 tools/mapcap.c가 단언하는 여유 규칙 *밖*입니다. 그 규칙은 출하 맵이
+ * 4분의 3 아래에 있기를 바라며, 그래야 그 맵에 가하는 다음 수정이 상한을 넘기는 수정이 되지
+ * 않습니다. 2048이면 Solstice는 39%입니다.
+ *
+ * *Solstice에 맞춘 것도 아닙니다.* 위의 같은 표가 2048이 무엇을 받아들이는지 말합니다.
+ * lqdm2(607)와 lqdm4(1180)를 여유 있게 받아들이고, lqdm3(2191)에는 미치지 않습니다. 그 맵은
+ * 이것을 4096으로, 면 풀을 24576으로, 그리고 ::BR_MAX_FACES까지 올려야 합니다. 그 맵의 브러시
+ * 둘이 면 33개를 지니기 때문입니다. 그것은 상한 셋과 스크래치 버퍼가 딸린 결정이고, 이것은
+ * 32KB가 딸린 결정입니다.
+ *
+ * 면 풀과 정점 버퍼는 *함께 움직이지 않았습니다.* Solstice는 면 8,192개 중 4,746개, 정점
+ * 49,152개 중 24,957개를 원하며 둘 다 이미 규칙 안입니다. 이웃 상한이 움직였다는 이유로 올린
+ * 상한은 아무도 재지 않은 상한입니다.
+ *
+ * 비용은 ::LVL_BRUSH_SLOTS 슬롯마다 브러시당 32바이트로, 이 변경에 32KB입니다. 움직인 네 상한
+ * 중 가장 쌉니다.
+ */
+#ifndef BR_MAX_BRUSHES
+#define BR_MAX_BRUSHES 2048
+#endif
+
+/**
+ * @brief Entities per map, worldspawn included.
+ *
+ * ENGLISH
+ * -------
+ * 96 was 94% consumed by lqdm11, which is the shape of a cap about to be
+ * overrun by somebody moving a light. 192 is 2.1x the widest shipped map.
+ *
+ * @note THE EXPENSIVE ONE, and not because there are many. A ::BrushEnt is
+ *       1,158 bytes -- ::BR_MAX_KEYS 12 pairs of ::BR_KEY 32 and ::BR_VAL 64 --
+ *       so this change costs 217KB where the brush cap cost 32KB for twice as
+ *       many objects. Almost all of it is empty: an ordinary entity carries
+ *       three or four keys.
+ * @note THE FIX FOR THAT IS THE ARGUMENT THIS FILE ALREADY MAKES ONE FIELD
+ *       ABOVE. ::BR_MAX_TOTAL_FACES is a shared pool rather than a per-brush
+ *       array precisely because "sizing every brush for the worst case would
+ *       charge the boxes 32 slots each to hold 6". Keys are the same shape and
+ *       have not been given the same answer -- a key pool would cut this cap's
+ *       cost by roughly two thirds. Not done here: this edit is about which
+ *       numbers are right, not about changing what they index.
+ *
+ * 한국어
+ * ------
+ * @brief 맵당 엔티티 수. worldspawn 포함.
+ *
+ * 96은 lqdm11이 94%를 소비했으며, 그것은 누군가 조명 하나를 옮기면 넘어갈 상한의 모습입니다.
+ * 192는 가장 넓은 출하 맵의 2.1배입니다.
+ *
+ * @note *비싼 쪽이며*, 개수가 많아서가 아닙니다. ::BrushEnt는 1,158바이트입니다.
+ *       ::BR_MAX_KEYS 12쌍의 ::BR_KEY 32와 ::BR_VAL 64입니다. 그래서 이 변경은 217KB가 드는
+ *       반면 브러시 상한은 두 배 많은 객체에 32KB였습니다. 그리고 그 대부분이 비어 있습니다.
+ *       평범한 엔티티는 키를 서넛 지닙니다.
+ * @note *그에 대한 해법은 이 파일이 한 필드 위에서 이미 펼친 논거입니다.*
+ *       ::BR_MAX_TOTAL_FACES가 브러시당 배열이 아니라 공유 풀인 이유가 정확히 "모든 브러시를
+ *       최악의 경우에 맞춰 잡으면 상자마다 6개를 담으려고 32칸씩 물리게 된다"는 것입니다. 키도
+ *       같은 형태인데 같은 답을 받지 못했습니다. 키 풀은 이 상한의 비용을 대략 3분의 2 줄입니다.
+ *       이곳에서는 하지 않습니다. 이 편집은 어느 숫자가 옳은가에 대한 것이지 그 숫자가 무엇을
+ *       인덱싱하는지 바꾸는 것이 아닙니다.
+ */
+#ifndef BR_MAX_ENTS
+#define BR_MAX_ENTS    192
+#endif
+
+/* THE HARD CEILING, and it is not RAM. ::Brush::first_face and
+   ::BrushEnt::first_brush are `short`, so an index past 32767 wraps negative
+   and a brush points at somebody else's faces -- silently, because nothing
+   validates an index that is merely wrong. Raising either cap past this needs
+   those fields widened first, which costs 2 bytes per brush and per entity.
+   Asserted rather than remembered.
+   *하드 천장이며 RAM이 아닙니다.* ::Brush::first_face와 ::BrushEnt::first_brush는 `short`이므로
+   32767을 넘는 인덱스는 음수로 감기고 브러시가 남의 면을 가리키게 됩니다. 조용히 그렇게 됩니다.
+   단지 틀렸을 뿐인 인덱스를 검증하는 것은 없기 때문입니다. 어느 상한이든 이것을 넘기려면 그
+   필드들을 먼저 넓혀야 하며, 비용은 브러시당·엔티티당 2바이트입니다. 기억에 맡기지 않고
+   단언합니다. */
+_Static_assert(BR_MAX_TOTAL_FACES <= 32767,
+               "Brush::first_face is short; widen it before raising this");
+_Static_assert(BR_MAX_BRUSHES <= 32767,
+               "BrushEnt::first_brush and Level::first_brush are short; "
+               "widen them before raising this");
+
+/* A BRUSH POOL THE FACE POOL CANNOT FEED IS A CAP THAT CANNOT FIRE.
+ *
+ * Six faces is the fewest a closed solid can have, so ::BR_MAX_BRUSHES brushes
+ * need at least six times that many faces before the brush count is what a map
+ * runs out of first. Without this, raising one of the two silently retires the
+ * other: the face pool fills, ::parse_face stores nothing, ::parse_brush drops
+ * the brush on its `count <= 0` path -- which is not a refusal and says
+ * nothing -- and the brush cap sits there unreachable.
+ *
+ * FOUND BY A TEST THAT COULD NO LONGER PASS. tools/maptest.c generates
+ * BR_MAX_BRUSHES + 8 cubes and asserts the parser stops at the cap having
+ * stored BR_MAX_BRUSHES * 6 faces. When the brush cap went to 2048 against a
+ * face pool of 8192, that expectation asked for 12,288 faces out of a pool of
+ * 8,192 -- arithmetic, not a bug in the test. The assertion is here rather
+ * than in the test because it is a fact about the two constants, and a test
+ * only catches it on the run after somebody has already shipped the pair.
+ *
+ * Real content agrees with the six: lqdm1 is 4,746 faces over 807 brushes,
+ * 5.88 each. The bound is not conservative, it is the floor.
+ *
+ * *면 풀이 먹여 살릴 수 없는 브러시 풀은 발동할 수 없는 상한입니다.*
+ *
+ * 닫힌 입체가 가질 수 있는 가장 적은 면이 여섯이므로, ::BR_MAX_BRUSHES개의 브러시에는 그보다
+ * 최소 여섯 배 많은 면이 있어야 브러시 수가 맵이 먼저 소진하는 것이 됩니다. 이것이 없으면 둘
+ * 중 하나를 올리는 일이 다른 하나를 조용히 은퇴시킵니다. 면 풀이 차고, ::parse_face가 아무것도
+ * 저장하지 않고, ::parse_brush가 `count <= 0` 경로에서 브러시를 버리며 -- 그것은 거절이 아니고
+ * 아무 말도 하지 않습니다 -- 브러시 상한은 도달 불가능한 채로 놓입니다.
+ *
+ * *더 이상 통과할 수 없게 된 검사가 찾았습니다.* 검사가 아니라 이곳에 단언을 두는 이유는 이것이
+ * 두 상수에 대한 사실이기 때문이며, 검사는 누군가 이미 그 쌍을 출하한 다음 실행에서야 그것을
+ * 잡습니다. */
+_Static_assert(BR_MAX_TOTAL_FACES >= BR_MAX_BRUSHES * 6,
+               "BR_MAX_BRUSHES brushes need 6 faces each before the brush cap "
+               "is reachable; raise BR_MAX_TOTAL_FACES with it");
 #define BR_MAX_KEYS     12   ///< @brief Key/value pairs one entity may carry. / 엔티티 하나가 가질 수 있는 key/value 쌍의 수.
 
 #define BR_TEX  16   ///< @brief Texture name length. Matches ::LVL_MAT and Quake's 15+nul. / 텍스처 이름 길이. ::LVL_MAT 및 Quake의 15+널과 일치합니다.
@@ -288,28 +522,44 @@ _Static_assert(BR_MAX_POLY >= BR_MAX_FACES + 4,
  *
  * ENGLISH
  * -------
- * One run per change of texture along the face order, not one per texture: a
- * map that alternates two materials brush by brush produces two runs per
- * brush, and merging them would mean sorting the whole level by material and
- * losing the brush order the author sees in the editor.
+ * One run per DISTINCT material among the faces of ONE CALL, not one per change
+ * of texture along the face order. The distinction used to run the other way,
+ * and this comment used to defend it: merging, it said, would mean sorting the
+ * level by material and losing the brush order the author sees in the editor.
+ * It does lose that order. Nothing depended on it -- the ranges partition the
+ * vertex buffer either way, which tools/mapcap.c checks on every shipped map --
+ * and the table under ::BR_MAX_BRUSHES is what keeping it cost.
  *
- * ::LVL_MAX_RANGES is `LVL_MAX_SECTORS * 3` for the same reason at a different
- * scale. Here the worst case is genuinely one run per face, so this is set
- * against the brush count rather than the face pool -- a map where every face
- * differs from its neighbour is not something anyone builds, and the overflow
- * merges rather than drops.
+ * PER CALL is the load-bearing half of that sentence. ::brush_geometry cannot
+ * group across calls, so ::level_geometry_part calling it once per stretch of
+ * brushes on its side of a door means the same material can open a run in each.
+ * This bounds one call; ::LVL_MAX_RANGES bounds the sum over them, and is
+ * derived from exactly that product.
+ *
+ * The worst case is still genuinely one run per face -- every face naming a
+ * material no other face names -- so this stays set against the brush count
+ * rather than the face pool. A map built that way is not something anyone
+ * builds, and the overflow merges rather than drops.
  *
  * 한국어
  * ------
  * @brief ::brush_geometry가 만들어 낼 수 있는 최대 재질 구간 수입니다.
  *
- * 텍스처마다 하나가 아니라 면 순서상 텍스처가 바뀔 때마다 하나입니다. 두 재질을 브러시마다
- * 번갈아 쓰는 맵은 브러시당 구간 두 개를 만들며, 그것을 병합하려면 레벨 전체를 재질로
- * 정렬해야 하고 제작자가 에디터에서 보는 브러시 순서를 잃게 됩니다.
+ * 면 순서상 텍스처가 바뀔 때마다 하나가 아니라, *한 호출*의 면들 안에 있는 *서로 다른* 재질마다
+ * 하나입니다. 예전에는 구별이 반대 방향이었고 이 주석이 그것을 옹호했습니다. 병합하려면 레벨을
+ * 재질로 정렬해야 하고 제작자가 에디터에서 보는 브러시 순서를 잃게 된다고 했습니다. 실제로 그
+ * 순서를 잃습니다. 그리고 그것에 기대는 것은 없었습니다. 구간은 어느 쪽이든 정점 버퍼를
+ * 분할하며 tools/mapcap.c가 출하되는 모든 맵에서 그것을 검사합니다. ::BR_MAX_BRUSHES 아래의
+ * 표가 그 순서를 지킨 대가입니다.
  *
- * ::LVL_MAX_RANGES가 `LVL_MAX_SECTORS * 3`인 것도 규모만 다른 같은 이유입니다. 이곳의 최악은
- * 진정으로 면당 구간 하나이므로, 면 풀이 아니라 브러시 수를 기준으로 잡았습니다. 모든 면이
- * 이웃과 다른 맵은 아무도 만들지 않으며, 초과 시에는 버리지 않고 병합합니다.
+ * *호출마다*가 그 문장에서 하중을 받는 절반입니다. ::brush_geometry는 호출을 넘어 묶지
+ * 못하므로, ::level_geometry_part가 문을 사이에 둔 자기 쪽 브러시 덩어리마다 그것을 한 번씩
+ * 부른다는 것은 같은 재질이 각각에서 구간을 하나씩 열 수 있다는 뜻입니다. 이것은 한 호출을
+ * 한정하고, ::LVL_MAX_RANGES는 그것들의 합을 한정하며 바로 그 곱에서 유도됩니다.
+ *
+ * 최악의 경우는 여전히 진정으로 면당 구간 하나입니다. 모든 면이 다른 어떤 면도 대지 않는 재질을
+ * 대는 경우입니다. 그러므로 면 풀이 아니라 브러시 수를 기준으로 잡은 채 둡니다. 그렇게 지어진
+ * 맵은 아무도 짓지 않으며, 초과 시에는 버리지 않고 병합합니다.
  */
 #define BR_MAX_RANGES (BR_MAX_BRUSHES * 2)
 
@@ -742,6 +992,10 @@ int brush_geometry(MeshBuf *b, const BrushMap *m, int first, int count,
  *       규칙의 사본이 둘이면 서로 어긋나며, 그 증상은 그려지지만 막지 않는 벽이거나 그 반대입니다.
  */
 int brush_tex_nodraw(const char *tex);
+/** @brief Is this texture name a sky? By Quake's `sky` prefix. / 하늘 텍스처인가. Quake의 `sky` 접두사로 판단합니다. */
+int brush_tex_sky(const char *tex);
+/** @brief Is every drawn face of this brush sky? / 이 브러시의 그려지는 모든 면이 하늘인가. */
+int brush_is_sky(const BrushMap *m, int bi);
 
 /* --- Collision / 충돌 ------------------------------------------------------ */
 

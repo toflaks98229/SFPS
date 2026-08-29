@@ -1,0 +1,98 @@
+Copyright © 2019-2023
+Contributors to the LibreQuake project.  All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+  * Redistributions of source code must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+  * Redistributions in binary form must reproduce the above copyright
+    notice, this list of conditions and the following disclaimer in the
+    documentation and/or other materials provided with the distribution.
+  * Neither the name of the LibreQuake project nor the names of its
+    contributors may be used to endorse or promote products derived from
+    this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS “AS
+IS” AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
+OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+For a list of contributors to the LibreQuake project, see the file
+CREDITS.
+
+For a list of resources used in the LibreQuake project, see the directory
+docs
+
+--- how this file got here ---------------------------------------------------
+
+Reproduced verbatim from the LibreQuake project (docs/COPYING), because a tidied
+licence is not the licence that was granted. That is the same rule
+docs/LICENSE-Freedoom.txt is kept under.
+
+WHAT IT COVERS HERE:
+  assets/maps/lqdm1.map -- "Solstice" -- converted from LibreQuake by
+  assets/maps/import-librequake.py, and
+  the 23 wall textures that map uses, in assets/sprites/, fetched from
+  LibreQuake's texture-wads by assets/sprites/import-librequake-textures.py:
+    black             grk_leaf1_1     med_cobstn1_1    med_csl_brk14_f
+    med_csl_brk14b    med_csl_flr5_1  med_dr1a         med_dr3c
+    med_glass5        med_roof4       med_tanwall4     med_wood2_plk1
+    med_wood3_plk1    med_wood5       med_wood_riv1b   met_brn_flat
+    met_brn_trim16    met_brn_trim32  met_brn_trim64   sky5_blu
+    snow1             sq_trim1_2_s    star_water0
+
+THE TEXTURES ARE THE BETTER-EVIDENCED HALF. The note below enumerates the BSD-3
+side as "models, textures and sounds" -- textures by NAME. The maps reach BSD-3
+only as residue, which is spelled out further down. Same licence, two different
+strengths of chain, and worth knowing which is which.
+
+LibreQuake ships under two licences and says so in its own
+docs/README-IMPORTANT-LICENCE-INFO:
+
+    bsd3 is permissive and is what all the models textures and sounds are under
+    gpl2 is more restrictive and just applies to the quakec, progs.dat and
+    pop.lmp
+
+READ THAT QUOTATION AGAIN: the word "maps" is not in it, on either side. The
+maps are BSD-3 by RESIDUE, not by enumeration -- the licence granted over the
+project is the BSD-3 above (their docs/COPYING, reproduced here verbatim), and
+that sentence removes only the QuakeC, progs.dat and pop.lmp from it. Their
+docs/CREDITS lists Maps among the contributions the project received, so the
+maps are contributions to the project this licence is the licence of.
+
+That is a sound chain and it is worth writing out, because an earlier version of
+this file and of README.md paraphrased it as "BSD-3 for the maps, models,
+textures and sounds" -- putting a word into a list that does not contain it. A
+reader checking GitHub's licence badge for this repository is told NOASSERTION,
+so the paraphrase was the only thing standing between that reader and the wrong
+conclusion.
+
+BSD-3 is the only side this game could have taken from: it bakes its maps INTO
+the executable, so a copyleft map would be a copyleft binary. README.md rejected
+OpenArena and Xonotic on exactly that reasoning, and the same test is what chose
+this.
+
+Nothing GPL-2 from LibreQuake is used, distributed, or linked here. No QuakeC,
+no progs.dat, no pop.lmp.
+
+한국어: LibreQuake 프로젝트의 docs/COPYING을 그대로 옮겼습니다. 정돈된 라이선스는
+허락받은 그 라이선스가 아니기 때문이며, docs/LICENSE-Freedoom.txt와 같은 규칙입니다.
+이곳에서 이 라이선스가 덮는 것은 assets/maps/lqdm1.map("Solstice")입니다. 위에 인용한
+LibreQuake 자신의 문장을 다시 보십시오. "맵"이라는 낱말은 양쪽 어디에도 없습니다. 맵이
+BSD-3인 것은 *열거*가 아니라 *잔여*에 의해서입니다. 프로젝트에 부여된 라이선스가 위의
+BSD-3(그들의 docs/COPYING을 그대로 옮긴 것)이고, 그 문장은 거기에서 QuakeC와 progs.dat과
+pop.lmp만을 덜어 냅니다. 그리고 그들의 docs/CREDITS는 프로젝트가 받은 기여에 Maps를
+포함시킵니다. 이 파일과 README.md의 이전 판이 그것을 "맵·모델·텍스처·사운드는 BSD-3"으로
+바꿔 말했기에 적어 둡니다. 그 목록에 없는 낱말을 넣은 것이었습니다.
+
+이 게임은 맵을 실행 파일 *안에* 굽기 때문에 카피레프트 맵은 곧 카피레프트 바이너리이며, README.md가 OpenArena와 Xonotic을 거절한
+논거가 그것입니다. 같은 검사가 이것을 고른 것입니다.

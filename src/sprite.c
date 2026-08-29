@@ -31,6 +31,11 @@
 #include "enemy.h"        /* MON_* -- the atlas row order */
 #include "weapon.h"       /* WP_TYPES and wp_stats -- the viewmodel row order */
 #include "pickup.h"       /* PK_* -- the pickup atlas order */
+/* png_decode -- a drawing arrives as the file somebody drew, not as a
+   derivative of it. See png.h for what that bought and what it cost.
+   png_decode입니다. 그림은 그것의 파생물이 아니라 누군가 그린 파일 그대로 도착합니다.
+   그것이 무엇을 사고 무엇을 치렀는지는 png.h를 참조하십시오. */
+#include "png.h"
 #include "m.h"            /* m_hashf -- surface grain. It used to come from
                              tex.h, which made sprite and tex mutually dependent
                              over one helper. See the note on ::m_hash.
@@ -90,7 +95,7 @@ static const unsigned char PAL_IMP[C_COUNT][3] = {
     { 200,  60,  60 },   /* C_GLOW: red-hot maw */
 };
 
-static int imp_pixel(int fr, float nx, float ny, unsigned char *rgb) {
+static int spirit_pixel(int fr, float nx, float ny, unsigned char *rgb) {
     float leg = 0.0f, arm = 0.0f, lean = 0.0f, maw = 0.0f;
     switch (fr) {
     case SPR_WALK0:  leg =  0.10f; break;
@@ -467,6 +472,167 @@ static int wraith_pixel(int fr, float nx, float ny, unsigned char *rgb) {
     return shade(win, best, ny, glow, PAL_WRAITH, rgb);
 }
 
+/* ------------------------------------------------------------------- maw
+ *
+ * NOT A CREATURE SHAPE, and that is the point of it. Every other body here is
+ * a silhouette with a head on top and something under it; this one fills its
+ * cell corner to corner, because it is a piece of the wall that opened. The
+ * read a player needs from across a room is "that is not a monster, that is the
+ * room", and a silhouette with air around it cannot say that.
+ *
+ * IT HAS NO WALK. Frames 0 and 1 breathe instead -- the lips of the slit part
+ * and close by a few hundredths -- which is the only motion an anchored thing
+ * can have and is enough to keep it from reading as scenery.
+ *
+ * 생물의 형태가 아니며, 그것이 요점입니다. 이곳의 다른 모든 몸통은 위에 머리가 있고 그 아래에
+ * 무언가가 있는 실루엣이지만, 이것은 자기 칸을 모서리까지 채웁니다. 열린 벽의 일부이기
+ * 때문입니다. 플레이어가 방 건너에서 얻어야 할 읽힘은 "저것은 몬스터가 아니라 방이다"이고,
+ * 주위에 공기가 있는 실루엣은 그렇게 말할 수 없습니다.
+ *
+ * 걷기가 없습니다. 프레임 0과 1은 대신 호흡합니다. 갈라진 틈의 입술이 수백분의 일만큼
+ * 벌어졌다 닫히며, 그것이 고정된 것이 가질 수 있는 유일한 움직임이자 배경으로 읽히지 않게
+ * 하기에 충분한 양입니다. */
+
+static const unsigned char PAL_MAW[C_COUNT][3] = {
+    {  74,  30,  34 }, { 104,  46,  46 }, {  46,  18,  22 },
+    { 208, 190, 172 }, { 255, 170,  70 }, {  10,   4,   6 },
+    { 255, 120,  40 },   /* C_GLOW: furnace light */
+};
+
+static int maw_pixel(int fr, float nx, float ny, unsigned char *rgb) {
+    float gape = 0.0f, glowamt = 0.35f, clench = 0.0f;
+    switch (fr) {
+    case SPR_WALK0:  gape =  0.015f; break;              /* breathing, not walking */
+    case SPR_WALK1:  gape = -0.015f; break;
+    case SPR_ATTACK: gape =  0.11f; glowamt = 1.0f; break;
+    case SPR_HURT:   clench = 0.06f; glowamt = 0.7f; break;
+    case SPR_DEAD:   gape = -0.10f; glowamt = 0.0f; break;
+    default: break;
+    }
+
+    float best = -1e9f; int win = C_BODY;
+
+    /* The mass. Two overlapping slabs rather than one, so the edge is not a
+       clean ellipse -- a clean edge reads as an object sitting in front of the
+       wall, and this is meant to read as the wall itself having a hole in it.
+       덩어리입니다. 하나가 아니라 겹친 두 판이므로 가장자리가 깔끔한 타원이 아닙니다. 깔끔한
+       가장자리는 벽 앞에 놓인 물체로 읽히는데, 이것은 벽 자체에 구멍이 난 것으로 읽혀야
+       합니다. */
+    part(ell(nx, ny, 0.0f, 0.50f, 0.50f, 0.52f), C_BODY,  &best, &win);
+    part(ell(nx, ny, -0.16f, 0.62f, 0.34f, 0.36f), C_BELLY, &best, &win);
+    part(ell(nx, ny,  0.18f, 0.38f, 0.32f, 0.34f), C_BELLY, &best, &win);
+
+    if (best <= 0.0f) return 0;
+
+    /* The rim: a ring of flesh a little darker than the face, so the slit does
+       not float. */
+    if (ell(nx, ny, 0.0f, 0.50f, 0.40f, 0.42f) > 0.0f) win = C_LIMB;
+
+    /* THE SLIT, which is the whole silhouette's job. Two lips meeting on a
+       horizontal axis; `gape` moves them apart and `clench` pulls them past
+       each other so a hurt frame is unmistakably shut.
+       틈이며, 실루엣 전체의 임무가 그것입니다. 수평축에서 만나는 두 입술입니다. `gape`가 둘을
+       벌리고 `clench`는 서로를 지나치도록 당겨서, 피격 프레임이 명백하게 닫히게 합니다. */
+    float half = 0.13f + gape - clench;
+    if (half > 0.0f && ell(nx, ny, 0.0f, 0.50f, 0.30f, half) > 0.0f) win = C_MAW;
+
+    /* Teeth along both lips, as pairs rather than a comb: three each, so the
+       count reads at 64 pixels wide instead of turning into a grey band. */
+    for (int i = -1; i <= 1; i++) {
+        float tx = (float)i * 0.15f;
+        if (ell(nx, ny, tx, 0.50f + half - 0.03f, 0.045f, 0.055f) > 0.0f ||
+            ell(nx, ny, tx + 0.075f, 0.50f - half + 0.03f, 0.045f, 0.055f) > 0.0f)
+            win = C_HORN;
+    }
+
+    /* The furnace behind the teeth. Only when actually open, so a shut maw is
+       not a lamp.
+       이빨 뒤의 화로입니다. 실제로 열려 있을 때만이므로, 닫힌 아귀는 등불이 아닙니다. */
+    if (half > 0.08f && ell(nx, ny, 0.0f, 0.50f, 0.16f, half * 0.55f) > 0.0f)
+        win = C_EYE;
+
+    float glow = (win == C_EYE) ? glowamt : 0.0f;
+    return shade(win, best, ny, glow, PAL_MAW, rgb);
+}
+
+/* ------------------------------------------------------------------ ward
+ *
+ * ONE BODY FOR BOTH KINDS. What an author places is two markers and what the
+ * player fights is two summon tables; the ward itself is the same object in
+ * both cases, so drawing it twice would be two files to keep in step for a
+ * difference the player reads off what walks out of it.
+ *
+ * A HARD SHAPE, deliberately unlike every other row here. Wards are shot at
+ * from across the room while something else is arriving, and a soft organic
+ * blob at 64 pixels is indistinguishable from a monster at that distance. The
+ * facets say "object" and the core says "shoot this".
+ *
+ * *두 종류에 하나의 몸통입니다.* 제작자가 배치하는 것은 표식 둘이고 플레이어가 상대하는 것은
+ * 소환표 둘이지만, 결계핵 자체는 두 경우 모두 같은 물체입니다. 두 번 그리면, 정작 플레이어는
+ * 거기서 걸어 나오는 것으로 읽는 차이를 위해 보조를 맞출 파일이 둘이 됩니다.
+ *
+ * *단단한 형태이며, 이곳의 다른 모든 행과 의도적으로 다릅니다.* 결계핵은 다른 무언가가 도착하는
+ * 동안 방 건너에서 쏘게 되는데, 64픽셀에서 부드러운 유기적 덩어리는 그 거리의 몬스터와 구별되지
+ * 않습니다. 각진 면이 "물체"라고 말하고 핵이 "이걸 쏴라"라고 말합니다. */
+
+static const unsigned char PAL_WARD[C_COUNT][3] = {
+    {  92,  84,  52 }, { 132, 120,  70 }, {  56,  50,  30 },
+    { 214, 206, 168 }, { 255, 226, 120 }, {  22,  20,  12 },
+    { 255, 210,  90 },   /* C_GLOW: the core */
+};
+
+static int ward_pixel(int fr, float nx, float ny, unsigned char *rgb) {
+    float spin = 0.0f, glowamt = 0.6f, crack = 0.0f;
+    switch (fr) {
+    case SPR_WALK0:  spin =  0.02f; break;               /* it turns in place */
+    case SPR_WALK1:  spin = -0.02f; break;
+    case SPR_ATTACK: glowamt = 1.0f; break;              /* while it is paying out */
+    case SPR_HURT:   crack = 0.05f; glowamt = 0.9f; break;
+    default: break;
+    }
+
+    if (fr == SPR_DEAD) {
+        /* It does not leave a corpse -- it leaves shards on the floor, which is
+           how a destroyed OBJECT differs from a killed creature. Nothing here
+           is above the lower third of the cell.
+           시체를 남기지 않고 바닥에 파편을 남깁니다. 그것이 파괴된 *물체*가 죽은 생물과
+           다른 점입니다. 이곳의 무엇도 칸의 아래 3분의 1을 넘지 않습니다. */
+        float best = -1e9f; int win = C_LIMB;
+        part(ell(nx, ny, -0.14f, 0.05f, 0.11f, 0.04f), C_LIMB, &best, &win);
+        part(ell(nx, ny,  0.03f, 0.07f, 0.09f, 0.05f), C_BODY, &best, &win);
+        part(ell(nx, ny,  0.17f, 0.04f, 0.07f, 0.03f), C_LIMB, &best, &win);
+        if (best <= 0.0f) return 0;
+        return shade(win, best, ny / 0.12f, 0.0f, PAL_WARD, rgb);
+    }
+
+    float best = -1e9f; int win = C_BODY;
+
+    /* A stubby column with a wider band at its waist: two facets top and
+       bottom, so it has an up and a down without having a head.
+       허리에 더 넓은 띠가 있는 짧고 굵은 기둥입니다. 위아래에 각진 면이 둘 있어, 머리 없이도
+       위와 아래를 가집니다. */
+    part(ell(nx, ny + spin, 0.0f, 0.50f, 0.20f, 0.30f), C_BODY,  &best, &win);
+    part(ell(nx, ny + spin, 0.0f, 0.50f, 0.30f, 0.12f), C_BELLY, &best, &win);
+    part(ell(nx, ny, 0.0f, 0.14f, 0.16f, 0.10f), C_LIMB, &best, &win);
+
+    if (best <= 0.0f) return 0;
+
+    /* Two bands of casing, which is what gives it facets rather than curves. */
+    if (ell(nx, ny + spin, 0.0f, 0.68f, 0.15f, 0.10f) > 0.0f ||
+        ell(nx, ny + spin, 0.0f, 0.32f, 0.15f, 0.10f) > 0.0f) win = C_HORN;
+
+    /* The core, and it is the reason this is drawn at all: a bright point at
+       eye height that survives the dither pass and is visible past whatever the
+       ward has just summoned in front of it.
+       핵이며, 이것을 그리는 이유 자체입니다. 눈높이의 밝은 점 하나가 디더 패스를 견디고,
+       결계핵이 방금 자기 앞에 소환한 것 너머로도 보입니다. */
+    if (ell(nx, ny + spin, 0.0f, 0.50f, 0.10f - crack, 0.13f - crack) > 0.0f)
+        win = C_EYE;
+
+    float glow = (win == C_EYE) ? glowamt : 0.0f;
+    return shade(win, best, ny, glow, PAL_WARD, rgb);
+}
+
 /* -------------------------------------------------------------- dispatch */
 
 static int creature_pixel(int type, int fr, float nx, float ny, unsigned char *rgb) {
@@ -475,7 +641,9 @@ static int creature_pixel(int type, int fr, float nx, float ny, unsigned char *r
     case MON_HOUND:  return hound_pixel(fr, nx, ny, rgb);
     case MON_CASTER: return caster_pixel(fr, nx, ny, rgb);
     case MON_WRAITH: return wraith_pixel(fr, nx, ny, rgb);
-    default:         return imp_pixel(fr, nx, ny, rgb);
+    case MON_MAW:    return maw_pixel(fr, nx, ny, rgb);
+    case MON_WARD:   return ward_pixel(fr, nx, ny, rgb);
+    default:         return spirit_pixel(fr, nx, ny, rgb);
     }
 }
 
@@ -916,87 +1084,8 @@ static int mon_type_for_prefix(const char *s, int len) {
     return -1;
 }
 
-static int hexval(char c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-    return -1;
-}
 
-/**
- * @brief One character of the sprite alphabet back to its six bits.
- *
- * ENGLISH
- * -------
- * @param[in] c A character from the alphabet bake.ps1 encodes with.
- * @return 0..63, or -1 for anything else.
- *
- * @note Computed rather than looked up in a string, so there is no table here
- *       that could disagree with the one in bake.ps1. The ORDER is the
- *       contract between the two, and it is stated the same way in both: A-Z,
- *       a-z, 0-9, '+', '-'.
- * @note Those 64 characters are exactly the printable ones that need no
- *       escaping inside a C string literal -- no backslash, no double quote,
- *       and no '?', which can begin a trigraph.
- *
- * 한국어
- * ------
- * @brief 스프라이트 알파벳의 한 문자를 6비트 값으로 되돌립니다.
- * @param[in] c bake.ps1이 인코딩에 사용하는 알파벳의 문자.
- * @return 0..63. 그 외의 문자는 -1.
- *
- * @note 문자열에서 조회하지 않고 계산합니다. 그래야 bake.ps1의 표와 어긋날 수 있는 표가
- *       이곳에 존재하지 않습니다. *순서*가 둘 사이의 계약이며, 양쪽 모두 같은 방식으로
- *       기술합니다. A-Z, a-z, 0-9, '+', '-'입니다.
- * @note 이 64개 문자는 C 문자열 리터럴 안에서 이스케이프가 필요 없는 출력 가능 문자입니다.
- *       역슬래시도, 큰따옴표도, 삼중자를 시작할 수 있는 '?'도 없습니다.
- */
-static int b64val(char c) {
-    if (c >= 'A' && c <= 'Z') return c - 'A';
-    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
-    if (c >= '0' && c <= '9') return c - '0' + 52;
-    if (c == '+') return 62;
-    if (c == '-') return 63;
-    return -1;
-}
 
-/**
- * @brief Reads a `pal` opcode: the shared 16-entry colour table.
- *
- * ENGLISH
- * -------
- * @param[in]  p     Cursor just past the opcode word.
- * @param[out] pal   Table to fill; entry 0 stays transparent.
- * @param[out] n_pal How many entries were read, clamped to 16.
- * @return The advanced cursor, or null when the count could not be read --
- *         which stops the parse, the way the `break` in the old loop did.
- *
- * 한국어
- * ------
- * @brief `pal` opcode를 읽습니다. 공유되는 16색 색상표입니다.
- * @param[in]  p     opcode 단어 바로 뒤의 커서.
- * @param[out] pal   채울 표. 0번 항목은 투명으로 남습니다.
- * @param[out] n_pal 읽어 들인 항목 수. 16으로 제한됩니다.
- * @return 진행된 커서. 개수를 읽지 못하면 널이며, 기존 루프의 `break`와 같이 파싱을
- *         중단시킵니다.
- */
-static const char *parse_palette(const char *p, unsigned char pal[SPR_PAL_MAX][3], int *n_pal) {
-    int len;
-    int ok = 1;
-    p = txt_read_int(p, n_pal, &ok);
-    if (!ok) return 0;
-    if (*n_pal > SPR_PAL_MAX) *n_pal = SPR_PAL_MAX;
-    for (int i = 0; i < *n_pal; i++) {
-        const char *h = txt_token(p, &len);
-        if (!h || len < 6) { i = *n_pal; break; }
-        p = h + len;
-        for (int k = 0; k < 3; k++) {
-            int hi = hexval(h[k*2]), lo = hexval(h[k*2+1]);
-            pal[i][k] = (unsigned char)((hi < 0 ? 0 : hi) * 16 + (lo < 0 ? 0 : lo));
-        }
-    }
-    return p;
-}
 
 /**
  * @brief Blanks one atlas cell before a drawing is painted into it.
@@ -1041,147 +1130,70 @@ typedef struct {
     int total;            /**< Pixels the drawing holds. / 그림이 담은 픽셀 수. */
 } SprTarget;
 
+
 /**
- * @brief Decodes one drawing's pixel stream into the atlas.
+ * @brief Splits a drawing's name into its subject and the frame it names.
  *
  * ENGLISH
  * -------
- * @param[in] data   The encoded run, base64-ish.
- * @param[in] len    Its length in characters.
- * @param[in] is_rle Non-zero for `r` (run-length).
- * @param[in] is_wide Non-zero for `q` (one 8-bit index per two characters).
- *                    Neither set is `p`, three 4-bit indices per two.
- * @param[in] n_pal  How many entries @p pal actually holds.
- * @param[in] t      Where it lands; see ::SprTarget.
- * @param[in] pal    The table indices refer into, up to ::SPR_PAL_MAX entries.
+ * A NAME THAT ENDS IN A LETTER MEANS EVERY FRAME. `brute2` is one frame of the
+ * brute; `brute` is all of them.
  *
- * @note THE TWO ENCODINGS SHARE THE RUN LOOP. `r` emits a count and an index;
- *       `p` emits one pixel per turn and holds the other two of its packed
- *       triple in `pend`. That is why the packed branch sets `count = 1`
- *       rather than having a loop of its own.
+ * That is not a convenience, it is what a half-finished creature needs. A new
+ * monster arrives as ONE drawing -- somebody draws it standing before they
+ * draw it walking, attacking and dying -- and until this rule existed the only
+ * way to see it in the game was to copy the same file four times under four
+ * names. Four identical pictures in the tree, four copies in the binary, and
+ * four files to delete one at a time as the real frames arrive.
+ *
+ * The override falls out of the sort. bake.ps1 emits drawings in name order
+ * and `.` sorts before `0`, so `brute` is always decoded before `brute0` --
+ * which means a subject-wide drawing lays down every frame and each numbered
+ * one painted after it replaces exactly its own. Adding `brute4` later is
+ * dropping in a file; nothing else changes.
+ *
+ * @param[in]  nm       First character of the name.
+ * @param[in]  nm_len   How many characters it has.
+ * @param[out] body_len The subject: the name with any frame digit removed.
+ * @return The frame, or -1 for "every frame of this subject".
  *
  * 한국어
  * ------
- * @brief 그림 하나의 픽셀 스트림을 아틀라스로 디코드합니다.
- * @param[in] data   인코딩된 데이터. base64 계열입니다.
- * @param[in] len    문자 단위 길이.
- * @param[in] is_rle `r`(런렝스)이면 0이 아닙니다.
- * @param[in] is_wide `q`(두 문자당 8비트 인덱스 하나)이면 0이 아닙니다.
- *                    둘 다 아니면 `p`이며 두 문자당 4비트 인덱스 셋입니다.
- * @param[in] n_pal  @p pal이 실제로 담고 있는 항목 수.
- * @param[in] t      놓이는 위치. ::SprTarget을 참조하십시오.
- * @param[in] pal    인덱스가 참조하는 표. 최대 ::SPR_PAL_MAX개입니다.
+ * @brief 그림 이름을 주제와 그것이 가리키는 프레임으로 나눕니다.
  *
- * @note *두 인코딩이 실행 루프를 공유합니다*. `r`은 개수와 인덱스를 내보내고, `p`는 한
- *       차례에 한 픽셀을 내보내며 패킹된 삼중항의 나머지 둘을 `pend`에 보관합니다. 패킹
- *       분기가 자체 루프를 갖지 않고 `count = 1`을 두는 이유가 그것입니다.
+ * *글자로 끝나는 이름은 모든 프레임을 뜻합니다.* `brute2`는 브루트의 한 프레임이고
+ * `brute`는 전부입니다.
+ *
+ * 편의가 아니라 절반만 완성된 생물에게 필요한 것입니다. 새 몬스터는 그림 *하나*로
+ * 도착합니다. 누군가는 걷고 공격하고 죽는 모습을 그리기 전에 서 있는 모습을 먼저 그립니다.
+ * 이 규칙이 생기기 전에는 그것을 게임에서 볼 유일한 방법이 같은 파일을 네 이름으로 네 번
+ * 복사하는 것이었습니다. 트리에 똑같은 그림 넷, 바이너리에 사본 넷, 그리고 진짜 프레임이
+ * 도착할 때마다 하나씩 지워야 할 파일 넷입니다.
+ *
+ * 덮어쓰기는 정렬에서 저절로 나옵니다. bake.ps1이 이름 순으로 내보내고 `.`이 `0`보다 앞서므로
+ * `brute`는 언제나 `brute0`보다 먼저 디코딩됩니다. 즉 주제 전체 그림이 모든 프레임을 깔고,
+ * 그 뒤에 칠해지는 번호 붙은 그림이 정확히 자기 것만 대체합니다. 나중에 `brute4`를 더하는
+ * 일은 파일 하나를 떨어뜨리는 일이며, 그 밖에는 아무것도 바뀌지 않습니다.
+ *
+ * @param[in]  nm       이름의 첫 문자.
+ * @param[in]  nm_len   이름의 길이.
+ * @param[out] body_len 주제. 프레임 숫자를 뗀 이름입니다.
+ * @return 프레임 번호. "이 주제의 모든 프레임"이면 -1.
  */
-static void blit_pixels(const char *data, int len, int is_rle, int is_wide,
-                        int n_pal,
-                        const SprTarget *t,
-                        const unsigned char pal[SPR_PAL_MAX][3]) {
-    int px_i = 0;
-    int pend[2] = {0, 0}, n_pend = 0;
-
-    /* `n_pend > 0` in the condition, not just `i < len`.
-     *
-     * A packed pair carries THREE pixels and the loop emits one per turn,
-     * so when the last pair is read `i` reaches `len` with two pixels still
-     * held. Testing only `i < len` dropped them -- every packed sprite lost
-     * its final one or two pixels.
-     *
-     * That is a corner of an image, on art that is usually transparent at
-     * its edges, so it survived a screenshot easily. tools/sprtest.c found
-     * it on a three-pixel sprite where two thirds of the picture went
-     * missing and the failure was impossible to miss.
-     *
-     * 조건에 `i < len`뿐 아니라 `n_pend > 0`이 필요합니다.
-     *
-     * 패킹된 한 쌍은 픽셀 *세 개*를 담고 루프는 한 번에 하나씩 내보내므로, 마지막
-     * 쌍을 읽으면 두 픽셀이 남은 채로 `i`가 `len`에 도달합니다. `i < len`만
-     * 검사하면 그것들이 버려졌고, 모든 패킹 스프라이트가 마지막 한두 픽셀을
-     * 잃었습니다.
-     *
-     * 이미지의 모서리이고 대개 가장자리가 투명한 아트이므로 스크린샷으로는 쉽게
-     * 살아남았습니다. tools/sprtest.c가 그림의 3분의 2가 사라져 실패를 놓칠 수 없는
-     * 3픽셀 스프라이트에서 이를 찾아냈습니다. */
-    for (int i = 0; (i < len || n_pend > 0) && px_i < t->total; ) {
-        int count, index;
-
-        if (is_rle) {
-            /* r: one character of run, one of palette index. */
-            if (i + 1 >= len) break;
-            count = b64val(data[i]);
-            index = b64val(data[i+1]);
-            i += 2;
-            /* Against the palette that was read, not against 16. The run form
-               spends one character on an index and so can only ever name the
-               first 64, which is why bake.ps1 does not choose it for a drawing
-               with a wide palette -- but the bound belongs to the data rather
-               than to a number that used to be the only palette size there was.
-               16이 아니라 *읽어 들인 팔레트*에 대해 검사합니다. 실행 형식은 인덱스에 문자
-               하나를 쓰므로 앞의 64개만 지목할 수 있고, 그래서 bake.ps1은 팔레트가 넓은
-               그림에 이 형식을 고르지 않습니다. 다만 경계는, 한때 유일한 팔레트 크기였던
-               숫자가 아니라 데이터에 속합니다. */
-            if (count < 0 || index < 0 || index >= n_pal) break;
-        } else if (is_wide) {
-            /* q: one 8-bit index in two characters, six bits each and four of
-               the twelve unused. Not packed tighter because the waste is
-               redundancy and deflate eats redundancy -- measured, the whole
-               wall set costs 13KB more than the 4-bit form, and a denser
-               packing would be arithmetic nobody can read to save a fraction
-               of that.
-               q: 8비트 인덱스 하나를 두 문자에 담으며, 문자마다 6비트에 12비트 중 4비트는
-               쓰지 않습니다. 더 조밀하게 담지 않는 이유는 그 낭비가 곧 중복이고 deflate가
-               중복을 먹기 때문입니다. 실측하면 벽 전체가 4비트 형식보다 13KB 더 들며, 더
-               조밀한 패킹은 그 일부를 아끼려고 아무도 읽을 수 없는 산술을 쓰는 일입니다. */
-            if (i + 1 >= len) break;
-            int hi = b64val(data[i]), lo = b64val(data[i+1]);
-            i += 2;
-            if (hi < 0 || lo < 0) break;
-            index = (hi << 6) | lo;
-            if (index >= n_pal) break;
-            count = 1;
-        } else {
-            /* p: three 4-bit indices packed into two characters. Emitted
-               one pixel at a time so the run loop below is shared -- the
-               remaining two are held in `pend` until the next turns.
-               세 개의 4비트 인덱스가 두 문자에 담깁니다. 아래의 실행 루프를
-               공유하도록 한 번에 한 픽셀씩 내보내며, 나머지 둘은 다음 차례까지
-               `pend`에 보관합니다. */
-            if (n_pend > 0) {
-                index = pend[0];
-                pend[0] = pend[1];
-                n_pend--;
-            } else {
-                if (i + 1 >= len) break;
-                int hi = b64val(data[i]), lo = b64val(data[i+1]);
-                i += 2;
-                if (hi < 0 || lo < 0) break;
-                int v = (hi << 6) | lo;             /* 12 bits */
-                index   = (v >> 8) & 0xf;
-                pend[0] = (v >> 4) & 0xf;
-                pend[1] =  v       & 0xf;
-                n_pend  = 2;
-            }
-            count = 1;
-        }
-
-        for (int r = 0; r < count && px_i < t->total; r++, px_i++) {
-            if (index == 0) continue;          /* transparent: leave what is under it */
-
-            int sx = px_i % t->sw, sy = px_i / t->sw;
-            int ax = t->x + sx;
-            int ay = t->y + sy;
-            if (ax < 0 || ax >= t->W || ay < 0 || ay >= t->H) continue;
-
-            unsigned char *q = &t->buf[(ay * t->W + ax) * 4];
-            q[0] = pal[index][0];
-            q[1] = pal[index][1];
-            q[2] = pal[index][2];
-            q[3] = 255;
-        }
+static int name_frame(const char *nm, int nm_len, int *body_len) {
+    char last = (nm_len > 0) ? nm[nm_len - 1] : 0;
+    if (last >= '0' && last <= '9') {
+        *body_len = nm_len - 1;
+        return last - '0';
     }
+    *body_len = nm_len;
+    return -1;
+}
+
+/** @brief How many frames a destination's atlas holds per subject. / 대상의 아틀라스가 주제마다 담는 프레임 수. */
+static int frames_in(int dest) {
+    return (dest == SPR_DEST_WEAPON) ? WPN_FRAMES
+         : (dest == SPR_DEST_MONSTER) ? SPR_FRAMES : 1;
 }
 
 /**
@@ -1236,7 +1248,8 @@ static int sprite_slot_for(int dest, const char *nm, int nm_len,
            접두사는 장식이 아닙니다. 그것이 없으면 `shotgun0`이라는 그림이 샷건의
            *뷰 모델*이자 바닥에 놓인 샷건이 되고, 둘 중 하나가 조용히 다른 하나가
            됩니다. 접두사가 있으면 그 충돌을 쓸 수조차 없습니다. */
-        const char *k = nm; int klen = nm_len - 1;
+        int klen; (void)name_frame(nm, nm_len, &klen);
+        const char *k = nm;
         if (klen > 4 && k[0]=='i' && k[1]=='t' && k[2]=='e' && k[3]=='m') {
             type = pickup_kind_for_n(k + 4, klen - 4);
         } else {
@@ -1263,12 +1276,24 @@ static int sprite_slot_for(int dest, const char *nm, int nm_len,
            만든다면 셋만 쓰는 레벨을 위해 게임의 모든 텍스처를 싣게 됩니다. */
         type  = (want && txt_is(nm, nm_len, want)) ? 0 : -1;
         *frame = 0;
-    } else if (dest == SPR_DEST_WEAPON) {
-        type = weapon_type_for_prefix(nm, nm_len - 1);
-        if (*frame < 0 || *frame >= WPN_FRAMES) *frame = 0;
     } else {
-        type = mon_type_for_prefix(nm, nm_len - 1);
-        if (*frame < 0 || *frame >= SPR_FRAMES) *frame = 0;
+        /* The split decides both halves: which subject the name belongs to and
+           which of its frames it fills. A name that ends in a letter leaves
+           `*frame` at -1, which ::decode_sprites reads as "all of them".
+           분리가 양쪽 절반을 모두 정합니다. 이름이 어느 주제에 속하는지와 그 주제의 어느
+           프레임을 채우는지입니다. 글자로 끝나는 이름은 `*frame`을 -1로 남기며,
+           ::decode_sprites가 그것을 "전부"로 읽습니다. */
+        int blen;
+        int f = name_frame(nm, nm_len, &blen);
+        type  = (dest == SPR_DEST_WEAPON) ? weapon_type_for_prefix(nm, blen)
+                                          : mon_type_for_prefix(nm, blen);
+        /* A digit past the end of the atlas is frame 0 rather than a refusal:
+           `imp7` is a naming mistake and showing the creature is a better
+           answer than showing nothing while saying nothing.
+           아틀라스 끝을 넘는 숫자는 거부가 아니라 프레임 0입니다. `imp7`은 이름 실수이며,
+           아무 말 없이 아무것도 보여 주지 않는 것보다 생물을 보여 주는 편이 낫습니다. */
+        if (f >= frames_in(dest)) f = 0;
+        *frame = f;
     }
     return type;
 }
@@ -1366,6 +1391,79 @@ int sprite_wall(const char *name, unsigned char *rgba) {
  * 다시 빌드해서 화면을 보는 것뿐입니다. 이 코덱이 형식이 바뀌는 동안에도 테스트가 전혀
  * 없었던 경위가 그것입니다.
  */
+/**
+ * @brief The drawing the record names, decoded and standing in the atlas.
+ *
+ * ENGLISH
+ * -------
+ * Big enough for any PNG ::png_decode will accept, which is what makes the
+ * two agree without a shared constant to keep in step. .bss, so it is zeroed
+ * at load and costs the floppy nothing.
+ *
+ * 한국어
+ * ------
+ * ::png_decode가 받아들이는 어떤 PNG도 담을 만큼 큽니다. 그것이 보조를 맞춰야 할 공용
+ * 상수 없이도 둘이 일치하게 만듭니다. .bss이므로 로드 시 0으로 채워지고 플로피 용량이
+ * 들지 않습니다.
+ */
+static unsigned char g_png[PNG_MAX_SIDE * PNG_MAX_SIDE * 4];
+
+/**
+ * @brief Paints a decoded drawing into its atlas cell, finding the muzzle.
+ *
+ * ENGLISH
+ * -------
+ * THE MUZZLE IS FOUND HERE RATHER THAN RECORDED BY THE BAKE, and that is the
+ * half of this change that is not about bytes. bake.ps1 used to scan for the
+ * magenta pixel and write its position into the stream, which meant a drawing
+ * read straight off disk -- which is what a hot reload now does -- would have
+ * carried no marker at all. Reading it out of the pixels means the drawing is
+ * the only thing that has to be right.
+ *
+ * The pixel itself is never drawn. It is a marker, and one magenta dot at the
+ * end of a barrel would be the brightest thing on the weapon.
+ *
+ * 한국어
+ * ------
+ * @brief 디코딩된 그림을 자기 아틀라스 셀에 칠하고, 총구를 찾습니다.
+ *
+ * *총구를 베이크가 기록하지 않고 이곳에서 찾으며*, 그것이 이 변경에서 바이트와 무관한
+ * 절반입니다. 예전에는 bake.ps1이 마젠타 픽셀을 훑어 그 위치를 스트림에 적었는데, 그러면
+ * 디스크에서 바로 읽은 그림(핫 리로드가 지금 하는 일입니다)은 표식을 전혀 지니지 못했을
+ * 것입니다. 픽셀에서 읽어 내면 옳아야 하는 것은 그림 하나뿐입니다.
+ *
+ * 그 픽셀 자체는 결코 그려지지 않습니다. 표식이며, 총열 끝의 마젠타 점 하나는 그 무기에서
+ * 가장 밝은 것이 될 것입니다.
+ */
+static void blit_rgba(const unsigned char *px, int sw, int sh,
+                      const SprTarget *t, int *muz_x, int *muz_y) {
+    for (int y = 0; y < sh; y++) {
+        for (int x = 0; x < sw; x++) {
+            const unsigned char *q = px + (y * sw + x) * 4;
+            int r = q[0], g = q[1], b = q[2], a = q[3];
+
+            /* The same threshold bake.ps1 used when it owned this, kept to the
+               number: a marker recognised differently by the two would be a
+               muzzle that moves when the art is reloaded.
+               bake.ps1이 이것을 소유했을 때 쓰던 것과 같은 임계값이며 숫자까지 그대로입니다.
+               둘이 다르게 알아보는 표식은 아트를 다시 읽을 때 움직이는 총구입니다. */
+            if (a >= 128 && r > 240 && g < 16 && b > 240) {
+                if (muz_x) *muz_x = x;
+                if (muz_y) *muz_y = y;
+                continue;                       /* recorded, never painted */
+            }
+            if (a < 128) continue;              /* transparent: leave the cell */
+
+            int dx = t->x + x, dy = t->y + y;
+            if (dx < 0 || dy < 0 || dx >= t->W || dy >= t->H) continue;
+
+            unsigned char *o = t->buf + (dy * t->W + dx) * 4;
+            o[0] = (unsigned char)r; o[1] = (unsigned char)g;
+            o[2] = (unsigned char)b; o[3] = 255;
+        }
+    }
+}
+
 static int decode_sprites(const char *p, unsigned char *buf, int W, int H,
                           int dest, const char *want) {
     int placed = 0;
@@ -1385,9 +1483,6 @@ static int decode_sprites(const char *p, unsigned char *buf, int W, int H,
                      : (dest == SPR_DEST_PICKUP) ? PK_CH
                      : (dest == SPR_DEST_WALL)   ? SPR_WALL : SPR_CH;
 
-    unsigned char pal[SPR_PAL_MAX][3] = {{0,0,0}};
-    int n_pal = 0;
-
     /* "No marker" is -1, and this is the one place that can say so for every
        frame without a second copy of how many frames there are.
        "표식 없음"은 -1이며, 프레임이 몇 개인지에 대한 두 번째 사본 없이 모든 프레임에
@@ -1404,109 +1499,72 @@ static int decode_sprites(const char *p, unsigned char *buf, int W, int H,
         if (!t) break;
         p = t + len;
 
-        /* The shared palette, once, before any sprite. */
-        if (txt_is(t, len, "pal")) {
-            p = parse_palette(p, pal, &n_pal);
-            if (!p) break;
-            continue;
-        }
-
         if (!txt_is(t, len, "s")) continue;
 
-        /* s <name> <w> <h> */
+        /* `s <name> <bytes>`, then that many bytes of PNG.
+           THE LENGTH IS WHAT SEPARATES RECORDS, not a delimiter -- a PNG can
+           contain any byte, including whatever a delimiter would have been,
+           and the .map blob is length-delimited for exactly this reason. It is
+           also why the tokeniser is only ever asked about the header: it never
+           sees a picture, so a NUL inside one cannot end the walk.
+           `s <이름> <바이트 수>` 다음에 그만큼의 PNG 바이트가 옵니다.
+           *레코드를 가르는 것은 길이이지 구분자가 아닙니다.* PNG는 구분자가 되었을 무엇을
+           포함해 어떤 바이트든 담을 수 있으며, .map 블롭이 길이로 구분되는 이유가 정확히
+           그것입니다. 토크나이저에게 헤더만 묻는 이유이기도 합니다. 그것은 그림을 결코 보지
+           않으므로, 그림 안의 NUL이 순회를 끝낼 수 없습니다. */
         const char *nm = txt_token(p, &len);
         if (!nm) break;
         int nm_len = len;
         p = nm + len;
 
-        int sw = 0, sh = 0, ok = 1;
-        p = txt_read_int(p, &sw, &ok);
-        p = txt_read_int(p, &sh, &ok);
-        if (!ok || sw <= 0 || sh <= 0) continue;
+        int bytes = 0, ok = 1;
+        p = txt_read_int(p, &bytes, &ok);
+        if (!ok || bytes <= 0) break;
 
-        /* The name is "<monster><frame>": the trailing digit is the frame and
+        /* Exactly one space separates the header from the picture, but the
+           skip is written as "whitespace" rather than "one byte": a PNG begins
+           0x89, which is not whitespace, so this cannot walk into one.
+           헤더와 그림 사이에는 정확히 공백 하나가 있지만, 건너뛰기를 "1바이트"가 아니라
+           "공백"으로 씁니다. PNG는 0x89로 시작하고 그것은 공백이 아니므로, 이것이 그림
+           안으로 걸어 들어갈 수 없습니다. */
+        while (*p == ' ' || *p == '\n' || *p == '\r' || *p == '\t') p++;
+        const unsigned char *png = (const unsigned char *)p;
+        p += bytes;
+
+        /* The name is "<subject><frame>": the trailing digit is the frame and
            what precedes it selects the row. Parsed here rather than looked up
            in a table so a new drawing needs no code change.
-           이름은 "<몬스터><프레임>" 형식입니다. 끝의 숫자가 프레임이고 그 앞부분이
-           행을 결정합니다. 새 그림에 코드 수정이 필요 없도록 테이블 조회 대신 이곳에서
-           해석합니다. */
-        int frame = nm[nm_len - 1] - '0';
+           이름은 "<주제><프레임>" 형식입니다. 끝의 숫자가 프레임이고 그 앞부분이 행을
+           결정합니다. 새 그림에 코드 수정이 필요 없도록 테이블 조회 대신 해석합니다. */
+        int frame = -1;
+        int type  = sprite_slot_for(dest, nm, nm_len, want, &frame);
 
-        /* The prefix picks the row, and which rows exist depends on what is
-           being filled. A sprite addressed to the other atlas is skipped
-           here but its data is still consumed below, so one stream feeds
-           both passes without either having to know the other's names.
-           접두사가 행을 결정하며, 어떤 행이 존재하는지는 무엇을 채우는지에 따라
-           달라집니다. 다른 아틀라스로 향하는 스프라이트는 이곳에서 건너뛰되 아래에서
-           데이터는 소비되므로, 하나의 스트림이 서로의 이름을 알 필요 없이 두 패스를
-           모두 먹입니다. */
-        int type = sprite_slot_for(dest, nm, nm_len, want, &frame);
-
-        /* An optional muzzle marker, then the data line.
-           Only weapons carry one -- bake.ps1 emits it for a magenta pixel --
-           but it is parsed for every sprite so the stream stays in sync. A
-           monster that grew one would simply be recording a point nothing
-           reads yet.
-           선택적인 총구 표식이 먼저 오고 그다음 데이터 줄입니다. 마젠타 픽셀에 대해
-           bake.ps1이 기록하므로 무기만 이를 가지지만, 스트림 동기화를 위해 모든
-           스프라이트에 대해 파싱합니다. */
-        int muz_x = -1, muz_y = -1;
-        /* Where in the cell the drawing goes. -1 means "not said", and the
-           default below -- centred, sitting on the cell floor -- applies. It
-           is optional because bake.ps1 only writes it for a drawing it cropped
-           to its ink, and cropping is a size optimisation that should not be
-           able to move the picture.
-           그림이 셀의 어디에 놓이는지입니다. -1은 "말하지 않음"이며 아래의 기본값(가로
-           가운데, 셀 바닥)이 적용됩니다. bake.ps1이 잉크에 맞춰 잘라 낸 그림에 대해서만
-           기록하므로 선택적이며, 자르기는 크기 최적화일 뿐 그림을 옮길 수 있어서는
-           안 됩니다. */
-        int org_x = -1, org_y = -1;
-        const char *op = txt_token(p, &len);
-        if (!op) break;
-        if (txt_is(op, len, "o")) {
-            int ok2 = 1;
-            p = op + len;
-            p = txt_read_int(p, &org_x, &ok2);
-            p = txt_read_int(p, &org_y, &ok2);
-            if (!ok2) break;
-            op = txt_token(p, &len);
-            if (!op) break;
-        }
-        if (txt_is(op, len, "m")) {
-            int ok2 = 1;
-            p = op + len;
-            p = txt_read_int(p, &muz_x, &ok2);
-            p = txt_read_int(p, &muz_y, &ok2);
-            if (!ok2) break;
-            op = txt_token(p, &len);
-            if (!op) break;
-        }
-        int is_rle  = txt_is(op, len, "r");
-        int is_wide = txt_is(op, len, "q");
-        p = op + len;
-
-        const char *data = txt_token(p, &len);
-        if (!data) break;
-        p = data + len;
-
-        /* Decode straight into the atlas cell. Out-of-range types still
-           consume their data so the stream stays in sync -- the same reason
-           mesh.c keeps parsing faces of meshes it is not building.
-           아틀라스 셀에 바로 디코딩합니다. 범위를 벗어난 종류도 데이터를 소비하여
-           스트림 동기화를 유지하는데, 이는 mesh.c가 생성하지 않는 메시의 면도 계속
-           파싱하는 것과 같은 이유입니다. */
+        /* A drawing addressed to the other atlas is skipped without being
+           decoded. It used to be decoded anyway, because the stream could only
+           be advanced by consuming it; a length can be stepped over, so the
+           weapon pass no longer pays to unpack every monster.
+           다른 아틀라스로 향하는 그림은 디코딩하지 않고 건너뜁니다. 예전에는 스트림을
+           소비해야만 진행할 수 있었으므로 어차피 디코딩했습니다. 길이는 건너뛸 수 있으므로,
+           이제 무기 패스가 모든 몬스터를 푸는 비용을 치르지 않습니다. */
         if (type < 0) continue;
 
-        int ox = (dest == SPR_DEST_WALL)   ? 0
-               : (dest == SPR_DEST_PICKUP) ? type * cell_w : frame * cell_w;
-        int oy = (dest == SPR_DEST_WALL)   ? 0
-               : (dest == SPR_DEST_PICKUP) ? 0             : type  * cell_h;
+        int sw = 0, sh = 0;
+        if (!png_decode(png, bytes, g_png, (int)sizeof g_png, &sw, &sh))
+            continue;                    /* png.c has already raised DIAG_PNG */
+
+        /* -1 is "every frame", which is what a creature that has been drawn
+           once but not yet animated says. See ::name_frame.
+           -1은 "모든 프레임"이며, 한 번 그려졌지만 아직 애니메이션되지 않은 생물이 하는
+           말입니다. ::name_frame을 참조하십시오. */
+        int f0 = (frame < 0) ? 0 : frame;
+        int f1 = (frame < 0) ? frames_in(dest) : frame + 1;
         placed++;
 
-        /* `px_i` moved into blit_pixels, which is the only thing that ever
-           advanced it.
-           `px_i`는 그것을 진행시키던 유일한 곳인 blit_pixels 안으로 옮겼습니다. */
-        int total = sw * sh;
+        for (int f = f0; f < f1; f++) {
+        int ox = (dest == SPR_DEST_WALL)   ? 0
+               : (dest == SPR_DEST_PICKUP) ? type * cell_w : f * cell_w;
+        int oy = (dest == SPR_DEST_WALL)   ? 0
+               : (dest == SPR_DEST_PICKUP) ? 0             : type  * cell_h;
 
         /* A DRAWN FRAME OWNS ITS CELL: clear the generated creature out of it
            before painting. The two are not layers of one picture, and leaving
@@ -1518,53 +1576,86 @@ static int decode_sprites(const char *p, unsigned char *buf, int W, int H,
            it is named for: a bestiary that is only half drawn still shows
            creatures, because a frame with no art never reaches this line and
            keeps its generated one.
-           그려진 프레임이 자기 셀을 소유합니다. 칠하기 전에 생성된 생물을 지웁니다.
-           둘은 한 그림의 레이어가 아니며, SDF 버전을 아래에 남겨 두면 그림이 더 좁은
-           모든 곳에서 그것이 후광처럼 비쳐 나옵니다. 첫 Freedoom 이식이 정확히 그렇게
-           보였습니다. hound 뒤에 선 초록 형체와 caster 위로 튀어나온 뿔이 그것입니다.
-           아틀라스 단위가 아니라 *셀* 단위로 지우므로, 이름이 가리키는 성질은 유지됩니다.
-           절반만 그려진 도감도 여전히 생물을 보여 줍니다. 아트가 없는 프레임은 이 줄에
-           닿지 않아 생성된 것을 그대로 갖기 때문입니다. */
+           그려진 프레임이 자기 셀을 소유합니다. 칠하기 전에 생성된 생물을 지웁니다. 둘은 한
+           그림의 레이어가 아니며, SDF 버전을 아래에 남겨 두면 그림이 더 좁은 모든 곳에서
+           그것이 후광처럼 비쳐 나옵니다. 첫 Freedoom 이식이 정확히 그렇게 보였습니다.
+           아틀라스가 아니라 *셀* 단위로 지우므로 이름이 가리키는 성질이 유지됩니다. 아트가
+           없는 프레임은 이 줄에 닿지 않아 생성된 것을 그대로 갖습니다. */
         clear_cell(buf, W, H, ox, oy, cell_w, cell_h);
 
-        /* WHERE THE DRAWING SITS IN ITS CELL, decided once. An explicit `o`
-           wins; otherwise centre it and sit it on the cell's floor, so a 32x32
-           sprite in a 64x96 cell stands on the ground rather than floating at
-           the top. A viewmodel wants the same rule for the same reason: it
-           rises from the bottom edge of the screen.
-           The muzzle and the pixels both read these, because they have to
-           agree: a flash computed from a different placement than the barrel
-           it belongs to is the exact failure the marker exists to prevent.
-           그림이 셀 안 어디에 앉는지를 한 번만 정합니다. 명시적인 `o`가 우선하고,
-           없으면 가로로 가운데 맞춰 셀 바닥에 놓습니다. 총구와 픽셀이 둘 다 이 값을
-           읽는 이유는 둘이 일치해야 하기 때문입니다. 총열과 다른 배치로 계산된 화염은
-           바로 이 표식이 막으려는 실패입니다. */
-        int place_x = (org_x >= 0) ? org_x : (cell_w - sw) / 2;
-        int place_y = (org_y >= 0) ? org_y : (cell_h - sh);
+        /* WHERE THE DRAWING SITS IN ITS CELL. Every drawing this project ships
+           is exactly its cell, so both of these are zero -- the formula is kept
+           because a drawing does not have to be: a 32x32 sprite in a 64x96 cell
+           should stand on the ground rather than float at the top, and that is
+           a rule about cells rather than about the current art.
+           The bake used to crop each drawing to its ink and record where the
+           crop came from, which is what these two numbers read. Cropping was a
+           size optimisation for an encoding that no longer exists.
+           그림이 셀 안 어디에 앉는지입니다. 이 프로젝트가 배포하는 모든 그림은 정확히 자기
+           셀이므로 둘 다 0입니다. 수식을 남겨 두는 이유는 그림이 반드시 그럴 필요는 없기
+           때문입니다. 64x96 셀 안의 32x32 스프라이트는 위에 떠 있지 않고 바닥에 서야 하며,
+           그것은 현재 아트가 아니라 셀에 대한 규칙입니다.
+           예전에는 베이크가 그림을 잉크에 맞춰 자르고 그 위치를 기록했으며, 이 두 숫자가 그것을
+           읽었습니다. 자르기는 이제 존재하지 않는 인코딩을 위한 크기 최적화였습니다. */
+        int place_x = (cell_w - sw) / 2;
+        int place_y = (cell_h - sh);
+        if (place_x < 0) place_x = 0;
+        if (place_y < 0) place_y = 0;
 
-        if (dest == SPR_DEST_WEAPON && muz_x >= 0 && frame < WPN_FRAMES) {
-            g_weapon_muz[type][frame][0] = place_x + muz_x;
-            g_weapon_muz[type][frame][1] = place_y + muz_y;
+        /* A WALL SMALLER THAN ITS CELL TILES INTO IT. Every other destination
+           holds a drawing of a thing -- a creature, a gun, a pickup -- and a
+           drawing narrower than its cell should sit in the cell, which is what
+           the two numbers above compute. A WALL IS NOT A DRAWING OF A THING.
+           It is a patch of surface whose whole job is to repeat, so a 64x64
+           wall in a 128x128 cell wants four copies and not one copy with a
+           border.
+           IT USED TO GET THE BORDER, and tools/texprobe.c measured it: a
+           material built from `wall_meat`, the one 64x64 surface this project
+           ships, came out 75.0% pure black -- exactly (128^2 - 64^2)/128^2, the
+           cleared remainder of its cell. textures.txt says of the tile count
+           that it is "the buffer's 256 divided by the source's side", which is
+           the right sampling rule and was never a fix for undersized art:
+           ::fill_from_image samples the whole cell, so what it repeated four
+           times was the drawing AND the black around it.
+           Nothing pointed at it because no shipped map used `wall_meat`. An
+           imported map that names a 64x64 surface would have, on every face.
+           벽이 자기 셀보다 작으면 셀 안으로 *타일링*됩니다. 다른 모든 대상은 어떤 것의
+           그림을 담습니다. 생물, 총, 획득물이며, 셀보다 좁은 그림은 셀 안에 앉아야 하고
+           위의 두 숫자가 그것을 계산합니다. *벽은 어떤 것의 그림이 아닙니다.* 반복하는 것이
+           일의 전부인 표면 조각이므로, 128x128 셀 안의 64x64 벽이 원하는 것은 사본 넷이지
+           테두리 두른 사본 하나가 아닙니다.
+           *예전에는 테두리를 얻었고* tools/texprobe.c가 그것을 쟀습니다. 이 프로젝트가
+           출하하는 유일한 64x64 표면인 `wall_meat`로 만든 재질은 75.0%가 순수한 검정으로
+           나왔습니다. (128^2 - 64^2)/128^2, 곧 지워진 셀의 나머지와 정확히 같습니다.
+           아무것도 이것을 지목하지 않은 이유는 출하되는 어떤 맵도 `wall_meat`를 쓰지 않았기
+           때문입니다. 64x64 표면을 지목하는 가져온 맵이라면 모든 면에서 그랬을 것입니다. */
+        if (dest == SPR_DEST_WALL && sw > 0 && sh > 0 &&
+            (sw < cell_w || sh < cell_h)) {
+            for (int ty = 0; ty < cell_h; ty += sh)
+                for (int tx = 0; tx < cell_w; tx += sw) {
+                    int mx = -1, my = -1;
+                    SprTarget t = { buf, W, H, ox + tx, oy + ty, sw, sw * sh };
+                    blit_rgba(g_png, sw, sh, &t, &mx, &my);
+                }
+            continue;
         }
 
-        /* Both opcodes spend whole characters rather than hex digits, so a
-           byte of .rdata carries six bits of picture instead of four. See the
-           encoder in bake.ps1 for the measurements that motivated it.
-           두 opcode 모두 16진수 자리가 아니라 문자 전체를 사용하므로, .rdata 1바이트가
-           4비트가 아니라 6비트의 그림을 담습니다. */
-        /* The two indices a packed triple has produced but not yet emitted.
-           Declared per SPRITE, not inside the loop: as a static it would carry
-           a half-finished triple from one drawing into the next, so a sprite
-           whose pixel count is not a multiple of three would shift every
-           sprite after it by a pixel. That is the kind of fault that looks
-           like bad art rather than like a decoder bug.
-           패킹된 3픽셀 묶음이 만들어 냈지만 아직 내보내지 않은 두 인덱스입니다. 루프
-           안이 아니라 *스프라이트마다* 선언합니다. static이었다면 완성되지 않은 묶음이
-           한 그림에서 다음 그림으로 넘어가, 픽셀 수가 3의 배수가 아닌 스프라이트 뒤의
-           모든 스프라이트가 한 픽셀씩 밀렸을 것입니다. 디코더 버그가 아니라 아트가
-           잘못된 것처럼 보이는 종류의 결함입니다. */
-        SprTarget tgt = { buf, W, H, ox + place_x, oy + place_y, sw, total };
-        blit_pixels(data, len, is_rle, is_wide, n_pal, &tgt, pal);
+        int muz_x = -1, muz_y = -1;
+        SprTarget tgt = { buf, W, H, ox + place_x, oy + place_y, sw, sw * sh };
+        blit_rgba(g_png, sw, sh, &tgt, &muz_x, &muz_y);
+
+        /* The muzzle and the pixels agree by construction now: both come out
+           of the same decode, placed by the same two numbers. A flash computed
+           from a different placement than the barrel it belongs to is the exact
+           failure the marker exists to prevent.
+           이제 총구와 픽셀은 구조적으로 일치합니다. 둘 다 같은 디코딩에서 나와 같은 두
+           숫자로 배치됩니다. 총열과 다른 배치로 계산된 화염은 바로 이 표식이 막으려는
+           실패입니다. */
+        if (dest == SPR_DEST_WEAPON && muz_x >= 0 && f < WPN_FRAMES) {
+            g_weapon_muz[type][f][0] = place_x + muz_x;
+            g_weapon_muz[type][f][1] = place_y + muz_y;
+        }
+        }
     }
     return placed;
 }
@@ -1908,7 +1999,7 @@ int weapon_muzzle(int type, int frame, float *u, float *v) {
    neither.
    테스트 훅입니다. 호출자가 작성한 스프라이트 텍스트를 호출자 소유 버퍼로 디코딩합니다.
    sprite_dump_ppm과 같이 가드되므로 배포 바이너리에는 둘 다 들어가지 않습니다. */
-void sprite_decode_text(const char *text, unsigned char *rgba, int W, int H,
+void sprite_decode_blob(const char *text, unsigned char *rgba, int W, int H,
                         int weapon) {
     decode_sprites(text, rgba, W, H, weapon ? SPR_DEST_WEAPON : SPR_DEST_MONSTER, 0);
 }
@@ -1919,7 +2010,6 @@ void sprite_decode_text(const char *text, unsigned char *rgba, int W, int H,
    알파벳을 문자 단위로 노출하여 tools/sprtest.c가 bake.ps1이 인코딩에 쓰는 문자열과
    대조할 수 있게 합니다. 그 계약은 PowerShell 스크립트와 C 파일 사이에 있으며 어떤
    컴파일러도 볼 수 없습니다. */
-int sprite_b64val(char c) { return b64val(c); }
 
 int sprite_weapon_muzzle_px(int type, int frame, int *x, int *y) {
     if (frame < 0 || frame >= WPN_FRAMES) return 0;

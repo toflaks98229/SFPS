@@ -213,6 +213,26 @@ if ($Debug) {
     # HOT_RELOAD reads assets\*.txt at runtime and watches them, so editing a
     # silhouette or a material updates the running game. Both are compiled out
     # entirely in release, so they cost nothing in the shipped exe.
+    #
+    # WORLD_START_LEVEL USED TO BE HERE and is not any more. It sent the dev
+    # build straight into the boss arena because there was no other way in --
+    # the menu that lets a player choose story or endless was unwritten, and a
+    # fight nothing can reach is a fight nobody can playtest. MENU_TITLE landed,
+    # so the mode is chosen there and world_begin loads the arena, which is
+    # where "which room is which mode" belongs.
+    #
+    # The note stays because a scaffold that is removed silently is a scaffold
+    # somebody puts back: the next person to want the arena on boot should know
+    # that the way in is the title screen and not a -D.
+    #
+    # WORLD_START_LEVEL이 이곳에 있었고 이제는 없습니다. 다른 입구가 없었기에 개발 빌드를 곧장
+    # 보스 아레나로 보냈습니다. 플레이어가 스토리와 무한을 고르는 메뉴가 쓰이지 않았고, 아무것도
+    # 도달할 수 없는 전투는 아무도 플레이테스트할 수 없는 전투였습니다. MENU_TITLE이 들어왔으므로
+    # 모드는 그곳에서 정해지고 아레나는 world_begin이 로드합니다. "어느 방이 어느 모드인가"가
+    # 있어야 할 곳이 그곳입니다.
+    #
+    # 이 note가 남는 이유는, 조용히 제거된 발판은 누군가 다시 세우는 발판이기 때문입니다. 다음에
+    # 부팅 시 아레나를 원하는 사람은 입구가 -D가 아니라 타이틀 화면임을 알아야 합니다.
     $flags = @('-std=c11','-O0','-g','-Wall','-Wextra','-mconsole',
                '-DDEBUG_HUD','-DHOT_RELOAD') + $ubsan
 } else {
@@ -418,9 +438,44 @@ $toolVariants = @{
         @{ Defines = @('-DAUDIO_MIXER_STALL_MS=2000'); Suffix = '_stuckmixer' }
     )
 
-    'tracetest' = @(
-        @{ Defines = @(); Suffix = '_baked'; NoHotReload = $true }
-    )
+    # TRACETEST_BAKED WAS HERE AND IS RETIRED. It built tracetest without
+    # HOT_RELOAD so the same assertions ran against the baked blob instead of
+    # the files on disk -- "a read-only test of the shipped path", which is
+    # what Invoke-ToolBuild's own comment calls the one exception to the
+    # tools-are-authoring-builds rule.
+    #
+    # ITS SUBJECT STOPPED BEING SHIPPED. tracetest asserts against
+    # `assets\maps\atrium.map`, which is a FIXTURE and not a level: the game
+    # cannot enter it, and bake.ps1's $mapsNotBaked now keeps it out of the
+    # binary so that one map ships. A fixture that is deliberately not in the
+    # blob cannot be read through the blob, and the variant did not fail
+    # because something broke -- it failed because it was asking for a file
+    # this project had decided not to carry.
+    #
+    # WHAT IT PROTECTED IS STILL PROTECTED, and on better ground. The property
+    # was "the blob reproduces the file"; maptest's test_bake_matches compares
+    # `data_map` against `data_map_baked` plane for plane, texture for texture,
+    # UV for UV and key for key -- and it does it on `lqdm1`, the map that
+    # actually ships, which the variant never touched. Everything downstream of
+    # that (level_load, level_ground, the traces) takes a `const char *` and
+    # cannot tell where the bytes came from once they are proven identical.
+    #
+    # Recorded rather than deleted quietly: a variant that vanishes from this
+    # table is a variant nobody can tell was ever considered.
+    #
+    # *tracetest_baked가 이곳에 있었고 은퇴했습니다.* HOT_RELOAD 없이 tracetest를 빌드하여 같은
+    # 단언들이 디스크의 파일이 아니라 구워진 블롭에 대해 실행되게 했습니다.
+    #
+    # *그 대상이 출하되기를 그만두었습니다.* tracetest는 `assets\maps\atrium.map`에 대해
+    # 단언하며, 그것은 레벨이 아니라 *픽스처*입니다. 게임은 그곳에 들어갈 수 없고, bake.ps1의
+    # $mapsNotBaked가 맵 하나만 출하되도록 그것을 바이너리 밖에 둡니다. 의도적으로 블롭에 없는
+    # 픽스처는 블롭을 통해 읽힐 수 없으며, 이 변형은 무언가 고장 나서 실패한 것이 아니라 이
+    # 프로젝트가 나르지 않기로 정한 파일을 요구했기에 실패했습니다.
+    #
+    # *그것이 지키던 것은 여전히 지켜지며*, 더 나은 근거 위에서입니다. 그 성질은 "블롭이 파일을
+    # 재현한다"였고, maptest의 test_bake_matches가 `data_map`과 `data_map_baked`를 평면 대 평면,
+    # 텍스처 대 텍스처, UV 대 UV, 키 대 키로 비교합니다. 그것도 이 변형이 한 번도 건드리지 않은,
+    # *실제로 출하되는* 맵인 `lqdm1`에 대해서 합니다.
 }
 
 if ($Tool) {
@@ -634,6 +689,7 @@ $notTests = @{
     'levelbench' = 'measures what the spatial queries cost; reports, asserts nothing'
     'soaktest'   = 'runs the frame loop for twenty minutes and prints what it cost'
     'sprdump'    = 'writes the sprite atlas to a PPM for eyeballing'
+    'matdump'    = 'renders the procedural recipes to PNG for the map editor'
 }
 
 if ($Tools -or $Test) {

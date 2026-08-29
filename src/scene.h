@@ -52,7 +52,52 @@
 #include "player.h"
 #include "weapon.h"
 #include "world.h"    /* World: ::scene_frame draws one, and only reads it */
+/* StoryPage by value, for ::scene_draw_story. A forward declaration would do
+   for the pointer, and would leave the caller unable to reach the lines it is
+   asking to have drawn -- the page IS the argument, so its shape belongs here.
+   ::scene_draw_story를 위한 값 타입 StoryPage입니다. 포인터에는 전방 선언으로 충분하지만,
+   그러면 호출자는 그리라고 요청하는 대상의 줄들에 닿을 수 없습니다. 페이지가 곧 인자이므로 그
+   모양은 이곳에 속합니다. */
+#include "story.h"
 #include "weaponview.h" /* WeaponView: the drawn gun, owned here beside the atlases */
+
+/* Vertices the level's scratch buffer holds. NOT a starting size -- ::mb_init
+   takes a capacity "for the buffer's whole life", and ::mb_vtx DROPS vertices
+   rather than growing. This comment used to say "starts at" and "large enough
+   that a hand-authored level never grows it", and both halves were wrong in a
+   way that matters: nothing grows, and the levels that test this are the ones
+   nobody here authored. A map past this cap loads, collides and plays with
+   holes in its walls.
+   Overridable with the brush caps, because it is the same question asked one
+   stage later -- brush.h decides whether the map parses, this decides whether
+   what parsed can be drawn. tools/mapcap.c measures both.
+   레벨 임시 버퍼가 담는 정점 수입니다. *시작 크기가 아닙니다.* ::mb_init은 "버퍼의 전 생애에
+   걸친" 용량을 받고 ::mb_vtx는 확장하는 대신 정점을 *버립니다*. 이 주석은 "시작 크기"이며
+   "사람이 제작한 레벨이 확장시키지 않을 만큼 충분하다"고 말했는데, 두 절반 모두 중요한 방식으로
+   틀렸습니다. 확장하는 것은 없고, 이것을 시험하는 레벨은 이곳의 누구도 제작하지 않은 것들입니다.
+   이 상한을 넘는 맵은 벽에 구멍이 뚫린 채로 로드되고 충돌하고 플레이됩니다.
+   브러시 상한과 함께 재정의할 수 있습니다. 한 단계 뒤에서 묻는 같은 질문이기 때문입니다.
+   brush.h는 맵이 파싱되는지를 정하고, 이것은 파싱된 것이 그려질 수 있는지를 정합니다.
+   tools/mapcap.c가 둘 다 잽니다. */
+/* WHY 49152. tools/mapcap.c measured lqdm11 wanting 15,411 vertices against
+   the old 16,384 -- 94% consumed, 973 short of losing walls, in a map that
+   shipped. Three times the widest shipped map, chosen the way every other cap
+   in this rewrite was: from the content, not from the largest thing that could
+   be made to fit.
+   THE ONLY ONE OF THESE THAT IS HEAP RATHER THAN .bss, at 44 bytes a vertex --
+   ::mb_init allocates once and ::scene_free gives it back. 2.1MB, paid whether
+   the level is spire (612 verts) or lqdm11, which is the argument for measuring
+   before tripling rather than after.
+   *왜 49152인가.* tools/mapcap.c가 lqdm11이 옛 16,384에 대해 정점 15,411개를 원한다고
+   측정했습니다. 94% 소비, 벽을 잃기까지 973개를 남긴 상태로 출하된 맵입니다. 가장 넓은 출하
+   맵의 세 배이며, 이 재작성의 다른 모든 상한과 같은 방식으로 골랐습니다. 들어맞게 만들 수 있는
+   가장 큰 것이 아니라 콘텐츠에서 정했습니다.
+   *이 중 유일하게 .bss가 아니라 힙이며* 정점당 44바이트입니다. ::mb_init이 한 번 할당하고
+   ::scene_free가 돌려줍니다. 2.1MB이고, 레벨이 spire(정점 612개)이든 lqdm11이든 치릅니다.
+   그것이 세 배로 늘리기 전에 재야 한다는 논거이지 늘린 뒤에 잴 이유가 아닙니다. */
+#ifndef LEVEL_BUF_VERTS
+#define LEVEL_BUF_VERTS 49152
+#endif
 
 /**
  * @struct Scene
@@ -78,6 +123,7 @@
 typedef struct {
     MeshBuf enemy_buf,  pickup_buf,  shot_buf,  hud_buf;   /**< CPU-side builders. / CPU 측 빌더. */
     Mesh    enemy_mesh, pickup_mesh, shot_mesh, hud_mesh;  /**< Their GPU counterparts. / 대응하는 GPU 측 메시. */
+
 
     GLuint  sprite_tex;   /**< Monster atlas. / 몬스터 아틀라스. */
     GLuint  pickup_tex;   /**< Pickup atlas. / 아이템 아틀라스. */
@@ -510,9 +556,17 @@ void scene_draw_hud(Scene *s, int vw, int vh, const Level *l,
  * @param[in]     vh Viewport height in pixels.
  * @param[in]     p  Player, for the final health figure.
  * @param[in]     w  Weapon, for the final ammo figure.
+ * @param[in]     run What the run amounted to, already worded by
+ *                   ::run_summary. A finished string rather than a ::RunState,
+ *                   for the reason `since` below is a float rather than one:
+ *                   this pass lays text out, and deciding which facts a run
+ *                   reports is not a layout decision.
  * @note The world keeps drawing underneath, dimmed rather than cleared: the
  *       last frame stays on screen so the ending reads as an overlay on the
  *       game rather than as a separate screen.
+ * @note Two stat lines, not one: the belt is what the player finished HOLDING
+ *       and the summary is what they DID. Running them together would make the
+ *       ammo count look like part of the score.
  *
  * 한국어
  * ------
@@ -522,10 +576,17 @@ void scene_draw_hud(Scene *s, int vw, int vh, const Level *l,
  * @param[in]     vh 뷰포트 높이 (픽셀).
  * @param[in]     p  최종 체력 수치를 제공하는 플레이어.
  * @param[in]     w  최종 탄약 수치를 제공하는 무기.
+ * @param[in]     run 이번 플레이가 무엇이었는지. ::run_summary가 이미 문구로 만든 것입니다.
+ *                   ::RunState가 아니라 완성된 문자열인 이유는 아래의 `since`가 플레이가 아니라
+ *                   float인 이유와 같습니다. 이 패스는 텍스트를 배치하며, 플레이가 어떤 사실을
+ *                   보고하는지는 배치의 결정이 아닙니다.
  * @note 월드는 지워지지 않고 어둡게 처리된 채 계속 그려집니다. 마지막 프레임이 화면에
  *       남아, 결말이 별도의 화면이 아니라 게임 위에 덧씌워진 것으로 읽힙니다.
+ * @note 한 줄이 아니라 두 줄입니다. 탄약대는 플레이어가 끝낼 때 *들고 있던* 것이고 요약은
+ *       그들이 *한 일*입니다. 붙여 놓으면 탄약 수가 성적의 일부처럼 보입니다.
  */
-void scene_draw_win(Scene *s, int vw, int vh, const Player *p, const Weapon *w);
+void scene_draw_win(Scene *s, int vw, int vh, const Player *p, const Weapon *w,
+                    const char *run);
 
 /**
  * @brief Draws the screen between two levels: what was cleared, what is next.
@@ -597,11 +658,18 @@ void scene_draw_menu(Scene *s, int vw, int vh);
  * @param[in]     ready Non-zero once input is accepted, which is when the
  *                      prompt appears. Passed in rather than derived from
  *                      `since` so the delay is decided in one place.
+ * @param[in]     run   What the run amounted to, already worded by
+ *                      ::run_summary. See ::scene_draw_win for why this is a
+ *                      string and not a ::RunState.
  * @note Fades IN rather than appearing at once. Death is the one moment the
  *       player most wants to see what happened, and a screen that lands
  *       instantly hides the frame that explains it.
  * @note Tinted red, where the win screen is neutral: the two endings must not
  *       be distinguishable only by reading their text.
+ * @note THE SUMMARY FADES WITH THE TITLE, not with the prompt. It is part of
+ *       what the screen says happened rather than an instruction about what to
+ *       do next, and a score that appeared later than the word DIED would read
+ *       as a second event.
  *
  * 한국어
  * ------
@@ -613,41 +681,194 @@ void scene_draw_menu(Scene *s, int vw, int vh);
  * @param[in]     ready 입력을 받기 시작하면 0이 아닌 값이며, 그때 안내 문구가 나타납니다.
  *                      지연 시간이 한 곳에서 결정되도록 `since`에서 유도하지 않고 인자로
  *                      받습니다.
+ * @param[in]     run   이번 플레이가 무엇이었는지. ::run_summary가 이미 문구로 만든 것입니다.
+ *                      ::RunState가 아니라 문자열인 이유는 ::scene_draw_win을 참조하십시오.
  * @note 즉시 나타나지 않고 서서히 나타납니다. 사망은 플레이어가 무슨 일이 있었는지 가장
  *       보고 싶어 하는 순간이며, 즉시 덮이는 화면은 그것을 설명하는 프레임을 가립니다.
  * @note 승리 화면이 중립적인 것과 달리 붉은 색조를 띱니다. 두 결말이 텍스트를 읽어야만
  *       구분되어서는 안 됩니다.
+ * @note *요약은 안내 문구가 아니라 제목과 함께 나타납니다.* 다음에 무엇을 할지에 대한
+ *       지시가 아니라 무슨 일이 있었는지에 대한 서술의 일부이며, DIED보다 늦게 나타나는
+ *       성적은 두 번째 사건처럼 읽힙니다.
  */
-void scene_draw_death(Scene *s, int vw, int vh, float since, int ready);
+void scene_draw_death(Scene *s, int vw, int vh, float since, int ready,
+                      const char *run);
 
 /**
- * @brief Draws the title screen over the frozen world.
+ * @brief Draws the game's name above the title menu's rows.
  *
  * ENGLISH
  * -------
- * @param[in,out] s  Scene supplying the buffer.
- * @param[in]     vw Viewport width in pixels.
- * @param[in]     vh Viewport height in pixels.
- * @param[in]     t  Seconds since startup, for the prompt's pulse.
- * @note PLACEHOLDER ART. The layout is deliberately plain -- a title, a
- *       subtitle and a prompt over the dimmed level -- because the real title
- *       art is still to be drawn. Everything it will need is already here:
- *       this is a UI pass at native resolution with the world behind it, so
- *       replacing the text with artwork changes this function and nothing
- *       else.
+ * @param[in,out] s    Scene supplying the buffer.
+ * @param[in]     vw   Viewport width in pixels.
+ * @param[in]     vh   Viewport height in pixels.
+ * @param[in]     t    Seconds the title has been up, for the fade in.
+ * @param[in]     best The best wave any run has reached, or 0 for none -- a
+ *                     figure this screen is the only place to see, because it
+ *                     outlives every run that produced it.
+ *
+ * AFTER ::scene_draw_menu RATHER THAN BEFORE IT, and that is the only unusual
+ * thing here. The menu dims the world behind it, and this is the screen's own
+ * art rather than something that dim should push back -- drawn first, the title
+ * would be darkened by the menu it heads. When there is no menu in front of the
+ * title -- a playback, or a ::World a tool is driving -- this pass draws the dim
+ * itself.
+ *
+ * @note CALLED FOR EVERY TITLE FRAME, not only the ones with a menu over them,
+ *       and that is load-bearing rather than tidy. ::scene_frame's other UI
+ *       passes are all skipped while `title` is set, so this is the only one
+ *       left -- and ::ui_end is what restores the depth test and the culling
+ *       the NEXT frame's world pass expects. A title frame that drew no UI pass
+ *       would corrupt the frame after it.
+ *
+ * @note WHERE IT SITS COMES FROM menu.c. ::menu_title_y is where the header of
+ *       the current screen goes, and the title screen widens that gap for
+ *       exactly this block; laying it out from a constant here would be a
+ *       second layout, and the first thing two layouts disagree about is
+ *       whether the header overlaps the first row.
+ * @note THE PROMPT IS GONE, and its absence is the point. This used to say
+ *       "press any key to begin", which stopped being true the moment there was
+ *       something to choose: a key does a specific thing now, and the rows say
+ *       what.
  *
  * 한국어
  * ------
- * @brief 정지된 월드 위에 타이틀 화면을 그립니다.
- * @param[in,out] s  버퍼를 제공하는 장면.
- * @param[in]     vw 뷰포트 너비 (픽셀).
- * @param[in]     vh 뷰포트 높이 (픽셀).
- * @param[in]     t  시작 이후 경과 시간(초). 안내 문구의 명멸에 사용됩니다.
- * @note *임시 아트입니다.* 실제 타이틀 아트를 아직 그리지 않았으므로 배치를 의도적으로
- *       단순하게 두었습니다. 어둡게 처리된 레벨 위의 제목, 부제, 안내 문구입니다. 필요한
- *       것은 이미 전부 갖춰져 있습니다. 뒤에 월드를 둔 원해상도 UI 패스이므로, 텍스트를
- *       아트워크로 교체하는 것은 이 함수만 바꾸면 됩니다.
+ * @brief 타이틀 메뉴의 행들 위에 게임의 이름을 그립니다.
+ * @param[in,out] s    버퍼를 제공하는 장면.
+ * @param[in]     vw   뷰포트 너비 (픽셀).
+ * @param[in]     vh   뷰포트 높이 (픽셀).
+ * @param[in]     t    타이틀이 떠 있던 시간(초). 서서히 나타나는 데 사용됩니다.
+ * @param[in]     best 어떤 플레이든 도달한 최고 웨이브. 없으면 0입니다. 그것을 만들어 낸 모든
+ *                     플레이보다 오래 살아남기에, 이 화면이 그것을 볼 수 있는 유일한 곳입니다.
+ *
+ * *::scene_draw_menu보다 앞이 아니라 뒤이며*, 이곳에서 유일하게 특이한 점입니다. 메뉴는 뒤의
+ * 월드를 어둡게 하는데, 이것은 그 어둡게 하기가 뒤로 밀어내야 할 것이 아니라 화면 자신의
+ * 아트입니다. 먼저 그리면 제목이 자기가 머리글로 있는 메뉴에 의해 어두워집니다. 타이틀 앞에
+ * 메뉴가 없을 때(재생이거나 도구가 구동하는 ::World일 때)는 이 패스가 직접 어둡게 합니다.
+ *
+ * @note *모든 타이틀 프레임에 대해 호출되며*, 메뉴가 위에 있는 프레임에만이 아닙니다. 이것은
+ *       단정함이 아니라 구조적으로 중요합니다. ::scene_frame의 다른 UI 패스는 `title`이 서 있는
+ *       동안 전부 건너뛰어지므로 남는 것이 이것뿐이며, 다음 프레임의 월드 패스가 기대하는 깊이
+ *       검사와 컬링을 복원하는 것이 ::ui_end입니다. UI 패스를 하나도 그리지 않는 타이틀 프레임은
+ *       그 다음 프레임을 망칩니다.
+ *
+ * @note *어디에 놓이는지는 menu.c에서 옵니다.* ::menu_title_y는 현재 화면의 머리글이 가는
+ *       자리이며, 타이틀 화면은 정확히 이 블록을 위해 그 간격을 넓힙니다. 이곳의 상수로
+ *       배치하면 두 번째 배치가 되고, 두 배치가 가장 먼저 어긋나는 것은 머리글이 첫 행과
+ *       겹치는가입니다.
+ * @note *안내 문구는 사라졌고* 그 부재가 요점입니다. 이곳은 "press any key to begin"이라고
+ *       말했는데, 고를 것이 생긴 순간 그것은 참이기를 그만두었습니다. 이제 키는 특정한 일을
+ *       하고, 무엇인지는 행들이 말합니다.
  */
-void scene_draw_title(Scene *s, int vw, int vh, float t);
+void scene_draw_title(Scene *s, int vw, int vh, float t, int best);
+
+/**
+ * @brief Draws one page of a cutscene over the stopped world.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] s     Scene supplying the buffer.
+ * @param[in]     vw,vh Viewport size in pixels.
+ * @param[in]     page  The page to show. Never null; a caller with nothing to
+ *                      show does not call this.
+ * @param[in]     index Which page this is, 0-based, for the pips.
+ * @param[in]     count How many the cutscene has.
+ * @param[in]     alpha Opacity, 0..1, worked out by ::scene_frame from the
+ *                      page's clock. Zero draws nothing.
+ *
+ * TAKES A PAGE, NOT A ::World AND NOT A ::StoryCut, which is this header's
+ * standing rule one step further in: which moment is playing and which of its
+ * pages is up are world.c's questions, already answered, and a pass handed the
+ * whole cutscene could answer them a second and different way.
+ *
+ * @note THE PIPS ARE THE SAME ARGUMENT THE WARD PIPS ARE. A cutscene stops the
+ *       game, and a player who cannot tell whether one page remains or five is
+ *       being asked to wait for an unknown length of time. Drawn as tracks for
+ *       the ones already spent, because "drawing the whole track means a slider
+ *       at zero is still a slider".
+ * @note Skippable, and the hint says so. It is not drawn on the first page:
+ *       a screen that offers a way out before it has said anything is a screen
+ *       that expects to be skipped.
+ *
+ * 한국어
+ * ------
+ * @brief 멈춘 월드 위에 컷신의 한 페이지를 그립니다.
+ * @param[in,out] s     버퍼를 제공하는 장면.
+ * @param[in]     vw,vh 뷰포트 크기(픽셀).
+ * @param[in]     page  보여 줄 페이지. 결코 null이 아닙니다. 보여 줄 것이 없는 호출자는 이것을
+ *                      부르지 않습니다.
+ * @param[in]     index 이것이 몇 번째 페이지인지. 0부터이며 핍에 사용됩니다.
+ * @param[in]     count 컷신이 가진 페이지 수.
+ * @param[in]     alpha 불투명도(0..1). 페이지의 시계로부터 ::scene_frame이 계산합니다. 0이면
+ *                      아무것도 그리지 않습니다.
+ *
+ * *::World도 ::StoryCut도 아닌 페이지를 받으며*, 이 헤더의 정해진 규칙을 한 걸음 더 들어간
+ * 것입니다. 어느 순간이 재생 중이고 그중 어느 페이지가 떠 있는지는 world.c가 이미 답한
+ * 질문이며, 컷신 전체를 건네받은 패스는 그것들에 두 번째로, 다르게 답할 수 있습니다.
+ *
+ * @note *핍은 결계핵 핍과 같은 논거입니다.* 컷신은 게임을 멈추며, 남은 페이지가 한 장인지 다섯
+ *       장인지 알 수 없는 플레이어는 알 수 없는 시간만큼 기다리라는 요구를 받는 것입니다. 이미
+ *       지나간 것도 트랙으로 그립니다. *"트랙 전체를 그리면 0인 슬라이더도 여전히
+ *       슬라이더"*이기 때문입니다.
+ * @note 건너뛸 수 있으며 안내가 그렇게 말합니다. 첫 페이지에는 그리지 않습니다. 아무 말도 하기
+ *       전에 나갈 길을 제시하는 화면은 건너뛰어질 것을 예상하는 화면입니다.
+ */
+void scene_draw_story(Scene *s, int vw, int vh, const StoryPage *page,
+                      int index, int count, float alpha);
+
+/**
+ * @brief The boss fight's top-of-screen readout: health, wards, and one line.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] s           The scene, for its HUD buffer.
+ * @param[in]     vw,vh       Viewport size in pixels.
+ * @param[in]     show_bar    Draw the bar and pips. Zero draws the line alone.
+ * @param[in]     fill        Boss health as a fraction, 0..1. Clamped here.
+ * @param[in]     wards_left  Wards still standing.
+ * @param[in]     wards_total Pips to draw, standing or not.
+ * @param[in]     groggy      Non-zero while the boss can actually be hurt.
+ * @param[in]     line        The sentence to show, or null for none.
+ * @param[in]     line_alpha  Its opacity, 0..1. Zero draws nothing.
+ *
+ * TAKES FINISHED FACTS, NOT A ::World, which is this header's standing rule --
+ * see ::scene_draw_between and ::scene_draw_win. Which slot the boss is in and
+ * which of the five lines is up are questions world.c has already answered.
+ *
+ * @note `groggy` changes the fill's COLOUR and nothing else. During the warded
+ *       phase the boss takes no damage, so the fill does not move; a bar that
+ *       simply sat there would read as broken rather than as invulnerable.
+ * @note Drawn with the HUD group so the end screens dim it, for the reason
+ *       ::scene_frame gives about readouts belonging to the frozen frame.
+ * @note `show_bar` EXISTS BECAUSE THE TWO HALVES HAVE DIFFERENT LIFETIMES. The
+ *       bar needs a living boss; the banner outlives one, because the maw's
+ *       last line is posted on the frame it dies. A banner drawn only when
+ *       there is a boss is a sentence that can never be shown, which reads
+ *       exactly like a sentence nobody wrote.
+ *
+ * 한국어
+ * ------
+ * @brief 보스전의 화면 상단 계기판. 체력, 결계핵, 그리고 대사 한 줄입니다.
+ * @param[in,out] s           HUD 버퍼를 쓸 장면.
+ * @param[in]     vw,vh       뷰포트 크기(픽셀).
+ * @param[in]     fill        보스 체력의 비율(0..1). 이곳에서 자릅니다.
+ * @param[in]     wards_left  아직 서 있는 결계핵의 수.
+ * @param[in]     wards_total 서 있든 아니든 그릴 핍의 수.
+ * @param[in]     groggy      보스가 실제로 다칠 수 있는 동안 0이 아닌 값.
+ * @param[in]     line        보여 줄 문장. 없으면 null.
+ * @param[in]     line_alpha  그 불투명도(0..1). 0이면 아무것도 그리지 않습니다.
+ *
+ * *::World가 아니라 완성된 사실을 받으며*, 이 헤더의 정해진 규칙입니다. ::scene_draw_between과
+ * ::scene_draw_win을 참조하십시오. 보스가 어느 슬롯에 있는지, 다섯 대사 중 어느 것이 떠 있는지는
+ * world.c가 이미 답한 질문입니다.
+ *
+ * @note `groggy`는 채움의 *색*만 바꿉니다. 수호 단계 동안 보스는 피해를 받지 않으므로 채움이
+ *       움직이지 않는데, 그냥 가만히 있는 바는 무적이 아니라 고장으로 읽힙니다.
+ * @note 종료 화면이 어둡게 할 수 있도록 HUD 무리와 함께 그립니다. 계기판이 정지된 프레임에
+ *       속한다는 ::scene_frame의 설명이 그 이유입니다.
+ */
+void scene_draw_boss(Scene *s, int vw, int vh, int show_bar, float fill,
+                     int wards_left, int wards_total, int groggy,
+                     const char *line, float line_alpha);
 
 #endif

@@ -207,6 +207,100 @@ int main(void) {
             cover, 0.5f);
     }
 
+    /* --- a floor item's motes must RISE ------------------------------------
+       This is the whole of what `itemmote` is. An item used to be marked by a
+       halo drawn behind its sprite and a light on the floor under it; both were
+       replaced by specks that climb off it, and the ONLY thing that makes a
+       speck a climbing speck is a negative gravity in the recipe -- one
+       character from making it fall. Every other check in this file passes just
+       as happily with the motes pouring into the floor: they still spawn, are
+       still alive partway through, and still retire on time. What the player
+       would see is an item leaking, which is not the same message.
+
+       RUN MOST OF THE WAY THROUGH THE LIFE, not a fraction of it. A shorter
+       run is the trap: `speed` throws the specks gently upward along the spawn
+       normal, so for the first half-second they are above where they started
+       whichever way gravity points, and a check taken there passes with the
+       sign flipped. It was written that way first and it did pass that way.
+       Buoyancy and a throw only separate once the throw has been spent -- so
+       this waits until it has been, and stops just short of the retirement
+       that would leave nothing to measure.
+
+       `itemmote`이 무엇인지의 전부입니다. 아이템은 스프라이트 뒤에 그려지는 헤일로와 발밑
+       바닥의 광원으로 표시되었고, 둘 다 아이템에서 기어오르는 알갱이로 대체되었습니다.
+       알갱이를 *올라가는* 알갱이로 만드는 유일한 것은 레시피의 음수 중력이며, 한 글자만
+       바뀌면 떨어집니다. 이 파일의 다른 모든 검사는 티끌이 바닥으로 쏟아져도 똑같이
+       통과합니다. 여전히 생성되고, 중간에 살아 있고, 제때 사라지기 때문입니다. 플레이어가
+       보게 될 것은 새고 있는 아이템이며, 그것은 같은 메시지가 아닙니다.
+
+       *수명의 대부분까지 돌리며* 일부만 돌리지 않습니다. 짧게 도는 것이 함정입니다.
+       `speed`가 생성 법선을 따라 알갱이를 부드럽게 위로 던지므로, 처음 0.5초 동안은 중력이
+       어느 쪽을 향하든 출발 지점보다 위에 있습니다. 그 시점에 잰 검사는 부호를 뒤집어도
+       통과합니다. 처음에 그렇게 작성했고 실제로 그렇게 통과했습니다. 부력과 던지기는 던진
+       힘이 다 소진된 뒤에야 갈라지므로, 이 검사는 그때까지 기다렸다가 잴 것이 없어지는
+       소멸 직전에 멈춥니다. */
+    {
+        const float START = 3.0f;
+
+        fx_reload(&g_pools);
+        fx_spawn(&g_pools, "itemmote", v3f(0, START, 0), v3f(0, 1, 0));
+        ok(fx_live_count(&g_pools) > 0, "itemmote spawns for the rise check");
+
+        for (int i = 0; i < 80; i++) fx_update(&g_pools, DT);   /* 1.33s of a 1.5s life */
+        ok(fx_live_count(&g_pools) > 0, "and is still alive to be measured");
+        okf(fx_mean_height(&g_pools) > START,
+            "a floor item's motes climb off it rather than falling",
+            fx_mean_height(&g_pools), START);
+    }
+
+    /* --- the disc is the dome's equator ------------------------------------
+       `disc` exists for one picture: a ring of light running out across a
+       floor, which is how a shrine says where it is from the other side of a
+       room. The dome cannot draw it -- half of a dome's particles leave the
+       ground -- and that is exactly the failure that would look fine in a
+       screenshot taken from head height, because a horizontal plane seen
+       edge-on shows nothing either way.
+
+       So it is measured rather than looked at. ::fx_radius_spread's `width` is
+       distance from the VERTICAL AXIS through the origin, and `mean` is
+       distance from the origin itself: for a ring lying flat those two are the
+       same number, and for the dome checked above the width is smaller because
+       the particles near its pole are directly overhead. A disc whose ratio
+       slipped back toward the dome's is a disc that has stopped being flat.
+
+       `disc`는 하나의 그림을 위해 존재합니다. 바닥을 가로질러 퍼져 나가는 빛의 고리이며,
+       방 건너편에서 제단이 자기 위치를 말하는 방식입니다. 돔으로는 그것을 그릴 수 없고(돔은
+       입자의 절반이 지면을 떠납니다), 그것이야말로 머리 높이에서 찍은 스크린샷에서는
+       멀쩡해 보일 실패입니다. 수평 평면을 옆에서 보면 어느 쪽이든 아무것도 보이지 않기
+       때문입니다.
+
+       그래서 보는 대신 잽니다. ::fx_radius_spread의 `width`는 원점을 지나는 *수직축*으로부터의
+       거리이고 `mean`은 원점 자체로부터의 거리입니다. 평평하게 누운 고리에서는 이 둘이 같은
+       숫자이며, 위에서 검사한 돔에서는 극 근처의 입자가 바로 머리 위에 있으므로 폭이 더
+       작습니다. 비율이 돔 쪽으로 되돌아간 디스크는 평평하기를 그만둔 디스크입니다. */
+    {
+        const v3 AT = { -2.0f, 1.0f, 5.0f };
+        float mean = 0.0f, width = 0.0f;
+
+        fx_reload(&g_pools);
+        fx_spawn(&g_pools, "altarring", AT, v3f(0, 1, 0));
+        ok(fx_live_count(&g_pools) > 0, "altarring spawns");
+
+        /* Its life is 900ms; part-way through is enough to have travelled and
+           early enough that nothing has retired.
+           수명이 900ms이므로, 중간쯤이면 충분히 이동했고 아직 아무것도 사라지지 않았습니다. */
+        for (int i = 0; i < 30; i++) fx_update(&g_pools, DT);
+        fx_radius_spread(&g_pools, AT, &mean, &width);
+
+        okf(mean > 0.5f, "and travels outward from where it was spawned",
+            mean, 0.5f);
+
+        float flat = mean > 0.0f ? width / mean : 0.0f;
+        okf(flat > 0.95f,
+            "and stays in the plane the normal is perpendicular to",
+            flat, 0.95f);
+    }
+
     /* --- gravity actually acts --------------------------------------------
        `blood` is authored with gravity; a particle thrown sideways under it
        must end up lower than it started. This is the one property that proves
@@ -337,7 +431,53 @@ int main(void) {
                                    이 목록이 나르지 않는 이름은 fx_spawn이 조용히 찾지
                                    못할 수 있는 이름입니다. */
                                 "landdust",
-                                "blastburst", "blastshard", "boltshard" };
+                                "blastburst", "blastshard", "boltshard",
+                                /* AND A THIRD TIME, for the spawn portal.
+                                   `spawnwarp` has been spawned by
+                                   ::spawners_update since the telegraph
+                                   existed and was named nowhere here, so the
+                                   one effect whose whole job is to be read
+                                   under pressure was the one nothing checked.
+                                   `spawnring` and `spawnburst` join it because
+                                   a portal is now three effects and a list that
+                                   carries one of three is the same hole in a
+                                   smaller shape.
+                                   그리고 세 번째로, 소환 포탈입니다. `spawnwarp`은 예고가
+                                   생긴 이래로 ::spawners_update가 생성해 왔지만 이곳에
+                                   이름이 없었습니다. 압박 속에서 읽히는 것이 임무의 전부인
+                                   그 이펙트가, 아무것도 검사하지 않던 바로 그것이었습니다.
+                                   포탈이 이제 세 이펙트이므로 `spawnring`과 `spawnburst`도
+                                   함께 넣습니다. 셋 중 하나만 나르는 목록은 같은 구멍을 더
+                                   작은 모양으로 가진 것입니다. */
+                                "spawnwarp", "spawnring", "spawnburst",
+                                /* The shrine a cleared wave lights, in the
+                                   three layers ::altar_light and ::step_altar
+                                   spawn, plus the beat an item plays as it
+                                   settles. Added WITH the effects rather than
+                                   after somebody noticed they did nothing --
+                                   which is what the three paragraphs above are
+                                   a record of, and the reason this list is
+                                   worth the trouble at all.
+                                   정리된 웨이브가 켜는 제단이며, ::altar_light와
+                                   ::step_altar이 생성하는 세 겹입니다. 여기에 아이템이
+                                   내려앉을 때 재생되는 박자가 더해집니다. 누군가 이것들이
+                                   아무 일도 하지 않음을 알아챈 뒤가 아니라 이펙트와 *함께*
+                                   추가했습니다. 위의 세 문단이 기록하고 있는 것이 그것이며,
+                                   이 목록이 애초에 수고할 값어치가 있는 이유입니다. */
+                                "altarring", "altarcore", "altarmote",
+                                /* What a floor item gives off, and the beat it
+                                   plays as it settles. `itemmote` is paced by
+                                   ::pickup_update rather than fired at an
+                                   event, which is the shape of spawn this list
+                                   is worst at covering: an effect nothing calls
+                                   in a burst is one nobody notices has stopped
+                                   existing.
+                                   바닥 아이템이 내보내는 것과, 안착할 때 재생되는 박자입니다.
+                                   `itemmote`은 사건에 맞춰 발사되지 않고 ::pickup_update가
+                                   조절해 뿌리는데, 그것이 이 목록이 가장 놓치기 쉬운 생성
+                                   형태입니다. 아무도 폭발로 부르지 않는 이펙트는, 존재하기를
+                                   그만두었다는 것을 아무도 알아채지 못하는 이펙트입니다. */
+                                "itemmote", "itemland" };
         int found = 0;
         for (int i = 0; i < (int)(sizeof(NAMES)/sizeof(NAMES[0])); i++) {
             fx_reload(&g_pools);

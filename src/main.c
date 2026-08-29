@@ -96,6 +96,18 @@
 #include "data.h"
 #include "decal.h"    /* decal_init/decal_free -- the pool's lifetime, not its draw */
 #include "fx.h"       /* fx_reload -- what a hot reload does to live particles */
+#include "loot.h"     /* loot_reload -- a drop rate is the point of hot reload */
+#include "story.h"    /* story_reload -- a line is the point of hot reload too */
+/* The unlocks the title menu reads and the best wave it shows. This file is the
+   only one that both knows a run has ended and can write a file, which is why
+   the two calls that record one are here rather than in world.c: a headless
+   ::world_step that saved would put a file on the disk of every test that
+   killed the maw.
+   타이틀 메뉴가 읽는 해금과 그것이 보여 주는 최고 웨이브입니다. 플레이가 끝났다는 것을 알면서
+   동시에 파일을 쓸 수 있는 것은 이 파일뿐이며, 그것이 그것을 기록하는 두 호출이 world.c가 아니라
+   이곳에 있는 이유입니다. 저장하는 헤드리스 ::world_step은 아귀를 죽인 모든 테스트의 디스크에
+   파일을 남깁니다. */
+#include "save.h"
 #include "demo.h"    /* demo_take / demo_put: the two calls that are in a frame */
 #include "demo_file.h" /* DemoFile, and the three that are not: the flag and the bytes */
 #include "gfx.h"     /* the render target a pixel preset asks for, and the live settings */
@@ -388,11 +400,21 @@ static void cursor_show(int show) {
  * Visible whenever the player needs to point at something -- a menu, or
  * another window -- and hidden while they are looking around the world.
  *
- * @note One place decides this, and every site that changes focus or opens the
- *       menu calls it rather than reasoning about the cursor itself. That is
- *       what stops the two from disagreeing: the old code hid the cursor in
- *       WM_SETFOCUS without asking whether the menu was up, so returning to a
- *       paused game left it operating a menu it could not see.
+ * @note ONE CALLER, ONCE A FRAME. It used to be five callers -- every site that
+ *       changed focus, opened the menu, took a click, restarted or crossed a
+ *       screen edge -- and being called by all of them is not the same as being
+ *       called when it matters. The earliest of the five is WM_SETFOCUS, which
+ *       arrives while ::app_start is still creating the window: before
+ *       ::world_init, so `run.title` is 0, and before ::menu_open_title, so no
+ *       menu is open. The pointer was hidden from a ::World that did not exist
+ *       yet and never asked about again.
+ * @note WHY NOBODY SAW IT FOR SO LONG. A title screen that took any key or any
+ *       click needs no pointer to aim, so the hidden cursor cost nothing until
+ *       the title became a menu -- the first screen that had to be clicked AT
+ *       was the first one that could not be used. The frame loop asks now; see
+ *       the note at the call.
+ * @note Idempotent, which is what makes asking every frame free: ::cursor_show
+ *       returns immediately when the cursor is already in the state asked for.
  *
  * 한국어
  * ------
@@ -401,18 +423,30 @@ static void cursor_show(int show) {
  * 플레이어가 무언가를 가리켜야 할 때(메뉴, 또는 다른 창) 보이고, 월드를 둘러보는 동안
  * 숨겨집니다.
  *
- * @note 이를 결정하는 곳은 한 군데이며, 포커스를 바꾸거나 메뉴를 여는 모든 지점이 커서에
- *       대해 스스로 판단하지 않고 이 함수를 호출합니다. 그것이 둘이 어긋나지 않게 하는
- *       방법입니다. 이전 코드는 메뉴가 열려 있는지 묻지 않고 WM_SETFOCUS에서 커서를
- *       숨겼으므로, 일시정지된 게임으로 돌아오면 보이지 않는 메뉴를 조작하게
- *       되었습니다. */
+ * @note *호출자 하나, 프레임당 한 번입니다.* 예전에는 호출자가 다섯이었습니다. 포커스를 바꾸고,
+ *       메뉴를 열고, 클릭을 가져가고, 재시작하고, 화면 경계를 넘는 모든 지점이었습니다. 그런데
+ *       그 전부에게 호출되는 것은 *필요한 때에* 호출되는 것과 같지 않습니다. 다섯 중 가장 이른
+ *       것은 WM_SETFOCUS이고, 그것은 ::app_start가 아직 창을 만드는 도중에 도착합니다.
+ *       ::world_init보다 먼저라 `run.title`이 0이고, ::menu_open_title보다 먼저라 열린 메뉴가
+ *       없습니다. 포인터는 아직 존재하지 않는 ::World를 보고 숨겨졌고 다시 질문받지 않았습니다.
+ * @note *왜 이렇게 오래 아무도 못 봤는가.* 아무 키나 아무 클릭이나 받는 타이틀 화면에는 조준할
+ *       포인터가 필요 없으므로, 숨겨진 커서는 타이틀이 메뉴가 되기 전까지 아무 비용도 들지
+ *       않았습니다. *겨냥해서* 클릭해야 하는 첫 화면이 곧 쓸 수 없게 된 첫 화면이었습니다. 이제는
+ *       프레임 루프가 묻습니다. 그 호출 지점의 참고 사항을 보십시오.
+ * @note 멱등이며, 그것이 매 프레임 묻는 것을 공짜로 만듭니다. ::cursor_show는 커서가 이미
+ *       요청받은 상태이면 즉시 반환합니다. */
 static void cursor_update(void) {
     /* The title and death screens do not steer a camera either, so the pointer
-       belongs to the player on those too. Same question, same answer, one
-       place.
+       belongs to the player on those too -- and a cutscene is a third: it takes
+       a click to turn a page, so the thing that clicks has to be visible.
+       Same question, same answer, one place, and it is the same list
+       ::screen_takes_press keeps for the same reason.
        타이틀 화면과 사망 화면도 카메라를 조작하지 않으므로 그곳에서도 포인터는
-       플레이어의 것입니다. 같은 질문, 같은 답, 한 곳입니다. */
-    cursor_show(menu_is_open() || g_world.run.title || g_world.run.dead || !g_focused);
+       플레이어의 것이며, 컷신이 세 번째입니다. 페이지를 넘기는 데 클릭을 받아들이므로 클릭하는
+       것이 보여야 합니다. 같은 질문, 같은 답, 한 곳이며, ::screen_takes_press가 같은 이유로
+       지키는 것과 같은 목록입니다. */
+    cursor_show(menu_is_open() || g_world.run.title || g_world.run.dead ||
+                g_world.run.cut || !g_focused);
 }
 
 /* ------------------------------------------------------------------ window */
@@ -475,23 +509,35 @@ static void menu_toggle_from_escape(void) {
     } else {
         g_warp_mouse = 1;
     }
-    cursor_update();
 }
 
 /**
  * @brief Is a press right now an answer to the screen in front of the player?
  *
- * ENGLISH: The title and death screens both take a press as an acknowledgement,
- * and from here they are one event -- what it MEANS is ::step_confirm's, which
- * is why this only asks whether one of them is up. A menu over either takes the
- * press instead.
+ * ENGLISH: The title screen, the death screen and a cutscene all take a press
+ * as an acknowledgement, and from here they are one event -- what it MEANS is
+ * ::step_confirm's, which is why this only asks whether one of them is up. A
+ * menu over any of them takes the press instead.
  *
- * 한국어: 타이틀 화면과 사망 화면 모두 누름을 응답으로 받아들이며, 이곳에서 보면 둘은 하나의
- * 사건입니다. 그것이 무엇을 *뜻하는지*는 ::step_confirm의 것이고, 그래서 이 함수는 둘 중
+ * @note The title is still on the list even though ::MENU_TITLE is always open
+ *       over it, which makes that half unreachable today. It stays because the
+ *       condition it states is still true -- a title screen with no menu takes
+ *       a press -- and a replay is exactly that case: ::menu_open_title is
+ *       skipped for a playback, and the recorded press is what clears the
+ *       title.
+ *
+ * 한국어: 타이틀 화면, 사망 화면, 컷신 모두 누름을 응답으로 받아들이며, 이곳에서 보면 셋은
+ * 하나의 사건입니다. 그것이 무엇을 *뜻하는지*는 ::step_confirm의 것이고, 그래서 이 함수는 그중
  * 하나가 떠 있는지만 묻습니다. 그 위에 메뉴가 있으면 누름은 메뉴가 가져갑니다.
+ *
+ * @note ::MENU_TITLE이 언제나 그 위에 열려 있어 오늘은 그 절반에 도달할 수 없는데도 타이틀이
+ *       목록에 남아 있습니다. 남는 이유는 그것이 진술하는 조건이 여전히 참이기 때문입니다.
+ *       메뉴가 없는 타이틀 화면은 누름을 받아들이며, 재생이 정확히 그 경우입니다. 재생에서는
+ *       ::menu_open_title을 건너뛰고, 기록된 누름이 타이틀을 지웁니다.
  */
 static int screen_takes_press(void) {
-    return (g_world.run.title || g_world.run.dead) && !menu_is_open();
+    return (g_world.run.title || g_world.run.dead || g_world.run.cut) &&
+           !menu_is_open();
 }
 
 /**
@@ -608,16 +654,24 @@ static int on_key_down(WPARAM wp) {
  * @param[in] right Non-zero for the right button.
  * @return Non-zero when the menu took the click.
  *
- * @note Activating RESUME closes the menu, so the cursor has to follow it back
- *       out on this very message -- waiting for the next focus change would
- *       leave a pointer floating over the game.
+ * @note Activating RESUME closes the menu, and the mouse delta accumulated
+ *       while the pointer was being used has to be thrown away or the view
+ *       snaps on the first frame back. The CURSOR is not this function's to
+ *       re-decide any more -- the frame loop asks ::cursor_update every frame,
+ *       so it follows before anything is drawn. This note used to say the
+ *       cursor had to follow "on this very message" because the alternative
+ *       was waiting for the next focus change; the alternative is now the end
+ *       of this frame.
  *
  * 한국어
  * ------
  * @brief 메뉴가 열려 있으면 클릭을 그것에 건넵니다.
  * @return 메뉴가 클릭을 가져갔으면 0이 아닌 값.
- * @note RESUME를 실행하면 메뉴가 닫히므로 커서도 바로 이 메시지에서 따라 나가야 합니다. 다음
- *       포커스 변경을 기다리면 게임 위에 포인터가 떠 있게 됩니다.
+ * @note RESUME를 실행하면 메뉴가 닫히며, 포인터를 쓰는 동안 쌓인 마우스 변화량은 버려야 합니다.
+ *       그러지 않으면 돌아온 첫 프레임에 시야가 튑니다. *커서*는 더 이상 이 함수가 다시 결정할
+ *       것이 아닙니다. 프레임 루프가 매 프레임 ::cursor_update에 물으므로 무엇이 그려지기 전에
+ *       따라옵니다. 이 참고 사항은 예전에 커서가 "바로 이 메시지에서" 따라와야 한다고 말했는데,
+ *       그 대안이 다음 포커스 변경이었기 때문입니다. 이제 그 대안은 이번 프레임의 끝입니다.
  */
 static int menu_takes_click(HWND w, LPARAM lp, int right) {
     if (!menu_is_open()) return 0;
@@ -627,7 +681,6 @@ static int menu_takes_click(HWND w, LPARAM lp, int right) {
                rc.right - rc.left, rc.bottom - rc.top, right);
 
     if (!menu_is_open()) g_warp_mouse = 1;
-    cursor_update();
     return 1;
 }
 
@@ -640,7 +693,11 @@ static int menu_takes_click(HWND w, LPARAM lp, int right) {
  *
  * @note Not an unconditional hide on the way in: returning to a PAUSED game has
  *       to keep the pointer, or the player is left operating a menu they cannot
- *       see. ::cursor_update is the one place that decides.
+ *       see. This function does not decide it at all now -- ::cursor_update
+ *       does, once a frame, and this one only records `g_focused` for it to
+ *       read. That is the fix for the bug this WAS: as the earliest focus
+ *       event of the process, it decided the pointer before the ::World it
+ *       decided from had been initialised.
  * @note On the way out the keys are cleared here, because they are this file's,
  *       and the grapple is asked for by the step, because it is not.
  *
@@ -650,8 +707,11 @@ static int menu_takes_click(HWND w, LPARAM lp, int right) {
  * @param[in] gained 포커스가 도착했으면 0이 아니고, 떠났으면 0.
  *
  * @note 들어올 때 무조건 숨기지 않습니다. *일시정지된* 게임으로 돌아올 때는 포인터를 유지해야
- *       하며, 그렇지 않으면 플레이어가 보이지 않는 메뉴를 조작하게 됩니다. 결정하는 곳은
- *       ::cursor_update 한 군데입니다.
+ *       하며, 그렇지 않으면 플레이어가 보이지 않는 메뉴를 조작하게 됩니다. 이제 이 함수는 그것을
+ *       결정하지 *않습니다*. ::cursor_update가 프레임당 한 번 결정하고, 이 함수는 그것이 읽을
+ *       `g_focused`를 기록할 뿐입니다. 이것이 이 함수가 *일으키던* 결함의 수정입니다. 프로세스에서
+ *       가장 이른 포커스 사건으로서, 자신이 근거로 삼는 ::World가 초기화되기도 전에 포인터를
+ *       결정했습니다.
  * @note 나갈 때 키는 이 파일의 것이므로 이곳에서 지우고, 그래플은 이 파일의 것이 아니므로
  *       스텝에게 요청합니다.
  */
@@ -666,7 +726,6 @@ static void on_focus_change(int gained) {
         g_edge.let_go = 1;   /* do not come back still roped to a wall */
         keys_release_all();
     }
-    cursor_update();
 }
 
 /**
@@ -738,13 +797,16 @@ static LRESULT CALLBACK wnd_proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
         }
         return 0;
 
-    /* The title and death screens take a click as readily as a key: the cursor
-       is visible on both, so clicking is what a player reaches for. The RIGHT
-       button does not, and that asymmetry is deliberate -- left is the answer
-       to a screen, right is the grapple.
-       타이틀 화면과 사망 화면은 키만큼이나 클릭도 받아들입니다. 양쪽 모두 커서가 보이므로
-       플레이어가 손을 뻗는 것은 클릭입니다. *오른쪽* 버튼은 그렇지 않으며 그 비대칭은
-       의도적입니다. 왼쪽은 화면에 대한 답이고 오른쪽은 그래플입니다. */
+    /* The screens ::screen_takes_press names take a click as readily as a key,
+       and a cutscene is now one of them: the pointer is where a hand already
+       is, and a page that only the keyboard could turn would be a screen that
+       ignores half the player. The RIGHT button still does not, and that
+       asymmetry is deliberate -- left is the answer to a screen, right is the
+       grapple.
+       ::screen_takes_press가 이름 짓는 화면들은 키만큼이나 클릭도 받아들이며, 이제 컷신도 그중
+       하나입니다. 포인터는 이미 손이 있는 자리이고, 키보드로만 넘길 수 있는 페이지는 플레이어의
+       절반을 무시하는 화면입니다. *오른쪽* 버튼은 여전히 그렇지 않으며 그 비대칭은 의도적입니다.
+       왼쪽은 화면에 대한 답이고 오른쪽은 그래플입니다. */
     case WM_LBUTTONDOWN:
         if (screen_takes_press()) { g_edge.confirm = 1; return 0; }
         if (!menu_takes_click(w, lp, 0)) g_mouse_down = 1;
@@ -1149,6 +1211,18 @@ static int app_start(HINSTANCE inst, int show, HDC *dc, Scene *scene) {
        게임은 창에 직접 렌더링합니다. 순전히 미관을 위한 패스 때문에 실행을 거부하는
        것은 잘못된 선택입니다. */
     menu_init(0);
+
+    /* BEFORE the first frame, because the title screen it feeds is the first
+       thing drawn: a locked ENDLESS row on a player who unlocked it last week
+       would be the save arriving one frame late, and one frame is enough to be
+       seen. A missing file is an empty save rather than a failure, so this
+       cannot fail in a way the caller has to answer for -- see save.h.
+       첫 프레임 *이전*입니다. 이것이 먹여 주는 타이틀 화면이 가장 먼저 그려지는 것이기
+       때문입니다. 지난주에 해금한 플레이어에게 잠긴 ENDLESS 행이 보이는 것은 저장이 한 프레임
+       늦게 도착한 것이며, 한 프레임이면 보이기에 충분합니다. 없는 파일은 실패가 아니라 빈
+       저장이므로, 호출자가 책임져야 하는 방식으로 실패할 수 없습니다. save.h를 참조하십시오. */
+    save_init();
+
     int cw, ch;
     client_size(&cw, &ch);
     gfx_apply_pixel_preset(menu_settings()->pixel, cw, ch);
@@ -1236,6 +1310,26 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
        프레임에 업로드합니다. */
     world_load_level(&g_world, g_world.cur_level, WORLD_ENTER_NEW);
 
+    /* --- the front screen ------------------------------------------------
+       AFTER the level, because the title is drawn over a real loaded room and
+       ::menu_open_title is what puts the rows in front of it. ::RunState::title
+       was already set by ::world_init; this is the half of the title screen
+       that belongs to the menu rather than to the run.
+       NOT DURING A PLAYBACK. A recording supplies the intent for every frame
+       and none of those frames chose a mode -- a menu in front of it would
+       freeze the world the replay is trying to drive, and the demo would sit
+       on its first frame waiting for a player who is not there. A replay
+       enters its recorded level directly, which is the entry demo.h says is
+       the only one a recording can reproduce.
+       *레벨 뒤*입니다. 타이틀은 실제로 로드된 방 위에 그려지고, 그 앞에 행들을 놓는 것이
+       ::menu_open_title이기 때문입니다. ::RunState::title은 ::world_init이 이미 세웠습니다. 이것은
+       타이틀 화면 중 플레이가 아니라 메뉴에 속하는 절반입니다.
+       *재생 중에는 하지 않습니다.* 기록은 모든 프레임의 의도를 공급하는데 그중 어느 프레임도
+       모드를 고르지 않았습니다. 그 앞의 메뉴는 재생이 구동하려는 월드를 정지시키고, 데모는 있지도
+       않은 플레이어를 기다리며 첫 프레임에 머무릅니다. 재생은 기록된 레벨로 곧장 진입하며, 그것이
+       기록이 재현할 수 있는 유일한 진입이라고 demo.h가 말하는 그 진입입니다. */
+    if (g_demo.drive.mode != DEMO_PLAY) menu_open_title();
+
     LARGE_INTEGER freq, prev_t;
     QueryPerformanceFrequency(&freq);
     QueryPerformanceCounter(&prev_t);
@@ -1262,12 +1356,50 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
            before the world it restarts is stepped.
            프레임마다 한 번 가져와 즉시 처리하므로, 재시작이 그것이 재시작할 월드를
            진행시키기 전에 일어납니다. */
-        switch (menu_take_action()) {
+        /* Taken into a local rather than switched on directly, because two of
+           the cases share a body and have to tell themselves apart inside it.
+           Taking it twice would be worse than untidy: ::menu_take_action clears
+           as it reports, so the second call would answer ::MENU_ACT_NONE and
+           every run would start in story mode.
+           직접 switch하지 않고 지역 변수로 받습니다. 두 case가 본문을 공유하면서 그 안에서 서로를
+           구별해야 하기 때문입니다. 두 번 가져오는 것은 단정하지 못한 정도가 아닙니다.
+           ::menu_take_action은 보고하면서 지우므로, 두 번째 호출은 ::MENU_ACT_NONE으로 답하고 모든
+           플레이가 스토리 모드로 시작하게 됩니다. */
+        MenuAction act = menu_take_action();
+        switch (act) {
         case MENU_ACT_QUIT:
             g_running = 0;
             break;
         case MENU_ACT_RESTART:
             g_world.run.restart_wanted = 1;
+            break;
+        case MENU_ACT_STORY:
+        case MENU_ACT_ENDLESS:
+            /* THE ONE PLACE A MODE IS TURNED INTO A RUN, and the whole of what
+               is left for this file to do is the window's half: close the menu and
+               throw away the mouse delta the cursor accumulated while it was
+               being used. The pointer itself is the per-frame
+               ::cursor_update's, which runs later in this same frame and sees
+               a title that is already down. ::world_begin owns the rest, including the refusal -- a room that
+               will not load leaves the title up, and every line below is a
+               no-op on a menu that is still open.
+               The title's own transition is not handled by the `was_title`
+               edge further down: that edge is read after this switch, so by the
+               time it runs the title is already gone. It stays for the path
+               that clears the title inside ::world_step, which is a replay.
+               *모드가 플레이가 되는 유일한 곳이며*, 이 파일에 남은 일의 전부는 창의 절반입니다.
+               메뉴를 닫고, 커서를 쓰는 동안 쌓인 마우스 변화량을 버리는 것입니다. 포인터 자체는 프레임당
+               ::cursor_update의 것이며, 그것은 같은 프레임의 뒤쪽에서 돌면서 이미 내려간 타이틀을
+               봅니다. 나머지는 거절까지 포함해 ::world_begin의 것입니다.
+               로드되지 않는 방은 타이틀을 그대로 두고, 아래의 모든 줄은 여전히 열려 있는 메뉴에
+               대해 아무 일도 하지 않습니다.
+               타이틀 자신의 전이는 아래쪽의 `was_title` 엣지가 처리하지 않습니다. 그 엣지는 이
+               switch 뒤에서 읽히므로, 그것이 돌 때 타이틀은 이미 사라져 있습니다. 그 엣지가
+               남는 것은 ::world_step 안에서 타이틀을 지우는 경로, 즉 재생을 위해서입니다. */
+            if (world_begin(&g_world, act == MENU_ACT_ENDLESS)) {
+                menu_close();
+                g_warp_mouse = 1;
+            }
             break;
         case MENU_ACT_DISPLAY: {
             apply_display_mode(menu_settings()->display);
@@ -1300,19 +1432,75 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
                          menu_settings()->sfx    * MENU_VOL_PER_STEP,
                          menu_settings()->music  * MENU_VOL_PER_STEP);
 
+        /* --- what the save and the menu owe each other ---------------------
+           ALL THREE STATED AS CONDITIONS, never fired as events, which is this
+           loop's own idiom -- the two lines above and ::music_play below are
+           the same shape. Every one of them is idempotent and says so in its
+           return, so none of them needs an edge to be detected first, and an
+           edge that has to be detected is an edge somebody eventually detects
+           in the wrong place.
+           WHAT EACH IS FOR:
+           - the unlocks reach the menu, so an ENDLESS row unlocked in this
+             session is choosable in this session rather than after a restart;
+           - the best wave is recorded as it is reached rather than when a run
+             ends, because a run does not always end politely and save.h's rule
+             is that a save flushed at exit is a save lost to every crash;
+           - beating the maw in story mode is the unlock, and `won` stays set,
+             so this writes the file once and reports nothing thereafter.
+           *셋 다 조건으로 진술되며 결코 사건으로 발화하지 않습니다.* 이 루프 자신의 관용구이고,
+           위의 두 줄과 아래의 ::music_play가 같은 형태입니다. 각각은 멱등이며 반환값으로 그렇다고
+           말하므로, 어느 것도 엣지를 먼저 감지할 필요가 없습니다. 그리고 감지되어야 하는 엣지는
+           결국 누군가 엉뚱한 곳에서 감지하게 되는 엣지입니다.
+           *각각이 무엇을 위한 것인가:*
+           - 해금이 메뉴에 닿으므로, 이번 세션에 해금된 ENDLESS 행을 재시작 뒤가 아니라 이번
+             세션에 고를 수 있습니다.
+           - 최고 웨이브는 플레이가 끝날 때가 아니라 도달할 때 기록됩니다. 플레이가 언제나
+             정중하게 끝나지는 않으며, 종료 시에 내보내는 저장은 모든 비정상 종료에 잃는
+             저장이라는 것이 save.h의 규칙입니다.
+           - 스토리 모드에서 아귀를 쓰러뜨리는 것이 곧 해금이고 `won`은 세워진 채 남으므로,
+             이것은 파일을 한 번 쓰고 그 뒤로는 아무것도 보고하지 않습니다. */
+        menu_set_unlocked(save_unlocks());
+        save_note_wave(g_world.run.wave_best);
+        if (g_world.run.won && !g_world.run.endless)
+            save_unlock(MENU_UNLOCK_ENDLESS);
+
         /* WHICH track, and it is stated as a CONDITION rather than fired as an
            event -- music_play is idempotent precisely so this can be. The title
-           screen has its own piece; a brute alive is the closest thing this
-           bestiary has to a boss (120hp against the next-toughest 40, and the
-           only monster that is slower than the player); everything else is
+           screen has its own piece, the maw has one, and everything else is
            ordinary play.
+           THE PARAGRAPH THAT WAS HERE justified a brute standing in for a boss:
+           "the closest thing this bestiary has to one, 120hp against the
+           next-toughest 40". The bestiary has a real one now and
+           ::world_boss_present answers from ::MON_BOSS, so that reasoning had
+           outlived what it was reasoning about -- the note in world.c says the
+           brute deliberately gets nothing in exchange.
+           THE THEME OUTLIVES THE MAW, by exactly as long as the fight is still
+           saying something. ::world_boss_present goes false on the frame the
+           maw dies, which is the frame its last line is posted and the frame
+           before the victory cutscene starts -- so the shortest condition cuts
+           the track out from under the one sentence the fight was building to,
+           and the win screen arrives in silence. The banner's own clock and the
+           cutscene are the two things that say the fight is not finished being
+           finished.
            *어느* 트랙인지이며, 사건으로 발화하지 않고 *조건*으로 진술합니다. music_play가
            멱등인 것이 바로 이것을 가능하게 하기 위함입니다. 타이틀 화면은 자기 곡을 가지고,
-           살아 있는 브루트는 이 도감이 가진 보스에 가장 가까운 것이며(다음으로 강한 것이
-           40일 때 120hp이고, 플레이어보다 느린 유일한 몬스터입니다), 그 밖은 평상시
-           플레이입니다. */
+           아귀도 하나 가지며, 그 밖은 평상시 플레이입니다.
+           *이곳에 있던 문단*은 브루트가 보스를 대신하는 것을 정당화했습니다. "이 도감이 가진 보스에
+           가장 가까운 것이며 다음으로 강한 것이 40일 때 120hp"였습니다. 이제 도감은 진짜 보스를
+           가졌고 ::world_boss_present는 ::MON_BOSS에서 답하므로, 그 근거는 자기가 근거 대던 것보다
+           오래 살아남아 있었습니다. 브루트가 그 대가로 아무것도 받지 않는다는 것은 world.c의
+           주석이 말합니다.
+           *테마는 아귀보다 오래갑니다.* 전투가 아직 무언가를 말하고 있는 딱 그만큼입니다.
+           ::world_boss_present는 아귀가 죽는 프레임에 거짓이 되는데, 그 프레임이 마지막 대사가
+           게시되는 프레임이자 승리 컷신이 시작되기 직전 프레임입니다. 그래서 가장 짧은 조건은
+           전투가 쌓아 올린 그 한 문장 아래에서 곡을 잘라 내고, 승리 화면은 침묵 속에 도착합니다.
+           배너 자신의 시계와 컷신이, 전투가 아직 끝나기를 끝내지 않았다고 말하는 둘입니다. */
+        int boss_music = world_boss_present(&g_world) ||
+                         g_world.run.boss_line ||
+                         g_world.run.cut == STORY_VICTORY + 1;
+
         music_play(g_world.run.title ? MUSIC_TITLE :
-                   world_boss_present(&g_world) ? MUSIC_BOSS : MUSIC_LEVEL);
+                   boss_music ? MUSIC_BOSS : MUSIC_LEVEL);
 
         /* REAL seconds, not world time: the music keeps playing behind a pause
            menu and across the between-levels screen. See music.h.
@@ -1358,22 +1546,36 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
            ::step_confirm으로 옮겨 갔고 이 절반만 남았습니다. */
         int was_title = g_world.run.title;
 
+        /* The cutscene, watched for the same reason and in the same place: it
+           shows the pointer while it is up, so the frame it arrives and the
+           frame it leaves are both frames on which the cursor's correct state
+           changed. Compared as a BOOLEAN rather than by value, because the
+           moment can change without the answer to "is a cutscene up" changing
+           and warping the mouse for that would throw away a delta for nothing.
+           같은 이유로 같은 자리에서 컷신도 지켜봅니다. 떠 있는 동안 포인터를 보여 주므로, 그것이
+           도착하는 프레임과 떠나는 프레임 둘 다 커서의 올바른 상태가 바뀐 프레임입니다. 값이
+           아니라 *불리언*으로 비교하는 이유는, "컷신이 떠 있는가"에 대한 답이 바뀌지 않은 채로
+           순간이 바뀔 수 있고 그 때문에 마우스를 워프하면 아무것도 아닌 일로 변화량을 버리기
+           때문입니다. */
+        int was_cut = (g_world.run.cut != 0);
+
         demo_put(&g_demo.drive, &in, vw, vh, dt);
 
         int frozen = world_step(&g_world, &in, sim_aspect, dt);
 
-        if (was_title && !g_world.run.title) {
+        if ((was_title && !g_world.run.title) ||
+            was_cut != (g_world.run.cut != 0)) {
             g_warp_mouse = 1;
-            cursor_update();
         }
 
         /* --- restart -------------------------------------------------------
            Three ways in -- the menu's RESTART row, a key on the death screen,
            and a click on it -- and all three arrive as the same flag, so there
            is one implementation. What is left here is the part that belongs to
-           the window: the menu has to close, the next mouse delta has to be
-           thrown away, and the cursor has to be re-decided AFTER `dead` has
-           changed.
+           the window: the menu has to close and the next mouse delta has to be
+           thrown away. The cursor is no longer on that list -- the per-frame
+           ::cursor_update below runs after this block, so it already sees a
+           `dead` that has changed.
 
            AFTER the step rather than before it, which is where this used to be.
            The flag is now raised BY the step -- ::step_confirm is what applies
@@ -1383,7 +1585,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
 
            진입로는 셋(메뉴의 RESTART 행, 사망 화면에서의 키, 그곳에서의 클릭)이며 셋 모두 같은
            플래그로 도착하므로 구현은 하나입니다. 이곳에 남은 것은 창에 속한 부분입니다. 메뉴를
-           닫고, 다음 마우스 변화량을 버리고, `dead`가 바뀐 *뒤에* 커서를 다시 결정해야 합니다.
+           닫고, 다음 마우스 변화량을 버려야 합니다. 커서는 더 이상 그 목록에 없습니다. 아래의 프레임당
+           ::cursor_update가 이 블록 뒤에 돌므로, 이미 바뀐 `dead`를 보고 있습니다.
 
            이전에 있던 자리인 스텝 *이전*이 아니라 스텝 *이후*입니다. 이제 그 플래그를 세우는
            것이 스텝이므로(사망 화면의 유예 시간을 적용하는 것이 ::step_confirm입니다) 먼저
@@ -1393,7 +1596,6 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
             world_restart(&g_world);
             menu_close();
             g_warp_mouse = 1;
-            cursor_update();
 
             /* Re-derived, because the frame about to be DRAWN is the restarted
                one and `frozen` describes the world the step ran against -- a
@@ -1407,6 +1609,54 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
             frozen = world_frozen(&g_world, menu_is_open());
         }
 
+        /* --- the pointer, decided rather than remembered --------------------
+           STATED AS A CONDITION, NEVER FIRED AS AN EVENT, which is the idiom
+           three other lines in this loop already use: ::audio_set_volume,
+           ::menu_set_unlocked and ::music_play are all here for the same
+           reason, and ::cursor_show is idempotent precisely so this can join
+           them.
+
+           IT USED TO BE AN EVENT AND THE EVENT CAME TOO EARLY. Cursor state was
+           set only by the five places that changed something -- a focus change,
+           ESC, a click the menu took, a restart, a title or cutscene edge --
+           and the FIRST of those is WM_SETFOCUS, which arrives inside
+           ::app_start while the window is being created. At that moment
+           ::world_init has not run, so `run.title` is still 0; ::menu_open_title
+           has not run either, so no menu is open. The one call that ever
+           decided the pointer therefore decided it from a ::World that did not
+           exist yet, hid it, and was never asked again.
+
+           Nothing looked wrong until the title screen became a MENU. A screen
+           that took any key or any click did not need a pointer to aim, so an
+           invisible cursor on the title was invisible in both senses for as
+           long as it has been there. The first screen that needed to be clicked
+           AT is the first screen that could not be used.
+
+           Asking every frame makes the answer a function of the state rather
+           than of the order two initialisers happen to run in -- which is the
+           only version of this that a later edit cannot quietly undo.
+
+           *조건으로 진술하고 결코 사건으로 발화하지 않습니다.* 이 루프의 다른 세 줄이 이미 쓰는
+           관용구입니다. ::audio_set_volume, ::menu_set_unlocked, ::music_play가 모두 같은 이유로
+           이곳에 있으며, ::cursor_show가 멱등인 것은 바로 이것이 그 셋에 합류할 수 있게 하기
+           위함입니다.
+
+           *이것은 사건이었고, 그 사건이 너무 일찍 왔습니다.* 커서 상태는 무언가를 바꾸는 다섯
+           곳에서만 정해졌습니다. 포커스 변경, ESC, 메뉴가 가져간 클릭, 재시작, 그리고 타이틀·컷신
+           엣지입니다. 그리고 그중 *첫 번째*인 WM_SETFOCUS는 창이 만들어지는 도중,
+           ::app_start 안에서 도착합니다. 그 순간 ::world_init은 아직 돌지 않아 `run.title`은 0이고,
+           ::menu_open_title도 돌지 않아 열린 메뉴가 없습니다. 그래서 포인터를 결정한 유일한
+           호출이 아직 존재하지 않는 ::World를 보고 결정했고, 숨겼고, 다시 질문받지 않았습니다.
+
+           타이틀 화면이 *메뉴*가 되기 전까지는 아무것도 잘못돼 보이지 않았습니다. 아무 키나 아무
+           클릭이나 받는 화면은 조준할 포인터가 필요 없었으므로, 타이틀의 보이지 않는 커서는 그것이
+           있어 온 내내 두 가지 의미로 보이지 않았습니다. *겨냥해서* 클릭해야 하는 첫 화면이 곧 쓸
+           수 없게 된 첫 화면이었습니다.
+
+           매 프레임 묻는 것은 답을 두 초기화가 마침 도는 순서가 아니라 상태의 함수로 만듭니다.
+           나중의 수정이 조용히 되돌릴 수 없는 판본은 그것뿐입니다. */
+        cursor_update();
+
         /* Hot reload: in a HOT_RELOAD build this notices an edit under the
            assets directory and rebuilds whatever came out of it, so a
            silhouette change appears in the running game -- in the real level,
@@ -1417,6 +1667,33 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
             wpview_reload_texture(&scene.wpview);   /* also flushes the texture cache */
             audio_reload();
             fx_reload(&g_world.pools);                  /* re-read effects.txt, drop live particles */
+
+            /* THE ONE ASSET THAT IS EDITED WHILE PLAYING. Tuning a drop rate
+               means killing a monster, deciding it paid too well, changing a
+               number and killing another -- so this costs nothing until the
+               next kill asks a question, which is what makes the loop tight
+               enough to be worth having. Live pickups keep the flare timing
+               they were given; only the rates and the purse are re-read.
+               *플레이 도중에 편집되는 유일한 에셋입니다.* 드롭 확률 조정이란 몬스터를 잡고,
+               지급이 후했다고 판단하고, 숫자를 바꾸고, 하나 더 잡는 일입니다. 그래서 다음
+               처치가 질문을 던지기 전까지는 아무 비용도 들지 않으며, 그것이 이 순환을 가질
+               만한 가치가 있을 만큼 짧게 만듭니다. 살아 있는 아이템은 부여받은 섬광 타이밍을
+               유지하고, 다시 읽히는 것은 확률과 몫뿐입니다. */
+            loot_reload();
+
+            /* THE OTHER ASSET THAT IS EDITED WHILE PLAYING, and for the same
+               reason one step over: a drop rate is tuned by killing something
+               and deciding it paid too well, and a line is tuned by reading it
+               on the screen it appears on and deciding it is too long. Costs
+               nothing until the next cutscene asks a question. A cutscene that
+               is up at this moment keeps its page and gets the new words under
+               it, which is what an author looking at the line wants.
+               *플레이 도중에 편집되는 다른 하나의 에셋*이며, 같은 이유를 한 걸음 옮긴
+               것입니다. 드롭 확률은 무언가를 잡고 지급이 후했다고 판단하며 조정하고, 대사는 그것이
+               나타나는 화면에서 읽고 너무 길다고 판단하며 조정합니다. 다음 컷신이 질문을 던지기
+               전까지 아무 비용도 들지 않습니다. 지금 떠 있는 컷신은 페이지를 유지한 채 그 아래에서
+               새 말을 받으며, 그 대사를 보고 있는 제작자가 원하는 것이 그것입니다. */
+            story_reload();
 
             /* After the flush, not before: tex_flush deletes every cached
                material, so resolving the level's materials first would leave

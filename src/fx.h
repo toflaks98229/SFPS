@@ -97,7 +97,7 @@ typedef struct MeshBuf MeshBuf;
    폭발이 네 겹이 되고 톱이 자기 것 둘을 얻으면서 16에서 올렸습니다. 상한을 넘는 정의는
    *버려집니다*. DIAG_FX_CAP으로 보고되기는 하지만 버려지므로, 증상은 아무 일도 하지 않는
    이펙트이며, 사라지는 것은 가장 나중에 추가된 것, 즉 아직 아무도 보지 않은 것입니다. */
-#define FX_MAX_DEFS      32   ///< @brief Effect definitions the text may hold. / 텍스트가 담을 수 있는 이펙트 정의 수.
+#define FX_MAX_DEFS      40   ///< @brief Effect definitions the text may hold. / 텍스트가 담을 수 있는 이펙트 정의 수.
 
 /**
  * @brief Particles alive at once, across every effect.

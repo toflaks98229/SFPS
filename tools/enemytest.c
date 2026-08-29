@@ -24,6 +24,7 @@
 static Pools g_pools;
 
 #include "player.h"   /* PLAYER_EYE -- projectiles are aimed at a standing body */
+#include "loot.h"     /* the drop a kill decides, and the one it owes */
 
 #define DT (1.0f / 60.0f)
 
@@ -88,7 +89,7 @@ int main(void) {
         for (int i = 0; i < 60 * 20; i++)      /* up to 20 s to arrive + swing */
             total += enemy_update(&g_pools, &L, player, DT);
         ok(total > 0, "it eventually lands a melee hit on the player");
-        ok(total >= mon_stats(MON_IMP)->damage, "for at least one swing of damage");
+        ok(total >= mon_stats(MON_WATER_SPIRIT)->damage, "for at least one swing of damage");
     }
 
     /* --- it stays inside the map the whole time --- */
@@ -103,7 +104,7 @@ int main(void) {
     {
         enemy_spawn_level(&g_pools, &L);                 /* fresh, full health */
         const Enemy *e = enemy_at(&g_pools, 0);
-        const MonType *S = mon_stats(MON_IMP);
+        const MonType *S = mon_stats(MON_WATER_SPIRIT);
         v3 eye = v3f(e->pos.x, e->pos.y + S->eye, e->pos.z - 5.0f);
         v3 dir = v3f(0, 0, 1);                  /* straight at it */
 
@@ -132,6 +133,37 @@ int main(void) {
         ok(!enemy_hitscan(&g_pools, eye, dir, 100.0f, &t, &idx),
            "the corpse cannot be hit again");
         ok(enemy_alive(&g_pools) == 0, "no monster is counted as alive");
+
+        /* --- and it is owed exactly once ---------------------------------
+           A corpse lies there for CORPSE_FADE seconds and world.c sweeps the
+           pool every frame, so "owed once" is the difference between a drop and
+           a fountain. It is also the one part of the drop that cannot be seen
+           in the game: an item arriving sixty times a second at the same point
+           looks like one item.
+           시체는 CORPSE_FADE초 동안 그 자리에 누워 있고 world.c는 매 프레임 풀을 훑으므로,
+           "한 번만 빚진다"가 드롭과 분수의 차이입니다. 또한 이것은 게임 안에서 볼 수 없는
+           유일한 부분이기도 합니다. 같은 지점에 초당 60번 도착하는 아이템은 아이템 하나처럼
+           보입니다. */
+        v3 at = v3f(0, 0, 0);
+        int owed = enemy_take_drop(&g_pools, 0, &at);
+        ok(owed == -1 || owed == LOOT_HELD || (owed >= 0 && owed < PK_KINDS),
+           "a corpse owes a real kind, the held pseudo-kind, or nothing");
+        ok(enemy_take_drop(&g_pools, 0, &at) == -1,
+           "and having handed it over, owes nothing more");
+
+        /* Wherever the body is, which is floor -- an item handed back at a
+           point off the floor would be tossed into the air or under it.
+           몸이 있는 자리이며 그곳은 바닥입니다. 바닥이 아닌 지점으로 돌려준 아이템은 공중이나
+           바닥 아래로 던져집니다. */
+        g_pools.enemy.m[0].drop = PK_HEALTH;
+        ok(enemy_take_drop(&g_pools, 0, &at) == PK_HEALTH,
+           "what it owes is what it hands over");
+        ok(at.x == g_pools.enemy.m[0].pos.x && at.z == g_pools.enemy.m[0].pos.z,
+           "handed over where the body actually fell");
+
+        ok(enemy_take_drop(&g_pools, -1, &at) == -1 &&
+           enemy_take_drop(&g_pools, 9999, &at) == -1,
+           "and a slot that is not there owes nothing");
     }
 
     /* --- the types are actually distinct -------------------------------------
@@ -139,7 +171,7 @@ int main(void) {
        roles the table is meant to encode, so a careless edit that makes the
        brute as fast as the hound gets caught. */
     {
-        const MonType *imp   = mon_stats(MON_IMP);
+        const MonType *imp   = mon_stats(MON_WATER_SPIRIT);
         const MonType *brute = mon_stats(MON_BRUTE);
         const MonType *hound = mon_stats(MON_HOUND);
 
@@ -151,21 +183,64 @@ int main(void) {
         ok(hound->height < imp->height,  "and lower to the ground");
         ok(hound->aspect > imp->aspect,  "and stockier than the imp");
 
-        ok(mon_type_for("imp")   == MON_IMP,   "entity 'imp' spawns an imp");
-        ok(mon_type_for("spawn") == MON_IMP,   "legacy 'spawn' still spawns an imp");
+        ok(mon_type_for("water_spirit") == MON_WATER_SPIRIT,
+           "entity 'water_spirit' spawns a water spirit");
+        /* BOTH OLD NAMES STILL RESOLVE. `spawn` is from when there was one
+           kind; `imp` is what this slot was called before the water spirit
+           took it, and two shipped maps place it. A rename that emptied the
+           levels already using it would be a rename nobody could make.
+           옛 이름 둘 다 여전히 해석됩니다. `spawn`은 종류가 하나뿐이던 시절의 것이고, `imp`는
+           물의 정령이 이 자리를 차지하기 전 이 슬롯의 이름이며 배포된 맵 둘이 그것을
+           배치합니다. 이미 그것을 쓰고 있는 레벨을 비우는 이름 변경은 아무도 할 수 없는
+           이름 변경입니다. */
+        ok(mon_type_for("imp")   == MON_WATER_SPIRIT, "legacy 'imp' still resolves");
+        ok(mon_type_for("spawn") == MON_WATER_SPIRIT, "and so does legacy 'spawn'");
         ok(mon_type_for("brute") == MON_BRUTE, "entity 'brute' spawns a brute");
         ok(mon_type_for("hound") == MON_HOUND, "entity 'hound' spawns a hound");
         ok(mon_type_for("caster")== MON_CASTER,"entity 'caster' spawns a caster");
         ok(mon_type_for("ammo")  < 0,          "a pickup entity spawns no monster");
 
-        /* The ranged type is defined by shot_speed alone -- there is no second
-           "is ranged" flag that could disagree with it. */
+        /* Ranged is defined by shot_speed alone -- there is no second "is
+           ranged" flag that could disagree with it.
+           원거리 여부는 shot_speed 하나로 정의됩니다. 그것과 어긋날 수 있는 두 번째
+           "원거리인가" 플래그는 없습니다. */
         const MonType *cast = mon_stats(MON_CASTER);
-        ok(cast->shot_speed > 0.0f,  "the caster is the only ranged type");
-        ok(imp->shot_speed == 0.0f && brute->shot_speed == 0.0f &&
-           hound->shot_speed == 0.0f, "and every melee type has no shot speed");
-        ok(cast->attack > imp->attack * 4.0f,
-           "its firing range dwarfs any melee reach");
+        ok(cast->shot_speed > 0.0f && imp->shot_speed > 0.0f,
+           "shot speed alone is what makes a type ranged");
+        ok(brute->shot_speed == 0.0f && hound->shot_speed == 0.0f,
+           "and the melee types carry none");
+
+        /* THREE DISTANCES, NOT TWO, and that is what the water spirit was
+           changed for. It used to be melee, which made the roster "in your
+           face or across the room" with nothing between -- so a player only
+           ever had two answers. Mid range is a third: close enough that
+           backing off does not break contact, far enough that closing costs
+           you the cone.
+           A ratio rather than a number, because 7.5 metres is a design
+           decision somebody will move and the RELATION is what must survive
+           the move.
+           *둘이 아니라 세 개의 거리*이며, 그것이 물의 정령을 바꾼 이유입니다. 예전에는
+           근접이었고, 그러면 진용이 "코앞이거나 방 건너"가 되어 그 사이가 없었습니다.
+           플레이어에게는 늘 두 가지 답뿐이었습니다. 중거리는 세 번째입니다. 물러나도 접촉이
+           끊기지 않을 만큼 가깝고, 붙으려면 원뿔을 감수해야 할 만큼 멉니다.
+           숫자가 아니라 *비율*인 이유는 7.5미터가 누군가 옮길 설계 결정이고, 그 이동을
+           견뎌야 하는 것은 *관계*이기 때문입니다. */
+        ok(imp->attack > brute->attack * 2.0f,
+           "the water spirit outranges every melee type");
+        ok(imp->attack < cast->attack * 0.75f,
+           "and still sits well inside the caster's, which is what mid means");
+
+        /* And it sprays. A volley is not a faster single shot: one aimed bolt
+           is answered by stepping aside and a cone is answered by leaving the
+           cone, which is a different move. Without this the water spirit would
+           be the caster at a shorter range.
+           그리고 난사합니다. 일제 사격은 더 빠른 단발이 아닙니다. 조준된 볼트 하나에는 옆으로
+           비켜서는 것으로 답하고 원뿔에는 그 원뿔에서 벗어나는 것으로 답합니다. 다른
+           동작입니다. 이것이 없으면 물의 정령은 사거리만 짧은 캐스터입니다. */
+        ok(imp->burst > 1 && imp->spread > 0.0f,
+           "it sprays a cone rather than firing one aimed bolt");
+        ok(cast->burst == 1 && brute->burst == 1,
+           "while everything else still fires or swings once");
         ok(cast->hp < imp->hp,       "but it is frailer than an imp");
         ok(cast->windup > imp->windup,
            "and telegraphs longer, so the bolt can be avoided");
@@ -186,7 +261,7 @@ int main(void) {
         ok(enemy_at(&g_pools, 0)->type == MON_BRUTE, "the brute entity spawned a brute");
         int pellets = 0;
         while (enemy_alive(&g_pools) && pellets < 200) { enemy_hurt(&g_pools, 0, 7, v3f(0,0,1)); pellets++; }
-        int imp_pellets = (int)ceilf(mon_stats(MON_IMP)->hp / 7.0f);
+        int imp_pellets = (int)ceilf(mon_stats(MON_WATER_SPIRIT)->hp / 7.0f);
         ok(pellets > imp_pellets * 2, "and took more than twice an imp's pellets");
     }
 
@@ -215,7 +290,7 @@ int main(void) {
         float held = dist_xz(enemy_at(&g_pools, 0)->pos, player);
         okf(held <= C->attack + 1.0f && held >= C->attack * 0.5f,
             "from far off it closes only to its firing range", held, C->attack);
-        ok(held > mon_stats(MON_IMP)->attack * 2.0f,
+        ok(held > mon_stats(MON_BRUTE)->attack * 2.0f,
            "which is nowhere near melee reach");
 
         /* Standing on top of it, it should give ground rather than stand there. */

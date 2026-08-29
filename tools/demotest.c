@@ -331,7 +331,9 @@ static void digest_print(const Digest *d) {
    and nothing else; none of them was chosen.
    `demotest -bless`가 채웁니다. 이곳의 모든 숫자는 아래의 실행이 만들어 낸 것이며 그 외에는
    없습니다. 어느 것도 사람이 고르지 않았습니다. */
-/* RE-BLESSED twice: for `landdust`, and for thickening the lava smoke. Worth recording what moved and what did not,
+/* RE-BLESSED four times: for `landdust`, for thickening the lava smoke, for
+   floor items giving off specks instead of carrying a halo, and for the water
+   spirit taking the imp's slot. Worth recording what moved and what did not,
    because the two answer different questions: `frng` changed and NOTHING ELSE
    did -- not the position, not the velocity, not the aim, not the health, not
    the monsters, not world_time. A hard landing now spawns a puff, so the
@@ -352,14 +354,52 @@ static void digest_print(const Digest *d) {
    moved `px` would not have been one.
    두 번째는 `srng`만 움직였고 이유도 같습니다. 연기가 더 자주 방출되므로 자기 난수가 더
    진행되었습니다. 두 번의 재승인이 같은 모양이며, 그것이 고집해야 할 모양입니다. `px`를
-   움직인 연출 변경은 연출 변경이 아니었을 것입니다. */
+   움직인 연출 변경은 연출 변경이 아니었을 것입니다.
+
+   THE THIRD MOVED `frng` AND NOTHING ELSE, and this one was worth the check
+   rather than merely surviving it. Floor items stopped carrying a halo and
+   started giving off `itemmote`, which means every pickup in the level now
+   spawns particles on a timer -- and the drop tables that arrived alongside it
+   roll ::EnemyPool::rng twice per kill. If either had leaked into the
+   simulation, `erng` would have moved with `frng` and the run would have
+   diverged at the first monster. `erng` is unchanged, so this demo killed
+   nothing, and `wrng` is unchanged, so nothing was thrown. The specks are the
+   whole diff.
+   세 번째는 `frng`만 움직였으며, 이번 것은 그저 통과한 것이 아니라 검사할 가치가 있었습니다.
+   바닥 아이템이 헤일로를 버리고 `itemmote`을 내보내기 시작했으므로, 이제 레벨의 모든 아이템이
+   타이머에 맞춰 입자를 생성합니다. 그리고 그와 함께 도착한 드롭 표는 처치마다
+   ::EnemyPool::rng를 두 번 굴립니다. 둘 중 하나라도 시뮬레이션으로 새어 들어갔다면 `erng`가
+   `frng`와 함께 움직였을 것이고 첫 몬스터에서 플레이가 어긋났을 것입니다. `erng`가 그대로이니
+   이 데모는 아무것도 죽이지 않았고, `wrng`가 그대로이니 아무것도 던져지지 않았습니다.
+   알갱이가 차이의 전부입니다.
+
+   THE FOURTH IS THE FIRST THAT SHOULD HAVE MOVED MORE THAN AN RNG, and that is
+   what makes it worth reading beside the other three. The imp was a melee
+   creature and the water spirit that replaced it holds mid range and sprays --
+   so the monster this demo walks past stopped swinging and started shooting.
+   `health` moved from 73 to 80 because four damage a bolt from seven metres is
+   not nine damage a swing from arm's length; `erng` moved because a volley
+   draws randoms a swing never did; `frng` followed the bolts.
+   What did NOT move is the whole point: `px`, `vx`, `yaw`, `pitch` and
+   `world_time` are bit-for-bit what they were. The recorded input is the same
+   input and it still lands in the same place -- the fight around the player
+   changed, the player did not.
+   네 번째는 난수 이상이 움직여야 마땅했던 첫 번째이며, 그것이 앞의 셋 곁에서 읽을 값어치를
+   만듭니다. 임프는 근접 생물이었고 그 자리를 대신한 물의 정령은 중거리를 유지하며 난사하므로,
+   이 데모가 지나치는 몬스터가 휘두르기를 그만두고 쏘기 시작했습니다. `health`가 73에서 80이
+   된 것은 7미터에서 발당 4의 피해가 팔 길이에서 한 번에 9의 피해와 같지 않기 때문이고,
+   `erng`가 움직인 것은 일제 사격이 휘두르기가 결코 뽑지 않던 난수를 뽑기 때문이며, `frng`는
+   볼트를 따라갔습니다.
+   *움직이지 않은 것*이 요점의 전부입니다. `px`, `vx`, `yaw`, `pitch`, `world_time`이 비트
+   단위로 그대로입니다. 기록된 입력은 같은 입력이고 여전히 같은 자리에 떨어집니다. 플레이어
+   주위의 전투가 바뀌었을 뿐 플레이어는 바뀌지 않았습니다. */
 static const Digest GOLDEN = {
     /* px py pz */ -12.2013168f, 2.84367466f, -14.8857975f,
     /* vx vy vz */ -0.312936455f, 1.9998908f, 0.38904506f,
     /* yaw pitch */ 0.382800102f, 0.534599602f,
-    /* health keys grounded */ 73, 0, 0,
+    /* health keys grounded */ 80, 0, 0,
     /* cur ammo */ 0, 0,
-    /* wrng srng erng frng */ 2972006077u, 522628529u, 2180890343u, 1524351959u,
+    /* wrng srng erng frng */ 2972006077u, 522628529u, 1060800797u, 1387843671u,
     /* enemies hp */ 1, 40,
     /* proj marks */ 0, 0,
     /* world_time */ 29.9002438f

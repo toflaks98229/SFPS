@@ -20,6 +20,15 @@
 #include "player.h"       /* PLAYER_EYE, to turn an eye position into feet */
 #include "audio.h"
 #include "fx.h"
+/* loot_mote -- how long a fresh item announces itself, and how often any item
+   gives off a speck. Read here rather than passed in, because the moment an
+   item arrives is the moment it is decided and pickup.c is where that moment
+   is -- and because the emitter is here too.
+   loot_mote입니다. 갓 도착한 아이템이 얼마나 오래 자신을 알리는지, 그리고 아무 아이템이나
+   얼마나 자주 알갱이를 내보내는지입니다. 인자로 받지 않고 이곳에서 읽는 이유는, 그것이
+   정해지는 순간이 아이템이 도착하는 순간이고 그 순간이 있는 곳이 pickup.c이기 때문이며,
+   내보내는 쪽도 이곳이기 때문입니다. */
+#include "loot.h"
 #include "diag.h"
 #include <math.h>
 
@@ -31,6 +40,12 @@
 /* --- Static function prototypes / 정적 함수 프로토타입 --- */
 
 static int pickup_kind_for(const char *k);
+/* Declared rather than moved: ::pickup_spawn_level and ::pickup_toss both seed
+   a mote clock, and both sit above the emitter that owns the idea. See
+   ::Pickup::mote.
+   옮기지 않고 선언합니다. ::pickup_spawn_level과 ::pickup_toss 둘 다 티끌 시계를 심는데,
+   둘 다 그 개념을 소유한 방출부보다 위에 있습니다. ::Pickup::mote를 참조하십시오. */
+static float mote_stagger(int slot);
 
 /* --- Public function definitions / 공개 함수 정의 --- */
 
@@ -80,6 +95,7 @@ void pickup_spawn_level(Pools *pl, const Level *l) {
         p->kind   = kind;
         p->pos    = v3f(x, f, z);
         p->anim   = (float)(pl->pickup.count) * 1.3f;   /* desync the bobbing */
+        p->mote   = mote_stagger(pl->pickup.count - 1);
         p->active = 1;
     }
 }
@@ -110,15 +126,115 @@ int pickup_toss(Pools *pl, int kind, v3 from, v3 vel) {
     p->kind   = kind;
     p->pos    = from;
     p->vel    = vel;
+    /* Desynced by slot, the same way ::pickup_spawn_level does it and for one
+       more reason than it had: the bob was the only thing this clock drove
+       until the halo started breathing on it, and a ring of a dozen items
+       thrown on the same frame from anim 0 would swell and settle in unison --
+       which reads as one object with twelve parts rather than twelve items.
+       ::pickup_spawn_level과 같은 방식으로 슬롯에 따라 어긋나게 하며, 그때보다 이유가 하나
+       더 있습니다. 헤일로가 이 시계로 숨 쉬기 전까지 이것이 움직이던 것은 위아래 움직임뿐
+       이었습니다. 같은 프레임에 anim 0에서 던져진 열몇 개의 고리는 한목소리로 부풀었다
+       가라앉는데, 그것은 아이템 열두 개가 아니라 부분이 열둘인 물체 하나로 읽힙니다. */
+    p->anim   = (float)(p - pl->pickup.p) * 1.3f;
+    /* Every tossed item announces itself, whether it came off a corpse or out
+       of a cleared wave. Not conditional on which, because the player has no
+       way to tell the two apart and no reason to want to: both are "something
+       arrived that was not there".
+       던져진 모든 아이템이 자신을 알립니다. 시체에서 나왔든 정리된 웨이브에서 나왔든
+       마찬가지입니다. 어느 쪽인지에 따라 나누지 않는 이유는, 플레이어에게 둘을 구분할
+       방법도 그럴 이유도 없기 때문입니다. 둘 다 "없던 것이 도착했다"입니다. */
+    p->flare  = loot_mote()->hold;
+    p->mote   = mote_stagger((int)(p - pl->pickup.p));
     p->active = 1;
     return 1;
+}
+
+/* Where an item's mote clock starts, so a room's worth of them do not tick
+   together. See ::Pickup::mote.
+
+   Derived from the SLOT rather than from a generator: this runs in the same
+   world a recorded demo replays, and a spawn point that consulted a random
+   number would put every particle in the level one step out of phase with the
+   recording for no benefit at all. Prime-ish steps of 0.11s spread sixty-four
+   items across seven seconds and repeat no offset within a pool.
+   아이템의 티끌 시계가 어디서 출발하는지입니다. 방 하나 분량이 함께 똑딱이지 않게 합니다.
+   ::Pickup::mote를 참조하십시오.
+
+   생성기가 아니라 *슬롯*에서 유도합니다. 이것은 기록된 데모가 재생하는 그 월드에서
+   돌아가며, 난수를 참조하는 시작점은 아무 이득도 없이 레벨의 모든 입자를 기록과 한 단계
+   어긋나게 만듭니다. 0.11초 단위는 아이템 64개를 7초에 걸쳐 퍼뜨리고 한 풀 안에서 같은
+   오프셋을 반복하지 않습니다. */
+static float mote_stagger(int slot) {
+    return (float)(slot & 63) * 0.11f;
+}
+
+/* One item's turn at giving off a speck.
+ *
+ * ENGLISH: Paced rather than spawned once, the same arrangement world.c has
+ * with the lava smoke and for the same reason: ::fx_spawn only knows how to be
+ * a burst, and what a floor item needs is a trickle that is still going when
+ * the player finally looks its way.
+ * The timer runs whether or not anything is spawned -- see ::Pickup::mote for
+ * why a paused one is worse than a wasted tick.
+ *
+ * 한국어: 한 번 생성하지 않고 조절해 뿌립니다. world.c가 용암 연기와 맺는 것과 같은 배치이며
+ * 이유도 같습니다. ::fx_spawn은 폭발이 될 줄만 알지만, 바닥 아이템에게 필요한 것은 플레이어가
+ * 마침내 그쪽을 볼 때까지도 이어지고 있는 흐름입니다.
+ * 타이머는 무언가 생성되든 아니든 돕니다. 멈춘 타이머가 낭비된 틱보다 나쁜 이유는
+ * ::Pickup::mote를 참조하십시오. */
+static void motes(Pools *pl, Pickup *p, v3 player_eye, float dt) {
+    const LootMote *m = loot_mote();
+
+    p->mote -= dt;
+    if (p->mote > 0.0f) return;
+
+    /* Reset off the flare, so an item that has just arrived is emitting four
+       times as fast as one that has been lying there -- which is the whole of
+       how "something appeared" is told apart from "something is here".
+       섬광을 기준으로 되돌립니다. 갓 도착한 아이템은 오래 놓여 있던 것보다 네 배 빠르게
+       내보내며, 그것이 "무언가 나타났다"와 "무언가 여기 있다"를 구분 짓는 전부입니다. */
+    p->mote = p->flare > 0.0f ? m->hurry : m->rate;
+
+    float dx = p->pos.x - player_eye.x, dz = p->pos.z - player_eye.z;
+    if (dx * dx + dz * dz > m->range * m->range) return;
+
+    /* From the LOWER PART of the billboard, not from the floor and not from its
+       middle. Specks that start at floor level spend the first third of their
+       life climbing to the item, and specks that start at its centre appear
+       out of nothing halfway up it -- from down here they rise THROUGH the
+       drawing, which is what makes them read as coming off it.
+       A literal, because the billboard's own lift lives in scene.c and a
+       drawing constant is not something the simulation should be reaching for:
+       what this number has to be right about is "inside the sprite, low", and
+       that stays true whatever the drawer does with the rest.
+       바닥도 한가운데도 아닌 빌보드의 *아래쪽*에서 나옵니다. 바닥 높이에서 출발한 알갱이는
+       수명의 첫 3분의 1을 아이템까지 오르는 데 쓰고, 한가운데에서 출발한 알갱이는 아이템의
+       중간에서 난데없이 나타납니다. 이 높이에서는 그림을 *뚫고* 올라가며, 그것이 알갱이가
+       아이템에서 나오는 것으로 읽히게 만듭니다.
+       리터럴인 이유는 빌보드의 들림 높이가 scene.c에 살고 있고, 시뮬레이션이 그리기 상수에
+       손을 뻗을 일은 아니기 때문입니다. 이 숫자가 맞혀야 하는 것은 "스프라이트 안쪽,
+       아래쪽"이며, 그리는 쪽이 나머지를 어떻게 하든 그것은 참으로 남습니다. */
+    fx_spawn(pl, "itemmote", v3f(p->pos.x, p->pos.y + 0.55f, p->pos.z),
+             v3f(0, 1, 0));
+}
+
+/* The frame a tossed item settles. One burst, at the item rather than under
+   it, and NOT the same effect a collection plays -- an arrival and a departure
+   that look alike is a player who cannot tell whether they just gained
+   something or lost it.
+   던져진 아이템이 안착하는 프레임입니다. 아래가 아니라 아이템 자리에 한 번, 그리고 획득이
+   재생하는 것과는 *다른* 이펙트입니다. 도착과 떠남이 똑같이 보인다는 것은, 플레이어가
+   방금 무언가를 얻었는지 잃었는지 구분할 수 없다는 뜻입니다. */
+static void land(Pools *pl, const Pickup *p) {
+    fx_spawn(pl, "itemland", v3f(p->pos.x, p->pos.y + 0.35f, p->pos.z),
+             v3f(0, 1, 0));
 }
 
 /* One item's flight. Returns non-zero while it is still in the air, which is
    also the answer to "may it be collected yet".
    아이템 하나의 비행입니다. 아직 공중에 있으면 0이 아닌 값을 반환하며, 그것은 "아직 획득할 수
    있는가"에 대한 답이기도 합니다. */
-static int fly(Pickup *p, const Level *l, float dt) {
+static int fly(Pools *pl, Pickup *p, const Level *l, float dt) {
     if (p->vel.x == 0.0f && p->vel.y == 0.0f && p->vel.z == 0.0f) return 0;
 
     p->vel.y -= PICKUP_GRAVITY * dt;
@@ -140,12 +256,14 @@ static int fly(Pickup *p, const Level *l, float dt) {
            떨어지는 대신 그 자리에 멈추므로, 구멍을 향해 던져진 보상은 사라지지 않고 닿을 수
            있는 곳에 남습니다. */
         p->vel = v3f(0, 0, 0);
+        land(pl, p);
         return 0;
     }
 
     if (p->pos.y <= f) {
         p->pos.y = f;
         p->vel   = v3f(0, 0, 0);
+        land(pl, p);
         return 0;
     }
     return 1;
@@ -167,6 +285,15 @@ void pickup_update(Pools *pl, const Level *l, v3 player_eye,
            아이템도 계속 움직입니다. */
         p->anim += dt;
 
+        /* BEFORE the flight test, so an item still in the air leaves a trail of
+           specks behind it. A reward thrown across a room and a reward that
+           appeared on the floor are the same item by the time it lands; the
+           trail is what makes the throw itself worth watching.
+           비행 판정보다 *앞*이므로, 아직 공중에 있는 아이템도 뒤에 알갱이 자국을 남깁니다.
+           방을 가로질러 던져진 보상과 바닥에 나타난 보상은 착지할 무렵이면 같은
+           아이템입니다. 던지는 것 자체를 볼 만하게 만드는 것이 그 자국입니다. */
+        motes(pl, p, player_eye, dt);
+
         /* IN THE AIR IS NOT COLLECTABLE, and that is the point rather than a
            limitation: the arc is what makes the reward noticed, and an item
            collected on the frame it was thrown never drew one. It also stops a
@@ -176,7 +303,16 @@ void pickup_update(Pools *pl, const Level *l, v3 player_eye,
            알아채이게 만드는 것인데, 던져진 프레임에 획득된 아이템은 포물선을 그린 적이
            없습니다. 또한 플레이어 자신의 발치에서 던져진 보상이 그 자리에 서 있는 플레이어에게
            즉시 흡수되는 것을 막습니다. */
-        if (fly(p, l, dt)) continue;
+        if (fly(pl, p, l, dt)) continue;
+
+        /* Counted down only now, past the flight test, which is what holds the
+           flare at full while the item is still in the air. See ::Pickup::flare.
+           비행 판정을 지난 지금에야 감소시킵니다. 그것이 아이템이 아직 공중에 있는 동안
+           섬광을 최대로 붙들어 두는 방법입니다. ::Pickup::flare를 참조하십시오. */
+        if (p->flare > 0.0f) {
+            p->flare -= dt;
+            if (p->flare < 0.0f) p->flare = 0.0f;
+        }
 
         /* Squared distance, avoiding a square root in the common
            "not close enough" case.

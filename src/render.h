@@ -417,6 +417,7 @@ enum {
     PROC_RUST,          /**< Rusted metal. / 녹슨 금속. */
     PROC_GRID,          /**< Emissive tech grid. / 발광하는 기술 격자. */
     PROC_LAVA,          /**< Molten rock: dark crust broken by glowing cracks. / 녹은 암석. 어두운 껍질이 빛나는 균열로 갈라져 있습니다. */
+    PROC_WINDOW,        /**< Glazed facade: dark panes with lit rooms behind some of them. / 유리 외벽. 어두운 창살 중 일부 뒤에 불 켜진 방이 있습니다. */
     PROC_COUNT          /**< Total number of procedural shaders. / 절차적 셰이더의 총 개수. */
 };
 

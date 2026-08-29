@@ -568,6 +568,171 @@ int main(void) {
         ok(l && !l[0] && v && !v[0], "and so does one past the end");
     }
 
+    /* --- the front screen ------------------------------------------------
+     *
+     * THE ONE SCREEN THAT CANNOT BE CLOSED, and the reason is what is behind
+     * it: nothing. Every other screen here is drawn over a run in progress, so
+     * closing it hands the player back what they were doing; there is no run
+     * yet when this is up, so a close would leave them looking at a frozen
+     * room with nothing to press. That is a rule with no visible symptom until
+     * it is wrong in front of somebody, which is what this whole file is for.
+     *
+     * *닫을 수 없는 유일한 화면이며*, 이유는 그 뒤에 있는 것, 즉 아무것도 없다는 것입니다.
+     * 이곳의 다른 모든 화면은 진행 중인 플레이 위에 그려지므로 닫으면 플레이어가 하던 것을
+     * 돌려받습니다. 이것이 떠 있을 때는 아직 플레이가 없으므로, 닫으면 누를 것도 없이 정지된
+     * 방을 바라보게 됩니다. 누군가의 앞에서 잘못되기 전까지 눈에 보이는 증상이 없는 규칙이며,
+     * 이 파일 전체가 그것을 위해 있습니다. */
+    printf("\n  --- the title screen ---\n");
+
+    menu_init(0);
+    menu_open_title();
+    ok(menu_is_open(),                    "menu_open_title opens the menu");
+    ok(menu_screen() == MENU_TITLE,       "on the front screen");
+    ok(menu_take_action() == MENU_ACT_NONE, "and asks for nothing by opening");
+
+    {
+        /* Twenty presses, the same sweep the root screen gets above, and for
+           the same claim in reverse: there ESC must never quit, here it must
+           never close.
+           스무 번의 누름이며, 위에서 최상위 화면이 받는 것과 같은 훑기이자 반대 방향의 같은
+           주장입니다. 그곳에서 ESC는 결코 종료하지 않아야 하고, 이곳에서는 결코 닫지 않아야
+           합니다. */
+        int closed = 0;
+        for (int i = 0; i < 20; i++) {
+            menu_escape();
+            if (!menu_is_open()) closed = 1;
+        }
+        ok(!closed, "no number of ESC presses closes the title");
+        ok(menu_screen() == MENU_TITLE, "and it is still the screen showing");
+    }
+
+    /* Settings and credits open from here and come BACK here, not to the pause
+       root. The root is a screen that only exists over a run, and landing on it
+       from the title would offer RESUME and RESTART for a run that has not
+       started.
+       설정과 크레딧은 이곳에서 열리고 일시정지 최상위가 아니라 *이곳으로* 돌아옵니다. 최상위는
+       플레이 위에만 존재하는 화면이며, 타이틀에서 그곳에 놓이면 시작되지도 않은 플레이에 대해
+       RESUME과 RESTART를 제시하게 됩니다. */
+    ok(select_row("SETTINGS"), "the title screen has a settings row");
+    menu_activate();
+    ok(menu_screen() == MENU_SETTINGS, "which opens the settings");
+    menu_escape();
+    ok(menu_screen() == MENU_TITLE,
+       "and ESC from there comes back to the title, not to the pause root");
+
+    ok(select_row("SETTINGS"), "the settings row is still findable");
+    menu_activate();
+    ok(select_row("BACK"), "the settings screen has a BACK row");
+    menu_activate();
+    ok(menu_screen() == MENU_TITLE, "and BACK goes home too, wherever home is");
+
+    /* The same two rows, from a run this time. Home is the pause root now, and
+       nothing about the rows changed -- which is the whole point of ROW_BACK
+       being a kind rather than a screen id written into the table.
+       이번에는 플레이에서 같은 두 행입니다. 이제 집은 일시정지 최상위이고 행에 대해서는 아무것도
+       바뀌지 않았습니다. ROW_BACK이 표에 적힌 화면 id가 아니라 *종류*인 요점 전부가 그것입니다. */
+    menu_init(0);
+    menu_escape();
+    ok(menu_screen() == MENU_ROOT, "during a run, ESC opens the pause root");
+    ok(select_row("SETTINGS"), "settings is reachable from it");
+    menu_activate();
+    ok(select_row("BACK"),     "and the settings screen offers BACK");
+    menu_activate();
+    ok(menu_screen() == MENU_ROOT, "which lands on the root rather than the title");
+    menu_escape();
+    ok(!menu_is_open(), "and ESC from the root still closes, as it always did");
+
+    /* --- locked rows -----------------------------------------------------
+     *
+     * A LOCKED ROW IS VISIBLE, REACHABLE AND INERT, and each third of that is
+     * a separate decision. Hidden, it would be a mode nobody knows to want.
+     * Skipped by the cursor, the highlight would jump two places for a reason
+     * nothing on screen explains. Choosable, the unlock would mean nothing.
+     *
+     * *잠긴 행은 보이고, 닿을 수 있고, 반응하지 않으며*, 그 셋은 각각 별개의 결정입니다.
+     * 숨기면 아무도 원할 줄 모르는 모드가 됩니다. 커서가 건너뛰면 화면의 어느 것도 설명하지
+     * 않는 이유로 강조가 두 칸씩 뜁니다. 고를 수 있으면 해금이 아무 뜻도 없게 됩니다. */
+    printf("\n  --- locked rows ---\n");
+
+    menu_init(0);
+    menu_set_unlocked(0);
+    menu_open_title();
+
+    int endless_row = row_named("ENDLESS");
+    ok(endless_row >= 0, "the endless row is on the title screen from the start");
+    ok(menu_row_locked(endless_row), "and it is locked with nothing unlocked");
+    ok(!menu_row_locked(row_named("STORY")),
+       "while a row that requires nothing is not");
+
+    /* Reachable: the cursor lands on it by walking, exactly as it lands on any
+       other row.
+       닿을 수 있음. 커서는 다른 어떤 행에 놓이는 것과 정확히 같이 걸어서 그 위에 놓입니다. */
+    ok(select_row("ENDLESS"), "the cursor can be walked onto it");
+    ok(menu_cursor() == endless_row, "and stops there rather than passing over");
+
+    /* Inert: every way in. ENTER, a left click and a right click all have to
+       refuse, and they are three separate paths into menu.c.
+       반응하지 않음. 모든 진입로에 대해서입니다. ENTER, 왼쪽 클릭, 오른쪽 클릭이 모두 거절해야
+       하며, 그것들은 menu.c로 들어가는 세 개의 별개 경로입니다. */
+    menu_activate();
+    ok(menu_take_action() == MENU_ACT_NONE, "ENTER on it asks for nothing");
+    {
+        float x0, y0, x1, y1;
+        menu_row_bounds(endless_row, VW, VH, &x0, &y0, &x1, &y1);
+        float cx = (x0 + x1) * 0.5f, cy = (y0 + y1) * 0.5f;
+
+        ok(menu_click(cx, cy, VW, VH, 0) == 1,
+           "a click on it reports a hit -- it IS a row, and the world must not get the button");
+        ok(menu_take_action() == MENU_ACT_NONE, "but asks for nothing");
+
+        ok(menu_click(cx, cy, VW, VH, 1) == 1, "and the right button hits it too");
+        ok(menu_take_action() == MENU_ACT_NONE, "and asks for nothing either");
+    }
+
+    /* Unlocked, it is an ordinary row and the SAME row -- same index, same
+       label. A row that moved when it became available would make the unlock
+       read as the menu being rebuilt.
+       해금되면 평범한 행이자 *같은* 행입니다. 같은 인덱스, 같은 레이블입니다. 사용 가능해질 때
+       자리를 옮기는 행은 해금을 메뉴가 다시 만들어진 것으로 읽히게 합니다. */
+    menu_set_unlocked(MENU_UNLOCK_ENDLESS);
+    ok(menu_unlocked() == MENU_UNLOCK_ENDLESS, "the mask is reported back");
+    ok(row_named("ENDLESS") == endless_row, "unlocking does not move the row");
+    ok(!menu_row_locked(endless_row),        "and it stops being locked");
+
+    ok(select_row("ENDLESS"), "the cursor goes back to it");
+    menu_activate();
+    ok(menu_take_action() == MENU_ACT_ENDLESS, "and now ENTER asks for an endless run");
+
+    /* STORY is what a first launch can choose, and it is the only thing between
+       a new player and the game. If this ever needed an unlock there would be
+       no way in at all.
+       STORY는 첫 실행이 고를 수 있는 것이며, 새 플레이어와 게임 사이에 있는 유일한 것입니다.
+       이것이 언젠가 해금을 필요로 하게 되면 입구가 아예 없어집니다. */
+    menu_set_unlocked(0);
+    ok(select_row("STORY"), "story is on the title screen");
+    menu_activate();
+    ok(menu_take_action() == MENU_ACT_STORY,
+       "and is choosable with nothing unlocked -- a first launch has a way in");
+
+    /* Out of range is not locked, so a drawing loop that runs one row long gets
+       the same shrug menu_row_text gives it rather than a second answer.
+       범위를 벗어난 행은 잠긴 것이 아닙니다. 그래야 한 행을 더 도는 그리기 루프가 두 번째 답이
+       아니라 menu_row_text가 주는 것과 같은 대답을 받습니다. */
+    ok(!menu_row_locked(-1) && !menu_row_locked(9999),
+       "a row out of range is not locked");
+
+    /* menu_close is what a chosen mode leaves behind, and the title must not be
+       home any more once it has run -- "closed" and "home is the title" cannot
+       both be true.
+       menu_close는 고른 모드가 남기는 것이며, 그것이 돈 뒤에는 타이틀이 더 이상 집이어서는 안
+       됩니다. "닫힘"과 "집이 타이틀"은 동시에 참일 수 없습니다. */
+    menu_open_title();
+    menu_close();
+    ok(!menu_is_open(), "menu_close closes the title screen");
+    menu_escape();
+    ok(menu_screen() == MENU_ROOT,
+       "and ESC afterwards opens the pause root, not the title again");
+
     printf("\n%s\n", fails ? "SOME MENU CHECKS FAILED" : "all menu checks passed");
     return fails != 0;
 }

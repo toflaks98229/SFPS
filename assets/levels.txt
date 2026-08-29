@@ -48,16 +48,19 @@
 
 l arena
 start 0 1200 0
-# atrium is assets\maps\atrium.map, a TrenchBroom level. Naming it here is all
-# it takes to put a .map into the campaign: level_load looks for a .map before
-# it looks in this file, so a name resolves to a brush level if one exists and
-# to a level below if one does not. atrium's own worldspawn carries `next vault`,
-# so the chain closes without anything here saying so.
-# atrium은 assets\maps\atrium.map이며 TrenchBroom 레벨입니다. .map을 캠페인에 넣는 데
-# 필요한 것은 이곳에 이름을 적는 것뿐입니다. level_load는 이 파일보다 .map을 먼저 찾으므로,
-# 이름은 브러시 레벨이 있으면 그쪽으로, 없으면 아래의 레벨로 해석됩니다. atrium 자신의
-# worldspawn이 `next vault`를 나르므로 이곳에서 아무 말을 하지 않아도 체인이 닫힙니다.
-next atrium
+# `next vault`, and it used to be `next atrium` -- a TrenchBroom .map that sat
+# in the middle of this chain to demonstrate that it could. That demonstration
+# cost a shipped map, and the map went when the game stopped shipping every
+# level it could not reach. The mechanism it showed is unchanged and still
+# reachable: level_load looks for a .map before it looks in this file, so
+# writing a brush level's name here puts it in the campaign and nothing else is
+# needed.
+# `next vault`이며, 이것은 `next atrium`이었습니다. 그럴 수 있다는 것을 보이려고 이 사슬
+# 가운데에 앉아 있던 TrenchBroom .map입니다. 그 시연은 출하되는 맵 하나를 치렀고, 게임이
+# 도달할 수 없는 레벨을 전부 출하하기를 그만두면서 그 맵도 갔습니다. 그것이 보여 준 기법은
+# 그대로이고 여전히 쓸 수 있습니다. level_load는 이 파일보다 .map을 먼저 찾으므로, 브러시
+# 레벨의 이름을 이곳에 적는 것만으로 캠페인에 들어가며 그 밖에 필요한 것은 없습니다.
+next vault
 
 s
 floor -50  ceil 600

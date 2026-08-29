@@ -6,8 +6,29 @@ NAMING decides where a drawing lands. The name is "<subject><frame>":
     brute2.png   monster "brute", frame 2
     shotgun0.png the weapon "shotgun", pose 0
 
-Monsters:  imp  brute  hound  caster
+Monsters:  water_spirit  brute  hound  caster  wraith
 Frames:    0 walk-A   1 walk-B   2 attack   3 hurt   4 dead
+
+A NAME THAT ENDS IN A LETTER MEANS EVERY FRAME.
+
+    brute2.png   one frame of the brute
+    brute.png    all five of them
+
+That is what a half-finished creature needs. A new monster arrives as ONE
+drawing -- somebody draws it standing before they draw it walking, attacking
+and dying -- and without this rule the only way to see it in the game was to
+copy the same file five times under five names. Five identical pictures in the
+tree, five copies in the binary, and five files to delete one at a time as the
+real frames arrive.
+
+The override falls out of the sort: bake.ps1 emits drawings in name order and
+`.` sorts before `0`, so `brute` is always decoded before `brute0`. A
+subject-wide drawing lays down every frame; each numbered one painted after it
+replaces exactly its own. Adding `brute4.png` later is dropping in a file.
+
+`water_spirit`, `brute` and `caster` are each one drawing today, which is why
+they have no digits. Their death frames are not drawn yet -- frame 4 is
+currently the same picture as the rest, and a `<name>4.png` will take it.
 
 Weapons:   shotgun  grenade  rapid  axe   -- named for weapon.c's WEAPONS table
 Poses:     shotgun  0 idle   1 pump-A  2 pump-B  3 pump-C   (SHTG A B C D)

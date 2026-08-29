@@ -27,6 +27,19 @@
 #include "door.h"
 #include "brush.h"
 #include "fx.h"
+/* The rates, the purse, the drop point and the shrine -- all of it is
+   assets\loot.txt, so that retuning any of them is saving a file.
+   확률, 몫, 낙하 지점, 제단. 전부 assets\loot.txt이므로, 그중 무엇을 조정하든 파일을
+   저장하는 일이 됩니다. */
+#include "loot.h"
+/* The three things said outside the fight, for loot.h's reason applied to
+   words: a line is what gets rewritten most and is worth a rebuild least.
+   This file only ever asks how many pages a moment has and what is on one --
+   the parsing and the file are story.c's.
+   전투 바깥에서 하는 세 가지 말이며, loot.h의 이유를 말에 적용한 것입니다. 대사는 가장 많이
+   다시 쓰이고 재빌드를 치를 가치는 가장 적습니다. 이 파일이 묻는 것은 어떤 순간이 몇 페이지를
+   가지는지와 한 페이지에 무엇이 있는지뿐입니다. 파싱과 파일은 story.c의 것입니다. */
+#include "story.h"
 #include "audio.h"
 #include "txt.h"
 #include "diag.h"
@@ -298,6 +311,60 @@ static void step_look_move(World *w, const Input *in, float aspect, float dt) {
 /* ----------------------------------------------------------------- damage */
 
 /**
+ * @brief Hands over what the corpses in this level owe the floor.
+ *
+ * ENGLISH
+ * -------
+ * The roll happened at the instant of death, inside ::enemy_hurt, because that
+ * is where the demo-replayable generator lives. This is the other half: which
+ * ammo box ::LOOT_HELD means is a question about the player's roster, and the
+ * roster is here. See ::Enemy::drop for the whole of that argument.
+ *
+ * ONE PASS PER FRAME OVER THE WHOLE POOL, and it is cheap for the reason the
+ * pool is small: ::enemy_take_drop answers -1 for every slot that owes nothing,
+ * which on almost every frame is all of them. A queue would be a second place a
+ * drop can be lost.
+ *
+ * The toss goes straight UP rather than outward. A reward is a ring because it
+ * is a purse arriving at once; a corpse's drop is one item and belongs where the
+ * body fell, which is also the spot the player is already looking at.
+ *
+ * @param[in,out] w The world.
+ *
+ * 한국어
+ * ------
+ * @brief 이 레벨의 시체들이 바닥에 빚진 것을 건네받습니다.
+ *
+ * 굴림은 죽는 순간 ::enemy_hurt 안에서 일어났습니다. 데모가 재생 가능한 생성기가 그곳에 있기
+ * 때문입니다. 이것은 나머지 절반입니다. ::LOOT_HELD가 어느 탄약 상자를 뜻하는지는 플레이어의
+ * 보유 목록에 대한 질문이고, 그 목록이 이곳에 있습니다. 그 논거 전체는 ::Enemy::drop을
+ * 참조하십시오.
+ *
+ * 프레임마다 풀 전체를 한 번 훑으며, 풀이 작기 때문에 저렴합니다. ::enemy_take_drop은 빚진
+ * 것이 없는 모든 슬롯에 -1로 답하는데, 거의 모든 프레임에서 그것이 전부입니다. 큐는 드롭이
+ * 사라질 수 있는 두 번째 장소가 됩니다.
+ *
+ * 던지기는 바깥이 아니라 *위로* 향합니다. 보상이 고리인 것은 몫이 한꺼번에 도착하기
+ * 때문이고, 시체의 드롭은 하나이며 몸이 쓰러진 자리에 놓여야 합니다. 그 자리는 플레이어가
+ * 이미 보고 있는 자리이기도 합니다.
+ */
+static void step_drops(World *w) {
+    int gun = 0;
+
+    for (int i = 0, n = enemy_count(&w->pools); i < n; i++) {
+        v3 at;
+        int kind = enemy_take_drop(&w->pools, i, &at);
+        if (kind < 0) continue;
+
+        if (kind == LOOT_HELD) {
+            kind = loot_held_kind(&w->weapon, &gun);
+            if (kind < 0) continue;
+        }
+        pickup_toss(&w->pools, kind, at, v3f(0, PICKUP_TOSS_UP * 0.55f, 0));
+    }
+}
+
+/**
  * @brief Monsters, hazard floors, and the one place death is noticed.
  *
  * ENGLISH
@@ -326,6 +393,16 @@ static void step_damage(World *w, float dt) {
     audio_listener(w->player.pos);
 
     int dmg = enemy_update(&w->pools, &w->level, w->player.pos, dt);
+
+    /* Drained on the same frame the monsters were stepped, so a kill this frame
+       leaves its item this frame. Here rather than in ::world_step because this
+       is the one function that has just moved the monsters, and a drop noticed
+       anywhere else is a drop noticed a frame late.
+       몬스터가 진행된 바로 그 프레임에 비웁니다. 그래야 이번 프레임의 처치가 이번 프레임에
+       아이템을 남깁니다. ::world_step이 아니라 이곳인 이유는 몬스터를 방금 움직인 함수가
+       이것 하나이기 때문이며, 다른 어디에서 알아챈 드롭은 한 프레임 늦게 알아챈 드롭입니다. */
+    step_drops(w);
+
     if (dmg > 0 && w->player.health > 0) {
         w->player.health -= dmg;
         if (w->player.health < 0) w->player.health = 0;
@@ -557,6 +634,22 @@ static int smoke_dart_brush(World *w, v3 *out) {
     return 1;
 }
 
+/**
+ * @brief Seconds between one mote of a burning shrine and the next.
+ *
+ * ENGLISH: Chosen against `altarmote`'s own 1600ms life: at this interval about
+ * eight are in the air at once, which is enough to read as a column from across
+ * the room and few enough that none of them has to be bright. Denser and the
+ * shrine glares; sparser and it flickers, and a flicker reads as something
+ * breaking rather than as something waiting for you.
+ *
+ * 한국어: `altarmote` 자신의 1600ms 수명에 맞춰 정했습니다. 이 간격이면 여덟쯤이 동시에
+ * 공중에 있는데, 방 건너에서 기둥으로 읽히기에 충분하고 그중 어느 것도 밝을 필요가 없을 만큼
+ * 적습니다. 더 촘촘하면 제단이 눈부시고, 더 성기면 깜박이며, 깜박임은 당신을 기다리는
+ * 무언가가 아니라 고장 나는 무언가로 읽힙니다.
+ */
+#define ALTAR_MOTE_INTERVAL 0.20f
+
 static void step_smoke(World *w, float dt) {
     w->run.smoke_timer -= dt;
     if (w->run.smoke_timer > 0.0f) return;
@@ -624,7 +717,144 @@ static void step_smoke(World *w, float dt) {
  *       만드는 일이고, 호출자에게는 닫을 메뉴와 `dead`가 바뀐 뒤에 다시 결정할 커서가
  *       있습니다. ::door_update가 "무언가 움직였다"를 반환하는 것과 같은 구분입니다.
  */
+/* ------------------------------------------------------------- the cutscene */
+
+/* Puts a moment on screen, once per run, if the file authored one.
+ *
+ * THREE REFUSALS AND THEY ARE ALL THE SAME REFUSAL: already seen, already
+ * playing, or nothing written. Each leaves the caller's own state exactly as it
+ * was, which is what lets every trigger below be an unconditional call at the
+ * point the moment happens rather than a condition the trigger has to get
+ * right. ::music_play's bargain.
+ *
+ * MARKED SEEN WHETHER OR NOT IT PLAYS. A moment with no pages has HAPPENED --
+ * the maw died, the player died -- and a story.txt saved mid-run that adds the
+ * cut must not make it start halfway through the screen it would have preceded.
+ *
+ * 어떤 순간을 화면에 올립니다. 플레이당 한 번, 파일이 그것을 제작했다면.
+ *
+ * *거절이 셋이고 셋 다 같은 거절입니다.* 이미 보았거나, 이미 재생 중이거나, 쓰인 것이 없거나.
+ * 각각은 호출자 자신의 상태를 그대로 남기며, 그것이 아래의 모든 발화점을 조건이 아니라 순간이
+ * 일어나는 지점에서의 무조건 호출로 만듭니다. ::music_play의 거래입니다.
+ *
+ * *재생되든 아니든 보았다고 표시합니다.* 페이지가 없는 순간도 *일어났습니다*. 아귀가 죽었고
+ * 플레이어가 죽었습니다. 그리고 플레이 도중에 저장되어 그 컷을 추가한 story.txt가, 그것이
+ * 선행했어야 할 화면의 도중에 컷신을 시작하게 만들어서는 안 됩니다. */
+static void cut_begin(World *w, int moment) {
+    /* ONE GATE, NOT THREE, and it is ::boss_say's gate for ::boss_say's
+       reason: every cutscene is story-only, and three separate `if (!endless)`
+       tests at three trigger sites is two chances for the fourth moment
+       somebody adds to be the one that plays in endless mode.
+       *셋이 아니라 하나의 게이트*이며, ::boss_say의 게이트이자 그 이유입니다. 모든 컷신은
+       스토리 전용이고, 세 발화 지점에 흩어진 `if (!endless)` 셋은 누군가 나중에 추가하는 네 번째
+       순간이 무한 모드에서 재생될 기회를 둘 만듭니다. */
+    if (w->run.endless) return;
+    if (moment < 0 || moment >= STORY_MOMENTS) return;
+
+    int bit = 1 << moment;
+    if (w->run.cut_seen & bit) return;
+    w->run.cut_seen |= bit;
+
+    if (w->run.cut) return;
+    if (!story_for(moment)) return;
+
+    w->run.cut      = moment + 1;
+    w->run.cut_page = 0;
+    w->run.cut_time = 0.0f;
+}
+
+/* Ends the cutscene and lets what it was covering happen.
+ *
+ * THE WIN IS RAISED HERE, and only for ::STORY_VICTORY. ::step_boss already
+ * refuses to raise it on the frame the maw dies so that the maw's last line can
+ * be read, and the banner clock used to be what raised it afterwards; the
+ * cutscene simply took that place in the queue. Guarded on `dead` for the
+ * reason the banner clock was: the killing blow and the player's own death can
+ * land in one frame, and a run that ended both ways has no screen.
+ *
+ * 컷신을 끝내고, 그것이 덮고 있던 것이 일어나게 합니다.
+ *
+ * *승리는 이곳에서 세워지며* ::STORY_VICTORY에 대해서만입니다. ::step_boss는 아귀의 마지막
+ * 대사가 읽힐 수 있도록 아귀가 죽는 프레임에 그것을 세우기를 이미 거절하고 있고, 그 뒤에
+ * 그것을 세우던 것은 배너 시계였습니다. 컷신은 그 대기열의 자리를 이어받았을 뿐입니다.
+ * `dead`를 함께 검사하는 이유는 배너 시계와 같습니다. 죽이는 한 발과 플레이어 자신의 죽음이 한
+ * 프레임에 떨어질 수 있고, 양쪽으로 끝난 플레이에는 화면이 없습니다. */
+static void cut_end(World *w) {
+    int moment = w->run.cut - 1;
+
+    w->run.cut      = 0;
+    w->run.cut_page = 0;
+    w->run.cut_time = 0.0f;
+
+    if (moment == STORY_VICTORY && !w->run.dead) w->run.won = 1;
+}
+
+/* One page forward, or out. What a press does and what the clock does, so the
+   two cannot drift -- a skip that advanced the page without the timeout's
+   end-of-cut test would run off the end of the array.
+   한 페이지 앞으로, 또는 밖으로. 누름이 하는 일이자 시계가 하는 일이며, 그래서 둘이 어긋날 수
+   없습니다. 타임아웃의 컷 종료 판정 없이 페이지만 넘기는 건너뛰기는 배열 끝을 넘어갑니다. */
+static void cut_advance(World *w) {
+    const StoryCut *c = story_for(w->run.cut - 1);
+
+    /* The file was reloaded out from under a playing cutscene and the moment is
+       gone. Ending it is the only answer that leaves the run playable; holding
+       a screen whose text no longer exists would be a freeze with nothing on
+       it.
+       재생 중인 컷신 아래에서 파일이 다시 읽혔고 그 순간이 사라졌습니다. 플레이를 계속 가능하게
+       두는 답은 끝내는 것뿐입니다. 더 이상 존재하지 않는 텍스트의 화면을 붙들고 있는 것은 아무
+       것도 없는 정지입니다. */
+    if (!c) { cut_end(w); return; }
+
+    w->run.cut_page++;
+    w->run.cut_time = 0.0f;
+    if (w->run.cut_page >= c->n_pages) cut_end(w);
+}
+
+/* The page clock.
+ *
+ * OUTSIDE `!frozen`, and it has to be: a cutscene is one of the things
+ * ::world_frozen counts, so a clock gated on `!frozen` would be a screen that
+ * stops the world and then waits for the world to advance it. ::step_between
+ * carries the same warning for the same reason.
+ *
+ * 페이지 시계입니다.
+ *
+ * `!frozen` *바깥*이며 그래야만 합니다. 컷신은 ::world_frozen이 세는 것 중 하나이므로,
+ * `!frozen`으로 막힌 시계는 월드를 멈춰 놓고 월드가 자신을 진행시켜 주기를 기다리는 화면이
+ * 됩니다. ::step_between이 같은 이유로 같은 경고를 달고 있습니다. */
+static void step_cut(World *w, float dt) {
+    if (!w->run.cut) return;
+
+    const StoryCut *c = story_for(w->run.cut - 1);
+    if (!c) { cut_end(w); return; }
+
+    /* A page index past the end of a cut that was rewritten under us. Not
+       reachable while the file holds still; reachable on the frame an author
+       saves a shorter story.txt, which is exactly when a crash would be
+       blamed on the edit rather than on the missing bound.
+       우리 아래에서 다시 쓰인 컷의 끝을 넘어선 페이지 인덱스입니다. 파일이 가만히 있는 동안에는
+       도달하지 않습니다. 제작자가 더 짧은 story.txt를 저장하는 프레임에 도달하며, 그때가 바로
+       충돌의 책임이 빠진 경계가 아니라 그 편집에 돌아갈 시점입니다. */
+    if (w->run.cut_page >= c->n_pages) { cut_end(w); return; }
+
+    w->run.cut_time += dt;
+    if (w->run.cut_time >= c->page[w->run.cut_page].hold) cut_advance(w);
+}
+
 static void step_confirm(World *w) {
+    /* FIRST, because a cutscene is drawn over whatever it is covering and a
+       press belongs to the thing on top. Without this, a press during the
+       defeat cutscene would reach the death screen underneath and restart the
+       run from behind a screen the player was still reading.
+       *가장 먼저*입니다. 컷신은 그것이 덮고 있는 무엇 위에 그려지고, 누름은 맨 위의 것에
+       속합니다. 이것이 없으면 패배 컷신 도중의 누름이 아래의 사망 화면에 도달하여, 플레이어가
+       아직 읽고 있는 화면 뒤에서 플레이를 재시작합니다. */
+    if (w->run.cut) {
+        cut_advance(w);
+        return;
+    }
+
     if (w->run.title) {
         w->run.title = 0;
         return;
@@ -773,7 +1003,139 @@ static void step_exit(World *w) {
 }
 
 /**
- * @brief Throws a cleared wave's reward down around the player.
+ * @brief Where a cleared wave's reward lands, as loot.txt asks for it.
+ *
+ * ENGLISH
+ * -------
+ * THE FALLBACK IS THE OLD BEHAVIOUR, and it is what makes `at altar` safe to
+ * leave switched on for the whole episode: a map that placed no altar pays at
+ * the player's feet exactly as it always did, rather than dropping the purse at
+ * the origin or refusing to pay. An author adds the marker when they want the
+ * shrine, and every level without one is unaffected.
+ *
+ * The nearest altar rather than the first, because a map may have several and
+ * the one that means anything is the one in the room the fight happened in.
+ * "First in the entity list" is a property of how the map was saved.
+ *
+ * @param[in] w The world, read for the player, the level and the spawners.
+ * @return A point on the floor, feet height.
+ *
+ * 한국어
+ * ------
+ * @brief 정리된 웨이브의 보상이 놓이는 자리이며, loot.txt가 요청하는 대로입니다.
+ *
+ * *되돌아가는 곳이 예전 동작이며*, 그것이 `at altar`를 에피소드 전체에 켜 둔 채로 두어도
+ * 안전한 이유입니다. 제단을 배치하지 않은 맵은 몫을 원점에 떨어뜨리거나 지급을 거부하는
+ * 대신, 늘 그랬듯 정확히 플레이어의 발치에 지급합니다. 제작자는 제단을 원할 때 표식을
+ * 추가하며, 그것이 없는 모든 레벨은 영향을 받지 않습니다.
+ *
+ * 첫 번째가 아니라 *가장 가까운* 제단인 이유는, 맵에 여럿이 있을 수 있고 그중 의미가 있는
+ * 것은 전투가 벌어진 방에 있는 것이기 때문입니다. "엔티티 목록의 첫 번째"는 맵이 어떻게
+ * 저장되었는지의 속성일 뿐입니다.
+ */
+static v3 reward_point(const World *w) {
+    v3 feet = v3f(w->player.pos.x, w->player.pos.y - PLAYER_EYE, w->player.pos.z);
+    int at = loot_reward()->at;
+
+    if (at == LOOT_AT_ALTAR) {
+        float best = 0.0f;
+        v3    found = feet;
+        int   any = 0;
+
+        for (int i = 0; i < w->level.n_ents; i++) {
+            const Entity *e = &w->level.ents[i];
+            if (!txt_eq(e->kind, "altar")) continue;
+
+            /* Entity coordinates are centimetres; the level is metres. Settled
+               onto whatever floor is under the marker, the same way
+               ::pickup_spawn_level settles an item -- a shrine floating above
+               its own room is a reward nobody can walk onto.
+               엔티티 좌표는 센티미터이고 레벨은 미터입니다. ::pickup_spawn_level이 아이템을
+               안착시키는 것과 같은 방식으로 표식 아래의 바닥에 내려놓습니다. 자기 방 위에 떠
+               있는 제단은 아무도 걸어 올라갈 수 없는 보상입니다. */
+            float x = e->x * 0.01f, z = e->z * 0.01f;
+            float f, c;
+            if (!level_ground(&w->level, x, z, e->y * 0.01f, 1e9f, &f, &c)) continue;
+
+            float dx = x - feet.x, dz = z - feet.z;
+            float d2 = dx * dx + dz * dz;
+            if (!any || d2 < best) { best = d2; found = v3f(x, f, z); any = 1; }
+        }
+        return found;                    /* feet, when the map placed none */
+    }
+
+    if (at == LOOT_AT_CENTRE) {
+        /* The average of the spawners, which is the middle of the fight rather
+           than the middle of the map -- the two are the same only in a room
+           somebody drew symmetrically.
+           스포너들의 평균이며, 맵의 한가운데가 아니라 *전투*의 한가운데입니다. 둘이 같은
+           것은 누군가 대칭으로 그린 방에서뿐입니다. */
+        float sx = 0.0f, sz = 0.0f;
+        int   n  = 0;
+        for (int i = 0, sn = enemy_spawner_count(&w->pools); i < sn; i++) {
+            const Spawner *sp = enemy_spawner_at(&w->pools, i);
+            if (!sp) continue;
+            sx += sp->pos.x; sz += sp->pos.z; n++;
+        }
+        if (n) {
+            float x = sx / (float)n, z = sz / (float)n, f, c;
+            if (level_ground(&w->level, x, z, w->player.pos.y, 1e9f, &f, &c))
+                return v3f(x, f, z);
+        }
+        return feet;
+    }
+
+    return feet;
+}
+
+/**
+ * @brief Lights the drop point as a shrine, and says so in three layers.
+ *
+ * ENGLISH
+ * -------
+ * The ring and the core fire once, here; the motes are paced by ::step_altar
+ * for as long as ::RunState::altar_time lasts. The split is the same one the
+ * lava smoke makes and for the same reason: an effect that must still be
+ * visible in five seconds cannot be a burst, and a burst is the only thing
+ * ::fx_spawn knows how to be.
+ *
+ * @param[in,out] w  The world whose run remembers the shrine.
+ * @param[in]     at Where it burns, feet height.
+ *
+ * 한국어
+ * ------
+ * @brief 낙하 지점을 제단으로 켜고, 세 겹으로 그것을 말합니다.
+ *
+ * 고리와 코어는 이곳에서 한 번 발사되고, 티끌은 ::RunState::altar_time이 지속되는 동안
+ * ::step_altar가 조절해 뿌립니다. 이 분리는 용암 연기가 하는 것과 같으며 이유도 같습니다.
+ * 5초 뒤에도 보여야 하는 이펙트는 폭발일 수 없고, ::fx_spawn이 될 줄 아는 것은 폭발뿐입니다.
+ */
+/* TAKES THE BURN RATHER THAN READING IT. It used to call `loot_reward()->altar`
+   itself, which was correct while a wave was the only thing that paid. A boss
+   purse has its own, longer burn -- and a function that reaches for the wave's
+   table would light a boss's shrine for a wave's duration while its own number
+   sat in the block that was actually paid out.
+   Handed the number for the reason scene.h hands its passes finished facts:
+   deciding which table applies is the caller's question, not this one's.
+   *연소 시간을 읽지 않고 건네받습니다.* 이전에는 스스로 `loot_reward()->altar`를 불렀고, 지급하는
+   것이 웨이브뿐인 동안에는 그것이 옳았습니다. 보스 지갑은 자기만의 더 긴 연소 시간을 가지며,
+   웨이브의 표로 손을 뻗는 함수는 실제로 지급된 블록에 자기 숫자가 있는데도 보스의 제단을 웨이브의
+   길이만큼 태우게 됩니다.
+   숫자를 건네받는 이유는 scene.h가 자기 패스들에 완성된 사실을 건네는 것과 같습니다. 어느 표가
+   적용되는지는 호출자의 질문이지 이 함수의 질문이 아닙니다. */
+static void altar_light(World *w, v3 at, float burn) {
+    if (burn <= 0.0f) return;
+
+    w->run.altar_pos  = at;
+    w->run.altar_time = burn;
+    w->run.altar_mote = 0.0f;          /* the first mote is due immediately */
+
+    fx_spawn(&w->pools, "altarring", at, v3f(0, 1, 0));
+    fx_spawn(&w->pools, "altarcore", v3f(at.x, at.y + 0.3f, at.z), v3f(0, 1, 0));
+}
+
+/**
+ * @brief Throws a cleared wave's reward down at the point loot.txt asks for.
  *
  * ENGLISH
  * -------
@@ -783,66 +1145,125 @@ static void step_exit(World *w) {
  * point read as a burst either way -- and would make this the one thing in a
  * recorded demo that replays differently, for nothing.
  *
- * Thrown from the player's own feet, because that is where they are looking
- * when the room goes quiet. ::pickup_toss refuses to be collected in flight, so
- * standing on the drop point does not absorb the reward before it is seen.
+ * WHAT is thrown, and WHERE, both come from assets\loot.txt now. The purse used
+ * to be two constants in world.h and the drop point was always the player's
+ * feet; the reason it moved is that neither number could be tried without a
+ * rebuild, and a reward economy that cannot be tried is one nobody tunes.
+ * ::pickup_toss still refuses to be collected in flight, so standing on the drop
+ * point does not absorb the reward before it is seen.
  *
  * @param[in,out] w World whose player is being paid.
- * @note Ammo only for weapons already held; see ::WORLD_WAVE_AMMO.
+ * @note `held` entries walk the roster -- see ::loot_held_kind -- so a box for
+ *       a gun the player has not found is never thrown.
  *
  * 한국어
  * ------
- * @brief 정리된 웨이브의 보상을 플레이어 주위로 던집니다.
+ * @brief 정리된 웨이브의 보상을 loot.txt가 요청하는 자리에 던집니다.
  *
  * 무작위가 아니라 *인덱스로* 흩뿌립니다. n개 중 k번째 아이템은 균등하게 나뉜 n개 방향 중
  * k번째로 떠나므로, 드롭은 고리 모양이고 모든 플레이가 같은 것을 만들어 냅니다. 무작위 각도가
  * 더 나아 보이지도 않으며(한 지점에서 나온 열몇 개는 어느 쪽이든 폭발로 읽힙니다), 기록된
  * 데모에서 다르게 재생되는 유일한 것을 아무 대가 없이 만들게 됩니다.
  *
- * 플레이어 자신의 발치에서 던지는 이유는 방이 조용해질 때 그들이 보고 있는 곳이 그곳이기
- * 때문입니다. ::pickup_toss는 비행 중 획득을 거부하므로, 낙하 지점에 서 있어도 보상이 보이기
- * 전에 흡수되지 않습니다.
+ * *무엇을* 던지는지와 *어디에* 던지는지가 이제 둘 다 assets\loot.txt에서 옵니다. 몫은
+ * world.h의 상수 둘이었고 낙하 지점은 언제나 플레이어의 발치였습니다. 그것이 옮겨 간 이유는
+ * 어느 숫자도 재빌드 없이는 시험해 볼 수 없었기 때문이며, 시험해 볼 수 없는 보상 경제는
+ * 아무도 조율하지 않는 경제입니다. ::pickup_toss는 여전히 비행 중 획득을 거부하므로, 낙하
+ * 지점에 서 있어도 보상이 보이기 전에 흡수되지 않습니다.
  *
  * @param[in,out] w 플레이어가 보상받는 월드.
- * @note 탄약은 이미 보유한 무기에 대해서만입니다. ::WORLD_WAVE_AMMO를 참조하십시오.
  */
-static void wave_reward(World *w) {
+/* Throws one purse. Was ::wave_reward's whole body until a boss needed the same
+   twenty lines with a different table -- and this file's own history says what
+   happens when a monster can be created two ways, or a level rebuilt in three
+   places: the fix goes into one of them.
+   지갑 하나를 던집니다. 보스가 다른 표로 같은 스무 줄을 필요로 하기 전까지는
+   ::wave_reward의 본문 전부였습니다. 그리고 이 파일 자신의 이력이, 몬스터를 만드는 방법이
+   둘이거나 레벨을 세 곳에서 다시 만들 때 무슨 일이 일어나는지 말해 줍니다. 수정은 그중 하나에만
+   들어갑니다. */
+static void reward_items(World *w, const LootReward *r) {
+
     /* What is actually going to be thrown, gathered first: the ring is spaced
-       by how many there are, and the ammo count depends on what the player
-       holds. Spacing by the intended count instead would leave a gap in the
-       ring wherever a weapon was not owned.
-       실제로 던져질 것을 먼저 모읍니다. 고리의 간격은 개수로 정해지는데, 탄약의 수는
-       플레이어가 무엇을 들고 있는지에 달려 있습니다. 의도한 개수로 간격을 잡으면 보유하지 않은
+       by how many there are, and a `held` entry may produce nothing at all.
+       Spacing by the intended count instead would leave a gap in the ring
+       wherever a weapon was not owned.
+       실제로 던져질 것을 먼저 모읍니다. 고리의 간격은 개수로 정해지는데, `held` 항목은
+       아무것도 만들어 내지 않을 수 있습니다. 의도한 개수로 간격을 잡으면 보유하지 않은
        무기가 있는 자리마다 고리에 틈이 생깁니다. */
-    int kinds[WORLD_WAVE_MEDKITS + WORLD_WAVE_AMMO];
-    int n = 0;
+    int kinds[LOOT_REWARD_MAX];
+    int n = 0, gun = 0;
 
-    for (int i = 0; i < WORLD_WAVE_MEDKITS; i++)
-        kinds[n++] = PK_HEALTH;
+    /* The cap is in the OUTER condition too, so a purse that overflows raises
+       ::DIAG_PICKUP_CAP once rather than once per remaining entry -- a counter
+       that reports how many lines the file has left is not reporting the fault.
+       상한을 바깥 조건에도 둡니다. 그래야 넘치는 몫이 남은 항목마다가 아니라 *한 번*
+       ::DIAG_PICKUP_CAP을 올립니다. 파일에 몇 줄이 남았는지를 보고하는 계수기는 결함을
+       보고하는 것이 아닙니다. */
+    for (int i = 0; i < r->n_items && n < LOOT_REWARD_MAX; i++) {
+        for (int k = 0; k < r->item[i].n; k++) {
+            if (n >= LOOT_REWARD_MAX) { DIAG(DIAG_PICKUP_CAP); break; }
 
-    for (int i = 0, gun = 0; i < WORLD_WAVE_AMMO; i++) {
-        /* Round-robin over the weapons actually held, so a player with three
-           guns is fed all three rather than three boxes for the first.
-           실제로 보유한 무기를 돌아가며 채웁니다. 총 세 자루를 든 플레이어가 첫 번째 것의
-           상자 세 개가 아니라 셋 모두를 받게 하기 위함입니다. */
-        int found = -1;
-        for (int k = 0; k < WP_TYPES; k++) {
-            int t = (gun + k) % WP_TYPES;
-            if (w->weapon.owned[t]) { found = t; gun = t + 1; break; }
+            int kind = r->item[i].kind;
+            if (kind == LOOT_HELD) {
+                kind = loot_held_kind(&w->weapon, &gun);
+                if (kind < 0) break;         /* holding nothing that takes ammo */
+            }
+            kinds[n++] = kind;
         }
-        if (found < 0) break;                  /* holding nothing that takes ammo */
-        kinds[n++] = PK_AMMO_FOR(found);
     }
 
-    v3 feet = v3f(w->player.pos.x, w->player.pos.y - PLAYER_EYE, w->player.pos.z);
+    if (!n) return;
+
+    v3 at = reward_point(w);
 
     for (int i = 0; i < n; i++) {
         float a = 6.2831853f * (float)i / (float)n;
-        v3 vel = v3f(cosf(a) * PICKUP_TOSS_OUT,
-                     PICKUP_TOSS_UP,
-                     sinf(a) * PICKUP_TOSS_OUT);
-        pickup_toss(&w->pools, kinds[i], feet, vel);
+        v3 vel = v3f(cosf(a) * r->out, r->up, sinf(a) * r->out);
+        pickup_toss(&w->pools, kinds[i], at, vel);
     }
+
+    altar_light(w, at, r->altar);
+}
+
+static void wave_reward(World *w) {
+    reward_items(w, loot_reward());
+}
+
+/**
+ * @brief Keeps a lit shrine burning, and lets it go out.
+ *
+ * ENGLISH
+ * -------
+ * Paced rather than spawned once, for the reason ::altar_light gives: a burst is
+ * over in half a second and the breather is ::WORLD_WAVE_BREAK long. The
+ * interval is a constant here rather than in loot.txt because it is a property
+ * of the EFFECT -- how dense a column of motes reads -- and effects.txt is where
+ * a person tunes how that column looks. What loot.txt owns is how long it lasts,
+ * which is a property of the reward.
+ *
+ * 한국어
+ * ------
+ * @brief 켜진 제단을 계속 타오르게 하고, 꺼지게 둡니다.
+ *
+ * 한 번 생성하지 않고 조절해 뿌리는 이유는 ::altar_light가 대는 것과 같습니다. 폭발은 0.5초면
+ * 끝나고 휴식은 ::WORLD_WAVE_BREAK만큼입니다. 간격이 loot.txt가 아니라 이곳의 상수인 이유는
+ * 그것이 *이펙트*의 속성(티끌 기둥이 얼마나 촘촘하게 읽히는가)이기 때문이며, 그 기둥이 어떻게
+ * 보이는지를 사람이 조정하는 곳은 effects.txt입니다. loot.txt가 소유하는 것은 그것이 얼마나
+ * 오래 지속되는지이며, 그것은 보상의 속성입니다.
+ */
+static void step_altar(World *w, float dt) {
+    if (w->run.altar_time <= 0.0f) return;
+
+    w->run.altar_time -= dt;
+    if (w->run.altar_time <= 0.0f) { w->run.altar_time = 0.0f; return; }
+
+    w->run.altar_mote -= dt;
+    if (w->run.altar_mote > 0.0f) return;
+    w->run.altar_mote = ALTAR_MOTE_INTERVAL;
+
+    fx_spawn(&w->pools, "altarmote",
+             v3f(w->run.altar_pos.x, w->run.altar_pos.y + 0.2f, w->run.altar_pos.z),
+             v3f(0, 1, 0));
 }
 
 /**
@@ -872,6 +1293,290 @@ static void wave_reward(World *w) {
  * 남지 않았고 *동시에* 걸어다니는 것도 없을 때 정리됩니다. 두 번째만 물으면 두 무리 사이의
  * 빈틈에서 웨이브가 끝나며, 그것은 몇 초마다입니다.
  */
+/* Puts a line on the boss banner, if this is a game that has one.
+ *
+ * ONE GATE, NOT FIVE. Every ::BossLine is story-only, and five separate
+ * `if (!endless)` tests at five call sites is four chances for the sixth line
+ * somebody adds to be the one that speaks in endless mode.
+ *
+ * Re-armed to the FULL time on every call rather than only when the previous
+ * line has expired -- door.h's rule, and for its reason: a message that only
+ * re-arms when empty blinks instead of holding.
+ *
+ * 이 게임이 배너를 가진 게임이라면 배너에 대사를 올립니다.
+ *
+ * *다섯이 아니라 하나의 게이트입니다.* 모든 ::BossLine은 스토리 전용이고, 다섯 호출 지점에
+ * 흩어진 `if (!endless)` 다섯 개는 누군가 나중에 추가하는 여섯 번째 대사가 무한 모드에서
+ * 말하게 될 기회를 넷 만듭니다.
+ *
+ * 이전 대사가 만료되었을 때만이 아니라 호출할 때마다 *만땅으로* 재장전합니다. door.h의
+ * 규칙이며 그 이유도 같습니다. 비었을 때만 재장전하는 메시지는 유지되는 대신 깜빡입니다. */
+static void boss_say(World *w, int line) {
+    if (w->run.endless) return;
+    w->run.boss_line   = line;
+    w->run.boss_line_t = BOSS_LINE_TIME;
+}
+
+/* What a beaten maw pays. ::wave_reward's shape, reading the other block.
+   쓰러진 아귀가 지급하는 것. 다른 블록을 읽는 ::wave_reward의 형태입니다. */
+static void boss_reward(World *w) {
+    reward_items(w, loot_boss_reward());
+}
+
+/* --- one frame of the boss fight ---------------------------------------
+ *
+ * ENGLISH
+ * -------
+ * BEFORE ::step_wave, and for ::step_wave's own reason for being before
+ * ::step_exit: what ends this room has to resolve before what merely counts it.
+ * A maw that dies on the same frame a wave clears must be the thing that
+ * happened.
+ *
+ * IT DOES NOT DECIDE DEATH. ::world_step's ordering warning requires that death
+ * be noticed in exactly one place after every source of damage, and the maw's
+ * death is noticed where every other monster's is -- in ::enemy_hurt, through
+ * the health boundary that ::BOSS_CYCLES makes zero on the last cycle. What
+ * this function does is notice that the boss it was watching is GONE, which is
+ * a different question and one only it is asking.
+ *
+ * 한국어
+ * ------
+ * ::step_wave보다 *앞*이며, ::step_wave가 ::step_exit보다 앞인 것과 같은 이유입니다. 이 방을
+ * 끝내는 것은 그것을 세기만 하는 것보다 먼저 결판나야 합니다. 웨이브가 정리되는 것과 같은
+ * 프레임에 죽는 아귀는, 일어난 일이 그것이어야 합니다.
+ *
+ * *이 함수는 사망을 결정하지 않습니다.* ::world_step의 순서 경고는 사망이 모든 피해원 이후
+ * 정확히 한 곳에서 감지될 것을 요구하며, 아귀의 사망도 다른 모든 몬스터와 같은 곳에서
+ * 감지됩니다. ::enemy_hurt에서, ::BOSS_CYCLES가 마지막 사이클에 0으로 만드는 체력 경계를
+ * 통해서입니다. 이 함수가 하는 일은 자신이 지켜보던 보스가 *사라졌다*는 것을 알아채는 것이고,
+ * 그것은 다른 질문이며 오직 이 함수만이 묻고 있는 질문입니다. */
+static void step_boss(World *w, float dt) {
+    BossFight *b = &w->pools.enemy.boss;
+    int idx = enemy_boss_index(&w->pools);
+
+    /* --- it was here last frame and is not now --------------------------
+       The one place the fight ends. Checked before everything else so a maw
+       that died this frame cannot also be found groggy, re-warded, or counted
+       into a cycle it did not live to see.
+       전투가 끝나는 유일한 곳입니다. 다른 무엇보다 먼저 검사하므로, 이번 프레임에 죽은 아귀가
+       동시에 그로기로 발견되거나, 결계가 다시 세워지거나, 살아서 보지 못한 사이클에
+       계산되는 일이 없습니다. */
+    if (b->active && idx < 0) {
+        b->active     = 0;
+        b->cycle      = 0;
+        b->groggy     = 0.0f;
+        b->was_groggy = 0;
+
+        /* SUPPRESSION LIFTED HERE AND ONLY HERE, so the two modes cannot
+           disagree about it: story mode is over anyway and endless mode gets
+           its arena back at full rate until the next maw is due.
+           억제는 이곳에서만 해제되므로 두 모드가 그에 대해 어긋날 수 없습니다. 스토리 모드는
+           어차피 끝났고, 무한 모드는 다음 아귀가 예정될 때까지 아레나를 온전한 속도로
+           돌려받습니다. */
+        w->pools.enemy.spawn_slow = 0.0f;
+
+        boss_reward(w);
+        boss_say(w, BOSS_LINE_DIE);
+
+        /* STORY MODE DOES NOT WIN HERE, and the reason is the line just
+           posted. ::world_frozen counts `won`, and ::scene_frame suppresses the
+           banner once a run is over -- so raising `won` on this frame would
+           post the maw's last sentence and cover it with the win screen in the
+           same frame. Nobody would ever see it, and the bug would look like a
+           line that was never written.
+           So the win waits for the line to expire; the banner clock below is
+           what raises it. Everything is already dead, so the seconds in between
+           cost nothing -- and they are where a victory cutscene slots in when
+           there is one.
+           스토리 모드는 이곳에서 이기지 않으며, 그 이유는 방금 게시한 대사입니다.
+           ::world_frozen이 `won`을 세고 ::scene_frame은 플레이가 끝나면 배너를 억제하므로,
+           이 프레임에 `won`을 세우면 아귀의 마지막 문장을 게시하고 같은 프레임에 승리 화면으로
+           덮게 됩니다. 아무도 그것을 보지 못하고, 그 버그는 애초에 쓰이지 않은 대사처럼
+           보입니다.
+           그래서 승리는 대사가 만료되기를 기다립니다. 그것을 세우는 것은 아래의 배너
+           시계입니다. 이미 전부 죽어 있으므로 그 사이의 몇 초는 아무 비용도 들지 않으며,
+           승리 컷신이 생기는 날 그것이 끼어들 자리이기도 합니다. */
+        if (w->run.endless)
+            b->next_wave = (short)(w->run.wave + WORLD_BOSS_EVERY);
+        return;
+    }
+
+    /* --- endless mode's FIRST appointment --------------------------------
+       Without this the respawn below never fires: it wants `next_wave > 0` and
+       nothing had ever set it, so an endless run met no maw at all and the
+       whole boss half of that mode was unreachable. The story branch could not
+       cover for it either -- it is gated on `!endless` by construction.
+       tools/bosstest.c found this by asserting that the endless maw could be
+       killed and getting "yes" from a pool that never had one. Three checks
+       were passing vacuously.
+       Booked on the same interval as every later one, so "every five waves" is
+       true from the first appearance rather than from the second.
+       이것이 없으면 아래의 재소환이 결코 발동하지 않습니다. 그것은 `next_wave > 0`을 원하는데
+       그것을 세운 적이 아무도 없었으므로, 무한 플레이는 아귀를 아예 만나지 못했고 그 모드의
+       보스 절반이 통째로 도달 불가였습니다. 스토리 분기가 대신해 줄 수도 없습니다. 그것은
+       구조적으로 `!endless`로 막혀 있습니다.
+       tools/bosstest.c가 무한 모드의 아귀를 죽일 수 있다고 단언했다가, 애초에 아귀를 가진 적
+       없는 풀에서 "그렇다"를 받아 이것을 찾았습니다. 세 검사가 공허하게 통과하고 있었습니다.
+       이후의 모든 약속과 같은 간격으로 예약하므로, "5웨이브마다"가 두 번째 등장이 아니라
+       첫 등장부터 참입니다. */
+    if (w->run.endless && !b->have_started && b->next_wave == 0) {
+        b->have_started = 1;
+        b->next_wave    = WORLD_BOSS_EVERY;
+    }
+
+    /* --- when the next one is due ---------------------------------------
+       ENDLESS ONLY, and refused while one already stands. The wave clock and
+       the boss's own life are two clocks that can disagree -- a fight lasting
+       longer than ::WORLD_BOSS_EVERY waves would otherwise summon a second maw
+       into the first one's fight, and the health bar has room for one subject.
+       Scheduled from the wave the last one DIED on rather than from a multiple,
+       so a long fight pushes the next appointment out instead of arriving the
+       instant it ends.
+       무한 모드 전용이며, 이미 하나가 서 있으면 거절합니다. 웨이브 시계와 보스 자신의 수명은
+       서로 어긋날 수 있는 두 시계입니다. ::WORLD_BOSS_EVERY 웨이브보다 오래 끄는 전투는 그러지
+       않으면 첫 아귀의 전투에 두 번째 아귀를 소환하게 되고, 체력바에는 대상 하나의 자리밖에
+       없습니다. 배수가 아니라 직전 아귀가 *죽은* 웨이브에서부터 예약하므로, 긴 전투는 다음
+       약속을 밀어낼 뿐 전투가 끝나는 순간 도착하지 않습니다. */
+    if (!b->active && idx < 0 && w->run.endless &&
+        b->next_wave > 0 && w->run.wave >= b->next_wave) {
+        if (enemy_boss_summon(&w->pools, &w->level)) {
+            b->next_wave = 0;
+            idx = enemy_boss_index(&w->pools);
+        }
+    }
+
+    /* --- story mode starts its fight after one wave, not on arrival ------
+       ONE WAVE, and this used to be zero. The comment here argued that "the
+       story arena IS the boss fight, and a player who has to survive to wave
+       five to meet it is playing endless mode with a cutscene" -- exact about
+       `glasstower`, which was seven brushes and nothing but ward slots, and
+       false about the 807-brush deathmatch map that replaced it. Measured on
+       that map, the maw stood up ONE FRAME after the intro cutscene ended, at
+       wave 1, four wards already placed and five monsters already walking: the
+       player met the boss before reaching any of the twenty-six weapons and
+       pickups the map lays out, in a room they had not seen.
+       The sentence rejecting FIVE waves is still right. It was not about one.
+       See ::WORLD_BOSS_STORY_WAVE for the whole of the reasoning.
+       *한 웨이브이며*, 이것은 0이었습니다. 이곳의 주석은 "스토리 아레나가 곧 보스전이며,
+       그것을 만나기 위해 5웨이브를 버텨야 하는 플레이어는 컷신이 붙은 무한 모드를 하고 있는
+       것"이라고 주장했습니다. 브러시 일곱 개에 결계핵 자리뿐이던 `glasstower`에 대해서는
+       정확했고, 그것을 대신한 브러시 807개짜리 데스매치 맵에 대해서는 틀렸습니다. 그 맵에서
+       재어 보니 아귀는 인트로 컷신이 끝난 *한 프레임 뒤*에 일어섰습니다. 다섯을 거부한 문장은
+       여전히 옳습니다. 그것은 하나에 대한 말이 아니었습니다. */
+    if (!b->active && idx < 0 && !w->run.endless && b->next_wave == 0 &&
+        !b->have_started && w->run.wave >= WORLD_BOSS_STORY_WAVE) {
+        if (enemy_boss_summon(&w->pools, &w->level)) {
+            b->have_started = 1;
+            idx = enemy_boss_index(&w->pools);
+        }
+    }
+
+    if (idx < 0) return;
+
+    /* --- it has just arrived --------------------------------------------- */
+    if (!b->active) {
+        b->active     = 1;
+        b->cycle      = 0;
+        b->groggy     = 0.0f;
+        b->was_groggy = 0;
+        w->pools.enemy.spawn_slow = WORLD_BOSS_SPAWN_SLOW;
+        enemy_ward_place(&w->pools, &w->level);
+        world_shake(w, WORLD_SHAKE_HURT);
+        boss_say(w, BOSS_LINE_WAKE);
+        return;
+    }
+
+    if (enemy_guards_alive(&w->pools) > 0) {
+        /* Warded. The clock is not running and must be put back, or a window
+           interrupted by a re-ward would resume already half spent.
+           수호 중입니다. 시계는 돌고 있지 않으며 되돌려야 합니다. 그러지 않으면 재점화로
+           중단된 창이 이미 절반 소모된 채로 재개됩니다. */
+        b->groggy     = 0.0f;
+        b->was_groggy = 0;
+        return;
+    }
+
+    /* --- groggy ---------------------------------------------------------- */
+    const Enemy *e = enemy_at(&w->pools, idx);
+    const MonType *S = mon_stats(e->type);
+
+    if (!b->was_groggy) {
+        b->was_groggy = 1;
+        world_shake(w, WORLD_SHAKE_HURT);
+        /* AT THE BOSS, not at the player, so the sound points. The player is by
+           construction looking away from the maw when the last ward falls --
+           that is the fight's design -- and a non-positional cue would tell
+           them something happened without telling them where.
+           플레이어가 아니라 *보스 위치*에서 재생하므로 소리가 방향을 가리킵니다. 마지막
+           결계핵이 쓰러질 때 플레이어는 구조적으로 아귀를 등지고 있으며(그것이 이 전투의
+           설계입니다), 위치 없는 신호는 무언가 일어났다고만 말하고 어디인지는 말하지
+           않습니다. */
+        audio_play_at("bossopen", 100, enemy_at(&w->pools, idx)->pos);
+        boss_say(w, BOSS_LINE_OPEN);
+    }
+
+    b->groggy += dt;
+
+    /* Hurt while open. Held off for ::BOSS_LINE_HIT_DELAY because the player is
+       already shooting when the last ward falls, so without it this line
+       overwrites ::BOSS_LINE_OPEN a few frames after it appeared -- with a line
+       that says almost the same thing.
+       열린 채로 다치고 있습니다. ::BOSS_LINE_HIT_DELAY만큼 미루는 이유는, 마지막 결계핵이
+       쓰러질 때 플레이어가 이미 쏘고 있기 때문입니다. 그러지 않으면 이 대사가
+       ::BOSS_LINE_OPEN을 나타난 지 몇 프레임 만에 덮어쓰는데, 거의 같은 말을 하는 대사로
+       덮어씁니다. */
+    if (b->groggy > BOSS_LINE_HIT_DELAY && e->flash > 0.0f &&
+        w->run.boss_line != BOSS_LINE_HIT)
+        boss_say(w, BOSS_LINE_HIT);
+
+    int ceiling = S->hp * (BOSS_CYCLES - b->cycle)     / BOSS_CYCLES;
+    int floor_hp = S->hp * (BOSS_CYCLES - b->cycle - 1) / BOSS_CYCLES;
+
+    /* --- the window expires ---------------------------------------------
+       THE DEFENCE AGAINST A FIGHT THAT CANNOT END. The window has no timer by
+       design -- it ends when the health crosses the boundary, which is what
+       makes the cycle count exact -- and that is a promise a player can decline
+       by running out of ammunition, by losing the maw behind them, or simply by
+       stopping. So it is taken back: the wards return and the health goes up to
+       the ceiling of the segment it started at. The cycle does NOT advance.
+       The bar visibly refilling is the only honest way to say the window is
+       gone; a bar that stayed put would report progress the player no longer
+       has. See ::BOSS_GROGGY_MAX.
+       끝날 수 없는 전투에 대한 방어입니다. 이 창은 설계상 타이머가 없습니다. 체력이 경계를
+       넘을 때 끝나고, 그것이 사이클 수를 정확하게 만듭니다. 그런데 그것은 플레이어가 탄약이
+       떨어져서, 아귀를 등 뒤로 놓쳐서, 또는 그냥 멈춤으로써 거절할 수 있는 약속입니다. 그래서
+       회수합니다. 결계핵이 돌아오고 체력은 시작했던 구간의 천장까지 올라갑니다. 사이클은
+       오르지 *않습니다.*
+       바가 눈에 띄게 되차오르는 것이 창이 날아갔다고 말하는 유일하게 정직한 방법입니다.
+       그대로 머무는 바는 플레이어가 더 이상 갖고 있지 않은 진척을 보고합니다.
+       ::BOSS_GROGGY_MAX를 참조하십시오. */
+    if (b->groggy >= BOSS_GROGGY_MAX) {
+        enemy_boss_heal(&w->pools, ceiling);
+        b->groggy     = 0.0f;
+        b->was_groggy = 0;
+        enemy_ward_place(&w->pools, &w->level);
+        world_shake(w, WORLD_SHAKE_HURT);
+        audio_play_at("bossward", 100, e->pos);
+        boss_say(w, BOSS_LINE_WARD);
+        return;
+    }
+
+    /* --- the boundary was crossed ---------------------------------------
+       The last boundary is zero (::types_check enforces the divisibility), so
+       reaching it is a death and ::enemy_hurt has already performed it. This
+       branch is only ever the first two.
+       마지막 경계는 0이므로(나누어떨어짐은 ::types_check가 강제합니다) 그곳에 닿는 것은 곧
+       사망이고 ::enemy_hurt가 이미 처리했습니다. 이 분기는 언제나 앞의 둘뿐입니다. */
+    if (e->health <= floor_hp && floor_hp > 0) {
+        b->cycle++;
+        b->groggy     = 0.0f;
+        b->was_groggy = 0;
+        enemy_ward_place(&w->pools, &w->level);
+        audio_play_at("bossward", 100, e->pos);
+        boss_say(w, BOSS_LINE_WARD);
+    }
+}
+
 static void step_wave(World *w, float dt) {
     if (!enemy_spawner_count(&w->pools)) return;
 
@@ -1389,6 +2094,34 @@ int world_start_stage(World *w, const char *root, const char *name) {
 }
 
 void world_restart(World *w) {
+    /* THE MODE SURVIVES, and it is the one thing here that has to be named.
+       ::run_reset's whole charter is that a field added to ::RunState is
+       cleared by construction -- "the previous version named six globals, and
+       the two it did not name were the ones nobody noticed" -- so carrying a
+       field across it by hand is exactly the shape that argument warns about.
+       It is right anyway, because ::RunState::endless is not a fact about this
+       run: it is a fact about WHICH GAME is being played, and a restart is a
+       retry of that game rather than a return to the menu that chose it.
+       Cleared instead, an endless run restarted from the pause menu would come
+       back as a story run -- same room, so nothing on screen would say so, and
+       the first sign would be a boss banner in a mode that has none.
+       ONE FIELD, and the day there is a second one the pair belongs in a struct
+       of its own beside ::RunState rather than in a longer list here. That is
+       the line this file has already been over once.
+       *모드는 살아남으며*, 이곳에서 이름으로 불러야 하는 유일한 것입니다. ::run_reset의 헌장
+       전체가 ::RunState에 추가된 필드는 구조적으로 지워진다는 것입니다. "이전 판은 여섯 개의
+       전역을 이름으로 나열했고, 나열하지 않은 두 개가 바로 아무도 알아채지 못한 것들이었습니다."
+       그러므로 그것을 손으로 건너 나르는 것은 그 논거가 경계하는 바로 그 형태입니다.
+       그럼에도 옳습니다. ::RunState::endless는 *이번 플레이*에 대한 사실이 아니라 *어떤 게임을
+       하고 있는가*에 대한 사실이고, 재시작은 그 게임의 재시도이지 그것을 고른 메뉴로 돌아가는
+       일이 아니기 때문입니다.
+       지웠다면, 일시정지 메뉴에서 재시작한 무한 플레이가 스토리 플레이로 돌아옵니다. 같은
+       방이므로 화면의 어느 것도 그렇다고 말해 주지 않고, 첫 신호는 그것을 갖지 않은 모드에 뜬
+       보스 배너입니다.
+       *필드 하나이며*, 두 번째가 생기는 날 그 쌍은 이곳의 더 긴 목록이 아니라 ::RunState 곁의
+       자기 구조체에 속합니다. 이 파일이 이미 한 번 지나온 선입니다. */
+    int endless = w->run.endless;
+
     /* REPLAY, not NEW: a retry means "put me back where I started this stage",
        which for the first stage IS the boot belt and for every stage after it
        is what the player walked in with. NEW here is what stripped a player who
@@ -1402,14 +2135,72 @@ void world_restart(World *w) {
     /* title=0: the player asked to play, so a restart goes straight back into
        the run rather than showing the title again. */
     run_reset(&w->run, 0);
+    w->run.endless = endless;
+
+    /* THE INTRO DOES NOT REPLAY, and nothing here has to say so: ::cut_begin is
+       called by ::world_begin and by nothing else, so a restart simply never
+       asks. A retry is not a new story, and a player who has died four times
+       has read it four times too many.
+       *인트로는 다시 재생되지 않으며*, 이곳의 무엇도 그렇게 말할 필요가 없습니다. ::cut_begin을
+       부르는 것은 ::world_begin뿐이므로 재시작은 그냥 묻지 않습니다. 재시도는 새 이야기가
+       아니며, 네 번 죽은 플레이어는 그것을 네 번 더 읽은 것입니다. */
+}
+
+int world_begin(World *w, int endless) {
+    /* The load is FIRST, and nothing about the run is touched until it
+       succeeds. ::world_load_level promises that a level which will not parse
+       changes nothing; clearing the run before asking would break that promise
+       from the outside -- the level would be untouched and the title screen
+       would be gone, which is a player standing in the backdrop with no menu.
+       로드가 *먼저*이며, 성공하기 전까지 플레이에 대해서는 아무것도 건드리지 않습니다.
+       ::world_load_level은 파싱되지 않는 레벨이 아무것도 바꾸지 않는다고 약속합니다. 묻기 전에
+       플레이를 지우면 그 약속을 바깥에서 깨뜨립니다. 레벨은 그대로인데 타이틀 화면이 사라지고,
+       그것은 메뉴도 없이 배경 속에 서 있는 플레이어입니다. */
+    if (!world_load_level(w, WORLD_BOSS_ARENA, WORLD_ENTER_NEW)) return 0;
+
+    /* AFTER the load, because ::world_load_level does not clear the run and
+       this does: the clocks, the wave counter, the banner and the cutscene all
+       belong to a playthrough rather than to a level, and a mode change is the
+       start of a new one. title=0 for ::world_restart's reason -- the player
+       has already asked to play, and asking again is the title screen they just
+       left.
+       로드 *뒤*입니다. ::world_load_level은 플레이를 지우지 않고 이것은 지웁니다. 시계, 웨이브
+       계수기, 배너, 컷신은 전부 레벨이 아니라 한 번의 플레이에 속하며, 모드 변경은 새 플레이의
+       시작입니다. title=0인 것은 ::world_restart의 이유와 같습니다. 플레이어는 이미 플레이하겠다고
+       요청했고, 다시 묻는 것은 방금 떠나온 그 타이틀 화면입니다. */
+    run_reset(&w->run, 0);
+
+    /* The whole of what the argument decides, in one assignment after the
+       zeroing that would otherwise undo it. See ::RunState::endless.
+       인자가 결정하는 것의 전부이며, 그러지 않으면 그것을 되돌릴 0 초기화 뒤의 대입 하나입니다.
+       ::RunState::endless를 참조하십시오. */
+    w->run.endless = endless ? 1 : 0;
+
+    /* Unconditional: ::cut_begin holds the mode gate, so this line says "the
+       intro happens here" and nothing about which game it is.
+       무조건입니다. 모드 게이트는 ::cut_begin이 쥐고 있으므로, 이 줄은 "인트로는 이곳에서
+       일어난다"고 말할 뿐 어떤 게임인지에 대해서는 말하지 않습니다. */
+    cut_begin(w, STORY_INTRO);
+    return 1;
 }
 
 int world_boss_present(const World *w) {
-    for (int i = 0, n = enemy_count(&w->pools); i < n; i++) {
-        const Enemy *e = enemy_at(&w->pools, i);
-        if (e->health > 0 && e->type == MON_BRUTE) return 1;
-    }
-    return 0;
+    /* THE FLAG, AT LAST. This function used to answer by scanning for a live
+       brute, and world.h stated both the reason and the condition under which
+       the answer would move: "If a later bestiary needs a real boss the answer
+       moves into ::MonType and this function keeps its signature." The bestiary
+       now has one, so it has moved, and the signature is kept.
+       The brute deliberately gets nothing in exchange. It was standing in for a
+       boss because there was none; leaving it able to switch the soundtrack now
+       would mean the boss theme says nothing on the frame the maw arrives.
+       마침내 플래그입니다. 이 함수는 살아 있는 브루트를 훑어 답했고, world.h는 그 이유와 답이
+       옮겨 가는 조건을 함께 밝혔습니다. "이후의 도감이 진짜 보스를 필요로 하면 답은
+       ::MonType으로 옮겨 가고 이 함수는 시그니처를 유지합니다." 이제 도감이 하나를 가졌으므로
+       답은 옮겨 갔고 시그니처는 유지됩니다.
+       브루트는 그 대가로 아무것도 받지 않으며, 의도적입니다. 보스가 없어서 보스를 대신하고
+       있었을 뿐입니다. 지금도 사운드트랙을 바꿀 수 있게 두면, 정작 아귀가 도착하는 프레임에
+       보스 테마가 아무 말도 하지 않게 됩니다. */
+    return enemy_boss_index(&w->pools) >= 0;
 }
 
 void world_shake(World *w, float amount) {
@@ -1428,7 +2219,17 @@ int world_frozen(const World *w, int paused) {
        붙잡아 둔 순간입니다. 그러지 않으면 플레이어는 이름 뒤에서 계속 걷고 쏘고 몬스터도
        계속 다가옵니다. 레벨을 클리어했다고 알리는 화면 도중에 죽는 플레이어는 서로
        모순되는 두 가지를 들은 것입니다. */
-    return w->run.won || w->run.dead || w->run.title || w->run.between || paused;
+    /* THE CUTSCENE IS ON THIS LIST AND THAT IS ALL IT TOOK. A cutscene is a
+       moment held over a room that is still there, which is the same kind of
+       state the intermission is -- and adding it here is what stops the player
+       walking, shooting and being shot at behind the words. The clock that ends
+       it runs outside the frozen gate; see ::step_cut.
+       *컷신이 이 목록에 있고 그것으로 끝이었습니다.* 컷신은 여전히 그 자리에 있는 방 위에
+       붙잡아 둔 순간이며, 인터미션과 같은 종류의 상태입니다. 이곳에 더하는 것이 플레이어가 말
+       뒤에서 걷고 쏘고 맞는 것을 멈춥니다. 그것을 끝내는 시계는 정지 게이트 바깥에서 돕니다.
+       ::step_cut을 참조하십시오. */
+    return w->run.won || w->run.dead || w->run.title || w->run.between ||
+           w->run.cut || paused;
 }
 
 int world_step(World *w, const Input *in, float aspect, float dt) {
@@ -1503,6 +2304,24 @@ int world_step(World *w, const Input *in, float aspect, float dt) {
        합니다. */
     if (w->run.dead)  w->run.death_time += dt;
     if (w->run.title) w->run.title_time += dt;
+
+    /* --- the defeat cutscene, once the fall has finished ------------------
+       NOT on the frame the player dies. ::scene_frame drops the camera over
+       ::DEATH_ANIM_TIME and its own note says why: "the fall is the part that
+       says what happened". A screen of text over it would cover the one thing
+       the player wants to see, so the words wait for the body to land.
+       The mode gate is ::cut_begin's, and the once-per-run latch is too --
+       which is what makes this safe to ask on every frame `dead` is set, and
+       `dead` is set on all of them.
+       *플레이어가 죽는 프레임이 아닙니다.* ::scene_frame은 ::DEATH_ANIM_TIME에 걸쳐 카메라를
+       떨어뜨리고 자신의 주석이 이유를 말합니다. *"무슨 일이 있었는지 말해 주는 것이 바로 그
+       넘어짐입니다."* 그 위에 덮인 텍스트 화면은 플레이어가 보고 싶어 하는 단 하나를 가리므로,
+       말은 몸이 착지하기를 기다립니다.
+       모드 게이트는 ::cut_begin의 것이고 플레이당 한 번이라는 래치도 그렇습니다. 그것이 `dead`가
+       세워진 모든 프레임에서 이것을 물어도 안전하게 만들며, `dead`는 그 모든 프레임에서
+       세워져 있습니다. */
+    if (w->run.dead && w->run.death_time >= DEATH_ANIM_TIME)
+        cut_begin(w, STORY_DEFEAT);
     if (w->player.hurt > 0.0f) w->player.hurt -= dt * 2.0f;
 
     /* Decays with the world rather than on a clock of its own, so a shake that
@@ -1518,6 +2337,14 @@ int world_step(World *w, const Input *in, float aspect, float dt) {
     }
 
     if (!frozen) step_smoke(w, dt);
+
+    /* The shrine, which outlives the burst that lit it. Frozen with the world
+       for the reason everything else here is: a pause menu should not spend the
+       breather the player is holding.
+       그것을 켠 폭발보다 오래가는 제단입니다. 이곳의 다른 모든 것과 같은 이유로 월드와 함께
+       멈춥니다. 일시정지 메뉴가 플레이어가 붙들고 있는 휴식을 소비해서는 안 됩니다. */
+    if (!frozen) step_altar(w, dt);
+
 
     /* Doors move the sectors themselves, so anything that collides sees them
        without knowing what a door is -- but the DRAWN geometry has to be
@@ -1577,9 +2404,81 @@ int world_step(World *w, const Input *in, float aspect, float dt) {
        프레임 뒤에 웨이브가 끝납니다. 그 한 프레임은 이미 눈에 띄게 끝나 있는 프레임입니다.
        ::step_exit보다 앞인 것은 아레나를 끝내는 것이 출구가 아니기 때문입니다. 웨이브 정리가
        출구 발판에 선 플레이어와 경쟁해서는 안 되며, 이 순서가 웨이브를 먼저 결판나게 합니다. */
+    /* BEFORE the wave, and for the wave's own reason for being before the exit:
+       what ENDS this room resolves before what merely counts it. A maw that
+       dies on the frame a wave clears must be the thing that happened, and this
+       order is what says so.
+       Also before, because ::step_boss is what raises and clears
+       ::EnemyPool::spawn_slow, and ::step_wave arms spawners through it.
+       웨이브보다 *앞*이며, 웨이브가 출구보다 앞인 것과 같은 이유입니다. 이 방을 *끝내는* 것이
+       그것을 세기만 하는 것보다 먼저 결판납니다. 웨이브가 정리되는 프레임에 죽는 아귀는 일어난
+       일이 그것이어야 하고, 이 순서가 그렇게 말합니다.
+       또한 ::step_boss가 ::EnemyPool::spawn_slow를 세우고 지우는 곳이며, ::step_wave가 그것을
+       통해 스포너를 장전하기 때문에도 앞입니다. */
+    if (!frozen) step_boss(w, dt);
+
     if (!frozen) step_wave(w, dt);
 
     if (!frozen) step_exit(w);
+
+    /* The banner's clock. OUTSIDE `!frozen` deliberately: the boss's last line
+       is raised on the frame the maw dies, and in story mode that is the frame
+       `won` goes up and freezes everything -- a line gated on `!frozen` would
+       be posted and then held on screen for the rest of the process. It expires
+       the way ::door_notice_left does, and the drawing fades it over the tail.
+       배너의 시계입니다. `!frozen` *바깥*이며 의도적입니다. 보스의 마지막 대사는 아귀가 죽는
+       프레임에 올라가는데, 스토리 모드에서 그 프레임은 `won`이 서서 모든 것을 정지시키는
+       프레임입니다. `!frozen`으로 막힌 대사는 게시된 뒤 프로세스가 끝날 때까지 화면에 남습니다.
+       ::door_notice_left가 그러하듯 만료되며, 그리기가 꼬리에서 흐리게 만듭니다. */
+    if (w->run.boss_line_t > 0.0f) {
+        w->run.boss_line_t -= dt;
+        if (w->run.boss_line_t <= 0.0f) {
+            int was = w->run.boss_line;
+            w->run.boss_line_t = 0.0f;
+            w->run.boss_line   = BOSS_LINE_NONE;
+
+            /* THE VICTORY CUTSCENE, in the gap ::step_boss opened. That gap was
+               made so the maw's last line could be read before the win screen
+               covered it, and its note says outright that it is "where a
+               victory cutscene slots in when there is one". There is one now,
+               so this is where it starts -- and ::cut_end raises `won` when it
+               finishes, which is what the line below used to do here.
+               A moment with no pages authored raises `won` on this very frame,
+               because ::cut_begin refuses and ::step_cut has nothing to hold:
+               deleting the `victory` block from story.txt gives back exactly
+               the behaviour that was here before, with no branch saying so.
+               승리 컷신이며, ::step_boss가 열어 둔 틈입니다. 그 틈은 승리 화면이 덮기 전에
+               아귀의 마지막 대사를 읽을 수 있게 하려고 만들어졌고, 그곳의 주석은 그것이 "승리
+               컷신이 생기는 날 그것이 끼어들 자리"라고 명시하고 있습니다. 이제 하나가 생겼으므로
+               이곳이 그 시작점입니다. 그리고 그것이 끝날 때 `won`을 세우는 것은 ::cut_end이며,
+               그것이 예전에 이 자리의 한 줄이 하던 일입니다.
+               제작된 페이지가 없는 순간은 바로 이 프레임에 `won`을 세웁니다. ::cut_begin이
+               거절하고 ::step_cut이 붙들 것이 없기 때문입니다. story.txt에서 `victory` 블록을
+               지우면 이전에 이곳에 있던 동작을 그대로 돌려받으며, 그렇게 말하는 분기는 어디에도
+               없습니다. */
+            if (was == BOSS_LINE_DIE && !w->run.dead) {
+                cut_begin(w, STORY_VICTORY);
+                if (!w->run.cut) w->run.won = 1;
+            }
+        }
+    }
+
+    /* OUTSIDE the frozen test for the intermission's own reason, and it is a
+       stronger case here: a cutscene freezes the world, so a page clock gated
+       on `!frozen` is a screen that stops everything and then waits for
+       everything to advance it. That is a hang with text on it, and the only
+       way out would be the key that skips a page -- which would make the
+       timeout look like it worked for anybody who never sat still.
+       AFTER ::step_confirm and everything the frame does, so a page that is
+       skipped by a press this frame does not also age by this frame's dt.
+       인터미션 자신의 이유로 `frozen` 검사 *바깥*이며, 이곳에서는 더 강한 경우입니다. 컷신은
+       월드를 정지시키므로 `!frozen`으로 막힌 페이지 시계는 모든 것을 멈춰 놓고 모든 것이 자신을
+       진행시켜 주기를 기다리는 화면입니다. 그것은 텍스트가 얹힌 멈춤이고, 빠져나갈 유일한 길은
+       페이지를 넘기는 키인데, 그러면 가만히 있어 본 적 없는 사람에게는 타임아웃이 동작하는
+       것처럼 보입니다.
+       ::step_confirm과 이번 프레임이 하는 모든 것 *뒤*이므로, 이번 프레임의 누름으로 넘어간
+       페이지가 이번 프레임의 dt만큼 나이를 먹지도 않습니다. */
+    step_cut(w, dt);
 
     /* OUTSIDE the frozen test, because the intermission is itself what froze
        the world -- gating its own clock on `!frozen` would stop the timer that
@@ -1605,6 +2504,48 @@ int world_step(World *w, const Input *in, float aspect, float dt) {
        속합니다. */
     if (!frozen) w->run.world_time += dt;
     if (w->run.world_time > WORLD_TIME_WRAP) w->run.world_time -= WORLD_TIME_WRAP;
+
+    /* --- what the end screens will have to report ------------------------
+       THE SCORE OF A RUN, kept here because ::world_step is the only thing
+       that may decide a run has ended and therefore the only thing that knows
+       when to stop counting.
+
+       The kills are DRAINED rather than counted, and drained here rather than
+       beside ::step_drops, because monsters die in three places across a
+       frame: the player's own shot in ::step_look_move, a monster's own death
+       inside ::step_damage, and a grenade in ::proj_update -- which runs after
+       both. One drain here, last, collects all three. Draining beside the
+       drops instead would post a grenade's kills a frame late, which is
+       harmless until the frame it is late by is the last frame of the run.
+
+       Unconditional, not gated on `!frozen`. Nothing can raise the tally while
+       the world is frozen, so the gate would buy nothing and cost the one
+       thing it is meant to protect: the frame the player dies is frozen from
+       the next frame onward, and a kill landed on it is still a kill.
+
+       한국어
+       ------
+       한 플레이의 성적이며, ::world_step만이 플레이가 끝났다고 결정할 수 있고 따라서 언제
+       세기를 멈출지 아는 것도 그것뿐이므로 이곳에 둡니다.
+
+       처치는 세는 것이 아니라 *비워 가져오며*, ::step_drops 곁이 아니라 이곳입니다. 한
+       프레임 안에서 몬스터는 세 곳에서 죽기 때문입니다. ::step_look_move의 플레이어 사격,
+       ::step_damage 안의 죽음, 그리고 그 둘보다 뒤에 도는 ::proj_update의 유탄입니다. 맨
+       마지막인 이곳의 배수 한 번이 셋을 모두 거두어들입니다. 드롭 곁에서 비우면 유탄의 처치가
+       한 프레임 늦게 기록되며, 그 늦은 한 프레임이 플레이의 마지막 프레임이 되기 전까지는
+       무해합니다.
+
+       `!frozen`으로 막지 않고 조건 없이 수행합니다. 월드가 정지한 동안에는 집계를 올릴 수
+       있는 것이 없으므로 게이트는 얻는 것이 없고, 정작 지켜야 할 하나를 잃습니다. 플레이어가
+       죽는 프레임은 그다음 프레임부터 정지되며, 그 프레임에 성립한 처치도 처치입니다. */
+    w->run.kills += enemy_take_kills(&w->pools);
+
+    /* SEPARATE FROM world_time above, which wraps. This one must not: a player
+       who outlasted the wrap would be told they lasted four seconds. See
+       ::RunState::alive_time.
+       위의 world_time과 별개이며, 그것은 순환합니다. 이것은 순환해서는 안 됩니다. 순환 주기보다
+       오래 버틴 플레이어에게 4초 버텼다고 말하게 됩니다. ::RunState::alive_time을 참조하십시오. */
+    if (!frozen) w->run.alive_time += dt;
 
     return frozen;
 }

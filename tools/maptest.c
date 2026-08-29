@@ -723,7 +723,24 @@ static void test_hostile_numbers(void) {
    The overflow branch only runs when something overflows, so the fixture is
    generated rather than written: BR_MAX_BRUSHES cubes plus a few. */
 
-static char BIG[420000];
+/* DERIVED FROM THE CAP, not measured against it once. This was `420000`, a
+   number that fitted BR_MAX_BRUSHES + 8 cubes while that cap was 512 and stopped
+   fitting the day it became 1024 -- and the failure was this file's own
+   "the generated fixture fitted in its buffer", which is the check working
+   exactly as intended and the constant beside it not.
+   A worst-case cube is six faces; a face is three points of three coordinates
+   at up to seven characters each, plus the Valve 220 axes and offsets. That is
+   under 700 bytes measured, and 768 is the round number above it. Deriving it
+   means the fixture grows with the cap it exists to overrun.
+   *상한에서 유도했으며*, 상한에 대고 한 번 재어 적은 값이 아닙니다. 이것은 `420000`이었고,
+   BR_MAX_BRUSHES가 512이던 동안 그 +8개의 큐브를 담았으며 그 상한이 1024가 되는 날 담기를
+   그만두었습니다. 그리고 그 실패는 이 파일 자신의 "생성된 픽스처가 자기 버퍼에 들어갔다"였습니다.
+   검사는 의도대로 동작했고 그 옆의 상수가 그러지 못한 것입니다.
+   최악의 큐브는 면 여섯이고, 면 하나는 최대 일곱 자짜리 좌표 셋으로 된 점 셋에 Valve 220의
+   축과 오프셋이 붙습니다. 재어 보면 700바이트 미만이며 768은 그 위의 둥근 숫자입니다. 유도하면
+   픽스처가 자신이 넘기려고 존재하는 그 상한과 함께 자랍니다. */
+#define BIG_BYTES_PER_CUBE 768
+static char BIG[(BR_MAX_BRUSHES + 16) * BIG_BYTES_PER_CUBE];
 
 static int emit_pt(char *o, int cap, int pos, int x, int y, int z) {
     pos = txt_append_str(o, cap, pos, "( ");
@@ -762,8 +779,40 @@ static void test_capacity(void) {
     const int cap = (int)sizeof(BIG);
     const int extra = 8;
     int pos = txt_append_str(BIG, cap, 0, "{\n\"classname\" \"worldspawn\"\n");
-    for (int i = 0; i < BR_MAX_BRUSHES + extra; i++)
-        pos = emit_cube(BIG, cap, pos, i * 16, 0, 0, i * 16 + 8, 8, 8);
+
+    /* A GRID, NOT A ROW, and that is a bug this file used to have rather than
+       a preference.
+       These cubes were laid out along X at 16 units apart, which put cube
+       1,024 at x = 16,384 -- exactly ::BRUSH_MAX_COORD, the half-extent of the
+       world a .map may describe. ::brush_face_poly starts from a quad sized by
+       that constant and clips down, so every cube from there on clipped to
+       nothing, produced no faces, and was skipped by parse_brush's
+       `count <= 0` -- which is silent, because a brush with no faces is not a
+       refusal, it is a brush with no faces.
+       It went unnoticed while BR_MAX_BRUSHES was 1,024, because the cap fired
+       on the very cube the row reached the edge of the world at. Raising the
+       cap to 2,048 made the LAYOUT the binding constraint, and the test then
+       reported the cap as 1,024 -- a fixture measuring its own geometry and
+       calling it a capacity.
+       A grid keeps the whole fixture inside a few hundred units whatever the
+       cap becomes. The fixture exists to overrun a COUNT; it has no business
+       being large.
+       *줄이 아니라 격자이며*, 이것은 선호가 아니라 이 파일이 지니고 있던 결함입니다.
+       이 큐브들은 X를 따라 16단위 간격으로 놓였고, 그것이 1,024번째 큐브를 x = 16,384에
+       두었습니다. .map이 기술할 수 있는 세계의 절반 크기인 ::BRUSH_MAX_COORD 바로 그 값입니다.
+       ::brush_face_poly는 그 상수로 크기를 정한 사각형에서 시작해 깎아 내려가므로, 그 지점부터
+       모든 큐브가 아무것도 남지 않게 잘려 면을 만들지 못했고 parse_brush의 `count <= 0`에
+       걸러졌습니다. 그리고 그것은 조용합니다. 면이 없는 브러시는 거절이 아니라 면이 없는
+       브러시이기 때문입니다.
+       BR_MAX_BRUSHES가 1,024인 동안에는 드러나지 않았습니다. 줄이 세계의 끝에 닿는 바로 그
+       큐브에서 상한이 발동했기 때문입니다. 상한을 2,048로 올리자 *배치*가 구속 조건이 되었고,
+       그러자 검사는 상한을 1,024로 보고했습니다. 자기 지오메트리를 재고서 그것을 용량이라고
+       부르는 픽스처입니다. */
+    const int GRID = 64;
+    for (int i = 0; i < BR_MAX_BRUSHES + extra; i++) {
+        int gx = (i % GRID) * 16, gy = (i / GRID) * 16;
+        pos = emit_cube(BIG, cap, pos, gx, gy, 0, gx + 8, gy + 8, 8);
+    }
     pos = txt_append_str(BIG, cap, pos, "}\n");
     check(pos < cap - 1, "the generated fixture fitted in its buffer");
 
@@ -962,8 +1011,8 @@ static void test_bake_matches(void) {
     printf("\nthe baked blob and the file on disk describe the same map\n");
 
     int flen = 0, blen = 0;
-    const char *ftext = data_map("atrium", &flen);
-    const char *btext = data_map_baked("atrium", &blen);
+    const char *ftext = data_map("lqdm1", &flen);
+    const char *btext = data_map_baked("lqdm1", &blen);
 
     check(ftext != 0, "the file is there");
     check(btext != 0, "and so is the baked copy");
@@ -1141,6 +1190,21 @@ static void test_roundtrip(void) {
     printf("\nre-saved the way an editor re-saves it\n");
 
     int len = 0;
+    /* THE FIXTURE, NOT THE SHIPPED MAP, and the tolerances below are why.
+       This was pointed at `lqdm1` for one build on the reasoning that a
+       re-emit-and-reparse is generic, so the biggest map exercises it hardest.
+       It does not. It exercises FLOAT PRECISION hardest: the plane comes back
+       from three points taken off a computed polygon, and lqdm1's coordinates
+       run fifty times larger than atrium's, so 160 of its 4,738 planes landed
+       outside a 0.002 distance tolerance that was calibrated here. Nothing was
+       wrong with the round-trip; the numbers were bigger.
+       A test whose tolerance is tuned to a fixture belongs on that fixture.
+       *출하되는 맵이 아니라 픽스처*이며, 아래의 허용 오차가 그 이유입니다. 이것을 한 빌드
+       동안 `lqdm1`에 겨누었습니다. 다시 내보내고 다시 파싱하는 것은 일반적인 검사이므로 가장
+       큰 맵이 가장 세게 시험한다는 논리였습니다. 그렇지 않습니다. 가장 세게 시험하는 것은
+       *부동소수점 정밀도*입니다. 평면은 계산된 다각형에서 취한 세 점으로부터 돌아오고,
+       lqdm1의 좌표는 atrium의 쉰 배이므로, 4,738개 평면 중 160개가 이곳에 맞춰 정해진 0.002
+       거리 허용 오차 밖에 떨어졌습니다. 왕복에 잘못된 것은 없었습니다. 수가 컸을 뿐입니다. */
     const char *text = data_map("atrium", &len);
     if (!text || !brush_parse(text, len, &M2)) {
         printf("  no atrium.map to round-trip\n"); fails++; return;

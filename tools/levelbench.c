@@ -159,7 +159,7 @@ static void build_grid_level(Level *big, int with_grid) {
 }
 
 int main(int argc, char **argv) {
-    const char *name = (argc > 1) ? argv[1] : "arena";
+    const char *name = (argc > 1) ? argv[1] : "lqdm1";
 
     LARGE_INTEGER freq;
     QueryPerformanceFrequency(&freq);

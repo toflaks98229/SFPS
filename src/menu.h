@@ -88,7 +88,52 @@ typedef enum {
      * 것이 없다면 무언가에 동반될 수 있는 유일한 장소는 게임 안입니다. .rdata에는 있지만
      * 플레이어가 닿을 수 없는 라이선스는 메뉴에서 읽을 수 있는 것보다 약한 주장입니다.
      */
-    MENU_CREDITS
+    MENU_CREDITS,
+
+    /**
+     * @brief The front screen: which game this is going to be.
+     *
+     * ENGLISH
+     * -------
+     * THE ONE SCREEN THAT CANNOT BE CLOSED, and the reason is what is behind
+     * it. Every other screen here is drawn over a run in progress, so closing
+     * it hands the player back what they were doing. There is no run yet when
+     * this is up -- ::RunState::title is still set and the level behind it is a
+     * frozen backdrop -- so a close would leave a player looking at a room they
+     * cannot move in with nothing to press. ESC therefore steps BACK to this
+     * screen from settings and credits, and does nothing on it.
+     *
+     * IT IS ALSO WHERE THE MODE IS CHOSEN, which is why it exists at all.
+     * ::RunState::endless is a property of how a run was ENTERED rather than of
+     * the map -- story and endless are the same room -- so something has to ask
+     * before the room is loaded, and a title screen is the only place in this
+     * game that runs before a room is loaded.
+     *
+     * @note Opened with ::menu_open_title, not with ::menu_escape. Which screen
+     *       is "home" is a fact about whether a run exists, and the menu is told
+     *       rather than guessing from state it does not own.
+     *
+     * 한국어
+     * ------
+     * @brief 앞 화면. 이것이 어떤 게임이 될 것인가입니다.
+     *
+     * *닫을 수 없는 유일한 화면이며*, 이유는 그 뒤에 있는 것입니다. 이곳의 다른 모든 화면은
+     * 진행 중인 플레이 위에 그려지므로, 닫으면 플레이어가 하던 것을 돌려받습니다. 이것이 떠
+     * 있을 때는 아직 플레이가 없습니다. ::RunState::title이 여전히 서 있고 뒤의 레벨은 정지된
+     * 배경입니다. 그래서 닫으면 플레이어는 움직일 수 없는 방을 누를 것도 없이 바라보게 됩니다.
+     * 따라서 ESC는 설정과 크레딧에서 이 화면으로 *물러나고*, 이 화면에서는 아무 일도 하지
+     * 않습니다.
+     *
+     * *모드를 고르는 곳이기도 하며*, 애초에 이것이 존재하는 이유가 그것입니다.
+     * ::RunState::endless는 맵이 아니라 플레이에 *들어온 방식*의 성질입니다. 스토리와 무한은
+     * 같은 방이기 때문입니다. 그러므로 방이 로드되기 전에 무언가가 물어야 하고, 방이 로드되기
+     * 전에 도는 곳은 이 게임에서 타이틀 화면뿐입니다.
+     *
+     * @note ::menu_escape이 아니라 ::menu_open_title로 엽니다. 어느 화면이 "집"인가는 플레이가
+     *       존재하는지에 대한 사실이며, 메뉴는 자신이 소유하지 않은 상태로부터 추측하는 대신
+     *       그것을 전달받습니다.
+     */
+    MENU_TITLE
 } MenuScreen;
 
 /**
@@ -113,8 +158,70 @@ typedef enum {
     MENU_ACT_NONE = 0,   /**< Nothing to do. / 할 일 없음. */
     MENU_ACT_RESTART,    /**< Reload the current level from the start. / 현재 레벨을 처음부터 다시 로드. */
     MENU_ACT_QUIT,       /**< Leave the game. / 게임 종료. */
-    MENU_ACT_DISPLAY     /**< Apply the display mode; see ::menu_settings. / 표시 모드 적용. */
+    MENU_ACT_DISPLAY,    /**< Apply the display mode; see ::menu_settings. / 표시 모드 적용. */
+
+    /**
+     * @brief Begin a story run. / 스토리 플레이를 시작합니다.
+     *
+     * ENGLISH: TWO ACTIONS RATHER THAN ONE WITH A FLAG, because the caller has
+     * to do two different things with them anyway -- and an action carrying a
+     * payload would be the first one here that does, for a distinction that is
+     * one row either way.
+     *
+     * 한국어: 플래그 하나를 가진 동작 하나가 아니라 *동작 둘*입니다. 호출자가 어차피 둘로 서로
+     * 다른 일을 해야 하며, 값을 실어 나르는 동작은 이곳에서 그렇게 하는 첫 번째가 될 텐데 그
+     * 구분은 어느 쪽이든 행 하나입니다.
+     */
+    MENU_ACT_STORY,
+
+    /** @brief Begin an endless run. / 무한 플레이를 시작합니다. */
+    MENU_ACT_ENDLESS
 } MenuAction;
+
+/**
+ * @brief What a row can require before it may be chosen.
+ *
+ * ENGLISH
+ * -------
+ * A MASK RATHER THAN A BOOL PER ROW, so the next locked row is a bit and a
+ * column in the table rather than a second predicate. The value is handed in by
+ * the caller through ::menu_set_unlocked; this module compares and never
+ * interprets, which is what lets save.c store the same number without either of
+ * them owning what it means.
+ *
+ * THE VOCABULARY IS HERE and not in save.h, because the question a bit answers
+ * is "may this row be chosen" -- a menu question. save.h's own note says it
+ * stores the mask verbatim for exactly that reason: two lists of bit names
+ * agree until somebody adds the second unlock to one of them.
+ *
+ * 한국어
+ * ------
+ * @brief 어떤 행이 선택되기 전에 요구할 수 있는 것.
+ *
+ * *행마다의 불리언이 아니라 마스크*이므로, 다음에 잠기는 행은 두 번째 술어가 아니라 비트
+ * 하나와 표의 열 하나입니다. 값은 ::menu_set_unlocked를 통해 호출자가 건네줍니다. 이 모듈은
+ * 비교할 뿐 결코 해석하지 않으며, 그것이 save.c가 같은 숫자를 저장하면서도 둘 중 어느 쪽도 그
+ * 뜻을 소유하지 않게 합니다.
+ *
+ * *어휘가 save.h가 아니라 이곳에 있는 이유*는, 비트가 답하는 질문이 "이 행을 고를 수 있는가"
+ * 이기 때문입니다. 메뉴의 질문입니다. save.h 자신의 참고 사항이 바로 그 이유로 마스크를 그대로
+ * 저장한다고 말합니다. 비트 이름 목록이 둘이면 누군가 그중 하나에 두 번째 해금을 추가하기
+ * 전까지만 일치합니다.
+ */
+typedef enum {
+    /**
+     * @brief The endless row, earned by finishing the story once.
+     *
+     * ENGLISH: Locked rather than hidden. A row nobody can see is a mode
+     * nobody knows to want, and the whole reason endless is worth unlocking is
+     * that the player has been looking at it since the first launch.
+     *
+     * 한국어: 숨기지 않고 잠급니다. 아무도 볼 수 없는 행은 아무도 원할 줄 모르는 모드이며,
+     * 무한 모드가 해금할 가치가 있는 이유 전부는 플레이어가 첫 실행 이후로 줄곧 그것을 보고
+     * 있었다는 데 있습니다.
+     */
+    MENU_UNLOCK_ENDLESS = 1u << 0
+} MenuUnlock;
 
 /**
  * @brief Window presentation modes offered by the settings page.
@@ -327,6 +434,40 @@ typedef struct {
  */
 void menu_init(const MenuSettings *s);
 
+/**
+ * @brief Puts the menu on ::MENU_TITLE and makes that screen its home.
+ *
+ * ENGLISH
+ * -------
+ * WHAT "HOME" MEANS: the screen ESC steps back to, and the screen a BACK row
+ * returns to. During a run that is ::MENU_ROOT and ESC from it closes the menu;
+ * before one it is ::MENU_TITLE and ESC on it does nothing, because there is no
+ * run underneath to be handed back to.
+ *
+ * @note Told rather than derived. This module owns no ::RunState and could only
+ *       guess at whether a run exists; a menu that guessed would be a second
+ *       opinion about it, and the two would disagree on exactly the frame a run
+ *       begins.
+ * @note ::menu_init leaves the menu closed with ::MENU_ROOT as home, which is
+ *       what a restart wants -- the player has already chosen a mode and is not
+ *       being asked again.
+ *
+ * 한국어
+ * ------
+ * @brief 메뉴를 ::MENU_TITLE에 놓고 그 화면을 집으로 삼습니다.
+ *
+ * *"집"이 뜻하는 것*은 ESC가 물러나는 화면이자 BACK 행이 돌아가는 화면입니다. 플레이 중에는
+ * ::MENU_ROOT이며 그곳에서의 ESC는 메뉴를 닫습니다. 플레이 이전에는 ::MENU_TITLE이며 그곳에서의
+ * ESC는 아무 일도 하지 않습니다. 돌려줄 플레이가 아래에 없기 때문입니다.
+ *
+ * @note 유도하지 않고 전달받습니다. 이 모듈은 ::RunState를 소유하지 않으므로 플레이가
+ *       존재하는지 추측할 수밖에 없습니다. 추측하는 메뉴는 그에 대한 두 번째 의견이 되고, 그
+ *       둘은 정확히 플레이가 시작되는 프레임에 어긋납니다.
+ * @note ::menu_init은 메뉴를 닫힌 채로 두고 ::MENU_ROOT을 집으로 삼습니다. 재시작이 원하는 것이
+ *       그것입니다. 플레이어는 이미 모드를 골랐고 다시 질문받지 않습니다.
+ */
+void menu_open_title(void);
+
 /* --- State / 상태 --- */
 
 /**
@@ -390,6 +531,66 @@ const MenuSettings *menu_settings(void);
  */
 int menu_row_count(void);
 int menu_cursor(void);
+
+/**
+ * @brief Is this row visible but not choosable?
+ *
+ * ENGLISH
+ * -------
+ * @param[in] row Row index on the current screen.
+ * @return Non-zero when the row requires an unlock the caller has not reported.
+ *
+ * @note THE CURSOR STILL PASSES OVER IT. Skipping a locked row would make the
+ *       highlight jump two places for a reason nothing on screen explains,
+ *       which reads as the menu losing keypresses -- and it would leave a row
+ *       drawn that the keyboard can never point at. Landing on it and refusing
+ *       to activate says what is true: that is a real row and it is not yours
+ *       yet.
+ * @note An out-of-range row is not locked. A drawing loop that runs one row
+ *       long already gets "" from ::menu_row_text; this answers in the same
+ *       spirit rather than making the caller test the range twice.
+ *
+ * 한국어
+ * ------
+ * @brief 이 행은 보이지만 고를 수 없는가?
+ * @param[in] row 현재 화면에서의 행 인덱스.
+ * @return 호출자가 보고하지 않은 해금을 요구하는 행이면 0이 아닌 값.
+ *
+ * @note *커서는 여전히 그 위를 지나갑니다.* 잠긴 행을 건너뛰면 화면의 어느 것도 설명하지 않는
+ *       이유로 강조가 두 칸씩 뛰게 되며, 그것은 메뉴가 키 입력을 잃는 것으로 읽힙니다. 또한
+ *       키보드가 결코 가리킬 수 없는 행이 그려진 채 남습니다. 그 위에 서되 실행을 거절하는
+ *       것이 참인 바를 말합니다. 그것은 실제 행이고 아직 당신의 것이 아닙니다.
+ * @note 범위를 벗어난 행은 잠긴 것이 아닙니다. 한 행을 더 도는 그리기 루프는 이미
+ *       ::menu_row_text에서 ""를 받습니다. 이 함수도 같은 정신으로 답하며, 호출자가 범위를 두
+ *       번 검사하게 만들지 않습니다.
+ */
+int menu_row_locked(int row);
+
+/**
+ * @brief Tells the menu which unlocks the player has.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] bits A mask of ::MenuUnlock values. 0 locks everything that has a
+ *                 requirement, which is what a first launch looks like.
+ * @note Read every time a row is drawn or activated rather than cached into the
+ *       rows, so an unlock earned mid-session takes effect the moment the
+ *       caller reports it -- the menu is not open at that moment and there
+ *       would be nothing to re-open it for.
+ *
+ * 한국어
+ * ------
+ * @brief 플레이어가 어떤 해금을 가지고 있는지 메뉴에 알립니다.
+ * @param[in] bits ::MenuUnlock 값들의 마스크. 0이면 요구 조건이 있는 모든 것이 잠기며, 첫
+ *                 실행이 그렇게 보입니다.
+ * @note 행에 캐시하지 않고 행이 그려지거나 실행될 때마다 읽으므로, 세션 도중에 얻은 해금은
+ *       호출자가 그것을 보고하는 순간 효력을 갖습니다. 그 순간 메뉴는 열려 있지 않으며, 그것을
+ *       다시 열게 할 것도 없습니다.
+ */
+void menu_set_unlocked(unsigned bits);
+
+/** @brief The mask last given to ::menu_set_unlocked. / ::menu_set_unlocked에 마지막으로 준 마스크. */
+unsigned menu_unlocked(void);
 
 /**
  * @brief The label and value text for one row of the current screen.
@@ -639,19 +840,28 @@ int menu_click(float mx, float my, int vw, int vh, int right);
  *
  * ENGLISH
  * -------
- * This is what ESC does. From ::MENU_CLOSED it opens the root; from
- * ::MENU_SETTINGS it returns to the root; from the root it closes.
+ * This is what ESC does. From ::MENU_CLOSED it opens home; from a sub-screen it
+ * returns home; from home it closes -- unless home is ::MENU_TITLE, where there
+ * is nothing underneath to close onto and it does nothing at all.
  *
  * @note ESC therefore never quits the game. Leaving is a menu row the player
  *       has to choose, which is the whole point of this module -- one
  *       mistaken keypress used to end a run outright.
+ * @note Which screen is home is ::menu_open_title's, not this function's. Every
+ *       step here is expressed against it rather than against ::MENU_ROOT by
+ *       name, so the title screen needed no branch of its own.
  *
  * 한국어
  * ------
  * @brief 메뉴를 열거나, 이미 열려 있으면 한 화면 뒤로 물러납니다.
  *
- * ESC가 하는 일입니다. ::MENU_CLOSED에서는 최상위 메뉴를 열고, ::MENU_SETTINGS에서는
- * 최상위로 돌아가며, 최상위에서는 닫습니다.
+ * ESC가 하는 일입니다. ::MENU_CLOSED에서는 집을 열고, 하위 화면에서는 집으로 돌아가며,
+ * 집에서는 닫습니다. 다만 집이 ::MENU_TITLE이면 닫고 갈 아래가 없으므로 아무 일도 하지
+ * 않습니다.
+ *
+ * @note 어느 화면이 집인가는 이 함수가 아니라 ::menu_open_title의 것입니다. 이곳의 모든 단계가
+ *       ::MENU_ROOT을 이름으로 지목하지 않고 집을 기준으로 표현되므로, 타이틀 화면은 자기
+ *       분기를 필요로 하지 않았습니다.
  *
  * @note 따라서 ESC는 결코 게임을 종료하지 않습니다. 나가는 것은 플레이어가 직접 골라야
  *       하는 메뉴 행이며, 그것이 이 모듈의 존재 이유입니다. 예전에는 잘못 누른 키 하나가
@@ -709,6 +919,9 @@ void menu_adjust(int delta);
  * @note On a value row this is the same as ::menu_adjust with +1, so ENTER
  *       cycles a setting rather than doing nothing. A menu where the main
  *       action key is inert on most rows teaches the player it is broken.
+ * @note A LOCKED ROW IS THE ONE EXCEPTION, and it is inert on purpose: the row
+ *       is drawn dim precisely so that pressing it and getting nothing is the
+ *       answer the player was already expecting. See ::menu_row_locked.
  *
  * 한국어
  * ------
@@ -716,6 +929,9 @@ void menu_adjust(int delta);
  * @note 값을 가진 행에서는 +1을 준 ::menu_adjust와 동일하므로, ENTER가 아무 일도 하지
  *       않는 대신 설정을 순환시킵니다. 주 실행 키가 대부분의 행에서 반응하지 않는
  *       메뉴는 플레이어에게 고장 났다고 가르칩니다.
+ * @note *잠긴 행이 유일한 예외이며* 의도적으로 반응하지 않습니다. 행이 흐리게 그려지는 것은
+ *       바로, 눌렀는데 아무 일도 없는 것이 플레이어가 이미 예상하고 있던 답이 되게 하기
+ *       위함입니다. ::menu_row_locked를 참조하십시오.
  */
 void menu_activate(void);
 
@@ -744,14 +960,22 @@ MenuAction menu_take_action(void);
  *
  * ENGLISH
  * -------
- * @note For the caller to use after it has carried out a restart, so the
- *       player lands back in the game rather than in the menu they just used.
+ * @note For the caller to use after it has carried out a restart, or after it
+ *       has begun the run a ::MENU_TITLE row asked for, so the player lands
+ *       back in the game rather than in the menu they just used.
+ * @note ALSO PUTS HOME BACK TO ::MENU_ROOT, because "closed" and "home is the
+ *       title" cannot both be true: the title is up precisely when there is no
+ *       run behind the menu, and a closed menu is a run being played.
  *
  * 한국어
  * ------
  * @brief 아무 동작도 하지 않고 메뉴를 닫습니다.
- * @note 호출자가 재시작을 수행한 뒤 사용하기 위한 것입니다. 그래야 플레이어가 방금
- *       사용한 메뉴가 아니라 게임으로 돌아갑니다.
+ * @note 호출자가 재시작을 수행한 뒤, 또는 ::MENU_TITLE의 행이 요청한 플레이를 시작한 뒤
+ *       사용하기 위한 것입니다. 그래야 플레이어가 방금 사용한 메뉴가 아니라 게임으로
+ *       돌아갑니다.
+ * @note *집도 ::MENU_ROOT으로 되돌립니다.* "닫힘"과 "집이 타이틀"은 동시에 참일 수 없습니다.
+ *       타이틀이 떠 있는 것은 정확히 메뉴 뒤에 플레이가 없을 때이고, 닫힌 메뉴는 플레이
+ *       중이라는 뜻입니다.
  */
 void menu_close(void);
 

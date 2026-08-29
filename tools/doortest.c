@@ -26,6 +26,7 @@
 #include <math.h>
 #include "door.h"
 #include "player.h"
+#include "world.h"   /* WORLD_BOSS_ARENA -- the shipped arena, named once */
 /* level_geometry, to look at the texture coordinates a moving door produces.
    CPU side only: mb_init/mb_free need no GL context and only mesh_upload would.
    움직이는 문이 만들어 내는 텍스처 좌표를 보기 위한 level_geometry입니다. CPU 측뿐이며
@@ -447,6 +448,57 @@ int main(void) {
                "(across the opening)", samples, worst);
 
         mb_free(&b);
+    }
+
+
+    /* --- the doors the SHIPPED arena actually carries --------------------
+     *
+     * Every block above builds its own fixture, which is right: a test that
+     * spells a shipped map's coordinates goes red on every edit. This one
+     * asks nothing about where the doors ARE. It asks whether a player can
+     * open them, which is a property of the level's data and not of its
+     * layout, and which no fixture can answer.
+     *
+     * IT EXISTS BECAUSE THE ANSWER WAS NO. lqdm1's two gates are Quake
+     * func_doors named `gate1`, and the only thing that fired that name was a
+     * trigger_once -- which import-librequake.py drops, because this engine
+     * has no counterpart for it. They arrived TAGGED, and door.c is explicit
+     * about what that means: "An untagged door opens to a touch on itself; a
+     * tagged one opens only" when something fires its tag. So both doors
+     * waited on a switch the conversion had already deleted, and nothing a
+     * player could do would move them. The importer frees a name nothing
+     * surviving targets; this is what says so from the other end.
+     *
+     * 위의 모든 블록은 자기 픽스처를 만들며 그것이 옳습니다. 배포되는 맵의 좌표를 적는
+     * 검사는 편집할 때마다 빨개집니다. 이 블록은 문이 *어디* 있는지는 아무것도 묻지
+     * 않습니다. 플레이어가 그것을 열 수 있는지를 묻고, 그것은 배치가 아니라 레벨 데이터의
+     * 성질이며, 어떤 픽스처도 답할 수 없는 질문입니다.
+     *
+     * *답이 아니오였기 때문에 존재합니다.* lqdm1의 두 문은 `gate1`이라는 이름의 Quake
+     * func_door이고 그 이름을 쏘던 것은 trigger_once 하나뿐인데, 이 엔진에 대응물이 없어
+     * import-librequake.py가 그것을 버립니다. 둘 다 *태그를 단 채* 도착했고, 변환이 이미
+     * 지운 스위치를 기다렸으며, 플레이어가 할 수 있는 어떤 일로도 움직이지 않았습니다. */
+    {
+        static Level A;
+        if (!level_load(WORLD_BOSS_ARENA, &A)) {
+            ok(0, "the shipped arena loads");
+        } else {
+            ok(1, "the shipped arena loads");
+            ok(A.n_doors > 0, "and it has doors at all");
+
+            int tagged = 0, vertical = 0;
+            for (int i = 0; i < A.n_doors; i++) {
+                if (A.doors[i].tag > 0) tagged++;
+                if (A.doors[i].axis == DOOR_UP || A.doors[i].axis == DOOR_DOWN)
+                    vertical++;
+            }
+            okf(tagged == 0,
+                "none of them waits on a switch that did not cross",
+                (float)tagged, 0.0f);
+            okf(vertical == 0,
+                "and they slide sideways, not up",
+                (float)vertical, 0.0f);
+        }
     }
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall door checks passed\n", fails);

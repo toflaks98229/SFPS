@@ -70,7 +70,29 @@ typedef enum {
      * 곳을 하나로 하기 위함입니다. ::menu_row_slider가 그 답이며, ::RowKind 자체는 사설로
      * 남습니다. scene.c가 이 모듈이 행을 어떻게 분류하는지 알아야 할 이유가 없습니다.
      */
-    ROW_SLIDER
+    ROW_SLIDER,
+
+    /**
+     * @brief Returns to whichever screen is home.
+     *
+     * ENGLISH
+     * -------
+     * A KIND RATHER THAN A ROW_SCREEN WITH A SENTINEL, because "go back" is not
+     * "go to ::MENU_ROOT" any more: before a run, home is ::MENU_TITLE. Writing
+     * it as a screen id would mean a value in `arg` that is not a screen, and
+     * the next reader would have to know that MENU_ROOT there sometimes means
+     * something else -- the exact shape of a table that lies about itself.
+     *
+     * 한국어
+     * ------
+     * @brief 집인 화면으로 돌아갑니다.
+     *
+     * *특별한 값을 가진 ROW_SCREEN이 아니라 종류인 이유*는, "뒤로"가 더 이상 "::MENU_ROOT으로"가
+     * 아니기 때문입니다. 플레이 이전에 집은 ::MENU_TITLE입니다. 화면 id로 적으면 `arg`에 화면이
+     * 아닌 값이 들어가고, 다음에 읽는 사람은 그곳의 MENU_ROOT이 때때로 다른 것을 뜻한다는 사실을
+     * 알아야 합니다. 자기 자신에 대해 거짓말하는 표의 정확한 형태입니다.
+     */
+    ROW_BACK
 } RowKind;
 
 /**
@@ -100,6 +122,20 @@ typedef struct {
     int         field;      /**< Byte offset into MenuSettings, for ROW_VALUE. / ROW_VALUE용 MenuSettings 내 바이트 오프셋. */
     int         values;     /**< How many values the field cycles through. / 필드가 순환하는 값의 개수. */
     const char *const *names; /**< One label per value. / 값마다 하나의 레이블. */
+
+    /**
+     * @brief ::MenuUnlock bits this row needs before it may be chosen. 0 = none.
+     *
+     * ENGLISH: A COLUMN RATHER THAN A PREDICATE, so the second locked row is an
+     * edit to one line of one table -- the argument the whole of this file is
+     * built on. Zero is "always available", which every existing row gets from
+     * the initialiser without being edited.
+     *
+     * 한국어: *술어가 아니라 열*이므로, 두 번째로 잠기는 행은 한 표의 한 줄에 대한 수정입니다.
+     * 이 파일 전체가 기반하는 논거입니다. 0은 "언제나 가능"이며, 기존의 모든 행이 수정 없이
+     * 초기화자로부터 그 값을 받습니다.
+     */
+    unsigned    needs;
 } Row;
 
 /* offsetof, without pulling in <stddef.h> for one macro. The cast goes through
@@ -148,11 +184,30 @@ _Static_assert(sizeof(PATTERNS) / sizeof(PATTERNS[0]) == GFX_PATTERN_COUNT,
 /* --- Screens / 화면 --- */
 
 static const Row ROOT_ROWS[] = {
-    { "RESUME",    ROW_SCREEN, MENU_CLOSED,      0, 0, 0 },
-    { "SETTINGS",  ROW_SCREEN, MENU_SETTINGS,    0, 0, 0 },
-    { "RESTART",   ROW_ACTION, MENU_ACT_RESTART, 0, 0, 0 },
-    { "CREDITS",   ROW_SCREEN, MENU_CREDITS,     0, 0, 0 },
-    { "QUIT",      ROW_ACTION, MENU_ACT_QUIT,    0, 0, 0 },
+    { "RESUME",    ROW_SCREEN, MENU_CLOSED,      0, 0, 0, 0 },
+    { "SETTINGS",  ROW_SCREEN, MENU_SETTINGS,    0, 0, 0, 0 },
+    { "RESTART",   ROW_ACTION, MENU_ACT_RESTART, 0, 0, 0, 0 },
+    { "CREDITS",   ROW_SCREEN, MENU_CREDITS,     0, 0, 0, 0 },
+    { "QUIT",      ROW_ACTION, MENU_ACT_QUIT,    0, 0, 0, 0 },
+};
+
+/* The front screen. No RESUME and no RESTART: there is nothing to resume, and
+   "start again" is what both of the top two rows already are.
+   ENDLESS SITS SECOND rather than last, in the place it will occupy once it is
+   unlocked. A row that moved when it became available would make the unlock
+   read as the menu being rebuilt, and the player who has been looking at it for
+   an hour would have to find it again.
+   앞 화면입니다. RESUME도 RESTART도 없습니다. 재개할 것이 없고, "다시 시작"은 위의 두 행이
+   이미 그것이기 때문입니다.
+   *ENDLESS는 마지막이 아니라 둘째에 놓입니다.* 해금된 뒤에 차지할 바로 그 자리입니다. 사용
+   가능해질 때 자리를 옮기는 행은 해금을 메뉴가 다시 만들어진 것으로 읽히게 하며, 한 시간 동안
+   그것을 바라보고 있던 플레이어는 다시 찾아야 합니다. */
+static const Row TITLE_ROWS[] = {
+    { "STORY",     ROW_ACTION, MENU_ACT_STORY,   0, 0, 0, 0 },
+    { "ENDLESS",   ROW_ACTION, MENU_ACT_ENDLESS, 0, 0, 0, MENU_UNLOCK_ENDLESS },
+    { "SETTINGS",  ROW_SCREEN, MENU_SETTINGS,    0, 0, 0, 0 },
+    { "CREDITS",   ROW_SCREEN, MENU_CREDITS,     0, 0, 0, 0 },
+    { "QUIT",      ROW_ACTION, MENU_ACT_QUIT,    0, 0, 0, 0 },
 };
 
 /* The credits screen has one row, and it is the way back. The notices
@@ -163,20 +218,20 @@ static const Row ROOT_ROWS[] = {
    그리는 텍스트입니다. 고르는 대상이 아니라 읽는 문단이며, 줄마다 행을 두면 강조 표시가
    라이선스를 따라 내려가게 됩니다. */
 static const Row CREDITS_ROWS[] = {
-    { "BACK",      ROW_SCREEN, MENU_ROOT,        0, 0, 0 },
+    { "BACK",      ROW_BACK,   0,                0, 0, 0, 0 },
 };
 
 static const Row SETTINGS_ROWS[] = {
-    { "DISPLAY",     ROW_VALUE, 0, FIELD(display),   DISPLAY_MODE_COUNT, DISPLAYS },
-    { "PIXEL SIZE",  ROW_VALUE, 0, FIELD(pixel),     GFX_PIXEL_COUNT,    PIXELS   },
-    { "POST FX",     ROW_VALUE, 0, FIELD(post_on),   2,                  OFF_ON   },
-    { "SCANLINES",   ROW_VALUE, 0, FIELD(scanlines), 2,                  OFF_ON   },
-    { "DITHER",      ROW_VALUE, 0, FIELD(dither),    GFX_DITHER_COUNT,   DITHERS  },
-    { "PATTERN",     ROW_VALUE, 0, FIELD(pattern),   GFX_PATTERN_COUNT,  PATTERNS },
-    { "MASTER VOL",  ROW_SLIDER,0, FIELD(master),    MENU_VOL_STEPS,     VOLUMES  },
-    { "SFX VOL",     ROW_SLIDER,0, FIELD(sfx),       MENU_VOL_STEPS,     VOLUMES  },
-    { "BGM VOL",     ROW_SLIDER,0, FIELD(music),     MENU_VOL_STEPS,     VOLUMES  },
-    { "BACK",        ROW_SCREEN, MENU_ROOT, 0, 0, 0 },
+    { "DISPLAY",     ROW_VALUE, 0, FIELD(display),   DISPLAY_MODE_COUNT, DISPLAYS, 0 },
+    { "PIXEL SIZE",  ROW_VALUE, 0, FIELD(pixel),     GFX_PIXEL_COUNT,    PIXELS  , 0 },
+    { "POST FX",     ROW_VALUE, 0, FIELD(post_on),   2,                  OFF_ON  , 0 },
+    { "SCANLINES",   ROW_VALUE, 0, FIELD(scanlines), 2,                  OFF_ON  , 0 },
+    { "DITHER",      ROW_VALUE, 0, FIELD(dither),    GFX_DITHER_COUNT,   DITHERS , 0 },
+    { "PATTERN",     ROW_VALUE, 0, FIELD(pattern),   GFX_PATTERN_COUNT,  PATTERNS, 0 },
+    { "MASTER VOL",  ROW_SLIDER,0, FIELD(master),    MENU_VOL_STEPS,     VOLUMES , 0 },
+    { "SFX VOL",     ROW_SLIDER,0, FIELD(sfx),       MENU_VOL_STEPS,     VOLUMES , 0 },
+    { "BGM VOL",     ROW_SLIDER,0, FIELD(music),     MENU_VOL_STEPS,     VOLUMES , 0 },
+    { "BACK",        ROW_BACK,  0, 0,               0,                  0,        0 },
 };
 
 /* --- Module state / 모듈 상태 --- */
@@ -184,6 +239,23 @@ static const Row SETTINGS_ROWS[] = {
 static MenuScreen   g_screen;
 static int          g_cursor;
 static MenuAction   g_pending;
+
+/* The screen ESC and every BACK row return to. ::MENU_ROOT during a run and
+   ::MENU_TITLE before one; see menu.h's note on ::menu_open_title for why this
+   is told rather than derived.
+   ZERO WOULD BE ::MENU_CLOSED, which is why ::menu_init assigns it explicitly
+   rather than relying on the .bss the rest of this module does: "home is
+   closed" is a state where ESC opens nothing and the menu cannot be reached.
+   ESC와 모든 BACK 행이 돌아가는 화면입니다. 플레이 중에는 ::MENU_ROOT, 플레이 이전에는
+   ::MENU_TITLE입니다. 왜 유도하지 않고 전달받는지는 menu.h의 ::menu_open_title 참고 사항을
+   보십시오.
+   *0은 ::MENU_CLOSED가 될 것이므로*, ::menu_init이 이 모듈의 나머지처럼 .bss에 기대지 않고
+   명시적으로 대입합니다. "집이 닫힘"은 ESC가 아무것도 열지 않고 메뉴에 도달할 수 없는
+   상태입니다. */
+static MenuScreen   g_home = MENU_ROOT;
+
+/** @brief What ::menu_set_unlocked was last told. / ::menu_set_unlocked가 마지막으로 들은 것. */
+static unsigned     g_unlocked;
 static MenuSettings g_set = {
     /* Named rather than positional past the first few: a struct that gains a
        field silently gives it 0, and 0 here is GFX_DITHER_HEAVY -- the exact
@@ -225,8 +297,32 @@ static const Row *rows_of(MenuScreen s, int *count) {
         *count = (int)(sizeof(CREDITS_ROWS) / sizeof(CREDITS_ROWS[0]));
         return CREDITS_ROWS;
     }
+    if (s == MENU_TITLE) {
+        *count = (int)(sizeof(TITLE_ROWS) / sizeof(TITLE_ROWS[0]));
+        return TITLE_ROWS;
+    }
     *count = 0;
     return 0;
+}
+
+/* The row at `row` on the current screen, or NULL. Four functions below were
+   each opening with the same three lines and one of them tested the bounds the
+   other way round; this is that opening, written once.
+   현재 화면의 `row` 행이며, 없으면 NULL입니다. 아래의 네 함수가 각각 같은 세 줄로 시작하고
+   있었고 그중 하나는 경계를 반대로 검사했습니다. 이것이 그 시작 부분을 한 번 적은 것입니다. */
+static const Row *row_of(int row) {
+    int n;
+    const Row *rs = rows_of(g_screen, &n);
+    if (!rs || row < 0 || row >= n) return 0;
+    return &rs[row];
+}
+
+/* Whether a row's requirement is met. The one place that compares, so a locked
+   row cannot be drawn dim by one rule and activated by another.
+   행의 요구 조건이 충족되었는지입니다. 비교하는 곳이 하나이므로, 잠긴 행이 한 규칙으로 흐리게
+   그려지고 다른 규칙으로 실행되는 일이 없습니다. */
+static int locked(const Row *r) {
+    return r && (r->needs & ~g_unlocked) != 0;
 }
 
 /* A slider is a value row that draws differently, so everything about INPUT
@@ -251,6 +347,22 @@ void menu_init(const MenuSettings *s) {
     g_screen  = MENU_CLOSED;
     g_cursor  = 0;
     g_pending = MENU_ACT_NONE;
+    /* Home is the pause root unless somebody says otherwise. That is what a
+       restart wants and what every existing caller meant before there was
+       anything else to mean. The unlocks are NOT cleared here: they describe
+       the player rather than this menu, and re-initialising the menu is not an
+       event that could take one away.
+       달리 말하는 사람이 없으면 집은 일시정지 최상위입니다. 재시작이 원하는 것이고, 다른 것을
+       뜻할 여지가 생기기 전까지 기존의 모든 호출자가 뜻하던 것입니다. 해금은 이곳에서 지우지
+       *않습니다*. 그것은 이 메뉴가 아니라 플레이어를 기술하며, 메뉴를 다시 초기화하는 것은
+       해금을 빼앗을 수 있는 사건이 아닙니다. */
+    g_home    = MENU_ROOT;
+}
+
+void menu_open_title(void) {
+    g_home   = MENU_TITLE;
+    g_screen = MENU_TITLE;
+    g_cursor = 0;
 }
 
 /* --- State / 상태 --- */
@@ -265,6 +377,11 @@ int menu_row_count(void) {
     rows_of(g_screen, &n);
     return n;
 }
+
+int menu_row_locked(int row) { return locked(row_of(row)); }
+
+void menu_set_unlocked(unsigned bits) { g_unlocked = bits; }
+unsigned menu_unlocked(void)          { return g_unlocked; }
 
 int menu_row_slider(int row, float *fill) {
     int n;
@@ -343,6 +460,19 @@ const char *menu_row_text(int row, const char **value) {
 #define TITLE_GAP   70.0f   /* above the first row */
 #define HINT_GAP    34.0f   /* below the last row */
 
+/* The front screen's header is the game's name at title size with a line under
+   it, not one word at menu size, so it needs room the pause menu does not.
+   HERE RATHER THAN IN scene.c for menu_row_bounds' own reason: this is where a
+   row IS, and the drawing reads it. A title drawn from its own constant would
+   be a second layout, and the first thing two layouts disagree about is
+   whether the header overlaps the first row.
+   앞 화면의 머리글은 메뉴 크기의 단어 하나가 아니라 타이틀 크기의 게임 이름과 그 아래 한
+   줄이므로, 일시정지 메뉴가 필요로 하지 않는 공간을 필요로 합니다.
+   scene.c가 아니라 이곳인 이유는 menu_row_bounds 자신의 이유와 같습니다. 행이 *어디에 있는지*를
+   정하는 곳이 이곳이고 그리기가 그것을 읽습니다. 자기 상수로 그려지는 제목은 두 번째 배치가
+   되며, 두 배치가 가장 먼저 어긋나는 것은 머리글이 첫 행과 겹치는가입니다. */
+#define TITLE_GAP_FRONT 150.0f
+
 /* The slider bar, in the same block as the rows above and for the same reason:
    it is a HIT TARGET, and a hit target whose extent is known only to the
    drawing side cannot be dragged. That was the bug -- the bar was drawn from
@@ -388,7 +518,11 @@ int menu_row_bounds(int row, int vw, int vh,
     return 1;
 }
 
-float menu_title_y(int vw, int vh) { (void)vw; return block_top(vh) - TITLE_GAP; }
+float menu_title_y(int vw, int vh) {
+    (void)vw;
+    return block_top(vh)
+         - (g_screen == MENU_TITLE ? TITLE_GAP_FRONT : TITLE_GAP);
+}
 
 float menu_hint_y(int vw, int vh) {
     (void)vw;
@@ -501,6 +635,21 @@ int menu_click(float mx, float my, int vw, int vh, int right) {
 
     g_cursor = r;
 
+    /* A LOCKED ROW TAKES THE CLICK AND DOES NOTHING WITH IT. It returns 1
+       because the click DID land on a row -- 0 here would be "you clicked
+       nothing", and the caller reads that to decide whether the world gets the
+       button instead. Firing a shot into the level from the title screen
+       because a row refused is the wrong kind of refusal.
+       Answered before the bar test below, because ::menu_row_bar_bounds knows
+       nothing about locks and would happily start a drag on one.
+       *잠긴 행은 클릭을 받아들이고 아무것도 하지 않습니다.* 1을 반환하는 이유는 그 클릭이
+       실제로 행에 *닿았기* 때문입니다. 이곳의 0은 "아무것도 클릭하지 않았다"이며, 호출자는
+       그것을 읽고 버튼을 월드에 넘길지 결정합니다. 행이 거절했다는 이유로 타이틀 화면에서
+       레벨에 총알이 나가는 것은 잘못된 종류의 거절입니다.
+       아래의 막대 판정보다 먼저 답합니다. ::menu_row_bar_bounds는 잠금에 대해 아무것도 모르며
+       기꺼이 그 위에서 드래그를 시작할 것이기 때문입니다. */
+    if (menu_row_locked(r)) return 1;
+
     /* The right button is only meaningful on a value row, where it reverses
        the cycle. On a button row there is no "backward", so it does what the
        left button does rather than nothing -- a right-click on QUIT that
@@ -550,12 +699,25 @@ int menu_click(float mx, float my, int vw, int vh, int right) {
 void menu_escape(void) {
     /* One key, three meanings, and each is the obvious one for where it is
        pressed: open, step back, close. Notably none of them is "quit".
+       Expressed against `g_home` rather than against MENU_ROOT by name, which
+       is what let the title screen arrive without a branch here: before a run
+       "step back" lands on the title, and "close" is refused below because
+       there is no run underneath to close onto.
        키 하나에 의미가 셋이며, 각각은 눌린 위치에서 가장 자연스러운 것입니다. 열기,
-       뒤로, 닫기입니다. 그중 어느 것도 "종료"가 아니라는 점이 핵심입니다. */
-    if (g_screen == MENU_CLOSED)        g_screen = MENU_ROOT;
-    else if (g_screen == MENU_SETTINGS) g_screen = MENU_ROOT;
-    else if (g_screen == MENU_CREDITS)  g_screen = MENU_ROOT;
-    else                                g_screen = MENU_CLOSED;
+       뒤로, 닫기입니다. 그중 어느 것도 "종료"가 아니라는 점이 핵심입니다.
+       MENU_ROOT을 이름으로 지목하지 않고 `g_home`을 기준으로 표현하며, 그것이 타이틀 화면이
+       이곳에 분기를 추가하지 않고 도착할 수 있게 한 것입니다. 플레이 이전에 "뒤로"는 타이틀에
+       놓이고, "닫기"는 닫고 갈 플레이가 아래에 없으므로 아래에서 거절됩니다. */
+    if (g_screen == MENU_CLOSED)   g_screen = g_home;
+    else if (g_screen != g_home)   g_screen = g_home;
+    else if (g_home != MENU_TITLE) g_screen = MENU_CLOSED;
+    /* else: home IS the title, and the title cannot be closed. Deliberately not
+       a no-op wrapped in an early return -- the cursor still goes back to the
+       top, which is what a player pressing ESC on a screen with nothing to
+       leave is asking for.
+       그 밖의 경우: 집이 곧 타이틀이며 타이틀은 닫을 수 없습니다. 의도적으로 조기 반환으로
+       감싼 무동작이 아닙니다. 커서는 여전히 맨 위로 돌아가며, 떠날 곳이 없는 화면에서 ESC를
+       누르는 플레이어가 요청하는 것이 그것입니다. */
     g_cursor = 0;
 }
 
@@ -573,11 +735,8 @@ void menu_move(int delta) {
 }
 
 void menu_adjust(int delta) {
-    int n;
-    const Row *rs = rows_of(g_screen, &n);
-    if (!rs || g_cursor < 0 || g_cursor >= n) return;
-
-    const Row *r = &rs[g_cursor];
+    const Row *r = row_of(g_cursor);
+    if (!r || locked(r)) return;
     if (!is_value(r) || r->values < 1) return;
 
     int *f = field_of(r);
@@ -598,14 +757,33 @@ void menu_adjust(int delta) {
 }
 
 void menu_activate(void) {
-    int n;
-    const Row *rs = rows_of(g_screen, &n);
-    if (!rs || g_cursor < 0 || g_cursor >= n) return;
+    const Row *r = row_of(g_cursor);
+    if (!r) return;
 
-    const Row *r = &rs[g_cursor];
+    /* A LOCKED ROW DOES NOTHING. Three functions ask -- this one,
+       ::menu_adjust and ::menu_click -- and all three ask ::locked rather than
+       inspecting `needs` themselves, which is what keeps the row that is drawn
+       dim and the row that refuses to fire the same row.
+       Today's only locked row is an action, which ::menu_adjust would ignore
+       anyway. It is guarded there regardless: "the locked ones happen to be
+       actions" is a fact about one table, and the day it stops being true the
+       symptom would be a setting that can be changed but not chosen.
+       *잠긴 행은 아무 일도 하지 않습니다.* 세 함수가 묻습니다. 이 함수와 ::menu_adjust와
+       ::menu_click이며, 셋 다 `needs`를 직접 들여다보지 않고 ::locked에 묻습니다. 그것이 흐리게
+       그려지는 행과 발동을 거절하는 행을 같은 행으로 유지합니다.
+       오늘 잠기는 유일한 행은 동작 행이고 ::menu_adjust는 어차피 그것을 무시합니다. 그럼에도
+       그곳에도 검사를 둡니다. "잠기는 것들이 마침 동작 행이다"는 표 하나에 대한 사실이며, 그것이
+       참이기를 그만두는 날의 증상은 고를 수는 없는데 바꿀 수는 있는 설정입니다. */
+    if (locked(r)) return;
+
     switch (r->kind) {
     case ROW_ACTION:
         g_pending = (MenuAction)r->arg;
+        break;
+    case ROW_BACK:
+        g_screen = g_home;
+        g_cursor = 0;
+        g_drag   = -1;
         break;
     case ROW_SCREEN:
         g_screen = (MenuScreen)r->arg;
@@ -637,4 +815,17 @@ void menu_close(void) {
     g_drag = -1;
     g_screen = MENU_CLOSED;
     g_cursor = 0;
+
+    /* AND THE TITLE STOPS BEING HOME. "Closed" and "home is the title" are
+       contradictory: the title exists because there is no run behind it, and a
+       closed menu is a run being played. Putting them back together here makes
+       the invariant hold by construction rather than by every caller of this
+       function remembering to say so -- and this function IS the moment a run
+       starts being played, whichever of its callers said it.
+       *그리고 타이틀은 집이기를 그만둡니다.* "닫힘"과 "집이 타이틀"은 서로 모순됩니다. 타이틀이
+       존재하는 이유는 뒤에 플레이가 없기 때문이고, 닫힌 메뉴는 플레이 중이라는 뜻입니다. 이곳에서
+       둘을 도로 맞추면, 이 함수의 모든 호출자가 그렇게 말해 주기를 기다리는 대신 불변식이
+       구조적으로 성립합니다. 그리고 어느 호출자가 말했든, 플레이가 시작되는 순간이 곧 이
+       함수입니다. */
+    g_home = MENU_ROOT;
 }

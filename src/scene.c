@@ -49,6 +49,13 @@
 #include "font.h"
 #include "post.h"     /* post_begin/post_end/post_size -- this file drives the pass */
 #include "menu.h"     /* the rows the ESC menu draws, read rather than copied */
+/* The best wave, for the title screen. A saved figure rather than a run's, so
+   it cannot come through ::World -- and the title screen is the only place it
+   is ever shown. Read the same way ::menu_screen is, three lines up.
+   타이틀 화면을 위한 최고 웨이브입니다. 플레이의 값이 아니라 저장된 값이므로 ::World를 통해
+   올 수 없으며, 타이틀 화면이 그것이 보이는 유일한 곳입니다. 세 줄 위의 ::menu_screen과 같은
+   방식으로 읽습니다. */
+#include "save.h"
 #include "door.h"     /* the refusal notice, and the names of the key bits */
 #include "txt.h"      /* txt_append_int/_str: the HUD's numbers, without user32 */
 #include "diag.h"
@@ -101,7 +108,33 @@
  *       유일한 곳이기 때문입니다. 창은 스냅 격자가 얼마나 성긴지에 대해 아무 견해도 갖지
  *       않습니다.
  */
-#define PSX_SNAP_COARSE 2.0f
+/* OFF. The machinery below is intact and one edit from returning; what
+   changed is that this project stopped asking for the look.
+   THE ARENA IS WHAT DECIDED IT. Both halves of the PlayStation look scale with
+   how much screen a single polygon covers, and ::PSX_AFFINE's own note already
+   said where that ends: "a brush level has single faces bigger than a
+   PlayStation drew in a whole room -- a wall here is one quad where that
+   hardware would have had a dozen. At 1.0 those faces crease along their
+   diagonal hard enough to read as a broken renderer." lqdm1's longest edge is
+   72 metres and 13% of its faces are over 4x4m, measured by tools/lightprobe.c
+   -- geometry coarser than anything those two numbers were tuned against, so
+   the wobble stopped reading as a period and started reading as the mesh
+   coming apart.
+   BOTH, NOT ONE. The note at the call site is explicit that they are halves of
+   one thing -- "the vertices wobble and the texture between them swims.
+   Turning on either alone reads as a fault in the renderer rather than as a
+   period" -- so removing the wobble and leaving the swim would trade one
+   artefact for a worse one.
+   *꺼졌습니다.* 아래의 기구는 그대로이며 한 번의 편집으로 돌아옵니다. 바뀐 것은 이
+   프로젝트가 그 룩을 더 이상 요구하지 않는다는 것입니다.
+   *아레나가 그것을 결정했습니다.* 플레이스테이션 룩의 두 절반 모두 폴리곤 하나가 화면을
+   얼마나 덮는지에 따라 커지며, ::PSX_AFFINE의 각주가 그 끝을 이미 말해 두었습니다. lqdm1의
+   가장 긴 모서리는 72미터이고 면의 13%가 4x4m를 넘습니다. 그 두 수가 맞춰졌던 어떤 것보다
+   거친 지오메트리이므로, 흔들림은 시대의 표현이기를 그만두고 메쉬가 무너지는 것으로 읽히기
+   시작했습니다.
+   *하나가 아니라 둘 다입니다.* 호출 지점의 각주가 둘이 한 가지의 절반이라고 분명히 말하므로,
+   흔들림만 없애고 헤엄을 남기는 것은 아티팩트 하나를 더 나쁜 것과 맞바꾸는 일입니다. */
+#define PSX_SNAP_COARSE 0.0f
 
 /**
  * @brief How much affine texture swim to use. See ::rd_affine.
@@ -139,7 +172,7 @@
  *       설정하는 것이 아니라 게임이 *지닌* 것입니다. 둘 중 하나를 노출한다면 함께 노출해야
  *       합니다.
  */
-#define PSX_AFFINE 0.55f
+#define PSX_AFFINE 0.0f
 
 /* --- moving light ----------------------------------------------------------
  *
@@ -186,8 +219,31 @@
 #define LIGHT_MUZZLE_POWER   0.85f  ///< @brief Peak power, faded over ::FLASH_TIME. / 최대 세기. ::FLASH_TIME에 걸쳐 감쇠합니다.
 #define LIGHT_PROJ_RADIUS    5.0f   ///< @brief Metres a player projectile lights. / 플레이어 발사체가 밝히는 거리 (미터).
 #define LIGHT_PROJ_POWER     0.55f  ///< @brief Steady, for as long as it is in the air. / 공중에 있는 동안 일정합니다.
-#define LIGHT_SHOT_RADIUS    4.5f   ///< @brief Metres a monster bolt lights. / 몬스터 볼트가 밝히는 거리 (미터).
-#define LIGHT_SHOT_POWER     0.60f  ///< @brief Bolts read as the brighter thing in a dark room. / 볼트는 어두운 방에서 더 밝은 것으로 읽힙니다.
+/* Reaches further than it did, to match the emission tier ::scene_draw_shots
+   now draws around the bolt. The two are one event told twice -- to the eye as
+   a glow and to the geometry as a light -- and a bolt whose halo is two metres
+   across while the wall behind it brightens over one is a bolt with a visible
+   seam in it.
+   ::scene_draw_shots가 이제 볼트 둘레에 그리는 발광 겹에 맞춰 예전보다 멀리 닿습니다. 둘은
+   하나의 사건을 두 번 말하는 것입니다. 눈에게는 발광으로, 지오메트리에게는 빛으로. 헤일로는
+   2미터인데 뒤의 벽은 1미터에 걸쳐 밝아지는 볼트는 눈에 보이는 이음매를 가진 볼트입니다. */
+#define LIGHT_SHOT_RADIUS    6.0f   ///< @brief Metres a monster bolt lights. / 몬스터 볼트가 밝히는 거리 (미터).
+#define LIGHT_SHOT_POWER     0.70f  ///< @brief Bolts read as the brighter thing in a dark room. / 볼트는 어두운 방에서 더 밝은 것으로 읽힙니다.
+
+/* --- the shrine ------------------------------------------------------------
+   Generous and warm, because unlike every other entry above this one is not an
+   event -- it burns for the whole breather, and what it has to do is be
+   findable from wherever the player happened to be standing when the room went
+   quiet. Gold rather than the blue the bolts and the hook use: the one thing in
+   the room that is a REWARD should not be lit in the colour of the things that
+   are about to hurt.
+   위의 다른 모든 항목과 달리 이것은 사건이 아니므로 넉넉하고 따뜻합니다. 휴식 내내
+   타오르며, 해야 할 일은 방이 조용해질 때 플레이어가 어디에 서 있었든 찾을 수 있게 되는
+   것입니다. 볼트와 갈고리가 쓰는 파랑이 아니라 금색인 이유는, 방에서 유일하게 *보상*인 것이
+   곧 아프게 할 것들의 색으로 밝혀져서는 안 되기 때문입니다. */
+#define LIGHT_ALTAR_RADIUS   9.0f   ///< @brief Metres a burning shrine lights. / 타오르는 제단이 밝히는 거리 (미터).
+#define LIGHT_ALTAR_POWER    0.55f  ///< @brief Steady, for as long as it burns. / 타오르는 동안 일정합니다.
+#define LIGHT_ALTAR_HEIGHT   0.9f   ///< @brief Metres above the floor it sits, so the floor is what brightens. / 바닥 위 높이(미터). 바닥이 밝아지도록 합니다.
 
 /** @brief Warm white: burnt powder, not a torch. / 따뜻한 백색. 횃불이 아니라 연소한 화약입니다. */
 static const float LIGHT_COL_MUZZLE[3] = { 1.00f, 0.86f, 0.62f };
@@ -208,6 +264,9 @@ static const float LIGHT_COL_PROJ[3]   = { 1.00f, 0.62f, 0.26f };
  * 나쁩니다. 벽은 한 색을 말하고 그 앞의 볼트는 다른 색을 말하는데, 눈은 벽을 믿습니다.
  */
 static const float LIGHT_COL_SHOT[3]   = { 0.42f, 0.68f, 1.00f };
+
+/** @brief The shrine's warm gold, the same hue `altarcore` burns in. / 제단의 따뜻한 금색. `altarcore`가 타는 것과 같은 색조입니다. */
+static const float LIGHT_COL_ALTAR[3]  = { 1.00f, 0.82f, 0.46f };
 
 /* --- how a shake looks -----------------------------------------------------
  * HOW HARD is ::RunState::shake's and the world's; how it LOOKS is this file's,
@@ -341,6 +400,21 @@ static void scene_lights(const World *w, v3 eye) {
                     LIGHT_SHOT_POWER, eye);
     }
 
+    /* The shrine a cleared wave lit, for as long as it burns. Not faded over
+       its own timer, unlike the muzzle flash: a marker that dims as the
+       breather runs out is dimmest exactly when the player is furthest into
+       deciding whether to go and fetch what it marks.
+       정리된 웨이브가 켠 제단이며, 타오르는 동안 지속됩니다. 총구 섬광과 달리 자기 타이머에
+       맞춰 감쇠하지 *않습니다.* 휴식이 끝나 갈수록 어두워지는 표식은, 플레이어가 그것이
+       표시하는 것을 가지러 갈지 말지 결정하는 데 가장 깊이 들어간 바로 그때 가장
+       어둡습니다. */
+    if (w->run.altar_time > 0.0f)
+        light_offer(ls, &n,
+                    v3f(w->run.altar_pos.x,
+                        w->run.altar_pos.y + LIGHT_ALTAR_HEIGHT,
+                        w->run.altar_pos.z),
+                    LIGHT_ALTAR_RADIUS, LIGHT_COL_ALTAR, LIGHT_ALTAR_POWER, eye);
+
     /* Flattened into the two arrays ::rd_lights takes. Kept apart until here
        because the eviction above needs the distance beside the light, and
        ::rd_lights wants neither.
@@ -370,6 +444,53 @@ static void scene_lights(const World *w, v3 eye) {
 #define SHOT_HALO_SIZE  0.62f
 #define SHOT_CORE_SIZE  0.22f
 #define SHOT_SPIN       2.3f    /* radians per second of remaining life */
+
+/* --- the emission ----------------------------------------------------------
+ *
+ * ENGLISH
+ * -------
+ * A THIRD TIER, OUTSIDE THE OTHER TWO, and it is not more of the same thing.
+ * The halo and the core describe the OBJECT -- how big the bolt is and how hot
+ * its middle is -- and both stop at the bolt's own edge. What was missing is
+ * the light it is supposed to be throwing: a projectile that glows exactly as
+ * far as it is wide reads as a painted sprite moving through a room rather
+ * than as something burning in it.
+ *
+ * Twice the halo's width and a fifth of its opacity, because that is what an
+ * emission is: it has to reach past the object and it must not compete with
+ * it. Additive at this alpha it is invisible against a lit wall and obvious
+ * against a dark corridor, which is exactly where a bolt you have not seen yet
+ * is the one that hits you.
+ *
+ * IT BREATHES, and that is the half that makes it read as emission rather than
+ * as a bigger sprite. A steady disc of light is a shape; one that swells and
+ * settles is a source. The rate is fast enough to be seen in the half-second a
+ * bolt is in the air and slow enough not to strobe -- ::SHOT_SPIN already
+ * turns the petals, so this only has to change the size.
+ *
+ * 한국어
+ * ------
+ * *다른 둘의 바깥에 있는 세 번째 겹*이며, 같은 것을 더한 것이 아닙니다. 헤일로와 코어는
+ * *물체*를 서술합니다. 볼트가 얼마나 큰지, 그 한가운데가 얼마나 뜨거운지이며, 둘 다 볼트
+ * 자신의 가장자리에서 멈춥니다. 빠져 있던 것은 그것이 내뿜고 있어야 할 *빛*입니다. 자기 폭만큼만
+ * 빛나는 발사체는 방 안에서 타고 있는 무언가가 아니라 방을 가로질러 움직이는 색칠된
+ * 스프라이트로 읽힙니다.
+ *
+ * 헤일로의 두 배 폭과 5분의 1 불투명도인 이유는 그것이 발광이기 때문입니다. 물체 너머까지
+ * 닿아야 하고, 물체와 경쟁해서는 안 됩니다. 이 알파의 가산 블렌드는 밝은 벽 앞에서는 보이지
+ * 않고 어두운 복도에서는 뚜렷한데, 아직 보지 못한 볼트가 곧 당신을 맞히는 볼트인 곳이 정확히
+ * 그곳입니다.
+ *
+ * *숨을 쉬며*, 그것이 이것을 더 큰 스프라이트가 아니라 발광으로 읽히게 하는 나머지 절반입니다.
+ * 일정한 빛의 원반은 형태이고, 부풀었다 가라앉는 것은 광원입니다. */
+#define SHOT_GLOWS      2       /* the outer emission: big, dim, and it breathes */
+#define SHOT_GLOW_SIZE  1.30f
+#define SHOT_GLOW_PULSE 0.22f   /* fraction of the size it swells by */
+#define SHOT_GLOW_RATE  9.0f    /* radians per second of remaining life */
+
+/** @brief Quads one bolt is built from, outermost tier first. / 볼트 하나를 이루는 사각형. 가장 바깥 겹부터입니다. */
+#define SHOT_QUADS (SHOT_GLOWS + SHOT_HALOS + SHOT_CORES)
+
 
 /* --- pickups --- */
 /* Floor items are drawn as a fixed square in world space, so their apparent
@@ -411,6 +532,12 @@ static void scene_lights(const World *w, v3 eye) {
 
 #define PICKUP_BOB      0.06f   /* bob amplitude, metres */
 #define PICKUP_BOB_RATE 2.2f
+
+/** @brief Where an item's billboard sits: lifted clear of the floor, and bobbing. / 아이템 빌보드가 놓이는 자리. 바닥에서 들리고 위아래로 움직입니다. */
+static v3 pickup_centre(const Pickup *p) {
+    float bob = PICKUP_BOB * sinf(p->anim * PICKUP_BOB_RATE);
+    return v3f(p->pos.x, p->pos.y + PICKUP_LIFT + bob, p->pos.z);
+}
 
 /* --- monsters --- */
 #define WALK_CYCLE_RATE 8.0f    /* how fast the two-frame walk alternates */
@@ -461,12 +588,64 @@ static void scene_lights(const World *w, v3 eye) {
 #define DEATH_DIM       0.62f   /* darker than the win screen, and red */
 #define DEATH_FADE      1.2f    /* seconds for the overlay to reach full */
 #define DEATH_TITLE_SIZE 7.0f
+/* Bigger than the hint below it and much smaller than the title above it,
+   which is the order the three lines are read in: what happened, what it came
+   to, what to do about it. A score at hint size would be skipped; one at title
+   size would compete with the word it is qualifying.
+   아래의 안내 문구보다 크고 위의 제목보다 훨씬 작으며, 그것이 세 줄이 읽히는 순서입니다.
+   무슨 일이 있었는가, 그것이 무엇이 되었는가, 그래서 어떻게 할 것인가입니다. 안내 문구 크기의
+   성적은 건너뛰어지고, 제목 크기의 성적은 자신이 수식하는 단어와 경쟁합니다. */
+#define DEATH_STAT_SIZE  2.0f
 #define DEATH_HINT_SIZE  1.6f
 
+/* The title screen's own header. TITLE_DIM is now only for the case where no
+   menu is in front of the title -- a playback, or a ::World driven directly --
+   because in the running game the menu's own wash is the dim. See
+   ::scene_draw_title.
+   The three offsets are measured DOWN from ::menu_title_y, which is where
+   menu.c puts the current screen's header and which the title screen widens for
+   exactly this block.
+   타이틀 화면 자신의 머리글입니다. TITLE_DIM은 이제 타이틀 앞에 메뉴가 없는 경우만을 위한
+   것입니다. 재생이거나 ::World를 직접 구동하는 경우입니다. 실행 중인 게임에서는 메뉴 자신의
+   워시가 곧 그 어둡게 하기입니다. ::scene_draw_title을 참조하십시오.
+   세 오프셋은 ::menu_title_y에서 *아래로* 잰 값입니다. 그곳이 menu.c가 현재 화면의 머리글을 두는
+   자리이며, 타이틀 화면은 정확히 이 블록을 위해 그 간격을 넓힙니다. */
 #define TITLE_DIM       0.70f
 #define TITLE_SIZE      9.0f
 #define TITLE_SUB_SIZE  1.8f
-#define TITLE_HINT_SIZE 1.6f
+#define TITLE_BEST_SIZE 1.6f
+#define TITLE_SUB_DY    80.0f   /* below the name's top edge */
+#define TITLE_BEST_DY  102.0f
+/* Seconds the header takes to arrive. The first frame of the process is the
+   one the driver spends waking up, and a name that is simply there on it reads
+   as a screenshot rather than as a game starting.
+   머리글이 도착하는 데 걸리는 초입니다. 프로세스의 첫 프레임은 드라이버가 깨어나는 데 쓰는
+   프레임이며, 그 위에 그냥 존재하는 이름은 시작하는 게임이 아니라 스크린숏으로 읽힙니다. */
+#define TITLE_FADE      0.9f
+
+/* --- the cutscene / 컷신 --- */
+
+/* Darker than the menu and lighter than nothing. A cutscene is read rather
+   than operated, so the room behind it is context rather than a control; the
+   menu's own dim is the floor because a screen that stops the game must not be
+   easier to see past than a pause.
+   메뉴보다 어둡고 완전한 검정보다는 밝습니다. 컷신은 조작하는 것이 아니라 읽는 것이므로 뒤의
+   방은 컨트롤이 아니라 맥락입니다. 메뉴의 어둡기가 바닥인 이유는, 게임을 멈추는 화면이 일시정지
+   보다 뒤를 보기 쉬워서는 안 되기 때문입니다. */
+#define STORY_DIM        0.82f
+#define STORY_TEXT_SIZE  2.0f
+#define STORY_LINE_STEP  34.0f  /* between two lines of a page */
+#define STORY_HINT_SIZE  1.3f
+#define STORY_PIP        7.0f
+#define STORY_PIP_GAP    5.0f
+/* Seconds at each end of a page. ::BETWEEN_FADE's number and its argument: long
+   enough that a page arriving does not flicker, short enough that a page spends
+   most of its life at full strength -- ::HUD_NOTICE_FADE's rule, that "the
+   instant it appears is the instant it is most needed".
+   페이지 양 끝의 초입니다. ::BETWEEN_FADE의 숫자이자 그 논거입니다. 도착하는 페이지가 깜빡이지
+   않을 만큼 길고, 페이지가 수명의 대부분을 온전한 세기로 보낼 만큼 짧습니다. "나타나는 순간이
+   가장 필요한 순간"이라는 ::HUD_NOTICE_FADE의 규칙입니다. */
+#define STORY_FADE       0.45f
 
 /* --- ESC menu / ESC 메뉴 --- */
 
@@ -478,6 +657,18 @@ static void scene_lights(const World *w, v3 eye) {
    원하지만(지우지 않고 정지시키는 이유가 그것입니다), 메뉴는 행에 주목하기를 원합니다.
    월드는 여전히 보이므로 플레이어는 게임이 사라진 것이 아니라 멈췄음을 알 수 있습니다. */
 #define MENU_DIM         0.72f
+
+/* What a locked row is drawn at. Faint enough that the eye passes over it when
+   reading the list, solid enough that it is plainly a row rather than a
+   rendering fault -- and the highlight still lands on it, so a player who wants
+   to know what it says can point at it and read it at this alpha with the
+   cursor bar behind it. See ::menu_row_locked.
+   잠긴 행이 그려지는 값입니다. 목록을 읽을 때 눈이 지나칠 만큼 흐리고, 렌더링 결함이 아니라
+   분명히 행으로 보일 만큼 진합니다. 그리고 강조는 여전히 그 위에 놓이므로, 무엇이라고 적혀
+   있는지 알고 싶은 플레이어는 그것을 가리켜 뒤에 커서 막대를 둔 채 이 알파로 읽을 수 있습니다.
+   ::menu_row_locked를 참조하십시오. */
+#define MENU_LOCKED_ALPHA 0.35f
+
 #define MENU_TITLE_SIZE  4.5f
 #define MENU_ROW_SIZE    2.6f
 #define MENU_ROW_STEP    38.0f  /* pixels between rows */
@@ -519,11 +710,6 @@ static void scene_lights(const World *w, v3 eye) {
 
 /* ---------------------------------------------------------------- lifecycle */
 
-/* Vertices the level's scratch buffer starts at. Large enough that a
-   hand-authored level never grows it, and it is freed at shutdown either way.
-   레벨 임시 버퍼의 초기 정점 수입니다. 사람이 제작한 레벨이 이를 확장시키지 않을 만큼
-   충분히 크며, 어느 쪽이든 종료 시 해제됩니다. */
-#define LEVEL_BUF_VERTS 16384
 
 void scene_init(Scene *s, Weapon *w) {
     /* Sized from the cap of what each draws, so a full level never grows one
@@ -536,7 +722,7 @@ void scene_init(Scene *s, Weapon *w) {
        구멍입니다. */
     mb_init(&s->enemy_buf,  ENEMY_MAX * 6);
     mb_init(&s->pickup_buf, PICKUP_MAX * 6);
-    mb_init(&s->shot_buf,   ENEMY_MAX_SHOTS * (SHOT_HALOS + SHOT_CORES) * 6);
+    mb_init(&s->shot_buf,   ENEMY_MAX_SHOTS * SHOT_QUADS * 6);
     /* 1024 vertices = 170 glyphs, because text_run draws a whole line through
        this buffer and mb_vtx DROPS vertices rather than growing. At the old
        256 a line was cut at 42 characters, which the credits notice hit in the
@@ -792,6 +978,7 @@ void scene_draw_enemies(Scene *s, const Pools *pl, mat4 vp, v3 eye, v3 cam_right
     glEnable(GL_CULL_FACE);
 }
 
+
 void scene_draw_pickups(Scene *s, const Pools *pl, mat4 vp, v3 eye, v3 cam_right) {
     DIAG_WANT_WORLD_PASS();
 
@@ -803,9 +990,7 @@ void scene_draw_pickups(Scene *s, const Pools *pl, mat4 vp, v3 eye, v3 cam_right
         if (!p->active) continue;
         float u0, v0, u1, v1;
         pickup_uv(p->kind, &u0, &v0, &u1, &v1);
-        float bob = PICKUP_BOB * sinf(p->anim * PICKUP_BOB_RATE);
-        v3 centre = v3f(p->pos.x, p->pos.y + PICKUP_LIFT + bob, p->pos.z);
-        mb_billboard_uv(&s->pickup_buf, centre, cam_right, v3f(0,1,0),
+        mb_billboard_uv(&s->pickup_buf, pickup_centre(p), cam_right, v3f(0,1,0),
                         PICKUP_SIZE, PICKUP_SIZE, u0, v0, u1, v1);
     }
 
@@ -826,8 +1011,22 @@ void scene_draw_pickups(Scene *s, const Pools *pl, mat4 vp, v3 eye, v3 cam_right
 void scene_draw_shots(Scene *s, const Pools *pl, mat4 vp, v3 cam_right, v3 cam_up) {
     DIAG_WANT_WORLD_PASS();
 
-    const int quads  = SHOT_HALOS + SHOT_CORES;
-    const int stride = quads * 6;
+    /* The three tiers, outermost first, in the order the buffer holds them and
+       the order they are drawn. One table rather than the arithmetic that used
+       to derive "am I a core" from the quad index: that worked for two tiers
+       and was already the least readable line in this function, and a third
+       tier would have made it a chain of conditionals nobody could check.
+       바깥쪽부터 세 겹이며, 버퍼가 담는 순서이자 그려지는 순서입니다. 사각형 인덱스에서
+       "내가 코어인가"를 유도하던 산술 대신 표 하나를 씁니다. 그 산술은 두 겹에서는
+       동작했지만 이미 이 함수에서 가장 읽기 어려운 줄이었고, 세 번째 겹은 그것을 아무도
+       검사할 수 없는 조건문 사슬로 만들었을 것입니다. */
+    struct Tier { int n; float size; float r, g, b, a; };
+    const struct Tier tier[3] = {
+        { SHOT_GLOWS, SHOT_GLOW_SIZE, 0.16f, 0.46f, 0.95f, 0.14f },  /* the emission */
+        { SHOT_HALOS, SHOT_HALO_SIZE, 0.10f, 0.42f, 0.85f, 0.30f },  /* halo petals  */
+        { SHOT_CORES, SHOT_CORE_SIZE, 0.85f, 0.98f, 1.00f, 0.85f },  /* hot core     */
+    };
+    const int stride = SHOT_QUADS * 6;
     int sn = enemy_shot_count(pl), live = 0;
 
     mb_reset(&s->shot_buf);
@@ -835,26 +1034,34 @@ void scene_draw_shots(Scene *s, const Pools *pl, mat4 vp, v3 cam_right, v3 cam_u
         const Shot *sh = enemy_shot_at(pl, i);
         if (!sh->active) continue;
 
-        /* Spin each bolt by its own remaining life, so a volley does not look
-           like one sprite stamped several times. */
-        for (int q = 0; q < quads; q++) {
-            int   core = q >= SHOT_HALOS;
-            int   n    = core ? SHOT_CORES : SHOT_HALOS;
-            int   k    = core ? q - SHOT_HALOS : q;
-            float size = core ? SHOT_CORE_SIZE : SHOT_HALO_SIZE;
-            /* Spread the quads over a QUARTER turn, not a half: a square maps
-               onto itself every 90 degrees, so two quads 180/2 apart are the
-               same square drawn twice -- which is why the core first came out
-               as a plain diamond.
-               사각형을 반 바퀴가 아니라 *4분의 1* 바퀴에 걸쳐 배치합니다. 정사각형은
-               90도마다 자기 자신과 겹치므로, 180/2도 떨어진 두 사각형은 같은 사각형을
-               두 번 그린 것입니다. 중심부가 처음에 평범한 마름모로 나온 이유입니다. */
-            float a = sh->life * SHOT_SPIN + k * (M_PI_F * 0.5f / n);
-            v3 r = v3add(v3scale(cam_right,  cosf(a)),
-                         v3scale(cam_up,     sinf(a)));
-            v3 u = v3add(v3scale(cam_right, -sinf(a)),
-                         v3scale(cam_up,     cosf(a)));
-            mb_billboard(&s->shot_buf, sh->pos, r, u, size, size);
+        /* The emission's breath. Off the SAME clock the spin runs on, so a
+           volley of bolts fired at different moments swells out of step -- one
+           rate shared by every bolt in the air would pulse them in unison,
+           which reads as the renderer doing it rather than as the bolts.
+           발광의 호흡입니다. 회전이 도는 것과 *같은* 시계를 쓰므로, 서로 다른 순간에
+           발사된 볼트들은 어긋나게 부풀어 오릅니다. 공중의 모든 볼트가 하나의 속도를
+           공유하면 한목소리로 맥동하는데, 그것은 볼트가 그러는 것이 아니라 렌더러가
+           그러는 것으로 읽힙니다. */
+        float breath = 1.0f + SHOT_GLOW_PULSE * sinf(sh->life * SHOT_GLOW_RATE);
+
+        for (int t = 0; t < 3; t++) {
+            for (int k = 0; k < tier[t].n; k++) {
+                float size = tier[t].size * (t == 0 ? breath : 1.0f);
+                /* Spread the quads over a QUARTER turn, not a half: a square
+                   maps onto itself every 90 degrees, so two quads 180/2 apart
+                   are the same square drawn twice -- which is why the core
+                   first came out as a plain diamond.
+                   사각형을 반 바퀴가 아니라 *4분의 1* 바퀴에 걸쳐 배치합니다. 정사각형은
+                   90도마다 자기 자신과 겹치므로, 180/2도 떨어진 두 사각형은 같은 사각형을
+                   두 번 그린 것입니다. 중심부가 처음에 평범한 마름모로 나온 이유입니다. */
+                float a = sh->life * SHOT_SPIN
+                        + k * (M_PI_F * 0.5f / tier[t].n);
+                v3 r = v3add(v3scale(cam_right,  cosf(a)),
+                             v3scale(cam_up,     sinf(a)));
+                v3 u = v3add(v3scale(cam_right, -sinf(a)),
+                             v3scale(cam_up,     cosf(a)));
+                mb_billboard(&s->shot_buf, sh->pos, r, u, size, size);
+            }
         }
         live++;
     }
@@ -869,12 +1076,11 @@ void scene_draw_shots(Scene *s, const Pools *pl, mat4 vp, v3 cam_right, v3 cam_u
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE);
     glBindVertexArray(s->shot_mesh.vao);
-    for (int k = 0; k < live; k++) {
-        rd_color(0.10f, 0.42f, 0.85f, 0.30f);   /* halo petals */
-        glDrawArrays(GL_TRIANGLES, k * stride, SHOT_HALOS * 6);
-        rd_color(0.85f, 0.98f, 1.00f, 0.85f);   /* hot core */
-        glDrawArrays(GL_TRIANGLES, k * stride + SHOT_HALOS * 6,
-                     SHOT_CORES * 6);
+    for (int i = 0; i < live; i++) {
+        for (int t = 0, first = 0; t < 3; first += tier[t].n, t++) {
+            rd_color(tier[t].r, tier[t].g, tier[t].b, tier[t].a);
+            glDrawArrays(GL_TRIANGLES, i * stride + first * 6, tier[t].n * 6);
+        }
     }
     glDisable(GL_BLEND);
     glDepthMask(GL_TRUE);
@@ -1185,7 +1391,8 @@ void scene_draw_hud(Scene *s, int vw, int vh, const Level *l,
     ui_end();
 }
 
-void scene_draw_win(Scene *s, int vw, int vh, const Player *p, const Weapon *w) {
+void scene_draw_win(Scene *s, int vw, int vh, const Player *p, const Weapon *w,
+                    const char *run) {
     DIAG_WANT_UI_PASS();
 
     ui_begin(vw, vh);
@@ -1213,9 +1420,20 @@ void scene_draw_win(Scene *s, int vw, int vh, const Player *p, const Weapon *w) 
     text_run(s, (vw - lw) * 0.5f, vh * 0.5f + 4.0f, WIN_STAT_SIZE, line,
              0.85f, 0.85f, 0.85f, 1.0f);
 
+    /* And what the run came to, on its own line. The belt above is a snapshot
+       of the last moment; this is the whole of it, and the win screen has to
+       report the same two numbers the death screen does or the game keeps
+       score only when you lose.
+       그리고 그 플레이가 무엇이 되었는지를 자기 줄에 씁니다. 위의 탄약대는 마지막 순간의
+       스냅숏이고 이것은 전체입니다. 승리 화면은 사망 화면과 같은 두 숫자를 보고해야 하며,
+       그러지 않으면 게임은 질 때만 점수를 매기는 셈입니다. */
+    float rw = font_width(WIN_STAT_SIZE, run);
+    text_run(s, (vw - rw) * 0.5f, vh * 0.5f + 28.0f, WIN_STAT_SIZE, run,
+             0.95f, 0.85f, 0.55f, 1.0f);
+
     const char *hint = "ESC for menu";
     float hw = font_width(WIN_HINT_SIZE, hint);
-    text_run(s, (vw - hw) * 0.5f, vh * 0.5f + 40.0f, WIN_HINT_SIZE, hint,
+    text_run(s, (vw - hw) * 0.5f, vh * 0.5f + 56.0f, WIN_HINT_SIZE, hint,
              0.55f, 0.55f, 0.58f, 1.0f);
 
     ui_end();
@@ -1279,7 +1497,8 @@ void scene_draw_between(Scene *s, int vw, int vh, const char *cleared,
     ui_end();
 }
 
-void scene_draw_death(Scene *s, int vw, int vh, float since, int ready) {
+void scene_draw_death(Scene *s, int vw, int vh, float since, int ready,
+                      const char *run) {
     DIAG_WANT_UI_PASS();
 
     ui_begin(vw, vh);
@@ -1307,6 +1526,27 @@ void scene_draw_death(Scene *s, int vw, int vh, float since, int ready) {
     text_run(s, (vw - tw) * 0.5f, vh * 0.5f - 50.0f, DEATH_TITLE_SIZE, title,
              0.85f, 0.16f, 0.16f, k);
 
+    /* WHAT THE RUN CAME TO. "YOU DIED" is the only thing this screen used to
+       say, and it is the one fact the player already watched happen. How many
+       they took down and how long they lasted are the two they cannot see from
+       inside the run -- and in a game about staying up as long as possible,
+       they are the result. Without them a death is a stop rather than a score,
+       and there is nothing to beat next time.
+
+       Faded on `k` with the title rather than shown on `ready` with the prompt:
+       it is part of the same sentence the title is, not an instruction.
+
+       그 플레이가 무엇이 되었는가. 이 화면이 말하던 것은 "YOU DIED"뿐이었고, 그것은 플레이어가
+       이미 직접 본 유일한 사실입니다. 몇을 쓰러뜨렸는지와 얼마나 버텼는지는 플레이 안에서는
+       볼 수 없는 두 가지이며, 가능한 한 오래 살아남는 게임에서 그것이 곧 결과입니다. 그것이
+       없으면 죽음은 성적이 아니라 정지이고, 다음번에 넘어설 대상이 없습니다.
+
+       안내 문구와 함께 `ready`에 나타나지 않고 제목과 함께 `k`로 페이드하는 이유는, 지시가
+       아니라 제목과 같은 문장의 일부이기 때문입니다. */
+    float rw = font_width(DEATH_STAT_SIZE, run);
+    text_run(s, (vw - rw) * 0.5f, vh * 0.5f + 14.0f, DEATH_STAT_SIZE, run,
+             0.92f, 0.78f, 0.72f, k);
+
     /* The prompt appears only once the input it describes is actually live.
        Showing it during the grace period would be the screen lying about what
        a press would do.
@@ -1315,54 +1555,86 @@ void scene_draw_death(Scene *s, int vw, int vh, float since, int ready) {
     if (ready) {
         const char *hint = "press any key to try again";
         float hw = font_width(DEATH_HINT_SIZE, hint);
-        text_run(s, (vw - hw) * 0.5f, vh * 0.5f + 30.0f, DEATH_HINT_SIZE, hint,
+        text_run(s, (vw - hw) * 0.5f, vh * 0.5f + 44.0f, DEATH_HINT_SIZE, hint,
                  0.72f, 0.62f, 0.62f, 1.0f);
     }
 
     ui_end();
 }
 
-void scene_draw_title(Scene *s, int vw, int vh, float t) {
+void scene_draw_title(Scene *s, int vw, int vh, float t, int best) {
     DIAG_WANT_UI_PASS();
 
     ui_begin(vw, vh);
 
-    full_screen_wash(s, vw, vh, 0.0f, 0.0f, 0.0f, TITLE_DIM);
+    /* THE WASH IS THE MENU'S WHEN THERE IS A MENU. ::scene_draw_menu has
+       already dimmed the world for this screen -- the title IS a menu in the
+       running game -- and a second wash would darken the backdrop twice for one
+       screen. That is also why this runs after the menu rather than before it;
+       see the note in scene.h.
+       WHEN THERE IS NOT ONE, this pass owes the dim. A playback comes up on the
+       title with no menu in front of it (::menu_open_title is skipped for a
+       replay), and so does any caller driving a ::World directly. Undimmed, the
+       name would sit on a fully lit room and read as a HUD rather than as a
+       screen.
+       *메뉴가 있을 때 워시는 메뉴의 것입니다.* ::scene_draw_menu가 이 화면을 위해 이미 월드를
+       어둡게 했습니다. 실행 중인 게임에서 타이틀은 곧 메뉴입니다. 워시가 둘이면 화면 하나 때문에
+       배경이 두 번 어두워집니다. 이것이 메뉴보다 앞이 아니라 뒤에서 도는 이유이기도 합니다.
+       scene.h의 참고 사항을 보십시오.
+       *메뉴가 없을 때는* 이 패스가 어둡게 하기를 빚집니다. 재생은 앞에 메뉴 없이 타이틀로
+       올라오며(재생에서는 ::menu_open_title을 건너뜁니다), ::World를 직접 구동하는 호출자도
+       그렇습니다. 어둡게 하지 않으면 이름이 온전히 밝은 방 위에 놓여 화면이 아니라 HUD로
+       읽힙니다. */
+    if (!menu_is_open()) full_screen_wash(s, vw, vh, 0.0f, 0.0f, 0.0f, TITLE_DIM);
 
     rd_mode(RD_TEXT);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, font_texture());
 
-    /* PLACEHOLDER. Text standing in for artwork that has not been drawn yet --
-       see the note in scene.h. The layout is the part worth keeping: a title
-       block above centre, a prompt below it, and the level visible behind.
-       임시입니다. 아직 그리지 않은 아트워크를 대신하는 텍스트입니다. scene.h의 참고
-       사항을 확인하십시오. 여기서 남길 가치가 있는 것은 배치입니다. 중앙 위쪽의 제목
-       블록, 그 아래의 안내 문구, 그리고 뒤로 보이는 레벨입니다. */
+    /* Arrives rather than appears. Clamped both ways because `t` is a clock the
+       caller owns and a negative one would make the first frame brighter than
+       full.
+       나타나는 것이 아니라 *도착합니다*. 양쪽으로 자르는 이유는 `t`가 호출자가 소유한 시계이고,
+       음수인 시계는 첫 프레임을 최대보다 밝게 만들기 때문입니다. */
+    float k = t / TITLE_FADE;
+    if (k > 1.0f) k = 1.0f;
+    if (k < 0.0f) k = 0.0f;
+
+    /* From menu.c, so the header and the rows cannot disagree about where the
+       header ends. See ::menu_title_y.
+       menu.c에서 가져옵니다. 그래야 머리글과 행들이 머리글이 어디서 끝나는지에 대해 어긋날 수
+       없습니다. ::menu_title_y를 참조하십시오. */
+    float top = menu_title_y(vw, vh);
+    float cx  = vw * 0.5f;
+
     const char *title = "SFPS";
     float tw = font_width(TITLE_SIZE, title);
-    text_run(s, (vw - tw) * 0.5f, vh * 0.42f - 60.0f, TITLE_SIZE, title,
-             1.0f, 0.82f, 0.28f, 1.0f);
+    text_run(s, cx - tw * 0.5f, top, TITLE_SIZE, title,
+             1.0f, 0.82f, 0.28f, k);
 
     const char *sub = "a shooter that fits on a floppy disk";
     float sw = font_width(TITLE_SUB_SIZE, sub);
-    text_run(s, (vw - sw) * 0.5f, vh * 0.42f + 24.0f, TITLE_SUB_SIZE, sub,
-             0.66f, 0.64f, 0.60f, 1.0f);
+    text_run(s, cx - sw * 0.5f, top + TITLE_SUB_DY, TITLE_SUB_SIZE, sub,
+             0.66f, 0.64f, 0.60f, k);
 
-    /* Pulsed, so the screen reads as waiting for the player rather than as
-       stopped. A static prompt on a frozen world looks like a hang.
-       명멸시켜 화면이 멈춘 것이 아니라 플레이어를 기다리는 것으로 읽히게 합니다. 정지된
-       월드 위의 고정된 문구는 멈춘 것처럼 보입니다. */
-    float pulse = 0.62f + 0.38f * (0.5f + 0.5f * sinf(t * 3.0f));
-    const char *hint = "press any key to begin";
-    float hw = font_width(TITLE_HINT_SIZE, hint);
-    text_run(s, (vw - hw) * 0.5f, vh * 0.72f, TITLE_HINT_SIZE, hint,
-             0.90f, 0.86f, 0.78f, pulse);
+    /* THE ONE PLACE A SAVED NUMBER IS EVER SEEN. Half of what save.c keeps is
+       this figure, and a number that is written and never shown is a number
+       nobody can tell is wrong. Omitted rather than shown as zero before any
+       arena has been played, for ::run_summary's reason about `wave 0`: a
+       screen printing a field it has no fact for is a screen inventing one.
+       *저장된 숫자가 보이는 유일한 곳입니다.* save.c가 지키는 것의 절반이 이 값이며, 쓰이기만
+       하고 보이지 않는 숫자는 아무도 틀렸다고 말할 수 없는 숫자입니다. 아레나를 하기 전에는 0으로
+       보여 주지 않고 생략합니다. `wave 0`에 대한 ::run_summary의 이유와 같습니다. 사실이 없는
+       필드를 찍는 화면은 사실을 지어내는 화면입니다. */
+    if (best > 0) {
+        char line[32];
+        int n = txt_append_str(line, (int)sizeof(line), 0, "BEST WAVE ");
+        txt_append_int(line, (int)sizeof(line), n, best);
 
-    const char *esc = "ESC for options";
-    float ew = font_width(1.2f, esc);
-    text_run(s, (vw - ew) * 0.5f, vh * 0.72f + 30.0f, 1.2f, esc,
-             0.48f, 0.48f, 0.52f, 1.0f);
+        float bw = font_width(TITLE_BEST_SIZE, line);
+        text_run(s, cx - bw * 0.5f, top + TITLE_BEST_DY, TITLE_BEST_SIZE, line,
+                 0.86f, 0.72f, 0.34f, k);
+    }
 
     ui_end();
 }
@@ -1458,15 +1730,100 @@ static void draw_menu_notices(Scene *s, int vw, int vh, float cx, int rows) {
             "",
             "Contributors: freedoom.github.io  /  CREDITS",
             "Full licence text: docs/LICENSE-Freedoom.txt",
+
+            /* --- the second work, and why it is written out in full ------
+               The two licences are the same 3-clause BSD text and differ in
+               exactly three places: the year, the project named in the
+               copyright line, and the project named in the third condition.
+               Sharing one copy and naming both projects would be shorter and
+               would not be either licence -- each requires ITS OWN copyright
+               notice and ITS OWN "neither the name of" clause to be
+               reproduced, and a merged clause 3 is a clause neither grantor
+               wrote. bake.ps1 checks both spans verbatim for that reason, so
+               the shorter version does not compile.
+               두 라이선스는 같은 3조항 BSD 텍스트이며 정확히 세 곳에서 다릅니다. 연도,
+               저작권 줄이 지목하는 프로젝트, 그리고 세 번째 조항이 지목하는 프로젝트입니다.
+               한 벌을 공유하고 두 프로젝트를 함께 적는 것은 더 짧고, 그리고 그것은 두
+               라이선스 중 어느 것도 아닙니다. 각각은 *자기* 저작권 고지와 *자기* "neither
+               the name of" 조항이 실릴 것을 요구하며, 합쳐진 3항은 어느 허락자도 쓰지 않은
+               조항입니다. bake.ps1이 그 이유로 두 구간을 각각 전문 대조하므로, 짧은 판은
+               빌드되지 않습니다. */
+            "",
+            "The lqdm11 and lqdm13 arenas from LibreQuake,",
+            "converted by assets/maps/import-librequake.py.",
+            "Copyright (c) 2019-2023 Contributors to",
+            "the LibreQuake project. All rights reserved.",
+            "",
+            "Redistribution and use in source and binary",
+            "forms, with or without modification, are",
+            "permitted provided that the following",
+            "conditions are met:",
+            "",
+            "* Redistributions of source code must retain",
+            "  the above copyright notice, this list of",
+            "  conditions and the following disclaimer.",
+            "",
+            "* Redistributions in binary form must",
+            "  reproduce the above copyright notice, this",
+            "  list of conditions and the following",
+            "  disclaimer in the documentation and/or",
+            "  other materials provided with the",
+            "  distribution.",
+            "",
+            "* Neither the name of the LibreQuake project",
+            "  nor the names of its contributors may be",
+            "  used to endorse or promote products derived",
+            "  from this software without specific prior",
+            "  written permission.",
+            "",
+            "THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT",
+            "HOLDERS AND CONTRIBUTORS \"AS IS\" AND ANY",
+            "EXPRESS OR IMPLIED WARRANTIES, INCLUDING,",
+            "BUT NOT LIMITED TO, THE IMPLIED WARRANTIES",
+            "OF MERCHANTABILITY AND FITNESS FOR A",
+            "PARTICULAR PURPOSE ARE DISCLAIMED. IN NO",
+            "EVENT SHALL THE COPYRIGHT OWNER OR",
+            "CONTRIBUTORS BE LIABLE FOR ANY DIRECT,",
+            "INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR",
+            "CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT",
+            "LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS",
+            "OR SERVICES; LOSS OF USE, DATA, OR PROFITS;",
+            "OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND",
+            "ON ANY THEORY OF LIABILITY, WHETHER IN",
+            "CONTRACT, STRICT LIABILITY, OR TORT",
+            "(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING",
+            "IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,",
+            "EVEN IF ADVISED OF THE POSSIBILITY OF SUCH",
+            "DAMAGE.",
+            "",
+            "Map by ZungryWare.  librequake.queer.sh",
+            "Full licence: docs/LICENSE-LibreQuake.txt",
         };
-        /* Where the block breaks into two columns. An index into NOTICE
-           rather than a count of the lines before it, so moving a line across
-           the break is a one-number edit and cannot disagree with the array.
-           본문이 두 단으로 갈라지는 지점. 앞선 줄의 개수가 아니라 NOTICE의 인덱스이므로,
-           줄 하나를 단 너머로 옮기는 일이 숫자 하나를 고치는 일이 되고 배열과 어긋날 수
-           없습니다. */
-        static const int NOTICE_SPLIT = 25;
-       const int n = (int)(sizeof(NOTICE) / sizeof(NOTICE[0]));
+        /* HOW TALL A COLUMN IS, and the count of them follows from it. This
+           was ::NOTICE_SPLIT -- one index, naming where the single break fell
+           -- which held exactly while there was one licence and one break. A
+           second work made it a list of indices to keep in step with the
+           array, and a height keeps none: the columns are `n` divided by this,
+           and adding, removing or re-wrapping a line moves the break by
+           itself.
+           단 하나의 높이이며, 단의 개수는 그것에서 따라 나옵니다. 이것은 ::NOTICE_SPLIT,
+           즉 유일한 분기점이 어디인지를 지목하는 인덱스 하나였고, 라이선스가 하나이고
+           분기가 하나인 동안에만 성립했습니다. 두 번째 저작물은 그것을 배열과 보조를 맞춰야
+           하는 인덱스 *목록*으로 만들었을 것이고, 높이는 아무것도 맞출 필요가 없습니다. 단의
+           개수는 `n`을 이 값으로 나눈 것이고, 줄을 더하거나 빼거나 다시 줄바꿈하면 분기점이
+           스스로 움직입니다. */
+        static const int NOTICE_ROWS = 25;
+
+        /* Where each work's attribution begins. Two numbers rather than a
+           rule that inspects the text, because "the three lines that name a
+           project" is not something a line can be asked about -- the same
+           argument ::NOTICE_ROWS is not derived from the words either.
+           각 저작물의 귀속 표시가 시작되는 곳입니다. 텍스트를 들여다보는 규칙이 아니라 숫자
+           둘인 이유는, "프로젝트를 지목하는 세 줄"이 한 줄에게 물어볼 수 있는 것이 아니기
+           때문입니다. ::NOTICE_ROWS도 단어에서 유도하지 않는 것과 같은 논거입니다. */
+        static const int NOTICE_LEAD[] = { 0, 48 };
+
+        const int n = (int)(sizeof(NOTICE) / sizeof(NOTICE[0]));
 
         /* Below the last row, not over it. The row positions come from
            menu_row_bounds -- the same function the mouse hit test reads -- so
@@ -1495,21 +1852,50 @@ static void draw_menu_notices(Scene *s, int vw, int vh, float cx, int rows) {
             float w = font_width(1.0f, NOTICE[i]);
             if (w > wmax) wmax = w;
         }
+
         const float gutter = 28.0f;
-        float lx = cx - wmax - gutter * 0.5f;
-        float rx = cx + gutter * 0.5f;
+        int cols = (n + NOTICE_ROWS - 1) / NOTICE_ROWS;
+        if (cols < 1) cols = 1;
+
+        /* SHRUNK TO FIT RATHER THAN ALLOWED TO RUN OFF THE EDGES. Two columns
+           of licence fitted the narrowest window this menu is usable in with
+           nothing to spare; four do not. A notice whose outer columns are past
+           the viewport is not a notice that was reproduced -- it is one the
+           player cannot read, which is the only thing the obligation is about.
+           Linear because font_width is: the whole block is measured at size 1
+           above and the size is the ratio that makes it fit.
+           가장자리 밖으로 나가게 두지 않고 *줄여서 맞춥니다.* 라이선스 두 단은 이 메뉴를 쓸 수
+           있는 가장 좁은 창에 여유 없이 겨우 들어갔고, 네 단은 들어가지 않습니다. 바깥 단이
+           뷰포트를 벗어난 고지는 실린 고지가 아니라 플레이어가 읽을 수 없는 고지이며, 그
+           의무가 말하는 것은 오직 그것뿐입니다.
+           선형인 이유는 font_width가 선형이기 때문입니다. 위에서 블록 전체를 크기 1로 재었고,
+           크기는 그것을 들어가게 만드는 비율입니다. */
+        float span = cols * wmax + (cols - 1) * gutter;
+        float room = (float)vw - 32.0f;
+        float size = (span > room && span > 0.0f) ? room / span : 1.0f;
+
+        float cw   = wmax * size;
+        float gap  = gutter * size;
+        float step = 11.0f * size;
+        float x0   = cx - (cols * cw + (cols - 1) * gap) * 0.5f;
 
         for (int i = 0; i < n; i++) {
-            int second = (i >= NOTICE_SPLIT);
-            float x = second ? rx : lx;
-            float y = ny + (i - (second ? NOTICE_SPLIT : 0)) * 11.0f;
+            int col = i / NOTICE_ROWS;
+            float x = x0 + col * (cw + gap);
+            float y = ny + (i - col * NOTICE_ROWS) * step;
 
             /* Brighter for the attribution, dimmer for the licence body: the
-               notice must be present and legible, not shouted.
+               notice must be present and legible, not shouted. Each work gets
+               its own three bright lines, because each has its own name to say.
                귀속 표시는 밝게, 라이선스 본문은 흐리게 합니다. 고지는 존재하고 읽을 수
-               있어야 하지 소리쳐야 하는 것은 아닙니다. */
-            float t = (i <= 2) ? 0.84f : 0.56f;
-            text_run(s, x, y, 1.0f, NOTICE[i], t, t * 0.98f, t * 0.92f, 1.0f);
+               있어야 하지 소리쳐야 하는 것은 아닙니다. 저작물마다 자기 밝은 세 줄을 가지며,
+               각각이 말할 자기 이름을 가지고 있기 때문입니다. */
+            int lead = 0;
+            for (int k = 0; k < (int)(sizeof(NOTICE_LEAD) / sizeof(NOTICE_LEAD[0])); k++)
+                if (i >= NOTICE_LEAD[k] && i <= NOTICE_LEAD[k] + 3) lead = 1;
+
+            float t = lead ? 0.84f : 0.56f;
+            text_run(s, x, y, size, NOTICE[i], t, t * 0.98f, t * 0.92f, 1.0f);
         }
     }
 }
@@ -1534,6 +1920,275 @@ static void hud_quad(Scene *s, float x0, float y0, float x1, float y1,
     mesh_draw(&s->hud_mesh);
 }
 
+void scene_draw_story(Scene *s, int vw, int vh, const StoryPage *page,
+                      int index, int count, float alpha) {
+    DIAG_WANT_UI_PASS();
+
+    if (!page || alpha <= 0.0f) return;
+    if (alpha > 1.0f) alpha = 1.0f;
+
+    ui_begin(vw, vh);
+
+    /* The wash fades with the text rather than landing whole. A page that
+       arrived over an already-black screen would give the player no moment in
+       which the room and the sentence about it are both visible, and that
+       moment is what a cutscene over a live level is for.
+       워시가 통째로 내려앉지 않고 텍스트와 함께 페이드합니다. 이미 검은 화면 위에 도착하는
+       페이지는 방과 그것에 대한 문장이 함께 보이는 순간을 플레이어에게 주지 않으며, 살아 있는
+       레벨 위의 컷신이 존재하는 이유가 그 순간입니다. */
+    full_screen_wash(s, vw, vh, 0.0f, 0.0f, 0.0f, STORY_DIM * alpha);
+
+    /* --- every quad first, then ONE restore -----------------------------
+       ::hud_quad sets neither the render mode nor the texture and restores
+       neither; ::draw_menu_rows names this as "the easiest thing in this loop
+       to get wrong and there should only be one of it".
+       사각형을 전부 먼저, 그다음 복원을 *한 번*입니다. ::hud_quad는 렌더 모드도 텍스처도
+       세우지 않고 되돌리지도 않습니다. ::draw_menu_rows가 이것을 "이 루프에서 가장 틀리기
+       쉬운 것이고 그것은 하나만 있어야 한다"고 이름 붙였습니다. */
+    float cx = vw * 0.5f;
+    float cy = vh * 0.5f;
+
+    /* The block is centred on the viewport rather than hung from the top, so a
+       one-line page and a four-line page are read from the same place. Half a
+       line step up per line past the first.
+       블록은 위에서 매다는 것이 아니라 뷰포트 중앙에 놓이므로, 한 줄짜리 페이지와 네 줄짜리
+       페이지를 같은 자리에서 읽습니다. 첫 줄을 넘는 줄마다 반 칸씩 위로 올라갑니다. */
+    float y0 = cy - (float)(page->n_lines - 1) * STORY_LINE_STEP * 0.5f
+                  - FONT_CH * STORY_TEXT_SIZE * 0.5f;
+
+    if (count > 1) {
+        rd_mode(RD_FLAT);
+
+        /* Pips under the text, one per page, filled up to and including the
+           one showing. The spent ones are tracks rather than absences, the way
+           the ward pips and the volume sliders are: "drawing the whole track
+           means a slider at zero is still a slider".
+           텍스트 아래의 핍이며 페이지마다 하나입니다. 지금 보이는 것까지 채웁니다. 지나간
+           것들은 없음이 아니라 트랙이며, 결계핵 핍과 음량 슬라이더가 그러한 것과 같습니다.
+           *"트랙 전체를 그리면 0인 슬라이더도 여전히 슬라이더입니다."* */
+        float span = (float)count * STORY_PIP + (float)(count - 1) * STORY_PIP_GAP;
+        float px   = cx - span * 0.5f;
+        float py   = cy + (float)page->n_lines * STORY_LINE_STEP * 0.5f + 26.0f;
+
+        for (int i = 0; i < count; i++) {
+            float x = px + (float)i * (STORY_PIP + STORY_PIP_GAP);
+            hud_quad(s, x, py, x + STORY_PIP, py + STORY_PIP,
+                     0.30f, 0.27f, 0.22f, 0.55f * alpha);
+            if (i <= index)
+                hud_quad(s, x + 1.0f, py + 1.0f, x + STORY_PIP - 1.0f,
+                         py + STORY_PIP - 1.0f, 0.94f, 0.84f, 0.46f, 0.90f * alpha);
+        }
+    }
+
+    rd_mode(RD_TEXT);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, font_texture());
+
+    for (int i = 0; i < page->n_lines; i++) {
+        const char *line = page->line[i];
+        float lw = font_width(STORY_TEXT_SIZE, line);
+        text_run(s, cx - lw * 0.5f, y0 + (float)i * STORY_LINE_STEP,
+                 STORY_TEXT_SIZE, line, 0.94f, 0.90f, 0.82f, alpha);
+    }
+
+    /* Not on the first page: a screen that offers a way out before it has said
+       anything is a screen that expects to be skipped.
+       첫 페이지에는 두지 않습니다. 아무 말도 하기 전에 나갈 길을 제시하는 화면은 건너뛰어질
+       것을 예상하는 화면입니다. */
+    if (index > 0) {
+        const char *hint = "press to continue";
+        float hw = font_width(STORY_HINT_SIZE, hint);
+        text_run(s, cx - hw * 0.5f, (float)vh - 42.0f, STORY_HINT_SIZE, hint,
+                 0.52f, 0.50f, 0.46f, alpha);
+    }
+
+    ui_end();
+}
+
+/* --- the boss readout / 보스 계기판 ---------------------------------------
+ *
+ * ENGLISH
+ * -------
+ * A SIBLING OF ::scene_draw_hud RATHER THAN A BRANCH INSIDE IT, and it takes
+ * finished facts rather than a ::World. That is scene.h's standing rule --
+ * ::scene_draw_between "takes the two names rather than the World, so it cannot
+ * accidentally read the level that is CURRENTLY loaded", and ::scene_draw_win
+ * takes an already-worded string because "deciding which facts a run reports is
+ * not a layout decision". Which slot the boss is in, what fraction it has left
+ * and which line is up are all world.c's questions.
+ *
+ * WHY THE BAR IS TWO COLOURS. During the warded phase -- most of the fight --
+ * the boss takes no damage, so the fill does not move. A bar that simply sat
+ * there while the player emptied a magazine into the maw would read as broken,
+ * not as invulnerable. Dimming it is the bar saying WHY it is not moving, and
+ * it costs one ternary; ::draw_menu_rows already does exactly this to
+ * distinguish an on row from an off one.
+ *
+ * WHY THE PIPS. R8 asks for a health bar and R6 makes the ward count the only
+ * gate on progress -- so for most of the fight the top of the screen would show
+ * a frozen bar and nothing about the objective. The pips are the objective. The
+ * empty ones are drawn as tracks rather than omitted, for the slider's own
+ * reason: "Drawing the whole track means a slider at zero is still a slider."
+ *
+ * 한국어
+ * ------
+ * ::scene_draw_hud 안의 분기가 아니라 *형제*이며, ::World가 아니라 완성된 사실을 받습니다.
+ * scene.h의 정해진 규칙입니다. ::scene_draw_between은 *"World가 아니라 두 이름을 받으므로,
+ * 지금 로드된 레벨을 실수로 읽을 수 없습니다"*이고, ::scene_draw_win이 이미 문장이 된 문자열을
+ * 받는 이유는 *"어떤 사실을 보고할지 정하는 것은 배치 결정이 아니"*기 때문입니다. 보스가 어느
+ * 슬롯에 있는지, 얼마가 남았는지, 어느 대사가 떠 있는지는 전부 world.c의 질문입니다.
+ *
+ * *바가 두 색인 이유.* 수호 단계 동안(전투의 대부분입니다) 보스는 피해를 받지 않으므로 채움이
+ * 움직이지 않습니다. 플레이어가 아귀에 탄창을 비우는 동안 그냥 가만히 있는 바는 무적이 아니라
+ * 고장으로 읽힙니다. 흐리게 하는 것이 바가 스스로 왜 움직이지 않는지 말하는 방법이고, 비용은
+ * 삼항 하나입니다. ::draw_menu_rows가 켜진 행과 꺼진 행을 구별하려고 이미 정확히 이것을 합니다.
+ *
+ * *핍이 있는 이유.* 요구는 체력바를 청하는데 진척의 유일한 관문은 결계핵 수입니다. 그래서
+ * 전투의 대부분 동안 화면 위쪽은 얼어붙은 바와, 목표에 대해서는 아무것도 보여 주지 않게 됩니다.
+ * 핍이 곧 목표입니다. 빈 것도 생략하지 않고 트랙으로 그리며, 슬라이더 자신의 이유를 따릅니다.
+ * *"트랙 전체를 그리면 0인 슬라이더도 여전히 슬라이더입니다."* */
+
+#define BOSS_BAR_TOP    22.0f   /**< Down from the top edge, pixels. / 위쪽 가장자리에서 내려온 거리(픽셀). */
+#define BOSS_BAR_W      0.54f   /**< Fraction of the viewport width. / 뷰포트 너비의 비율. */
+#define BOSS_BAR_H      11.0f   /**< Bar height, pixels. / 바의 높이(픽셀). */
+#define BOSS_PIP        9.0f    /**< Ward pip size, pixels. / 결계핵 핍의 크기(픽셀). */
+#define BOSS_PIP_GAP    4.0f    /**< Between two pips. / 핍 사이의 간격. */
+#define BOSS_LINE_Y     46.0f   /**< The banner, below the bar. / 배너. 바 아래입니다. */
+
+/* What the five moments say.
+ *
+ * A TABLE BESIDE THE DRAWING, which is ::draw_menu_notices' own arrangement and
+ * for its reason: font_text draws a line at a time, so lines live as lines
+ * rather than as one string with newlines in it.
+ *
+ * ENGLISH ONLY, and that is a constraint rather than a choice. font.c's atlas
+ * is `FIRST 32` through `COUNT 96` -- printable ASCII and nothing else -- so
+ * there is no Hangul glyph to draw with. Every string this game puts on screen
+ * is in the same position. Korean story text needs a font change, which is a
+ * larger piece of work than the fight these lines belong to.
+ *
+ * Kept short for a second reason: each is centred at ::HUD_NOTICE_SIZE, and a
+ * line long enough to reach the viewport edges at 2.2 would have to shrink,
+ * which would make the loudest sentence in the fight the smallest one.
+ *
+ * 다섯 순간이 하는 말입니다.
+ *
+ * *그리기 곁의 표*이며, ::draw_menu_notices 자신의 배치이자 그 이유를 따릅니다. font_text는 한
+ * 번에 한 줄을 그리므로, 줄은 개행이 든 문자열 하나가 아니라 줄로 존재합니다.
+ *
+ * *영어 전용이며, 선택이 아니라 제약입니다.* font.c의 아틀라스는 `FIRST 32`부터 `COUNT 96`까지,
+ * 출력 가능한 ASCII뿐입니다. 그릴 한글 글리프가 없습니다. 이 게임이 화면에 올리는 모든 문자열이
+ * 같은 처지입니다. 한글 스토리 텍스트는 폰트 작업을 필요로 하며, 그것은 이 대사들이 속한
+ * 전투보다 큰 작업입니다.
+ *
+ * 짧게 유지하는 두 번째 이유는, 각각이 ::HUD_NOTICE_SIZE로 가운데 정렬되기 때문입니다. 2.2에서
+ * 뷰포트 가장자리에 닿을 만큼 긴 줄은 줄여야 하고, 그러면 전투에서 가장 큰 목소리의 문장이 가장
+ * 작은 문장이 됩니다. */
+static const char *boss_line_text(int line) {
+    switch (line) {
+    case BOSS_LINE_WAKE: return "THE SPIRE OPENS ITS MOUTH";
+    case BOSS_LINE_OPEN: return "THE WARDS ARE DOWN -- HURT IT";
+    case BOSS_LINE_HIT:  return "IT FEELS THAT";
+    case BOSS_LINE_WARD: return "IT PULLS THE WARDS BACK UP";
+    case BOSS_LINE_DIE:  return "THE MAW IS QUIET";
+    default:             return 0;
+    }
+}
+
+void scene_draw_boss(Scene *s, int vw, int vh, int show_bar, float fill,
+                     int wards_left, int wards_total, int groggy,
+                     const char *line, float line_alpha) {
+    DIAG_WANT_UI_PASS();
+
+    ui_begin(vw, vh);
+
+    /* CLAMPED, not trusted. The caller divides a health by a table value, and
+       the day anything scales a spawned monster's health that ratio goes over
+       one with nothing else to catch it -- a fill wider than its own track
+       reads as a rendering fault rather than as a buff.
+       신뢰하지 않고 자릅니다. 호출자는 체력을 표의 값으로 나누는데, 무언가가 생성된 몬스터의
+       체력을 조정하는 날 그 비율은 1을 넘고 그것을 잡을 다른 것이 없습니다. 자기 트랙보다 넓은
+       채움은 강화가 아니라 렌더링 결함으로 읽힙니다. */
+    if (!(fill > 0.0f)) fill = 0.0f;
+    if (fill > 1.0f)    fill = 1.0f;
+
+    float w  = (float)vw * BOSS_BAR_W;
+    float x0 = ((float)vw - w) * 0.5f;
+    float x1 = x0 + w;
+    float y0 = BOSS_BAR_TOP;
+    float y1 = y0 + BOSS_BAR_H;
+
+    /* --- every quad first, then ONE restore -----------------------------
+       ::hud_quad sets neither the render mode nor the texture and restores
+       neither. ::draw_menu_rows names this as "the easiest thing in this loop
+       to get wrong and there should only be one of it", so the text below is
+       preceded by exactly one restore rather than by a restore per group.
+       사각형을 전부 먼저, 그다음 복원을 *한 번*입니다. ::hud_quad는 렌더 모드도 텍스처도
+       세우지 않고 되돌리지도 않습니다. ::draw_menu_rows가 이것을 "이 루프에서 가장 틀리기
+       쉬운 것이고 그것은 하나만 있어야 한다"고 이름 붙였으므로, 아래의 글씨 앞에는 무리마다의
+       복원이 아니라 정확히 하나의 복원만 옵니다. */
+    /* THE BAR AND THE BANNER HAVE DIFFERENT LIFETIMES, which is why one of
+       them is behind a flag. The bar exists exactly while the maw does. The
+       last line it speaks is posted on the frame it dies, and there is no maw
+       by then -- so a banner tied to the bar's condition would be a sentence
+       written and never shown, which is indistinguishable from a sentence
+       nobody wrote.
+       바와 배너는 수명이 다르며, 그것이 둘 중 하나가 플래그 뒤에 있는 이유입니다. 바는 정확히
+       아귀가 존재하는 동안 존재합니다. 아귀가 말하는 마지막 대사는 그것이 죽는 프레임에
+       게시되고 그때는 이미 아귀가 없습니다. 바의 조건에 묶인 배너는 쓰였지만 결코 보이지 않는
+       문장이 되고, 그것은 아무도 쓰지 않은 문장과 구별되지 않습니다. */
+    if (show_bar) {
+        rd_mode(RD_FLAT);
+
+        hud_quad(s, x0 - 2.0f, y0 - 2.0f, x1 + 2.0f, y1 + 2.0f,
+                 0.04f, 0.02f, 0.03f, 0.72f);                /* the track */
+
+        if (fill > 0.0f)
+            hud_quad(s, x0, y0, x0 + w * fill, y1,
+                     groggy ? 1.00f : 0.52f,
+                     groggy ? 0.28f : 0.20f,
+                     groggy ? 0.16f : 0.18f, 0.94f);
+
+        /* The two cycle boundaries, drawn ON the fill so the player can see
+           what a groggy window bought and how much of this one is left.
+           두 사이클 경계이며 채움 *위에* 그립니다. 플레이어가 그로기 창이 무엇을 벌었는지,
+           그리고 이번 창이 얼마나 남았는지 볼 수 있게 합니다. */
+        for (int i = 1; i < BOSS_CYCLES; i++) {
+            float tx = x0 + w * ((float)i / (float)BOSS_CYCLES);
+            hud_quad(s, tx - 1.0f, y0, tx + 1.0f, y1, 0.02f, 0.01f, 0.02f, 0.85f);
+        }
+
+        /* Ward pips, right of the bar. Track always, fill only while it
+           stands -- "drawing the whole track means a slider at zero is still a
+           slider", and a ward that is gone is exactly the thing the player
+           needs to be able to count.
+           결계핵 핍이며 바 오른쪽입니다. 트랙은 언제나, 채움은 서 있는 동안만입니다.
+           "트랙 전체를 그리면 0인 슬라이더도 여전히 슬라이더"이고, 사라진 결계핵이야말로
+           플레이어가 셀 수 있어야 하는 것입니다. */
+        for (int i = 0; i < wards_total; i++) {
+            float px = x1 + 10.0f + (float)i * (BOSS_PIP + BOSS_PIP_GAP);
+            float py = y0 + (BOSS_BAR_H - BOSS_PIP) * 0.5f;
+            hud_quad(s, px, py, px + BOSS_PIP, py + BOSS_PIP,
+                     0.05f, 0.04f, 0.02f, 0.70f);
+            if (i < wards_left)
+                hud_quad(s, px + 1.5f, py + 1.5f, px + BOSS_PIP - 1.5f,
+                         py + BOSS_PIP - 1.5f, 1.00f, 0.86f, 0.34f, 0.95f);
+        }
+    }
+
+    rd_mode(RD_TEXT);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, font_texture());
+
+    if (line && line[0] && line_alpha > 0.0f) {
+        float lw = font_width(HUD_NOTICE_SIZE, line);
+        text_run(s, ((float)vw - lw) * 0.5f, BOSS_LINE_Y, HUD_NOTICE_SIZE,
+                 line, 1.0f, 0.88f, 0.62f, line_alpha);
+    }
+
+    ui_end();
+}
+
 static void draw_menu_rows(Scene *s, int vw, int vh, float cx, int rows, int cur) {
     for (int i = 0; i < rows; i++) {
         const char *value;
@@ -1542,7 +2197,28 @@ static void draw_menu_rows(Scene *s, int vw, int vh, float cx, int rows, int cur
         float bx0, by0, bx1, by1;
         if (!menu_row_bounds(i, vw, vh, &bx0, &by0, &bx1, &by1)) continue;
 
-        int on = (i == cur);
+        int on   = (i == cur);
+        int lock = menu_row_locked(i);
+
+        /* HOW A LOCKED ROW LOOKS, and it is one multiplier rather than a
+           second set of colours. The row keeps its shape, its place and its
+           highlight -- the cursor still lands on it, deliberately, see
+           ::menu_row_locked -- and only goes faint, which is the difference
+           between "not yours yet" and "broken". A separate palette would let
+           the two drift into looking like different kinds of row, and there is
+           only one kind here.
+           NOT SKIPPED AND NOT HIDDEN. A row nobody can see is a mode nobody
+           knows to want, and the whole reason endless is worth unlocking is
+           that the player has been looking at it since the first launch.
+           *잠긴 행이 어떻게 보이는가*이며, 두 번째 색 조합이 아니라 곱하는 값 하나입니다.
+           행은 모양과 자리와 강조를 그대로 유지하고(커서는 의도적으로 여전히 그 위에
+           놓입니다. ::menu_row_locked를 보십시오) 흐려지기만 합니다. 그것이 "아직 당신의 것이
+           아니다"와 "고장 났다"의 차이입니다. 별도의 팔레트를 두면 둘이 서로 다른 종류의 행처럼
+           보이는 쪽으로 어긋날 수 있는데, 이곳에 종류는 하나뿐입니다.
+           *건너뛰지도 숨기지도 않습니다.* 아무도 볼 수 없는 행은 아무도 원할 줄 모르는 모드이며,
+           무한 모드가 해금할 가치가 있는 이유 전부는 플레이어가 첫 실행 이후로 줄곧 그것을 보고
+           있었다는 데 있습니다. */
+        float a = lock ? MENU_LOCKED_ALPHA : 1.0f;
 
         /* The highlighted row gets a filled bar as well as a brighter colour.
            Colour alone is not enough: the dither and the scanlines both eat
@@ -1570,7 +2246,7 @@ static void draw_menu_rows(Scene *s, int vw, int vh, float cx, int rows, int cur
             rd_mode(RD_FLAT);
 
             if (on)
-                hud_quad(s, bx0, by0, bx1, by1, 1.0f, 0.85f, 0.30f, 0.16f);
+                hud_quad(s, bx0, by0, bx1, by1, 1.0f, 0.85f, 0.30f, 0.16f * a);
 
             if (slider) {
                 float x0, y0, x1, y1;
@@ -1607,9 +2283,9 @@ static void draw_menu_rows(Scene *s, int vw, int vh, float cx, int rows, int cur
         float y = by0 + 4.0f;
 
         if (on)
-            text_run(s, bx0 + 8.0f, y, MENU_ROW_SIZE, ">", r, g, b, 1.0f);
+            text_run(s, bx0 + 8.0f, y, MENU_ROW_SIZE, ">", r, g, b, a);
 
-        text_run(s, cx + MENU_LABEL_X, y, MENU_ROW_SIZE, label, r, g, b, 1.0f);
+        text_run(s, cx + MENU_LABEL_X, y, MENU_ROW_SIZE, label, r, g, b, a);
 
         if (value[0]) {
             float vx = cx + MENU_VALUE_X;
@@ -1620,7 +2296,7 @@ static void draw_menu_rows(Scene *s, int vw, int vh, float cx, int rows, int cur
             float sx0, sx1;
             if (slider && menu_row_bar_bounds(i, vw, vh, &sx0, 0, &sx1, 0))
                 vx = sx1 + MENU_BAR_GAP;
-            text_run(s, vx, y, MENU_ROW_SIZE, value, r, g, b, 1.0f);
+            text_run(s, vx, y, MENU_ROW_SIZE, value, r, g, b, a);
         }
     }
 }
@@ -1648,8 +2324,19 @@ static void draw_menu_hint(Scene *s, int vw, int vh, float cx) {
        설명할 것도 없습니다. BACK이라고 적힌 행 하나가 있고 ESC도 같은 일을 합니다.
        라이선스 위에 겹친 도움말 한 줄은 도움말이 없는 것보다 나쁩니다. */
     if (menu_screen() != MENU_CREDITS) {
+        /* ESC IS NAMED FOR WHAT IT DOES HERE, which is not the same word on
+           every screen: it resumes a run, steps back out of settings, and on
+           the title screen it does nothing at all -- so the title's hint does
+           not mention it. A line that offers a key which is inert is the
+           screen teaching the player it is broken.
+           *ESC는 이곳에서 하는 일로 이름이 붙으며*, 그것은 화면마다 같은 단어가 아닙니다.
+           플레이를 재개하고, 설정에서 물러나며, 타이틀 화면에서는 아무 일도 하지 않습니다.
+           그래서 타이틀의 안내는 그것을 언급하지 않습니다. 반응하지 않는 키를 제시하는 줄은
+           화면이 플레이어에게 고장 났다고 가르치는 것입니다. */
         const char *hint = (menu_screen() == MENU_SETTINGS)
             ? "CLICK to change   RIGHT-CLICK reverses   W/S A/D   ESC back"
+            : (menu_screen() == MENU_TITLE)
+            ? "CLICK to choose   W/S select   ENTER"
             : "CLICK to choose   W/S select   ENTER   ESC resume";
         float hw = font_width(MENU_HINT_SIZE, hint);
         text_run(s, cx - hw * 0.5f, menu_hint_y(vw, vh), MENU_HINT_SIZE, hint,
@@ -1681,12 +2368,24 @@ void scene_draw_menu(Scene *s, int vw, int vh) {
        모든 위치를 이곳에서 다시 계산하지 않고 menu_row_bounds에서 가져옵니다. 마우스
        히트 판정이 같은 함수를 읽으므로, 눈에 보이는 것과 클릭이 선택하는 것이 어긋날 수
        없습니다. menu.h의 참고 사항을 확인하십시오. */
-    const char *title = (menu_screen() == MENU_SETTINGS) ? "SETTINGS"
-                      : (menu_screen() == MENU_CREDITS)  ? "CREDITS"
-                      : "PAUSED";
-    float tw = font_width(MENU_TITLE_SIZE, title);
-    text_run(s, cx - tw * 0.5f, menu_title_y(vw, vh), MENU_TITLE_SIZE, title,
-             1.0f, 0.85f, 0.30f, 1.0f);
+    /* THE TITLE SCREEN'S HEADER IS NOT DRAWN HERE. It is the game's name at
+       title size with a line under it, it fades in on a clock this pass cannot
+       see, and it must not be dimmed by the wash above it -- so it is
+       ::scene_draw_title, called after this. The alternative was a fourth
+       string in this chain and three arguments added to this function for one
+       screen's sake.
+       *타이틀 화면의 머리글은 이곳에서 그리지 않습니다.* 그것은 타이틀 크기의 게임 이름과 그
+       아래 한 줄이며, 이 패스가 볼 수 없는 시계에 따라 서서히 나타나고, 위의 워시에 의해
+       어두워져서는 안 됩니다. 그래서 ::scene_draw_title이며 이 함수 뒤에 불립니다. 대안은 이
+       사슬의 네 번째 문자열과, 화면 하나를 위해 이 함수에 추가되는 인자 셋이었습니다. */
+    if (menu_screen() != MENU_TITLE) {
+        const char *title = (menu_screen() == MENU_SETTINGS) ? "SETTINGS"
+                          : (menu_screen() == MENU_CREDITS)  ? "CREDITS"
+                          : "PAUSED";
+        float tw = font_width(MENU_TITLE_SIZE, title);
+        text_run(s, cx - tw * 0.5f, menu_title_y(vw, vh), MENU_TITLE_SIZE, title,
+                 1.0f, 0.85f, 0.30f, 1.0f);
+    }
 
     /* Prose rather than rows, and long enough to have its own function. */
     if (menu_screen() == MENU_CREDITS) draw_menu_notices(s, vw, vh, cx, rows);
@@ -1799,7 +2498,15 @@ void scene_frame(const World *w, Scene *sc, int vw, int vh, int frozen) {
     {
         int sw, sh;
         post_size(&sw, &sh);
-        rd_snap((float)sw / PSX_SNAP_COARSE, (float)sh / PSX_SNAP_COARSE);
+        /* A grid of zero IS the disable, which render.c states of uSnap: "0
+           disables the whole thing". Guarded rather than divided by, because
+           PSX_SNAP_COARSE is 0 now and the division would be one.
+           격자 0이 곧 비활성화이며, render.c가 uSnap에 대해 그렇게 말합니다. 나누지 않고
+           분기하는 이유는 PSX_SNAP_COARSE가 이제 0이고 나눗셈이 성립하지 않기 때문입니다. */
+        if (PSX_SNAP_COARSE > 0.0f)
+            rd_snap((float)sw / PSX_SNAP_COARSE, (float)sh / PSX_SNAP_COARSE);
+        else
+            rd_snap(0.0f, 0.0f);
     }
 
     /* Set beside the snap and released beside it, because the two are halves of
@@ -2012,15 +2719,119 @@ void scene_frame(const World *w, Scene *sc, int vw, int vh, int frozen) {
        밀어내는 일입니다. */
     if (!w->run.title) scene_draw_hud(sc, vw, vh, &w->level, &w->player, &w->weapon);
 
+    /* --- the boss readout -----------------------------------------------
+       AFTER the HUD and BEFORE the end screens, so it is dimmed by them for the
+       reason the HUD is: it is a readout belonging to the frozen frame
+       underneath, and the wash pushes it back rather than removing it.
+       Everything it needs is computed HERE rather than passed as a World, which
+       is scene.h's rule for every pass that draws a fact.
+       HUD *뒤*, 종료 화면들 *앞*입니다. 그래야 HUD와 같은 이유로 그것들에 의해 어두워집니다.
+       아래에 정지된 프레임에 속한 계기판이며, 워시는 그것을 제거하는 대신 뒤로 밀어냅니다.
+       필요한 모든 것을 World로 넘기지 않고 *이곳에서* 계산하며, 그것이 사실을 그리는 모든
+       패스에 대한 scene.h의 규칙입니다. */
+    if (!w->run.title) {
+        int bi = enemy_boss_index(&w->pools);
+
+        /* EITHER, not both. The bar needs a boss; the banner outlives one --
+           the maw's last line is posted on the frame it dies. Gating the whole
+           block on `bi >= 0` is what made that line unshowable.
+           둘 중 하나이며 둘 다가 아닙니다. 바에는 보스가 필요하지만 배너는 보스보다 오래
+           삽니다. 아귀의 마지막 대사는 그것이 죽는 프레임에 게시됩니다. 블록 전체를
+           `bi >= 0`으로 막은 것이 그 대사를 보여 줄 수 없게 만든 원인이었습니다. */
+        if (bi >= 0 || w->run.boss_line) {
+            const Enemy   *b = bi >= 0 ? enemy_at(&w->pools, bi) : 0;
+            const MonType *S = b ? mon_stats(b->type) : 0;
+            int wards = enemy_guards_alive(&w->pools);
+
+            /* The banner is suppressed on the end screens while the BAR is not,
+               and the two are different things: the bar is a readout of the
+               frozen frame, the line is an announcement -- and once the run is
+               over there is nothing left to announce. A frozen sentence under a
+               death overlay reads as part of the death screen.
+               종료 화면에서 배너는 억제하고 *바*는 억제하지 않으며, 둘은 다른 것입니다. 바는
+               정지된 프레임의 계기판이고 대사는 공지인데, 플레이가 끝나면 공지할 것이 남아
+               있지 않습니다. 사망 오버레이 아래에 얼어붙은 문장은 사망 화면의 일부로 읽힙니다. */
+            const char *line = 0;
+            float       la   = 0.0f;
+            if (!w->run.dead && !w->run.won && w->run.boss_line) {
+                line = boss_line_text(w->run.boss_line);
+                la   = w->run.boss_line_t / HUD_NOTICE_FADE;
+                if (la > 1.0f) la = 1.0f;
+            }
+
+            scene_draw_boss(sc, vw, vh, b != 0,
+                            b ? (float)b->health / (float)S->hp : 0.0f,
+                            wards, BOSS_WARDS, wards == 0, line, la);
+        }
+    }
+
     /* The three end/start screens are mutually exclusive by construction:
        `title` is cleared before a run can begin, and a run that has been won
        cannot also have been lost.
        세 개의 시작·종료 화면은 구조적으로 상호 배타적입니다. `title`은 플레이가
        시작되기 전에 해제되며, 승리한 플레이가 동시에 패배할 수는 없습니다. */
-    if (w->run.title)
-        scene_draw_title(sc, vw, vh, w->run.title_time);
+    /* Worded once, here, for whichever of the two end screens is up. Built in
+       this scope rather than inside each branch because the two screens must
+       report the same run the same way -- a second call site is a second place
+       the wording can drift, and the cost is one stack buffer on a frame that
+       is already drawing text.
+       두 종료 화면 중 어느 쪽이 떠 있든, 이곳에서 한 번 문구로 만듭니다. 각 분기 안이 아니라 이
+       스코프인 이유는 두 화면이 같은 플레이를 같은 방식으로 보고해야 하기 때문입니다. 두 번째
+       호출 지점은 문구가 어긋날 수 있는 두 번째 장소이며, 비용은 이미 텍스트를 그리고 있는
+       프레임에서 스택 버퍼 하나입니다. */
+    char run_line[RUN_SUMMARY_MAX];
+    run_summary(&w->run, run_line, sizeof(run_line));
+
+    /* --- the cutscene, ahead of every end screen -------------------------
+       A FOURTH SCREEN AND IT WINS. The three below are mutually exclusive by
+       construction; this one is not -- it plays OVER `dead`, and in story mode
+       it is what stands between the maw's death and `won`. So it is asked
+       first, and when it is up the others are not drawn at all rather than
+       drawn under it: two washes and two sets of text would leave the death
+       screen's own prompt legible through the words, offering a key that
+       ::step_confirm has already given to the cutscene.
+       Nothing is drawn on the title screen, because a run that has not begun
+       has no moment to hold -- ::STORY_INTRO is started by ::world_begin, which
+       is also what clears `title`.
+       *네 번째 화면이고 그것이 이깁니다.* 아래의 셋은 구조적으로 상호 배타적이지만 이것은
+       아닙니다. `dead` 위에서 재생되며, 스토리 모드에서는 아귀의 죽음과 `won` 사이에 서 있는
+       것이 이것입니다. 그래서 먼저 묻고, 이것이 떠 있으면 나머지는 아래에 그려지는 것이 아니라
+       아예 그려지지 않습니다. 워시 둘과 텍스트 둘이면 사망 화면 자신의 안내 문구가 글자 사이로
+       읽히고, ::step_confirm이 이미 컷신에 준 키를 제시하게 됩니다.
+       타이틀 화면에서는 아무것도 그리지 않습니다. 시작되지 않은 플레이에는 붙잡아 둘 순간이
+       없기 때문입니다. ::STORY_INTRO는 ::world_begin이 시작하며, `title`을 지우는 것도
+       그것입니다. */
+    const StoryCut *cut = w->run.cut ? story_for(w->run.cut - 1) : 0;
+    if (cut && w->run.cut_page < cut->n_pages) {
+        const StoryPage *pg = &cut->page[w->run.cut_page];
+
+        /* In at the start and out at the end, from the one clock world.c
+           keeps. ::BETWEEN_FADE's shape: the shorter of the two distances to an
+           edge, so a page whose hold is shorter than two fades still reaches
+           full strength at its midpoint instead of never arriving.
+           한 시계로부터 시작에서 들어오고 끝에서 나갑니다. world.c가 지키는 그 시계입니다.
+           ::BETWEEN_FADE의 형태입니다. 가장자리까지의 두 거리 중 짧은 쪽이므로, hold가 페이드
+           둘보다 짧은 페이지도 결코 도착하지 못하는 대신 중간 지점에서 온전한 세기에
+           닿습니다. */
+        float in   = w->run.cut_time;
+        float left = pg->hold - w->run.cut_time;
+        float a    = (in < left ? in : left) / STORY_FADE;
+        if (a > 1.0f) a = 1.0f;
+        if (a < 0.0f) a = 0.0f;
+
+        scene_draw_story(sc, vw, vh, pg, w->run.cut_page, cut->n_pages, a);
+    }
+    else if (w->run.title)
+        /* The rows are drawn by ::scene_draw_menu below and the name by
+           ::scene_draw_title after it; nothing about the title screen is drawn
+           in this chain any more. The branch stays so the three end screens
+           cannot be reached while a run has not begun.
+           행은 아래의 ::scene_draw_menu가, 이름은 그 뒤의 ::scene_draw_title이 그립니다. 타이틀
+           화면에 대한 어떤 것도 더 이상 이 사슬에서 그려지지 않습니다. 이 분기가 남는 이유는
+           플레이가 시작되지 않은 동안 세 종료 화면에 도달할 수 없게 하기 위함입니다. */
+        ;
     else if (w->run.won)
-        scene_draw_win(sc, vw, vh, &w->player, &w->weapon);
+        scene_draw_win(sc, vw, vh, &w->player, &w->weapon, run_line);
     else if (w->run.between)
         /* Before the death screen in this chain and after the win screen,
            which is the order the states can actually co-exist in: the world is
@@ -2042,7 +2853,7 @@ void scene_frame(const World *w, Scene *sc, int vw, int vh, int frozen) {
            넘어지는 동안 붉은 막을 덮으면 그 뒤로 애니메이션이 가려지는데, 무슨 일이
            있었는지 말해 주는 것이 바로 그 넘어짐입니다. */
         scene_draw_death(sc, vw, vh, w->run.death_time - DEATH_ANIM_TIME,
-                         w->run.death_time > DEATH_INPUT_DELAY);
+                         w->run.death_time > DEATH_INPUT_DELAY, run_line);
 
     /* Last, so it sits over the HUD and the end screens both. A menu opened
        from the win screen has to be readable too, and it is the thing the
@@ -2050,4 +2861,38 @@ void scene_frame(const World *w, Scene *sc, int vw, int vh, int frozen) {
        마지막에 그려 HUD와 종료 화면 양쪽 위에 놓입니다. 승리 화면에서 연 메뉴도 읽을
        수 있어야 하며, 그것이 플레이어가 지금 조작하고 있는 대상입니다. */
     scene_draw_menu(sc, vw, vh);
+
+    /* AFTER THE MENU, and it is the only pass here that is. ::scene_draw_menu
+       dims the world for the screen it draws; the title's name is that
+       screen's own art rather than something that dim should push back, so it
+       goes over the wash instead of under it. See scene.h.
+       ON `title` RATHER THAN ON ::MENU_TITLE, which is not the same condition
+       and the difference is load-bearing twice over. A playback comes up on the
+       title with no menu (::menu_open_title is skipped for one), and so does a
+       tool driving a ::World directly -- gated on the menu, both would draw a
+       frame with NO UI pass in it at all. That matters beyond a missing title:
+       ::ui_end is what restores the depth test and the culling the next frame's
+       world pass expects, so a frame that runs no UI pass corrupts the frame
+       AFTER it. scenetest found exactly that, as two end screens that stopped
+       agreeing with themselves.
+       The best wave comes from save.c because it outlives every run that
+       produced it -- ::RunState cannot carry it and this pass is the only place
+       it is ever shown. Reading a state module for a UI fact is what this
+       function already does for ::menu_screen, three lines up.
+       *메뉴 뒤이며*, 이곳에서 그런 패스는 이것뿐입니다. ::scene_draw_menu는 자신이 그리는 화면을
+       위해 월드를 어둡게 하는데, 타이틀의 이름은 그 어둡게 하기가 뒤로 밀어내야 할 것이 아니라
+       그 화면 자신의 아트입니다. 그래서 워시 아래가 아니라 위에 놓입니다. scene.h를 참조하십시오.
+       *::MENU_TITLE이 아니라 `title`을 검사하며*, 그것은 같은 조건이 아니고 그 차이는 두 겹으로
+       중요합니다. 재생은 메뉴 없이 타이틀로 올라오고(재생에서는 ::menu_open_title을 건너뜁니다)
+       ::World를 직접 구동하는 도구도 그렇습니다. 메뉴로 막으면 둘 다 UI 패스가 *하나도* 없는
+       프레임을 그리게 됩니다. 그것은 사라진 제목보다 큰 문제입니다. 다음 프레임의 월드 패스가
+       기대하는 깊이 검사와 컬링을 복원하는 것이 ::ui_end이므로, UI 패스를 하나도 돌리지 않는
+       프레임은 *그 다음* 프레임을 망칩니다. scenetest가 정확히 그것을, 자기 자신과 일치하기를
+       그만둔 두 종료 화면으로 찾아냈습니다.
+       최고 웨이브가 save.c에서 오는 이유는, 그것이 자신을 만들어 낸 모든 플레이보다 오래
+       살아남기 때문입니다. ::RunState는 그것을 나를 수 없고 이 패스가 그것이 보이는 유일한
+       곳입니다. UI를 위한 사실을 상태 모듈에서 읽는 것은 이 함수가 세 줄 위에서
+       ::menu_screen에 대해 이미 하고 있는 일입니다. */
+    if (w->run.title)
+        scene_draw_title(sc, vw, vh, w->run.title_time, save_best_wave());
 }

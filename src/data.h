@@ -5,7 +5,15 @@
  * assets/models.txt와 assets/textures.txt가 원본 데이터입니다.
  * bake.ps1 스크립트는 이 파일들의 주석과 공백을 제거하여 src/gen_assets.h 파일로
  * 만듭니다. 릴리스 빌드는 이 생성된 파일을 포함하므로, 배포되는 exe 파일은
- * 최소화된 텍스트를 내장하고 파일 시스템에 접근하지 않습니다.
+ * 최소화된 텍스트를 내장하고 *에셋을 위해서는* 파일 시스템에 접근하지 않습니다.
+ *
+ * @note 이 문장은 한때 에셋에 대한 것이 아니라 바이너리 전체에 대한 것이었고, 더 이상
+ *       그렇지 않습니다. src/save.c가 %APPDATA%에 해금 비트와 최고 웨이브를 씁니다. 그것이
+ *       배포 빌드가 여는 유일한 파일이며, 이 모듈이 여는 파일은 여전히 하나도 없습니다.
+ *       무엇이 바뀌었고 왜 바뀌었는지는 save.h를 참조하십시오.
+ *       This sentence was once about the whole binary rather than about assets, and is not
+ *       any more: src/save.c writes unlock bits and a best wave under %APPDATA%. That is the
+ *       only file the shipped build opens, and this module still opens none. See save.h.
  *
  * HOT_RELOAD 빌드는 파일을 직접 읽고 변경 사항을 감시합니다. 이를 통해
  * 실루엣을 편집하면 재빌드 없이 실행 중인 게임에 변경 사항이 반영됩니다.
@@ -60,6 +68,38 @@ enum DataAsset {
      * 핫 리로드 경로를 가집니다.
      */
     DATA_MAPS,
+
+    /**
+     * @brief Drop rates, the wave reward, and the glow a fresh item carries.
+     *
+     * ENGLISH: Behind assets\loot.txt and watched like the others, because it
+     * is the one asset in this list whose whole reason for existing is being
+     * retuned -- a drop rate is not authored once and shipped, it is played
+     * against and moved. A rate that needs a rebuild to change is a rate
+     * nobody changes. See loot.h.
+     *
+     * 한국어: assets\loot.txt가 뒤에 있으며 다른 것들처럼 감시됩니다. 이 목록에서 존재
+     * 이유 자체가 *다시 조정되는 것*인 유일한 에셋이기 때문입니다. 드롭 확률은 한 번
+     * 제작하고 배포하는 것이 아니라, 플레이해 보고 옮기는 것입니다. 바꾸는 데 재빌드가
+     * 필요한 확률은 아무도 바꾸지 않는 확률입니다. loot.h를 참조하십시오.
+     */
+    DATA_LOOT,
+
+    /**
+     * @brief The intro, victory and defeat cutscenes.
+     *
+     * ENGLISH: Behind assets\story.txt and watched like the others, for
+     * ::DATA_LOOT's reason applied to words instead of numbers: a line is the
+     * thing most likely to be rewritten and least likely to be worth waiting
+     * for a build, and a line that needs a rebuild to change is a line that
+     * stays as first drafted. See story.h.
+     *
+     * 한국어: assets\story.txt가 뒤에 있으며 다른 것들처럼 감시됩니다. ::DATA_LOOT의 이유를
+     * 숫자가 아니라 말에 적용한 것입니다. 대사는 가장 다시 쓰이기 쉬운 것이자 빌드를 기다릴
+     * 가치가 가장 적은 것이며, 바꾸는 데 재빌드가 필요한 대사는 초고 그대로 남는 대사입니다.
+     * story.h를 참조하십시오.
+     */
+    DATA_STORY,
     DATA_COUNT        /**< 총 데이터 에셋 수 */
 };
 
@@ -107,7 +147,7 @@ const char *data_baked(int which);
  * ENGLISH
  * -------
  * @param[in]  name    Level name, which is the .map's filename without the
- *                     extension: `assets\maps\atrium.map` is "atrium".
+ *                     extension: `assets\maps\lqdm1.map` is "lqdm1".
  * @param[out] out_len Receives the length in bytes. The text is NOT null
  *                     terminated -- the next map follows it -- so the length is
  *                     the only thing that says where this map ends. Pass it to
@@ -133,7 +173,7 @@ const char *data_baked(int which);
  * ------
  * @brief 포장된 맵 블롭 안에서 이름이 주어진 .map 하나를 찾습니다.
  * @param[in]  name    레벨 이름이며 확장자를 뺀 .map 파일명입니다.
- *                     `assets\maps\atrium.map`은 "atrium"입니다.
+ *                     `assets\maps\lqdm1.map`은 "lqdm1"입니다.
  * @param[out] out_len 바이트 길이를 받습니다. 텍스트는 널로 끝나지 *않습니다*. 뒤에 다음
  *                     맵이 이어지므로 이 맵이 어디서 끝나는지를 말해 주는 것은 길이뿐입니다.
  *                     종료 문자에 기대지 말고 ::brush_parse에 그대로 넘기십시오.

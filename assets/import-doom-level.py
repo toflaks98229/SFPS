@@ -9,12 +9,29 @@ and sound importers beside it are not run. What it prints is meant to be pasted
 into assets/levels.txt and then EDITED -- see WHY THE OUTPUT IS A DRAFT below.
 
 Freedoom is BSD-3 licensed, which is what makes its levels usable here at all.
-Quake's are not an option: id released the engine and the game code, never the
-maps, and the .bsp files that do exist are commercial data inside pak archives.
-Doom's format is also the only one that could be converted -- a Doom sector is
-a floor height, a ceiling height and an outline, which is exactly the shape of
-a Sector here. Quake maps are CSG brushes compiled to a BSP tree and share no
-structure with this engine at all.
+
+id's own Quake maps are not an option either, and the reason is NOT the one
+this paragraph gave for years. It said they "released the engine and the game
+code, never the maps". That is false: John Romero released the original Quake
+.map sources in October 2006, e1m1 through e4m8 and dm1 through dm6, and they
+carry the GPL like the engine does. They exist, they are the real thing, and
+they are refused for the same reason OpenArena and Xonotic are -- this game
+bakes its maps INTO the executable, so a copyleft map is a copyleft binary.
+
+Worth correcting rather than quietly deleting, because the two verdicts are not
+interchangeable. "There is nothing to take" invites nobody to look again;
+"there is something and its licence is wrong for us" tells the next reader
+exactly what would have to change for the answer to change.
+
+THE SECOND HALF OF THIS PARAGRAPH USED TO SAY that Doom's format was the only
+one that could be converted, because "Quake maps are CSG brushes compiled to a
+BSP tree and share no structure with this engine at all". That was true when it
+was written and stopped being true when brush.c landed: this engine reads Valve
+220 and Standard .map text directly, which is what TrenchBroom saves. See
+assets/maps/import-librequake.py, which converts a BSD-3 Quake map without a
+compiler in the path -- and note that it converts the .map SOURCE, not a .bsp.
+The sentence outlived what it was reasoning about, which is the one thing this
+tree asks a comment not to do.
 
 WHAT DOOM STORES AND WE DO NOT
 ------------------------------

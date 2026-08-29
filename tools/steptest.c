@@ -30,6 +30,7 @@
 #include "proj.h"     /* proj_reset -- now takes the World's own pool */
 #include "door.h"     /* door_reset, and the DOOR_* axes */
 #include "diag.h"     /* diag_count -- a stale door is counted, not printed */
+#include "story.h"    /* STORY_DEFEAT -- the screen that is now in front of the death one */
 #include "txt.h"      /* txt_copy -- walking the level chain by name */
 /* level_geometry, to fill the light cache the checks below watch being
    dropped. CPU side only: mb_init/mb_free need no GL context, and only
@@ -219,6 +220,116 @@ static void check_shake(void) {
        which is the whole reason it lives in RunState. */
     run_reset(&w.run, 0);
     ok(w.run.shake == 0.0f, "a restart clears it");
+}
+
+/* --- the score a run carries to its own end screen ---------------------------
+ *
+ * Two numbers, and neither of them is visible from inside the run: how many the
+ * player took down, and how long they stayed up. The game is an arena survived
+ * rather than a chain of levels finished, so these ARE the result -- and both
+ * are accumulated by ::world_step, which means both are exactly the kind of
+ * bookkeeping that goes quietly wrong and is noticed months later on a screen
+ * nobody reaches on purpose.
+ *
+ * WHAT IS ACTUALLY WORTH PINNING. Not "does a kill count" -- that fails on the
+ * first playtest. The two that do not are: a corpse must be paid out ONCE,
+ * because it lies in its slot for ::CORPSE_FADE seconds after it dies and a
+ * counter that re-reads the pool would count it every frame it lies there; and
+ * the survival clock must NOT be ::RunState::world_time, which wraps at
+ * ::WORLD_TIME_WRAP because it drives animated materials. Sharing that clock
+ * would tell a player who lasted five minutes that they lasted twenty seconds,
+ * and it would only ever happen to the players who did best.
+ *
+ * 한국어
+ * ------
+ * 두 개의 숫자이며, 어느 쪽도 플레이 안에서는 보이지 않습니다. 몇을 쓰러뜨렸는가, 그리고
+ * 얼마나 오래 서 있었는가입니다. 이 게임은 끝내는 레벨의 사슬이 아니라 살아남는 아레나이므로
+ * 이것이 곧 결과입니다. 그리고 둘 다 ::world_step이 누적하는데, 그것은 조용히 잘못되었다가 몇
+ * 달 뒤 아무도 일부러 도달하지 않는 화면에서 발견되는 바로 그런 종류의 기록입니다.
+ *
+ * 무엇을 고정할 가치가 있는가. "처치가 세어지는가"는 아닙니다. 그것은 첫 플레이테스트에서
+ * 실패합니다. 그렇지 않은 둘은 이것입니다. 시체는 *한 번* 지급되어야 합니다. 죽은 뒤
+ * ::CORPSE_FADE초 동안 자기 슬롯에 누워 있으므로, 풀을 다시 읽는 계수기는 누워 있는 모든
+ * 프레임마다 그것을 셉니다. 그리고 생존 시계는 ::RunState::world_time이어서는 안 됩니다.
+ * 그것은 애니메이션 재질을 구동하기에 ::WORLD_TIME_WRAP에서 순환합니다. 그 시계를 함께 쓰면
+ * 5분을 버틴 플레이어에게 20초를 버텼다고 말하게 되며, 그런 일은 가장 잘한 플레이어에게만
+ * 일어납니다. */
+static void check_score(void) {
+    printf("\nthe run's own score\n");
+
+    /* One monster, put in by the level rather than by hand, so what is counted
+       is a monster the game made.
+       손이 아니라 레벨이 넣은 몬스터 하나입니다. 그래야 세어지는 것이 게임이 만든 몬스터입니다. */
+    World w;
+    fixture(&w, 0);
+    {
+        Entity *e = &w.level.ents[w.level.n_ents++];
+        e->kind[0]='s'; e->kind[1]='p'; e->kind[2]='a'; e->kind[3]='w';
+        e->kind[4]='n'; e->kind[5]=0;
+        e->x = -1500; e->z = -1500;
+    }
+    enemy_spawn_level(&w.pools, &w.level);
+    ok(enemy_count(&w.pools) == 1, "one monster is standing in the room");
+
+    ok(w.run.kills == 0 && w.run.alive_time == 0.0f,
+       "a fresh run has killed nothing and survived nothing");
+
+    /* --- the clock ------------------------------------------------------- */
+    Input in = idle();
+    world_step(&w, &in, ASPECT, DT);
+    okf(fabsf(w.run.alive_time - DT) < 1e-6f,
+        "a played frame is a frame survived", w.run.alive_time, DT);
+
+    float held = w.run.alive_time;
+    in = idle();
+    in.paused = 1;
+    for (int i = 0; i < 30; i++) world_step(&w, &in, ASPECT, DT);
+    okf(w.run.alive_time == held,
+        "and half a second behind the pause menu is not",
+        w.run.alive_time, held);
+
+    /* --- the kill -------------------------------------------------------- */
+    enemy_hurt(&w.pools, 0, 10000, v3f(0.0f, 0.0f, 1.0f));
+    ok(enemy_alive(&w.pools) == 0, "the monster is down");
+    ok(w.run.kills == 0,
+       "which the run does not know until a frame is stepped");
+
+    in = idle();
+    world_step(&w, &in, ASPECT, DT);
+    ok(w.run.kills == 1, "and then it does");
+
+    /* THE ONE THAT WOULD NOT BE NOTICED. The corpse is still in its slot and
+       still dead, so anything that answers "how many dead monsters are there"
+       instead of "how many died since you last asked" counts it again every
+       frame -- and reports several hundred kills for one imp.
+       알아채지 못할 바로 그것입니다. 시체는 여전히 자기 슬롯에 죽은 채로 있으므로, "죽은
+       몬스터가 몇인가"에 답하는 것은 "마지막으로 물은 뒤 몇이 죽었는가" 대신 매 프레임 그것을
+       다시 세고, 임프 하나로 수백 처치를 보고합니다. */
+    for (int i = 0; i < 60; i++) world_step(&w, &in, ASPECT, DT);
+    ok(w.run.kills == 1, "a corpse is paid out once, not once per frame");
+
+    /* --- the clock that must not wrap -------------------------------------
+       Both are pushed to the edge and stepped over it, which is the only way to
+       see the difference: they advance together for the whole of a normal run
+       and part company exactly once, at 4m39s.
+       둘 다 경계까지 밀어 넣고 그 너머로 진행시킵니다. 차이를 볼 수 있는 방법은 그것뿐입니다.
+       평범한 플레이 내내 함께 나아가다가 정확히 한 번, 4분 39초에 갈라섭니다. */
+    w.run.world_time = WORLD_TIME_WRAP - 0.01f;
+    w.run.alive_time = WORLD_TIME_WRAP - 0.01f;
+    for (int i = 0; i < 5; i++) world_step(&w, &in, ASPECT, DT);
+
+    ok(w.run.world_time < 1.0f,
+       "the material clock wraps, because only its phase means anything");
+    okf(w.run.alive_time > WORLD_TIME_WRAP,
+        "the survival clock does not, because its value is the answer",
+        w.run.alive_time, WORLD_TIME_WRAP);
+
+    /* And a restart puts both back, by construction rather than by being
+       listed -- the whole reason they live in RunState.
+       그리고 재시작이 둘 다 되돌립니다. 나열되어서가 아니라 구조적으로이며, 그것이 이들이
+       RunState에 사는 이유 전부입니다. */
+    run_reset(&w.run, 0);
+    ok(w.run.kills == 0 && w.run.alive_time == 0.0f, "a restart clears both");
 }
 
 int main(void) {
@@ -1283,10 +1394,38 @@ int main(void) {
             ok(!w.run.restart_wanted,
                "and waiting alone does not restart anything");
 
+            /* THE DEFEAT CUTSCENE IS IN FRONT OF THE DEATH SCREEN by now, and
+               it takes the press. ::step_confirm answers `cut` before `dead`
+               deliberately -- the cutscene is what is drawn, and a press
+               belongs to the thing on top -- so the sequence a player performs
+               is one press to clear the words and one to restart. Waiting
+               the grace period out above also waits out ::DEATH_ANIM_TIME,
+               which is what started it.
+               The cut is asserted rather than assumed: if story.txt ever stops
+               authoring a `defeat`, this line fails and says so, instead of the
+               two presses below quietly becoming one press and a no-op.
+               *이 시점에는 패배 컷신이 사망 화면 앞에 있고* 그것이 누름을 가져갑니다.
+               ::step_confirm은 의도적으로 `dead`보다 `cut`을 먼저 답합니다. 그려지는 것이 컷신이고
+               누름은 맨 위의 것에 속하기 때문입니다. 그래서 플레이어가 하는 순서는 말을 지우는
+               누름 하나와 재시작하는 누름 하나입니다. 위에서 유예 시간을 기다린 것이
+               ::DEATH_ANIM_TIME도 함께 기다린 것이며, 그것이 컷신을 시작시켰습니다.
+               가정하지 않고 컷을 단언합니다. story.txt가 언젠가 `defeat`를 제작하지 않게 되면 이
+               줄이 실패하며 그렇다고 말합니다. 아래의 두 누름이 조용히 한 번의 누름과 한 번의
+               무동작이 되는 대신입니다. */
+            ok(w.run.cut == STORY_DEFEAT + 1,
+               "the defeat cutscene is up once the collapse has finished");
+
             in = idle();
             in.confirm = 1;
             world_step(&w, &in, 1.6f, DT);
-            ok(w.run.restart_wanted, "a press after it asks for a restart");
+            ok(!w.run.cut, "a press clears it");
+            ok(!w.run.restart_wanted,
+               "and that press was spent on it rather than on the restart");
+
+            in = idle();
+            in.confirm = 1;
+            world_step(&w, &in, 1.6f, DT);
+            ok(w.run.restart_wanted, "the next press asks for a restart");
         }
 
         /* --- let_go, which is the one edge that undoes something ------------ */
@@ -1339,6 +1478,7 @@ int main(void) {
     }
 
     check_shake();
+    check_score();
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall frame-order checks passed\n", fails);
     return fails != 0;

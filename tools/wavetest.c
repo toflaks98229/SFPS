@@ -33,6 +33,8 @@
 #include "world.h"
 #include "enemy.h"
 #include "pickup.h"
+#include "loot.h"
+#include "txt.h"    /* txt_eq -- an altar marker is found by its kind name */
 #include "door.h"
 #include "diag.h"
 
@@ -54,6 +56,38 @@ static void oki(int cond, const char *what, int got, int want) {
 #define DT (1.0f / 60.0f)
 
 static Input idle(void) { Input in = {0}; return in; }
+
+/* How many items assets\loot.txt asks a cleared wave to throw AT THIS PLAYER.
+ *
+ * ENGLISH: A literal here -- "five" -- would go red the first time somebody
+ * retunes the purse, which is the whole reason the purse moved into a text
+ * file. So the expectation is read from the same file the game reads, and what
+ * this section actually proves is the plumbing: that the wave pays what loot.txt
+ * says, that `held` resolves against the roster rather than throwing boxes for
+ * guns the player has not found, and that nothing is silently lost between the
+ * table and the floor.
+ *
+ * 한국어: 이곳의 리터럴("다섯")은 누군가 몫을 처음 조정하는 순간 빨개지며, 몫이 텍스트
+ * 파일로 옮겨 간 이유가 바로 그것입니다. 그래서 기대값을 게임이 읽는 것과 같은 파일에서
+ * 읽습니다. 이 절이 실제로 증명하는 것은 배관입니다. 웨이브가 loot.txt가 말하는 것을
+ * 지급하는가, `held`가 찾지도 못한 총의 상자를 던지는 대신 보유 목록에 비추어 해석되는가,
+ * 그리고 표와 바닥 사이에서 조용히 사라지는 것이 없는가입니다. */
+static int reward_size(const World *w) {
+    const LootReward *r = loot_reward();
+    int n = 0, gun = 0;
+
+    for (int i = 0; i < r->n_items; i++)
+        for (int k = 0; k < r->item[i].n; k++) {
+            if (n >= LOOT_REWARD_MAX) break;
+            int kind = r->item[i].kind;
+            if (kind == LOOT_HELD) {
+                kind = loot_held_kind(&w->weapon, &gun);
+                if (kind < 0) break;
+            }
+            n++;
+        }
+    return n;
+}
 
 static void step_n(World *w, int frames) {
     Input in = idle();
@@ -369,14 +403,14 @@ int main(void) {
 
         int after = pickup_count(&w.pools);
         ok(after > before, "clearing a wave throws items down");
-        /* All of both budgets. The ammo goes round-robin over the weapons
-           actually held, so a player with one gun gets all three boxes for it
+        /* The whole purse. `held` goes round-robin over the weapons actually
+           held, so a player with one gun gets all of its boxes for that gun
            rather than one box and two nothings.
-           두 예산 모두입니다. 탄약은 실제로 보유한 무기를 돌아가며 배정되므로, 총 한 자루를 든
-           플레이어는 상자 하나와 빈자리 둘이 아니라 세 상자를 모두 그 총으로 받습니다. */
-        oki(after - before == WORLD_WAVE_MEDKITS + WORLD_WAVE_AMMO,
-            "the medkits and a box for every point of the ammo budget",
-            after - before, WORLD_WAVE_MEDKITS + WORLD_WAVE_AMMO);
+           몫 전체입니다. `held`는 실제로 보유한 무기를 돌아가며 배정되므로, 총 한 자루를 든
+           플레이어는 상자 하나와 빈자리 둘이 아니라 그 총의 상자를 모두 받습니다. */
+        oki(after - before == reward_size(&w),
+            "everything loot.txt asks a cleared wave to pay",
+            after - before, reward_size(&w));
 
         /* IN THE AIR. The player is standing exactly where they were thrown
            from, so any of these that were collectable would already be gone.
@@ -433,6 +467,85 @@ int main(void) {
         }
     }
 
+    /* --- what a kill leaves behind ---------------------------------------
+       The roll is enemytest's and loottest's; what is checked here is the half
+       that spans two modules -- that a corpse's debt is noticed by the world on
+       the frame it is incurred, resolved against the player's roster, and
+       thrown as a real item at the spot the body fell.
+       ::Enemy::drop is written directly rather than rolled for, so this passes
+       or fails on the plumbing rather than on the shipped rates: a `chance 26`
+       fixture would go red the first time somebody retunes the imp, and would
+       have needed a thousand kills to be sure of anything anyway.
+       굴림은 enemytest와 loottest의 것입니다. 이곳에서 검사하는 것은 두 모듈에 걸친
+       절반입니다. 시체의 빚이 발생한 프레임에 월드에 의해 알아채지고, 플레이어의 보유 목록에
+       비추어 해석되고, 몸이 쓰러진 자리에 실제 아이템으로 던져지는가입니다.
+       ::Enemy::drop을 굴리지 않고 직접 쓰므로, 이 검사는 배포된 확률이 아니라 배관에 따라
+       통과하거나 실패합니다. `chance 26` 픽스처는 누군가 임프를 처음 조정하는 순간 빨개지고,
+       애초에 무엇이든 확신하려면 천 번의 처치가 필요했을 것입니다. */
+    printf("\nwhat a kill leaves behind\n");
+    {
+        fixture(&w);
+        add_spawner(&w.level, "spawner_imp", 2000, 0, 3, 0, 0);
+        enemy_spawn_level(&w.pools, &w.level);
+        w.weapon.owned[WP_SHOTGUN] = 1;
+        step_alive(&w, 1);
+
+        /* Wait for one to exist, then hand it a debt and one frame. */
+        step_alive(&w, 200);
+        ok(w.pools.enemy.count > 0, "a monster is standing there");
+
+        if (w.pools.enemy.count > 0) {
+            int before = 0;
+            for (int i = 0; i < w.pools.pickup.count; i++)
+                if (w.pools.pickup.p[i].active) before++;
+
+            v3 fell = w.pools.enemy.m[0].pos;
+            w.pools.enemy.m[0].drop = PK_HEALTH;
+            step_alive(&w, 1);
+
+            int after = 0, at_body = 0;
+            for (int i = 0; i < w.pools.pickup.count; i++) {
+                const Pickup *p = &w.pools.pickup.p[i];
+                if (!p->active) continue;
+                after++;
+                float dx = p->pos.x - fell.x, dz = p->pos.z - fell.z;
+                if (p->kind == PK_HEALTH && dx*dx + dz*dz < 0.01f) at_body++;
+            }
+            oki(after == before + 1, "one item, on the frame the debt was set",
+                after - before, 1);
+            ok(at_body > 0, "and it is lying where the body fell");
+
+            /* NOT AGAIN on the next frame, which is what a corpse sweeping into
+               a fountain would look like from here.
+               다음 프레임에는 *다시* 나오지 않습니다. 시체가 분수가 되는 것은 이곳에서
+               그렇게 보입니다. */
+            step_alive(&w, 20);
+            int later = 0;
+            for (int i = 0; i < w.pools.pickup.count; i++)
+                if (w.pools.pickup.p[i].active) later++;
+            oki(later <= after, "and the corpse is not still paying out",
+                later, after);
+        }
+
+        /* `held` is resolved by the world and not thrown raw. A pickup whose
+           kind is the pseudo-kind would be an item with no sprite and no rule
+           for collecting it -- invisible in the game until somebody walks
+           through it and nothing happens.
+           `held`는 월드가 해석하며 날것으로 던져지지 않습니다. 종류가 의사 종류인 아이템은
+           스프라이트도 획득 규칙도 없는 아이템이며, 누군가 그 위를 지나가도 아무 일이
+           일어나지 않을 때까지 게임 안에서 보이지 않습니다. */
+        if (w.pools.enemy.count > 0) {
+            w.pools.enemy.m[0].drop = LOOT_HELD;
+            step_alive(&w, 1);
+
+            int raw = 0;
+            for (int i = 0; i < w.pools.pickup.count; i++)
+                if (w.pools.pickup.p[i].active &&
+                    w.pools.pickup.p[i].kind == LOOT_HELD) raw++;
+            oki(raw == 0, "`held` never reaches the floor unresolved", raw, 0);
+        }
+    }
+
     /* --- a collected slot is reused --------------------------------------
        An arena rewards every wave and the pool holds PICKUP_MAX. Without reuse
        it fills in a dozen waves and DIAG_PICKUP_CAP fires for the rest of the
@@ -484,7 +597,7 @@ int main(void) {
         world_init(&w);
         w.run.title = 0;
 
-        if (!world_load_level(&w, "spire", WORLD_ENTER_NEW)) {
+        if (!world_load_level(&w, WORLD_START_LEVEL, WORLD_ENTER_NEW)) {
             ok(0, "spire loads");
         } else {
             ok(1, "spire loads");
@@ -500,6 +613,7 @@ int main(void) {
 
             int spawners = enemy_spawner_count(&w.pools);
             ok(spawners > 0, "it is an arena: at least one spawner");
+
 
             /* At least one mouth in the air. Asked of the SPAWNER rather than
                of a coordinate, so moving it in the editor changes nothing here
@@ -537,6 +651,135 @@ int main(void) {
             }
             ok(airborne > 0, "and something is off the ground");
         }
+    }
+
+    /* --- every shipped arena has somewhere to be paid --------------------
+       `at altar` falls back to the player's feet in a map that placed no
+       marker, which is what makes it safe to leave switched on -- and is also
+       exactly how this feature would ship doing nothing at all. THE FALLBACK IS
+       INVISIBLE: the reward still arrives, still bounces, still gets collected,
+       and the only thing missing is the shrine nobody knew to look for. Nothing
+       in the game says which of the two happened.
+
+       So the question is asked of the campaign rather than of one level. A
+       level is an arena if it has spawners -- the same test ::step_wave makes --
+       so an arena added later is covered by this without being added to a list,
+       and an ordinary level is skipped without being excluded from one.
+
+       `at altar`는 표식을 배치하지 않은 맵에서 플레이어의 발치로 되돌아가며, 그것이 이 기능을
+       켜 둔 채로 두어도 안전한 이유이자, 이 기능이 아무 일도 하지 않는 채로 출하될 수 있는
+       경위이기도 합니다. *되돌아감은 보이지 않습니다.* 보상은 여전히 도착하고, 튀고,
+       획득되며, 빠진 것은 아무도 찾을 줄 몰랐던 제단뿐입니다. 게임 안의 무엇도 둘 중 어느
+       쪽이 일어났는지 말해 주지 않습니다.
+
+       그래서 질문을 레벨 하나가 아니라 캠페인에 던집니다. 스포너가 있으면 아레나이며,
+       ::step_wave가 하는 것과 같은 판정입니다. 나중에 추가된 아레나는 목록에 넣지 않아도
+       이곳에 포함되고, 평범한 레벨은 목록에서 빼지 않아도 건너뛰어집니다. */
+    if (loot_reward()->at == LOOT_AT_ALTAR) {
+        printf("\nevery shipped arena has somewhere to be paid\n");
+
+        /* glasstower and lqdm13 were missing, and each for its own reason worth
+           recording. glasstower is the boss arena -- it shipped with spawners
+           and an altar and was never added here, so the room the story mode
+           actually drops the player into was the one arena this sweep did not
+           look at. lqdm13 is the imported one, and its shrine was not placed by
+           a person at all: import-librequake.py puts it at a deathmatch start,
+           on the argument that the map's author verified a player can stand
+           there. That argument is worth exactly as much as a check, and this is
+           the check -- on the ground, clear of the start, and not in the lava.
+           glasstower와 lqdm13이 빠져 있었고, 각각 기록할 만한 자기 이유가 있습니다.
+           glasstower는 보스 아레나입니다. 스포너와 제단을 갖고 출하되었는데 이곳에 추가된 적이
+           없었으므로, 스토리 모드가 플레이어를 실제로 떨어뜨리는 그 방이 이 훑기가 보지 않는
+           유일한 아레나였습니다. lqdm13은 가져온 것이며, 그 제단은 애초에 사람이 놓지
+           않았습니다. import-librequake.py가 데스매치 시작점에 놓으며, 그 근거는 맵 제작자가
+           그곳에 플레이어가 설 수 있음을 확인했다는 것입니다. 그 근거의 값어치는 정확히 검사
+           하나만큼이고, 이것이 그 검사입니다. 바닥 위에 있고, 시작 지점에서 떨어져 있고,
+           용암 속이 아닐 것. */
+        static const char *const LEVELS[] = { "arena", "vault", "dm03",
+                                              "lqdm1" };
+        int arenas = 0;
+
+        /* ONE ::world_init FOR THE WHOLE SWEEP, and it matters. A brush level
+           claims one of ::LVL_BRUSH_SLOTS and a Level KEEPS its claim across
+           loads, so five levels through one World cost one slot -- while
+           re-initialising between them abandons a claim each time and the third
+           .map in the list simply fails to load. Which it did, silently: the
+           sweep skipped spire and still passed, because a level that does not
+           load is not an arena and an arena nobody asked about cannot fail.
+           전체 훑기에 ::world_init 하나이며, 그것이 중요합니다. 브러시 레벨은
+           ::LVL_BRUSH_SLOTS 중 하나를 주장하고 Level은 로드를 거쳐도 자기 주장을 *유지하므로*,
+           World 하나로 도는 레벨 다섯은 슬롯 하나가 듭니다. 그 사이에 다시 초기화하면 매번
+           주장을 버리게 되고 목록의 세 번째 .map은 그냥 로드에 실패합니다. 실제로 그랬고,
+           조용했습니다. 훑기가 spire를 건너뛰고도 통과했는데, 로드되지 않은 레벨은 아레나가
+           아니고 아무도 묻지 않은 아레나는 실패할 수 없기 때문입니다. */
+        world_init(&w);
+        w.run.title = 0;
+
+        for (int n = 0; n < (int)(sizeof LEVELS / sizeof LEVELS[0]); n++) {
+            if (!world_load_level(&w, LEVELS[n], WORLD_ENTER_NEW)) {
+                ok(0, "a level in the campaign loads");
+                continue;
+            }
+            if (!enemy_spawner_count(&w.pools)) continue;   /* not an arena */
+            arenas++;
+
+            int altars = 0, grounded = 0, clear_of_start = 0, safe = 0;
+            for (int i = 0; i < w.level.n_ents; i++) {
+                const Entity *e = &w.level.ents[i];
+                if (!txt_eq(e->kind, "altar")) continue;
+                altars++;
+
+                float x = e->x * 0.01f, z = e->z * 0.01f, af, ac;
+                if (!level_ground(&w.level, x, z, e->y * 0.01f, 1e9f, &af, &ac))
+                    continue;
+                grounded++;
+
+                /* Clear of the start, or the shrine is a lamp shining on the
+                   spot the player was already standing on and the reward is
+                   collected without a decision -- which is the arrangement
+                   `at altar` exists to replace. Four collection radii, which is
+                   a distance rather than a coordinate: moving the altar in the
+                   editor changes nothing here as long as it stays somewhere the
+                   player has to go.
+                   출발 지점에서 떨어져 있어야 합니다. 그러지 않으면 제단은 플레이어가 이미
+                   서 있던 자리를 비추는 등이고 보상은 결정 없이 획득되는데, 그것이야말로
+                   `at altar`가 대체하려고 존재하는 배치입니다. 획득 반경 네 배이며, 좌표가
+                   아니라 거리입니다. 에디터에서 제단을 옮겨도, 플레이어가 가야 하는 자리로
+                   남아 있는 한 이곳은 달라지지 않습니다. */
+                float dx = x - w.player.pos.x, dz = z - w.player.pos.z;
+                if (dx*dx + dz*dz > PICKUP_RADIUS * PICKUP_RADIUS * 16.0f)
+                    clear_of_start++;
+
+                /* NOT STANDING IN A HAZARD, which is the mistake this level
+                   actually made: spire's middle is a sunken square and the
+                   obvious centrepiece to build a shrine on, and it is full of
+                   lava. Every check above passed -- the altar was real, it was
+                   on floor, it was a walk away -- and the feature worked
+                   perfectly while paying the player into a fire.
+                   The floor is what is asked about rather than the marker,
+                   because that is where the items come to rest: an altar
+                   hovering a metre over a pool still drops its purse in.
+                   *위험 지형에 서 있지 않아야 합니다.* 이 레벨이 실제로 저지른 실수입니다.
+                   spire의 한가운데는 움푹 팬 사각형이며 제단을 세우기에 뻔한 자리이고,
+                   용암으로 가득 차 있습니다. 위의 모든 검사는 통과했습니다. 제단은 실재했고,
+                   바닥에 있었고, 걸어갈 거리였습니다. 그리고 기능은 플레이어를 불 속으로
+                   지급하면서 완벽하게 동작했습니다.
+                   표식이 아니라 *바닥*에 대해 묻는 이유는 아이템이 내려앉는 곳이 그곳이기
+                   때문입니다. 웅덩이 1미터 위에 떠 있는 제단도 자기 몫은 그 안에
+                   떨어뜨립니다. */
+                if (!level_hazard_at(&w.level, x, af, z)) safe++;
+            }
+
+            printf("  %s\n", LEVELS[n]);
+            ok(altars > 0, "    has an altar for the reward to land on");
+            oki(grounded == altars, "    and every one of them stands on floor",
+                grounded, altars);
+            ok(clear_of_start > 0, "    and at least one is somewhere to walk to");
+            oki(safe == grounded, "    and none of them stands in a hazard",
+                safe, grounded);
+        }
+
+        ok(arenas > 0, "the campaign still contains an arena to ask about");
     }
 
     printf("\n%s\n", fails ? "  FAILED" : "  passed");

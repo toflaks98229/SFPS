@@ -884,6 +884,169 @@ static const char *FS_PROC =
 "  return mix(hot, rock, crust);\n"
 "}\n"
 
+/* --- A glazed facade, lit from inside ---------------------------------------
+ *
+ * ENGLISH
+ * -------
+ * A curtain wall: a grid of panes held in metal members, where SOME of the
+ * rooms behind the glass have their lights on and the rest do not. The lit
+ * ones are emissive; the dark ones are ordinary dark glass.
+ *
+ * The random lit/unlit draw IS the effect. A facade whose windows are all the
+ * same reads as a texture no matter how well the glass itself is drawn,
+ * because a real building's windows differ from each other and nothing else
+ * about a facade does. Everything below is detail on top of that one idea.
+ *
+ * EMISSION HERE MEANS RETURNING ABOVE 1.0, the same way pLava does and for the
+ * same reason: there is no separate emissive term in this shader. The world
+ * pass computes c *= lum*tint with lum banded into five levels whose floor is
+ * AMBIENT rounded to 0.25, so a lit pane has to come back bright enough to
+ * survive being quartered. GLOW is set from that: base*GLOW at its dimmest
+ * variation still lands above the post pass's BLOOM_KNEE of 0.25 after the
+ * multiply, so a lit window blooms in a dark room -- which is the point -- and
+ * clamps to a warm white in a bright one.
+ *
+ * The honest cost of doing it this way: a lit pane is still MULTIPLIED by the
+ * room's light, so the same window is four times brighter under a bright band
+ * than under a dark one. That is backwards for something that emits. It is
+ * invisible on a facade, where every pane shares one wall's lighting and only
+ * the differences between panes are read, and it is why this is a facade
+ * material rather than a general "emissive" one.
+ *
+ * `base` IS THE LIT ROOM'S COLOUR, not the glass and not the frame -- the same
+ * convention pLava uses for its cracks. The dark glass and the members supply
+ * their own colours, because a recipe that could recolour those would let a
+ * facade be authored that no light explains.
+ *
+ * The members are measured in UV UNITS rather than in cell fractions, unlike
+ * pBrick's mortar. A cell here is half again as tall as it is wide, so
+ * measuring in fractions would make the transoms 1.5x thicker than the
+ * mullions -- and a window frame whose horizontal and vertical members differ
+ * in thickness is the one part of this that the eye checks.
+ *
+ * Give this NO `bump`. It is emissive for the same reason pgrid is: a lit pane
+ * is bright because light comes out of it, not because it faces a light, and
+ * differencing its luminance would tilt the normal away from the glow.
+ *
+ * 한국어
+ * ------
+ * 유리 외벽입니다. 금속 창살에 끼워진 창유리 격자이며, 유리 뒤의 방 중 *일부*는 불이 켜져
+ * 있고 나머지는 꺼져 있습니다. 켜진 쪽은 발광하고, 꺼진 쪽은 평범한 어두운 유리입니다.
+ *
+ * 켜짐과 꺼짐을 무작위로 뽑는 것이 효과의 *전부*입니다. 창이 모두 같은 외벽은 유리를 아무리
+ * 잘 그려도 텍스처로 읽힙니다. 실제 건물의 창은 서로 다르고, 외벽의 다른 무엇도 그렇지 않기
+ * 때문입니다. 아래의 모든 것은 그 하나의 발상 위에 얹은 세부입니다.
+ *
+ * *이곳의 발광은 1.0을 넘겨 반환하는 것*을 뜻하며, pLava와 같은 방식이고 같은 이유입니다.
+ * 이 셰이더에는 별도의 발광 항이 없습니다. 월드 패스는 c *= lum*tint를 계산하고 lum은 다섯
+ * 단계로 나뉘며 그 하한은 AMBIENT를 반올림한 0.25입니다. 따라서 불 켜진 창유리는 4분의 1로
+ * 줄어들고도 살아남을 만큼 밝게 돌아와야 합니다. GLOW는 그 기준으로 정했습니다. 가장 어두운
+ * 변화에서도 base*GLOW는 곱셈 이후 포스트 패스의 BLOOM_KNEE 0.25를 넘으므로, 어두운 방에서는
+ * 불 켜진 창에 블룸이 생기고(이것이 핵심입니다) 밝은 방에서는 따뜻한 흰색으로 포화합니다.
+ *
+ * 이 방식의 정직한 대가: 불 켜진 창유리도 여전히 방의 빛에 *곱해지므로*, 같은 창이 밝은 단계
+ * 아래에서 어두운 단계보다 네 배 밝습니다. 발광하는 것에게는 거꾸로 된 동작입니다. 모든 창이 한
+ * 벽의 조명을 공유하고 창들 *사이의 차이*만 읽히는 외벽에서는 보이지 않으며, 이것이 이 재질이
+ * 범용 "발광" 재질이 아니라 외벽 재질인 이유입니다.
+ *
+ * *`base`는 불 켜진 방의 색*이며 유리도 창틀도 아닙니다. pLava가 균열에 쓰는 것과 같은
+ * 규약입니다. 어두운 유리와 창살은 자기 색을 스스로 정하는데, 그것들까지 다시 칠할 수 있는
+ * 레시피는 어떤 빛으로도 설명되지 않는 외벽을 만들 수 있게 하기 때문입니다.
+ *
+ * 창살은 pBrick의 줄눈과 달리 셀 비율이 아니라 *UV 단위*로 잽니다. 이곳의 셀은 너비의 1.5배
+ * 높이이므로 비율로 재면 가로재가 세로재보다 1.5배 두꺼워집니다. 그리고 가로재와 세로재의
+ * 두께가 다른 창틀은 이 재질에서 눈이 실제로 확인하는 유일한 부분입니다.
+ *
+ * 여기에는 `bump`를 주지 *마십시오*. pgrid와 같은 이유로 발광합니다. 불 켜진 창유리가 밝은
+ * 것은 빛을 향하고 있어서가 아니라 빛이 나오기 때문이며, 그 휘도를 차분하면 법선이 발광에서
+ * 멀어지게 기울어집니다. */
+"vec3 pWindow(vec2 uv, vec3 base){\n"
+/* A glazing module, taller than it is wide. 1.5 lands on 48 texels at
+   RD_PROC_TEXELS, so a row boundary falls on a texel edge rather than inside
+   one -- a cell height that does not divide evenly leaves every other row of
+   windows a pixel taller than its neighbour.
+   유리 모듈이며 너비보다 높습니다. 1.5는 RD_PROC_TEXELS에서 48텍셀에 떨어지므로 행 경계가
+   텍셀 안이 아니라 텍셀 가장자리에 놓입니다. 나누어떨어지지 않는 셀 높이는 창의 매 다른
+   행을 이웃보다 한 픽셀씩 높게 남깁니다. */
+"  const vec2  CELL   = vec2(1.0, 1.5);\n"
+/* Two texels of metal each side of a pane, so neighbouring windows are parted
+   by four. An exact texel multiple as well, for the reason above.
+   창유리 양쪽에 두 텍셀씩의 금속이므로 이웃한 창은 네 텍셀로 나뉩니다. 위와 같은 이유로 이
+   값도 텍셀의 정확한 배수입니다. */
+"  const float MEMBER = 0.0625;\n"
+"  const float SOFT   = 0.03125;\n"
+/* Just under half the building is awake. Past half it reads as an office at
+   six o'clock rather than a tower at midnight: the dark panes become the
+   exception, and the eye starts reading THEM as the pattern.
+   건물의 절반에 조금 못 미치는 만큼이 깨어 있습니다. 절반을 넘으면 자정의 탑이 아니라 여섯
+   시의 사무실로 읽힙니다. 어두운 창이 예외가 되고, 눈이 *그쪽*을 패턴으로 읽기 시작합니다. */
+"  const float AWAKE  = 0.45;\n"
+"  const float GLOW   = 2.4;\n"
+"  vec2 g = uv / CELL;\n"
+"  vec2 id = floor(g), f = fract(g);\n"
+/* Distance to the nearest cell edge, carried back into UV units. */
+"  vec2 e = (0.5 - abs(f - 0.5)) * CELL;\n"
+"  float pane = smoothstep(MEMBER, MEMBER + SOFT, min(e.x, e.y));\n"
+/* One hash per window, offset off the origin: h21 is sin-based and h21(0,0) is
+   exactly 0, which would make the window at the UV origin reliably dark.
+   창마다 해시 하나이며 원점에서 비켜 둡니다. h21은 sin 기반이라 h21(0,0)이 정확히 0이고,
+   그러면 UV 원점의 창이 언제나 어둡게 나옵니다. */
+"  float r = h21(id + 0.5);\n"
+/* --- the dark glass: a reflection, not a colour --------------------------
+   The unlit panes take a slow fbm sampled across the WHOLE facade rather than
+   per cell, so the reflection runs continuously over the members the way a
+   reflection in real glass does. Per-cell noise would give every pane its own
+   independent shade and read as dirty glass instead.
+   어두운 유리는 색이 아니라 반사입니다. 꺼진 창은 셀 단위가 아니라 외벽 *전체*에 걸친 느린
+   fbm을 취하므로, 실제 유리의 반사처럼 창살을 가로질러 이어집니다. 셀 단위 노이즈는 창마다
+   독립된 명암을 주어 더러운 유리로 읽힙니다. */
+"  vec3 sky  = vec3(0.13,0.16,0.23) * (0.35 + 1.30*fbm(uv*0.30));\n"
+/* Brighter toward the top of each pane: on a wall planar_uv puts world y into
+   v, so f.y runs upward, and glass catches more sky the higher up you look.
+   각 창유리의 위쪽이 더 밝습니다. 벽에서 planar_uv는 월드 y를 v에 넣으므로 f.y가 위로
+   가고, 유리는 위를 볼수록 하늘을 더 많이 받습니다. */
+"  vec3 dark = sky * (0.70 + 0.60*f.y);\n"
+/* --- the lit rooms -------------------------------------------------------
+   Three more draws off the one hash, spread by primes. Calling h21 again would
+   be another sin() each time; a lit window only needs its three choices to be
+   uncorrelated WITH EACH OTHER across the lit range, which multiplying by a
+   prime and taking the fraction already achieves.
+   하나의 해시에서 소수를 곱해 세 개의 뽑기를 더 얻습니다. h21을 다시 부르면 그때마다 sin()이
+   한 번 더입니다. 불 켜진 창은 세 선택이 켜진 구간에서 *서로* 무관하기만 하면 되며, 소수를
+   곱해 소수부를 취하는 것으로 이미 충분합니다. */
+"  vec3 tint = mix(vec3(1.00,0.82,0.52), vec3(0.68,0.86,1.00), step(0.80, fract(r*17.0)));\n"
+"  vec3 room = base * GLOW * tint * (0.70 + 0.55*fract(r*29.0));\n"
+/* Light falls off toward the floor of the room, as a GRADIENT rather than the
+   hard band this first was. The blind below already cuts a pane with one hard
+   horizontal line, and a second one at a fixed height turned every window into
+   a little landscape with a horizon in it -- two hard lines per pane is one
+   more than a window has.
+   방의 바닥 쪽으로 갈수록 빛이 약해지며, 처음의 단단한 밴드가 아니라 *그러데이션*입니다.
+   아래의 블라인드가 이미 창유리를 가로선 하나로 자르는데, 고정된 높이에 두 번째 선을 더하니
+   창마다 지평선이 있는 작은 풍경이 되었습니다. 창유리당 두 개의 뚜렷한 가로선은 창이 가진
+   것보다 하나 많습니다. */
+"  room *= 0.78 + 0.36*f.y;\n"
+/* A blind, pulled down from the top over some of the lit windows. The min
+   leaves most of them uncovered: the expression reaches past 1.0 for the
+   larger part of the draw, and a cut at or above 1.0 covers nothing.
+   불 켜진 창 일부에 위에서 내려온 블라인드입니다. min이 대부분을 덮이지 않게 둡니다. 이 식은
+   뽑기의 큰 쪽에서 1.0을 넘어가고, 1.0 이상의 경계는 아무것도 덮지 않습니다. */
+"  float cut = min(1.0, 0.62 + 0.62*fract(r*53.0));\n"
+/* The blind is LIT FROM BEHIND rather than dark: a drawn blind with a lamp on
+   the far side of it glows, and cutting to the dark-glass colour instead would
+   read as the top of the window being a different window.
+   블라인드는 어둡지 않고 *뒤에서 빛을 받습니다*. 내린 블라인드 너머에 등이 켜져 있으면
+   블라인드가 빛나며, 대신 어두운 유리 색으로 자르면 창의 윗부분이 다른 창인 것처럼 읽힙니다. */
+"  vec3 inner = mix(room*0.26, room, step(f.y, cut));\n"
+"  vec3 glass = mix(dark, inner, step(1.0 - AWAKE, r));\n"
+/* The members stay dark and NEVER emit, which is what gives a lit pane an edge
+   to be bright against.
+   창살은 어둡게 남고 결코 발광하지 않으며, 그것이 불 켜진 창유리가 밝게 대비될 가장자리를
+   만듭니다. */
+"  vec3 member = vec3(0.15,0.16,0.18) * (0.88 + 0.24*n2(uv*24.0));\n"
+"  return mix(member, glass, pane);\n"
+"}\n"
+
 /* --- Tangent space, derived rather than stored ------------------------------
  *
  * ENGLISH
@@ -1006,7 +1169,8 @@ static const char *FS_PROC =
 "  if(id==6) return pMarble(uv, base);\n"
 "  if(id==7) return pRust(uv, base);\n"
 "  if(id==8) return pGrid(uv, base);\n"
-"  return pLava(uv, base);\n"
+"  if(id==9) return pLava(uv, base);\n"
+"  return pWindow(uv, base);\n"
 "}\n"
 
 /* --- The normal map itself, computed rather than sampled --------------------
@@ -1210,6 +1374,47 @@ static const char *FS_SRC =
 
 /* Split here so FS_PROC can be spliced in between without any string
    concatenation at runtime -- glShaderSource takes an array of pieces. */
+/* HOW FAR YOU CAN SEE, and it is this rather than the far plane.
+ *
+ * scene.c projects to a far plane of 200m, which sounds like the sight range
+ * and is not: the fog below reaches FULL at FOG_FAR, so everything past it is
+ * the fog colour whatever the projection allows. The arena is 82m across, so
+ * the far plane has never been what a player runs into.
+ *
+ * DOUBLED FROM 30. At 30 a room 82m across was mostly fog, and the fog is
+ * mixed toward a FIXED colour -- vec3(0.05,0.06,0.09), luminance 0.067 -- which
+ * is brighter than a dark wall under ambient alone (albedo 0.126 x AMBIENT 0.32
+ * = 0.040). So distance was LIFTING the far half of the room toward a flat
+ * navy instead of dropping it into shadow, and the banded light it was washing
+ * out is the whole mechanism by which a lamp reads as a pool. 60 puts the
+ * arena's far wall at f=0.7 of the ramp rather than past its end.
+ *
+ * ONE CONSTANT, TWO USERS. The world branch and the sprite branch both fog,
+ * and they have to agree: a monster fogged on a different curve from the wall
+ * behind it separates from the wall as it walks away, which is exactly the
+ * failure RD_SPRITE's own note describes from the other direction.
+ *
+ * *얼마나 멀리 보이는가*이며, 원거리 평면이 아니라 이것입니다.
+ *
+ * scene.c는 200m 원거리 평면으로 투영하며, 그것은 시야 거리처럼 들리지만 아닙니다. 아래의
+ * 안개가 FOG_FAR에서 *가득* 차므로, 그 너머는 투영이 무엇을 허락하든 안개 색입니다. 아레나는
+ * 82m 폭이므로 원거리 평면은 플레이어가 부딪히는 것이었던 적이 없습니다.
+ *
+ * *30에서 두 배로.* 30에서는 82m짜리 방의 대부분이 안개였고, 안개는 *고정된* 색
+ * vec3(0.05,0.06,0.09)로 섞입니다. 그 휘도 0.067은 주변광만 받는 어두운 벽(알베도 0.126 x
+ * AMBIENT 0.32 = 0.040)보다 *밝습니다.* 그래서 거리는 방의 먼 절반을 그림자로 떨어뜨리는
+ * 대신 평평한 남색으로 *들어 올리고* 있었고, 그것이 씻어 내던 계단화된 빛이야말로 등이
+ * 웅덩이로 읽히게 하는 기법 전부입니다.
+ *
+ * *상수 하나, 사용처 둘.* 월드 갈래와 스프라이트 갈래가 모두 안개를 칠하며 둘은 일치해야
+ * 합니다. 뒤의 벽과 다른 곡선으로 안개가 낀 몬스터는 멀어질수록 벽에서 떨어져 나옵니다. */
+static const char *FS_FOG =
+"const float FOG_FAR = 60.0;\n"
+"vec3 fogged(vec3 c, vec3 p, vec3 eye){\n"
+"  float f=clamp(length(p-eye)/FOG_FAR,0.0,1.0);\n"
+"  return mix(c, vec3(0.05,0.06,0.09), f*f);\n"
+"}\n";
+
 static const char *FS_MAIN =
 "void main(){\n"
 "  if(uMode==2){ oCol=uColor; return; }\n"
@@ -1309,8 +1514,7 @@ static const char *FS_MAIN =
 "    }\n"
 "    c+=sp.rgb*add*SPRITE_LIGHT;\n"
 "    c=mix(c, vec3(1.0,0.92,0.92), uColor.a);\n"
-"    float fg=clamp(length(vPos-uEye)/30.0,0.0,1.0);\n"
-"    oCol=vec4(mix(c, vec3(0.05,0.06,0.09), fg*fg), 1.0);\n"
+"    oCol=vec4(fogged(c, vPos, uEye), 1.0);\n"
 "    return;\n"
 "  }\n"
 /* Flat sprite: the same hard cutout, with neither of the two things RD_SPRITE
@@ -1363,18 +1567,33 @@ static const char *FS_MAIN =
  * A fixed key direction, plus whatever point lights the level declared, then
  * QUANTISED into bands before anything else touches it.
  *
- * The banding is the point, not an artefact. The resolve pass dithers to four
- * levels, so the tone budget is tiny: continuous shading over 0.32..1.0 lands
- * in about two and a half of those steps, and a point light added on top just
- * shifts pixels between the same two bands. The result reads as noise gaining
+ * The banding is the point, not an artefact. The resolve pass quantises to a
+ * handful of levels, so the tone budget is small: continuous shading over
+ * 0.32..1.0 lands in a few of those steps, and a point light added on top just
+ * shifts pixels between neighbouring ones. The result reads as noise gaining
  * density rather than as light falling on a surface.
+ *
+ * THIS PARAGRAPH SAID "FOUR" AND POST_LEVELS_DEFAULT HAS BEEN 12. The count
+ * moved when post.c gained its gamma-space quantiser and this reasoning did
+ * not follow it, so anyone re-deriving the tone budget from here got a number
+ * three times too pessimistic -- which is exactly what happened, twice, during
+ * an investigation into the lighting. The argument survives the correction
+ * whole: it never depended on the count being four, only on it being small.
+ * Written without a number now, because the number lives in post.h and a
+ * second copy of it here is the thing that just went stale.
+ * *이 문단은 "넷"이라고 적고 있었고 POST_LEVELS_DEFAULT는 12였습니다.* post.c가 감마 공간
+ * 양자화기를 얻으면서 그 수가 움직였는데 이 추론은 따라가지 않았고, 그래서 이곳에서 톤
+ * 예산을 다시 유도한 사람은 3배 비관적인 수를 얻었습니다. 조명 조사 도중 실제로 두 번
+ * 그런 일이 있었습니다. 논거 자체는 그대로입니다. 그 수가 넷인 것에 기댄 적이 없고 작다는
+ * 것에만 기댔습니다. 이제 수 없이 적습니다. 그 수는 post.h에 있고, 이곳의 두 번째 사본이야
+ * 말로 방금 낡아 버린 그것이기 때문입니다.
  *
  * Rounding the light to a fixed number of steps FIRST makes each step a
  * region with an edge, and an edge is what the eye reads as a layer. It is the
  * same reason the dither quantises in gamma space: with few levels, deciding
  * where the boundaries go matters more than resolution does.
  *
- * LIGHT_BANDS is deliberately not equal to the dither's four. The dither
+ * LIGHT_BANDS is deliberately not equal to the dither's count. The dither
  * quantises the FINAL colour, this quantises the illumination before the
  * material is applied, so a dark material and a bright one in the same band
  * still differ -- which is what keeps the level readable rather than posterised
@@ -1639,8 +1858,7 @@ static const char *FS_MAIN =
 "    lum=floor(lum*(LIGHT_BANDS-1.0)+0.5)/(LIGHT_BANDS-1.0);\n"
 
 "    c*=lum*tint;\n"
-"    float f=clamp(length(vPos-uEye)/30.0,0.0,1.0);\n"
-"    oCol=vec4(mix(c,vec3(0.05,0.06,0.09),f*f),1.0);\n"
+"    oCol=vec4(fogged(c, vPos, uEye),1.0);\n"
 "  }\n"
 "}\n";
 
@@ -1678,9 +1896,15 @@ static GLuint compile(GLenum type, const char **src, int n) {
 }
 
 void rd_init(void) {
-    const char *fs_parts[3] = {FS_SRC, FS_PROC, FS_MAIN};
+    /* FS_FOG before FS_MAIN because main() calls fogged(): GLSL needs the
+       definition first, and splicing it as its own part keeps the one
+       constant out of both call sites.
+       main()이 fogged()를 부르므로 FS_FOG가 FS_MAIN보다 앞입니다. GLSL은 정의가
+       먼저여야 하며, 별도의 조각으로 이어 붙이면 그 상수 하나가 두 호출 지점
+       어디에도 적히지 않습니다. */
+    const char *fs_parts[4] = {FS_SRC, FS_PROC, FS_FOG, FS_MAIN};
     GLuint vs = compile(GL_VERTEX_SHADER, &VS_SRC, 1);
-    GLuint fs = compile(GL_FRAGMENT_SHADER, fs_parts, 3);
+    GLuint fs = compile(GL_FRAGMENT_SHADER, fs_parts, 4);
     g_prog = glCreateProgram();
     glAttachShader(g_prog, vs);
     glAttachShader(g_prog, fs);

@@ -1123,6 +1123,84 @@ static void brush_start_of(Level *out, const BrushMap *bm) {
  * ::Light::power는 기준값 100으로 둡니다. Quake에는 그것을 가져올 두 번째 밝기 숫자가 없고,
  * 에디터가 제공하지 않는 키를 만들어 내는 것은 아무도 닿을 수 없는 조절 장치입니다.
  */
+/* The sun and the sky the worldspawn declares, if it declares any.
+ *
+ * ENGLISH
+ * -------
+ * ericw-tools lights an outdoor Quake level with `_sunlight` (a directional
+ * sun), `_sun_mangle` (which way it shines) and `_sunlight2` (a dome of sky
+ * light). None of the three is a point light, so ::brush_lights_of never saw
+ * them and an imported outdoor map arrived with only its accent lamps -- which
+ * on `lqdm1` is 0.5% of the light the author placed.
+ *
+ * MANGLE IS YAW, PITCH, ROLL, IN DEGREES, and it names the direction the light
+ * TRAVELS: ericw's default is "0 -90 0", straight down. ::Level::sun wants the
+ * direction the sun is IN, so this negates once here rather than at every
+ * vertex of every bake.
+ *
+ * Roll is read and discarded. A directional light has no roll -- it is in the
+ * key because mangle is a general orientation triple -- and silently ignoring
+ * the third number is better than pretending the parse used it.
+ *
+ * 한국어
+ * ------
+ * ericw-tools는 야외 Quake 레벨을 `_sunlight`(방향성 태양), `_sun_mangle`(비추는 방향),
+ * `_sunlight2`(하늘 돔 조명)로 조명합니다. 셋 다 점광원이 아니므로 ::brush_lights_of는 그것들을
+ * 본 적이 없고, 가져온 야외 맵은 장식용 램프만 지닌 채 도착했습니다. `lqdm1`에서 그것은 제작자가
+ * 배치한 빛의 0.5%입니다.
+ *
+ * *mangle은 도 단위의 yaw, pitch, roll이며* 빛이 *진행하는* 방향을 가리킵니다. ericw의 기본값은
+ * "0 -90 0", 곧 수직 아래입니다. ::Level::sun은 태양이 *있는* 방향을 원하므로, 모든 베이크의
+ * 모든 정점에서가 아니라 이곳에서 한 번 부호를 뒤집습니다.
+ *
+ * roll은 읽고 버립니다. 방향성 광원에는 roll이 없습니다. mangle이 일반적인 방향 삼중항이라
+ * 키에 들어 있을 뿐이며, 세 번째 수를 조용히 무시하는 것이 그것을 쓴 척하는 것보다 낫습니다. */
+static void brush_sun_of(Level *out, const BrushMap *bm) {
+    out->sun[0] = out->sun[1] = out->sun[2] = 0.0f;
+    out->sun_power = 0;
+    out->sky_power = 0;
+
+    for (int i = 0; i < bm->n_ents; i++) {
+        const BrushEnt *e = &bm->ents[i];
+        const char *cn = brush_ent_value(e, "classname");
+        if (!cn || !txt_eq(cn, "worldspawn")) continue;
+
+        float sun = brush_ent_num(e, "_sunlight",  0.0f);
+        float sky = brush_ent_num(e, "_sunlight2", 0.0f);
+        if (sun <= 0.0f && sky <= 0.0f) return;      /* an indoor level */
+
+        out->sun_power = (short)clampf(sun, 0.0f, 32000.0f);
+        out->sky_power = (short)clampf(sky, 0.0f, 32000.0f);
+
+        /* Straight down when the map declares a sun and no angle for it,
+           which is ericw's own default and the sensible one: a level that
+           says "there is a sun" and nothing else means overhead.
+           맵이 태양은 선언하고 각도는 선언하지 않으면 수직 아래입니다. ericw 자신의
+           기본값이며 합리적인 값입니다. "태양이 있다"고만 말하는 레벨은 머리 위를
+           뜻합니다. */
+        float m[3] = { 0.0f, -90.0f, 0.0f };
+        brush_ent_triple(e, "_sun_mangle", m);
+
+        float yaw = m[0] * 0.01745329f, pitch = m[1] * 0.01745329f;
+        float cp = cosf(pitch);
+        /* Quake's axes, then this engine's: ::map_dir is (x, z, -y) and the
+           same rotation has to happen to a direction as to a point.
+           Quake의 축에서 이 엔진의 축으로 옮깁니다. 방향에도 점과 같은 회전이 필요합니다. */
+        float qx = cosf(yaw) * cp, qy = sinf(yaw) * cp, qz = sinf(pitch);
+        float ex = qx, ey = qz, ez = -qy;
+
+        /* Negated: the file says where the light goes, the bake asks where it
+           comes from.
+           부호를 뒤집습니다. 파일은 빛이 가는 곳을 말하고, 베이크는 오는 곳을 묻습니다. */
+        float len = sqrtf(ex * ex + ey * ey + ez * ez);
+        if (len < 1e-6f) { out->sun_power = 0; return; }
+        out->sun[0] = -ex / len;
+        out->sun[1] = -ey / len;
+        out->sun[2] = -ez / len;
+        return;
+    }
+}
+
 static void brush_lights_of(Level *out, const BrushMap *bm) {
     for (int i = 0; i < bm->n_ents; i++) {
         const BrushEnt *e = &bm->ents[i];
@@ -1482,6 +1560,49 @@ static void brush_ents_of(Level *out, const BrushMap *bm) {
     static const struct { const char *cn; const char *kind; } ALIAS[] = {
         { "info_exit", "exit" },
         { "info_push", "push" },
+        /* Where a cleared wave pays, when loot.txt says `at altar`. An alias
+           and not a third prefix, for the reason above: there is one idea of
+           "the shrine this room pays at" and there always will be. Nothing
+           spawns from it -- pickup.c's kind lookup does not know the name and
+           will not -- so a map that places one and a loot.txt that never asks
+           for it cost each other nothing.
+           loot.txt가 `at altar`라고 말할 때 정리된 웨이브가 지급되는 자리입니다. 위의
+           이유대로 세 번째 접두사가 아니라 별칭입니다. "이 방이 지급하는 제단"이라는
+           개념은 하나이고 앞으로도 그럴 것입니다. 이것에서 생성되는 것은 없습니다.
+           pickup.c의 종류 조회는 이 이름을 모르고 앞으로도 모를 것이므로, 이것을 배치한
+           맵과 그것을 결코 요청하지 않는 loot.txt는 서로에게 아무 비용도 지우지 않습니다. */
+        { "info_altar", "altar" },
+
+        /* Where a ward MAY stand, which is a kind of statement no entity in
+           this game had made before: every other marker says a thing IS here.
+           A boss fight raises a random few of these each cycle and none of them
+           at any other time, so the level places more than it will ever use.
+           ALIASES AND NOT A `monster_` PREFIX, deliberately. The prefix
+           resolves through ::mon_type_for into ::enemy_spawn_level, which
+           creates the monster at load -- and a ward standing in a room with no
+           boss makes every boss that later arrives invulnerable from its first
+           frame. The name is the enforcement: there is no classname a map can
+           write that puts a live ward in a level.
+           Two rows rather than one with a key, because the two are what the
+           author is choosing BETWEEN when they place one -- an air marker sends
+           the things that fight at range, a ground marker the things that
+           close. A single class with a spawnflag would put that choice one
+           dialog deeper than the decision deserves.
+           결계핵이 설 수 *있는* 자리이며, 이 게임의 어떤 엔티티도 지금까지 해 본 적 없는 종류의
+           진술입니다. 다른 모든 표식은 무언가가 *여기 있다*고 말합니다. 보스전은 사이클마다 이
+           중 무작위로 몇을 세우고 그 외의 어느 때에도 세우지 않으므로, 레벨은 앞으로 쓸 것보다
+           많이 배치합니다.
+           *`monster_` 접두사가 아니라 별칭이며, 의도적입니다.* 접두사는 ::mon_type_for를 거쳐
+           ::enemy_spawn_level로 해석되고 그것이 로드 시점에 몬스터를 만듭니다. 그런데 보스가
+           없는 방에 선 결계핵은, 나중에 도착하는 모든 보스를 첫 프레임부터 무적으로 만듭니다.
+           이름이 곧 강제입니다. 맵이 적어서 살아 있는 결계핵을 레벨에 넣을 수 있는 classname은
+           존재하지 않습니다.
+           키 하나를 가진 한 행이 아니라 두 행인 이유는, 제작자가 하나를 놓을 때 고르고 있는
+           것이 바로 그 둘 *사이*이기 때문입니다. 공중 표식은 거리를 두고 싸우는 것들을, 지상
+           표식은 붙는 것들을 보냅니다. 스폰플래그를 가진 단일 클래스는 그 선택을, 그 결정이
+           받아야 할 것보다 대화상자 하나만큼 더 깊은 곳에 두게 됩니다. */
+        { "info_ward_air",    "wardair"    },
+        { "info_ward_ground", "wardground" },
     };
 
     for (int i = 0; i < bm->n_ents; i++) {
@@ -1589,6 +1710,7 @@ static int load_brush_level(BrushStore *bs, const char *name, Level *out) {
 
     brush_start_of(out, bm);
     brush_lights_of(out, bm);
+    brush_sun_of(out, bm);
 
     /* Triggers before doors, so a trigger's `target` is interned first and a
        door's `targetname` finds the number already assigned. Either order
@@ -2743,6 +2865,122 @@ static int light_slot(const Vtx *v) {
     return -1;
 }
 
+
+/* Is anything OPAQUE between here and the sky in this direction?
+ *
+ * ENGLISH
+ * -------
+ * WHY THE ORDINARY TRACE IS THE WRONG ONE FOR A SUN. `lqdm1` is an outdoor map
+ * and its sky is brushwork: this engine has no sky pass, so a `sky5_blu` face
+ * is drawn and collided with as the solid it physically is. The player must not
+ * walk out through it, and every ray toward the sun hits it first. Measured by
+ * tools/lightprobe.c before this existed: of the vertices that FACE the sun,
+ * 98% were shadowed and 1% were lit -- shadowed by the sky itself.
+ *
+ * Quake's compiler answers this by treating a ray that reaches a sky face as a
+ * ray that reached the sun. This does the same thing from the other side: it
+ * traces, and when the thing it hit is sky, it steps past and traces again.
+ *
+ * BOUNDED, because a loop that continues on a condition the geometry controls
+ * is a loop a map can hang. Four passes clears a shell, a light well and a
+ * gap between two roofs; a map that needs a fifth gets a shadow it did not
+ * quite earn, which is a wrong pixel rather than a frozen load.
+ *
+ * ::LVL_LIGHT_BIAS is why it steps rather than resuming exactly: a ray
+ * restarted on the surface it just hit is inside that surface, which is the
+ * same reason ::bake_light lifts its origin off the wall before tracing at all.
+ *
+ * 한국어
+ * ------
+ * *왜 평범한 판정이 태양에게는 틀린 판정인가.* `lqdm1`은 야외 맵이고 그 하늘은 브러시입니다.
+ * 이 엔진에는 하늘 패스가 없으므로 `sky5_blu` 면은 물리적으로 그것인 고체로 그려지고 충돌합니다.
+ * 플레이어는 그것을 통과해 걸어 나가면 안 되고, 태양을 향하는 모든 광선은 그것에 먼저 부딪힙니다.
+ * 이것이 생기기 전 tools/lightprobe.c로 잰 값: 태양을 *마주 보는* 정점 중 98%가 그늘이고 1%가
+ * 빛을 받았습니다. 하늘 자신에게 가려져서입니다.
+ *
+ * Quake의 컴파일러는 하늘 면에 닿은 광선을 태양에 닿은 광선으로 취급하여 이에 답합니다. 이것은
+ * 반대편에서 같은 일을 합니다. 판정하고, 부딪힌 것이 하늘이면 그것을 지나쳐 다시 판정합니다.
+ *
+ * *횟수를 제한합니다.* 지오메트리가 제어하는 조건으로 계속되는 루프는 맵이 멈춰 세울 수 있는
+ * 루프이기 때문입니다. 네 번이면 껍질과 채광정과 지붕 둘 사이의 틈을 지납니다. 다섯 번째가
+ * 필요한 맵은 온전히 얻지 못한 그림자를 하나 얻으며, 그것은 멈춘 로드가 아니라 틀린 픽셀입니다. */
+static int light_blocked(const Level *l, v3 from, v3 dir, float max_dist) {
+    if (!l->brushes) return level_blocked(l, from, dir, max_dist);
+
+    v3    at   = from;
+    float left = max_dist;
+
+    for (int pass = 0; pass < LVL_LIGHT_SKY_PASSES; pass++) {
+        BrushTrace t;
+        v3 end = v3add(at, v3scale(dir, left));
+        brush_trace(l->brushes, 0, l->brushes->n_brushes, at, end,
+                    v3f(0, 0, 0), v3f(0, 0, 0), &t);
+
+        if (!t.hit && !t.start_solid) return 0;      /* reached the sky */
+        if (!brush_is_sky(l->brushes, t.brush)) return 1;
+
+        /* PAST THE WHOLE BRUSH, not past its near face.
+           A skybox wall is a BOX, and stepping a couple of centimetres beyond
+           the surface the ray touched leaves the ray inside it. The next pass
+           then starts solid, reports the same brush, and steps another couple
+           of centimetres -- so four passes advanced eight centimetres into a
+           brush metres thick and the ray never came out. Measured while it was
+           wrong: passing sky lifted the sunlit vertices from 174 to 209 of
+           12,504, which is the shape of a fix that is not fixing anything.
+           The exit is a slab test against the brush's own bounding box, which
+           is already computed and is exactly the question "where does this ray
+           leave this brush".
+           *면이 아니라 브러시 전체를 지나갑니다.* 스카이박스의 벽은 *상자*이고, 광선이 닿은
+           표면 너머로 몇 센티미터를 나아가는 것은 광선을 여전히 그 안에 남겨 둡니다. 다음
+           패스는 고체 안에서 시작해 같은 브러시를 보고하고 또 몇 센티미터를 나아갑니다.
+           그래서 네 번의 패스가 수 미터 두께의 브러시 안으로 8센티미터를 나아갔고 광선은
+           결코 빠져나오지 못했습니다. 틀린 채로 잰 값: 하늘을 통과시키자 햇빛 받는 정점이
+           12,504개 중 174개에서 209개가 되었으며, 그것은 아무것도 고치지 않는 수정의
+           모습입니다. */
+        const Brush *sb = &l->brushes->brushes[t.brush];
+        float exit = t.t * left;
+        for (int ax = 0; ax < 3; ax++) {
+            float o  = ax == 0 ? at.x  : ax == 1 ? at.y  : at.z;
+            float d  = ax == 0 ? dir.x : ax == 1 ? dir.y : dir.z;
+            float lo = ax == 0 ? sb->min.x : ax == 1 ? sb->min.y : sb->min.z;
+            float hi = ax == 0 ? sb->max.x : ax == 1 ? sb->max.y : sb->max.z;
+            if (d > 1e-6f || d < -1e-6f) {
+                float far_ = ((d > 0.0f ? hi : lo) - o) / d;
+                if (far_ > exit) exit = far_;
+            }
+        }
+        float went = exit + LVL_LIGHT_BIAS;
+        if (went >= left) return 0;
+        at   = v3add(at, v3scale(dir, went));
+        left -= went;
+    }
+    return 1;
+}
+
+/* Does the sun reach this point? ::bake_light's own question, asked of the same
+   walk rather than a copy of it.
+ *
+ * WHY THIS IS PUBLIC AND light_blocked IS NOT. tools/lightprobe.c is the only
+ * thing in this project that checks where light lands, and its first version
+ * replicated the walk above so it could ask. That is a test that agrees with
+ * itself: the copy would have had the same two-centimetre step as the original,
+ * passed, and said nothing. One narrow entry point -- a point, and yes or no --
+ * costs less than the duplicate and cannot drift away from what ships.
+ *
+ * `from` is a point already lifted off the surface; the caller does that,
+ * because the caller is the one that knows the normal.
+ *
+ * *이것은 공개이고 light_blocked는 아닌 이유.* tools/lightprobe.c는 이 프로젝트에서 빛이
+ * 어디에 닿는지 검사하는 유일한 것이며, 그 첫 판은 묻기 위해 위의 걸음을 복제했습니다.
+ * 그것은 자기 자신과 일치하는 테스트입니다. 복제본도 같은 2cm 걸음을 가졌을 것이고,
+ * 통과했을 것이며, 아무것도 말하지 않았을 것입니다. 좁은 입구 하나가 복제본보다 싸고
+ * 출하되는 것에서 멀어질 수 없습니다. */
+int level_sun_reaches(const Level *l, v3 from) {
+    if (l->sun_power <= 0) return 0;
+    v3 sd = v3f(l->sun[0], l->sun[1], l->sun[2]);
+    return !light_blocked(l, from, sd, LVL_SUN_REACH);
+}
+
 static void bake_light(MeshBuf *b, const Level *l, int first) {
     /* A level with no lamps bakes nothing, so there is nothing to look up and
        nothing worth remembering. Without this the cache charges such a level
@@ -2806,6 +3044,55 @@ static void bake_light(MeshBuf *b, const Level *l, int first) {
            판정 전에 표면에서 띄웁니다. 벽에 정확히 놓인 점은 판정에게는 벽 *안*이므로,
            모든 정점이 자기 자신을 가리고 레벨 전체가 검게 구워집니다. */
         v3 from = v3add(p, v3scale(n, 0.05f));
+
+        /* --- the sun, and the sky it hangs in ---------------------------
+         *
+         * TRACED LIKE A LAMP, WHICH IS THE WHOLE POINT. A directional term with
+         * no trace is `dot(n, dir)` and nothing else -- constant across a face,
+         * which is what the shader's fixed key already gives and what makes
+         * every wall one flat tone. What makes light read as SHAPED is that
+         * some of the wall is in shadow and some is not, and the only thing
+         * that can say which is the same ray ::level_blocked already casts for
+         * the lamps.
+         *
+         * The ray runs a level's width rather than to a point, because a
+         * directional light has no position: what matters is whether anything
+         * at all stands between this vertex and the sky in that direction.
+         *
+         * THE SKY IS A SEPARATE TERM AND A CRUDER ONE. `_sunlight2` is a dome,
+         * not a direction, and sampling a dome per vertex is a bake this
+         * project cannot afford. One ray straight up answers the question that
+         * matters -- is this surface under the open sky or under a roof -- and
+         * the `0.5 + 0.5 * n.y` weight is the hemisphere the surface can see:
+         * a floor gets all of it, a wall half, a ceiling none.
+         *
+         * *램프처럼 판정하며, 그것이 요점 전부입니다.* 판정 없는 방향성 항은 `dot(n, dir)`
+         * 뿐이고 면 안에서 상수입니다. 셰이더의 고정 주광이 이미 주는 것이며 모든 벽을 하나의
+         * 평평한 톤으로 만드는 것입니다. 빛이 *모양 있게* 읽히게 하는 것은 벽의 일부가
+         * 그늘이고 일부가 아니라는 사실이며, 어느 쪽인지 말할 수 있는 것은 ::level_blocked가
+         * 램프를 위해 이미 쏘는 그 광선뿐입니다.
+         *
+         * *하늘은 별개의 항이고 더 거친 항입니다.* `_sunlight2`는 방향이 아니라 돔이고, 돔을
+         * 정점마다 표본추출하는 것은 이 프로젝트가 감당할 수 없는 베이크입니다. 수직 위로 쏘는
+         * 광선 하나가 중요한 질문에 답합니다. 이 표면은 열린 하늘 아래인가 지붕 아래인가.
+         * 그리고 `0.5 + 0.5 * n.y` 가중치는 표면이 볼 수 있는 반구입니다. 바닥은 전부, 벽은
+         * 절반, 천장은 없습니다. */
+        if (l->sun_power > 0) {
+            v3 sd = v3f(l->sun[0], l->sun[1], l->sun[2]);
+            float lam = v3dot(n, sd);
+            if (lam > 0.0f && !light_blocked(l, from, sd, LVL_SUN_REACH)) {
+                float e = lam * (l->sun_power * LVL_SUN_SCALE);
+                v->lr += e; v->lg += e; v->lb += e;
+            }
+        }
+        if (l->sky_power > 0) {
+            v3 up = v3f(0.0f, 1.0f, 0.0f);
+            float open = 0.5f + 0.5f * n.y;
+            if (open > 0.0f && !light_blocked(l, from, up, LVL_SUN_REACH)) {
+                float e = open * (l->sky_power * LVL_SUN_SCALE);
+                v->lr += e; v->lg += e; v->lb += e;
+            }
+        }
 
         for (int li = 0; li < l->n_lights; li++) {
             const Light *lt = &l->lights[li];
@@ -2898,18 +3185,26 @@ int level_geometry_split(const Level *l) {
 }
 
 /* One half of a brush level, as maximal runs of brushes that belong to it.
-   RUNS RATHER THAN ONE CALL PER BRUSH because ::brush_geometry merges adjacent
-   triangles that share a material into one range, and it can only do that
-   within a single call -- a call per brush would produce a range per brush and
+   RUNS RATHER THAN ONE CALL PER BRUSH because ::brush_geometry gathers every
+   face of one material into a single range, and it can only see the faces of
+   one call -- a call per brush would produce a range per brush per material and
    spend ::LVL_MAX_RANGES on runs that were always going to be drawn together.
+   THE STRETCH COUNT IS THEREFORE A COST. Each stretch pays its own set of
+   materials, so a level whose doors interleave with its walls draws the same
+   material once per stretch, and it is that product -- stretches times
+   materials -- that ::LVL_MAX_RANGES is derived from.
    Ascending index order, so STATIC then MOVING is a stable partition of the
    whole build rather than the same vertices shuffled.
    브러시 레벨의 한쪽 절반을, 그쪽에 속하는 브러시들의 최대 연속 구간 단위로 생성합니다.
-   브러시마다 한 번씩이 아니라 *구간* 단위인 이유는, ::brush_geometry가 같은 재질을 공유하는
-   인접 삼각형을 하나의 구간으로 병합하는데 그것을 한 번의 호출 안에서만 할 수 있기
-   때문입니다. 브러시마다 호출하면 브러시마다 구간이 하나씩 생기고, 어차피 함께 그려질
-   것들에 ::LVL_MAX_RANGES를 소진하게 됩니다. 인덱스 오름차순이므로 STATIC 다음 MOVING은
-   전체 생성의 안정 분할이며 같은 정점을 뒤섞은 것이 아닙니다. */
+   브러시마다 한 번씩이 아니라 *구간* 단위인 이유는, ::brush_geometry가 한 재질의 모든 면을
+   하나의 구간으로 모으는데 한 호출의 면만 볼 수 있기 때문입니다. 브러시마다 호출하면
+   브러시마다 재질마다 구간이 하나씩 생기고, 어차피 함께 그려질 것들에 ::LVL_MAX_RANGES를
+   소진하게 됩니다.
+   *따라서 덩어리의 수가 곧 비용입니다.* 덩어리마다 자기 재질 집합을 치르므로, 문이 벽과
+   뒤섞인 레벨은 같은 재질을 덩어리마다 한 번씩 그리게 되며, ::LVL_MAX_RANGES가 유도되는
+   근거가 바로 그 곱(덩어리 수 x 재질 수)입니다.
+   인덱스 오름차순이므로 STATIC 다음 MOVING은 전체 생성의 안정 분할이며 같은 정점을 뒤섞은
+   것이 아닙니다. */
 static int brush_geometry_half(MeshBuf *b, const Level *l, MdlRange *ranges,
                                int max_ranges, int want_moving) {
     const BrushMap *m = l->brushes;

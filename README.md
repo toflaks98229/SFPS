@@ -13,14 +13,16 @@ A small but complete FPS loop, start to finish. Win32 window → OpenGL 3.3 core
 → shaders → procedural textures and sprites → level geometry from sectors or
 from TrenchBroom brushes, mixed freely in one episode →
 FPS camera with real momentum, a DOOM-Eternal-style meat hook and recoil
-jumping → Quake-style shotgun with ammo → four monster types, three melee and
-one that shoots → health, pickups, and level transitions that end in a win
-screen → a pixelised, luminance-dithered presentation over the whole thing.
+jumping → Quake-style shotgun with ammo → seven monster types: five that come
+at you, one that never moves and one that never acts → a boss fight where the
+room is the puzzle — the maw is untouchable while its wards stand, and shooting
+a ward is what fills the room → health, pickups, and level transitions that end
+in a win screen → a pixelised, luminance-dithered presentation over the whole thing.
 Models, materials, sounds and levels are all authored as text and hot-reload
 into the running game.
 
 ```
-413,184 / 1,474,560 bytes   (28.02% used)
+995,840 / 1,474,560 bytes   (67.53% used)
 ```
 
 ## Build
@@ -333,6 +335,174 @@ For the look itself, `build\dithershot.exe <level> <effect>` renders the real
 level with the effect firing and writes a PNG — the same tool used to compare
 dither settings, since an effect has to be judged through the post pass rather
 than beside it.
+
+## Loot
+
+Who drops what, how often, what a cleared wave pays, where it lands and how
+brightly it announces itself are all integers in
+[assets/loot.txt](assets/loot.txt). None of them appear in code:
+
+```
+d brute                # a monster's drop table
+  chance 62            # percent of kills that leave anything at all
+  item held   3        # weights, not counts -- a kill drops exactly one thing
+  item health 2
+
+r                      # what a cleared wave pays
+  give health 2        # counts, this time: a wave pays a fixed purse
+  give held   3
+  at    altar          # altar | player | centre
+  out   340            # cm/s outward, and
+  up    420            # cm/s upward, for the ring it is thrown along
+  altar 6000           # ms the drop point burns as a shrine
+
+m                      # the specks every floor item gives off
+  rate   340           # ms between one mote and the next, once settled
+  hurry  80            # ms between them while it is still announcing itself
+  hold   1200          # ms that hurry lasts, from the moment it arrives
+  range  2200          # cm past which it gives off nothing at all
+```
+
+`held` is the one name no level can place: **ammo for a weapon the player is
+actually holding**, round-robin over the ones they own. A box for a gun you
+have not found is the one thing `pickup.c` refuses to collect, so it would lie
+on the floor for the rest of the run looking like something you had missed.
+
+**Two rolls per kill, not one.** `chance` decides whether anything is left
+behind and the weights decide what. Folding them into a single weighted table
+with an implicit "nothing" entry would mean that making a monster drop medkits
+more often also made it drop *everything* more often, and an author retuning
+one number should be retuning one thing.
+
+Both rolls are spent whichever way the first one lands, so `EnemyPool::rng`
+advances by exactly two per kill and **a recorded demo still replays after a
+rate is changed**. A `chance` that short-circuited the second roll would make
+the drop table an input to the AI.
+
+### Where a reward lands
+
+`at` is three different games:
+
+| | |
+|---|---|
+| `player` | at your own feet, which is where you are looking when the room goes quiet. Diablo's drop, and what this used to be unconditionally |
+| `altar` | at an `info_altar` the map placed. The reward becomes a **place you go to** |
+| `centre` | the average of the arena's spawners, for a map that wants the middle of the room without marking it |
+
+A reward thrown at your feet is collected without a decision — you are already
+standing on it. One that lands on a shrine across the room *is* a decision: go
+now and be caught reloading in the open, or hold position and start the next
+wave without it. `WORLD_WAVE_BREAK` is six seconds precisely so there is time
+to make it.
+
+A map that places no `info_altar` falls back to the player's feet rather than
+dropping the purse at the origin, which is what makes `at altar` safe to leave
+switched on for every level. That fallback is also invisible in play — the
+reward still arrives, still bounces, still gets collected, and the only thing
+missing is the shrine nobody knew to look for — so `wavetest` asks the
+campaign directly: every level with spawners must have an altar, standing on
+floor, somewhere other than the start.
+
+### The shrine, and why it is three effects
+
+An altar is `altarring`, `altarcore` and `altarmote` in
+[assets/effects.txt](assets/effects.txt), for the same reason the blast is four
+layers: each answers a different question. **Where** (the ring, running out
+across the floor at the instant the wave ends — motion at the edge of vision is
+what turns the head), **what** (the core, a warm column that says shrine and not
+explosion), and **still here** (the motes, paced by `world.c` for as long as the
+shrine burns, because the ring and the core are over in half a second and the
+player has six).
+
+The ring uses `disc 1`, which is `dome`'s equator: one speed around the circle
+perpendicular to the spawn normal. With `face normal` the quads lie in that same
+plane, so a disc spawned against a floor is a ring of light travelling out
+across it. The dome cannot do this — half its particles leave the ground.
+
+Warm gold throughout, and deliberately not the blue every other bright thing in
+this game is. A bolt is blue, the hook is blue, a caster's burst cools into blue
+— all of them things that are about to hurt. The one thing in the room that is a
+*reward* should not be drawn in the colour of the things that are not.
+
+### What a floor item gives off
+
+A floor item is an alpha-tested billboard standing in a room lit to about 0.4,
+and the dither pass quantises what survives. At the far end of a hall a medkit
+was four dark pixels: the player did not decide not to fetch it, **they never
+saw it**.
+
+So every item gives off small specks that rise off it — `itemmote`, one per
+spawn, paced by `pickup.c` the same way `world.c` paces the lava smoke.
+
+**This replaced a halo and a light, and the replacement is smaller on purpose.**
+The first attempt drew an additive halo behind the sprite and lit the floor
+under a freshly landed item. Both worked, and both were the wrong kind of
+working: a glowing disc standing in the air is a **lamp**, and this game already
+spends that language on bolts, the hook and muzzle flash — on the things that
+are about to hurt you. An item that glows the same way asks to be read as one of
+them, and does it while parked, forever, which none of them do.
+
+Motes say the same thing with none of that. They are small, so nothing reads as
+a light source. They **move**, which is what actually catches the eye at
+distance: a static glow competes with every lit surface in the room, and
+drifting specks compete with nothing. And they leave the item's own drawing
+completely untouched, so what says *which* item this is is never sitting inside
+what says *where* it is.
+
+Every number in `loot.txt`'s `m` block is a **time**, not a size:
+
+| | |
+|---|---|
+| `rate` | ms between one mote and the next, once the item has settled |
+| `hurry` | ms between them while it is still announcing itself |
+| `hold` | ms `hurry` lasts, from the moment it arrives |
+| `range` | cm past which an item gives off nothing at all |
+
+That is the point of the struct rather than an accident of it: `LootMote` cannot
+express a size or a brightness, so it cannot drift back into being a lamp.
+
+`hurry` against `rate` is what answers "something just arrived". A steady trickle
+says where an item *is*, equally whether it has been there a minute or landed
+this frame — so the arrival, the one moment the player has to be told about,
+reads as nothing at all. Four times the rate for `hold` milliseconds and then
+settling costs one float per item.
+
+**`range` is a budget, not a look.** Every effect shares one particle pool, and
+`PICKUP_MAX` items each on a timer would spend it on specks nobody can see
+before a caster's bolt could lay a trail. An item past that distance keeps its
+timer running and simply does not spawn — pausing it instead would hand over the
+whole backlog the instant the player walked close enough, and holding it at zero
+would make every item in the room emit on the same frame, which reads as the
+room blinking rather than as twelve items.
+
+Each item's timer is staggered at birth from its **slot index**, not from a
+generator: this runs in the same world a recorded demo replays, and a random
+start would put every particle in the level one step out of phase with the
+recording for no benefit at all.
+
+The bolts a caster throws still got the opposite treatment, and deliberately —
+they gained a third tier outside the halo and the core, twice as wide and a
+fifth as opaque, breathing off the bolt's own clock. A bolt *should* read as a
+lamp. It is about to hurt you.
+
+### Retuning it
+
+`loot.txt` hot-reloads, and it is the one asset in this project that is edited
+*while playing*: tuning a drop rate means killing a monster, deciding it paid
+too well, changing a number and killing another. `loot_reload` clears a flag
+rather than re-parsing, so the cost lands on the next kill that asks a question
+rather than on the save.
+
+`build\loottest.exe` checks the parse and the arithmetic headlessly — that
+40% of a thousand evenly spread rolls drop something, that weight 3 against 1
+lands mostly on the 3, that a roll landing exactly on the edge of the die still
+drops rather than reading as nothing, and that a name the file got wrong
+produces no entry rather than entry zero, which is `PK_AMMO` and would have
+every monster in the level quietly dropping shells.
+
+What it does **not** assert is the shipped numbers. `chance 26` for a water spirit is a
+design decision somebody will move next week, and a test that names it goes red
+on that edit while proving nothing.
 
 ## Levels
 
@@ -876,6 +1046,90 @@ This is what `.\size.ps1 -Detail` is for. The per-section report only said the
 binary was 55KB; the per-symbol report named `g_keys` (1,024 bytes), `g_impacts`
 (1,344) and `g_tracers` (672) sitting in `.data` full of zeros.
 
+### The map caps are RAM budgets, and they were guesses until they were measured
+
+`brush.h` says it plainly at the top of its capacity block: *"All of this lives
+in `.bss`, which the floppy budget does not count. What it costs is RAM and
+nothing else."* So the caps are not a size decision — and for years nothing
+checked them against a map, because every map the project shipped was
+hand-authored and small enough that no cap was close.
+
+Importing somebody else's arena ended that. [tools/mapcap.c](tools/mapcap.c)
+loads every map and reports what each one asks of every cap. Built with the caps
+opened wide, so the numbers are what the maps *want* rather than what they were
+allowed:
+
+| map | brushes | faces | ents | verts | **runs** | load |
+|---|---|---|---|---|---|---|
+| `glasstower` | 7 | 42 | 25 | 252 | 4 | 0 ms |
+| `lqdm13` | 244 | 1,555 | 83 | 8,946 | 6 | 2 ms |
+| `lqdm11` | 425 | 2,564 | 90 | 15,411 | 4 | 3 ms |
+| `lqdm2` | 607 | 3,677 | 104 | 20,211 | 17 | 5 ms |
+| **`lqdm1`** | **737** | **4,340** | **83** | **24,957** | **24** | **5 ms** |
+| `lqdm4` | 1,180 | 7,166 | 91 | 42,267 | 20 | 12 ms |
+| `lqdm3` | 2,191 | 13,124 | 111 | 71,142 | 53 | 20 ms |
+
+**Nothing in that table is a ceiling.** A 2,191-brush map bakes its lighting and
+builds its geometry in 19 ms, costs 1.9 MB of face pool, and asks the renderer
+for 53 draw calls.
+
+**The last column used to be the ceiling, and that is why it was remeasured.**
+`brush_geometry` emitted faces in brush order, so a run ended every time the
+material changed and the count grew *faster* than the brush count: `lqdm4`
+wanted 3,001 runs, `lqdm3` more than the 4,096-entry probe could hold, and both
+shipped arenas were already past the cap of 192. Emitting one material at a time
+instead makes a run the number of *distinct* materials rather than the number of
+changes. The same six maps now want 4 to 53. The cap that decided how big a map
+could be is now the cap furthest from being reached.
+
+Four things the measurement found:
+
+1. **Both imported arenas were already over `LVL_MAX_RANGES`.** 262 and 338
+   against a cap of 192, so 428 and 734 runs were *merged* — and `brush.c`
+   merges rather than drops on purpose, because "the surplus draws with the
+   wrong texture, which is visible; dropping it would delete the wall, which is
+   not". They shipped with surfaces drawing the wrong material.
+2. **The cap's formula was a sector level's answer.** `LVL_MAX_SECTORS * 3` is
+   exact for a loader where a sector has a floor, a ceiling and walls. A brush
+   level has no sectors, and nothing in the header bounded it.
+3. **`LEVEL_BUF_VERTS` was 94% consumed** by a shipped map — 973 vertices from
+   dropping walls, silently, because `mb_vtx` does not grow.
+4. **The run count was a property of the emitter, not of the maps.** Three of
+   the six were "too expensive to ship" against a number that a reordering
+   removed. Measuring a cap says what the content wants; it does not say the
+   code was right to want it.
+
+The caps were rewritten from the shipped content with roughly 3× headroom, never
+from the largest map that could be made to fit — *a cap chosen to admit one
+particular map means nothing the day that map is replaced.*
+
+| | was | worst shipped | now | cost |
+|---|---|---|---|---|
+| `BR_MAX_BRUSHES` | 512 | 425 → 807 | **2048** | +64 KB `.bss` |
+| `BR_MAX_TOTAL_FACES` | 4096 | 2,564 → 4,746 | **16384** | +1.7 MB `.bss` |
+| `BR_MAX_ENTS` | 96 | 90 | **192** | +217 KB `.bss` |
+| `LVL_MAX_RANGES` | 192 | **338 (over)** → 9 | **1056** | +51 KB |
+| `LEVEL_BUF_VERTS` | 16384 | 15,411 | **49152** | +1.4 MB heap |
+
+`LVL_MAX_RANGES` is the one that is no longer a sample. After the reordering the
+worst shipped map wants **9** runs, so a headroom multiple would have been
+meaningless in either direction. It is derived instead:
+`(2 * LVL_MAX_DOORS + 1) * 32` — at most sixteen doors cut the brush list into
+thirty-three stretches, `brush_geometry` cannot group across the calls that
+build them, and `mapedit` offers a palette of 32 materials. That is every
+stretch of a level using every material in the editor. It is sized so that no
+map the other caps admit can reach it, rather than to fit the maps that exist.
+
+**The binary did not change size: 566,272 bytes before and after.** `.bss` went
+2.6 MB → 3.5 MB and the heap buffer 0.7 MB → 2.1 MB. That is the whole argument
+for measuring these rather than economising on them.
+
+**The hard ceiling is 32,767 and it is not memory.** `Brush::first_face` and
+`BrushEnt::first_brush` are `short`, so an index past that wraps negative and a
+brush points at somebody else's faces — silently, because nothing validates an
+index that is merely wrong. Two `_Static_assert`s now say so, and both were
+verified by tripping them.
+
 ### Where the bytes actually are, and why compression is not the answer yet
 
 Measured on the current 145,408-byte build, so the next person asking "can we
@@ -1066,7 +1320,7 @@ code path. The atlas is a grid, one row per type, one column per frame:
 
 | | role | reads as |
 |---|---|---|
-| **imp** | the baseline — dies to one point-blank blast | tall, thin, red, horns, glowing eyes |
+| **water_spirit** | the baseline — holds mid range and sprays a cone of bolts | a small pale drifting shape |
 | **brute** | a wall of health that hits like a truck, slow | broad grey-green hulk, tusks, back spikes |
 | **hound** | fast and frail, punishes standing still | low green beast, all fanged mouth |
 | **caster** | ranged — never closes, shoots across the room | violet robe, no legs, cold cyan eyes |
@@ -1097,7 +1351,7 @@ Everything else falls out of the same state machine the melee types use:
   and a caster with no angle closes in to find one instead of standing there.
 - **The long wind-up is the fight.** That is the window to break line of sight,
   and the bolt is slow enough to sidestep once seen. `enemytest` asserts the
-  caster telegraphs longer than an imp for exactly this reason.
+  caster telegraphs longer than a water spirit for exactly this reason.
 
 Bolts are owned by [src/enemy.c](src/enemy.c), the way `weapon.c` owns its
 tracers — they exist only because a monster fired them. They sweep against
@@ -1136,7 +1390,7 @@ stops on flesh instead of passing through into the wall, sprays blood, and a
 corpse can no longer be hit. The player has health now, drained by swings,
 shown bottom-left and tinted green→red as it falls.
 
-Monsters spawn at the level's entities — `imp`, `brute`, `hound` (and legacy
+Monsters spawn at the level's entities — `water_spirit`, `brute`, `hound` (and legacy `imp`,
 `spawn`) — so you place them in `mapedit` with the entity tool, no code change
 to build an encounter.
 
@@ -1169,16 +1423,478 @@ Collection runs every frame against the player's feet, so a pickup is taken
 A level names a `next` and drops an `exit` entity; walk onto the exit and the
 game loads `next`, **carrying your health and ammo across** — the exit is a
 reward you arrive at, the way a Doom episode runs, not a reset. The shipped
-campaign is `arena → atrium → vault`, and **vault has no `next`**, which is
-what makes it the end of the game (see below).
+campaign is `arena → vault`, and **vault has no `next`**, which is what makes
+it the end of the game (see below).
 
-The chain is not one file's list. `arena` and `vault` are sector levels in
-`assets/levels.txt`; `atrium` is `assets/maps/atrium.map`, authored in
-TrenchBroom, and it is on the chain because `arena` names it and its own
-`worldspawn` names `vault`. `level_load` looks for a `.map` before it looks in
-`levels.txt`, so a name resolves to whichever exists and the two authoring
-routes mix freely inside one episode — see
-[assets/trenchbroom/README.md](assets/trenchbroom/README.md).
+**Nothing in the shipped game walks that chain any more**, and `world.h` says so
+where it names the two halves that came apart: `WORLD_START_LEVEL` is where a
+fresh world starts and `WORLD_CHAIN_ROOT` is where the `next` chain begins, and
+since the menu sends both STORY and ENDLESS straight to the arena, the campaign
+levels "still load by name — nothing has been deleted — but nothing reaches them
+by walking forward". They are kept as the progression machinery's test fixtures,
+and `WORLD_CHAIN_ROOT` exists so that retiring the campaign outright is one edit
+rather than three test files.
+
+It used to be `arena → atrium → vault`, with `atrium` an
+`assets/maps/atrium.map` sitting in the middle to demonstrate that a TrenchBroom
+brush level and a `levels.txt` sector level mix freely in one episode —
+`level_load` looks for a `.map` before it looks in `levels.txt`, so a name
+resolves to whichever exists. The demonstration cost a shipped map, and the map
+went when the game stopped shipping levels it could not reach. The mechanism is
+unchanged: writing a brush level's name into a `next` still puts it on the
+chain. See [assets/trenchbroom/README.md](assets/trenchbroom/README.md).
+
+**And a third route: somebody else's editor.** `brush_parse` reads Valve 220 and
+Standard `.map` text, which is the format TrenchBroom writes and the format the
+Quake mapping world has been publishing in for thirty years. The arena the game
+is fought in — `lqdm1`, LibreQuake's **Solstice** by ZungryWare — is a converted
+LibreQuake deathmatch map, produced by
+[assets/maps/import-librequake.py](assets/maps/import-librequake.py) — no
+compiler in the path, and no `levels.txt` entry needed because the file *is* the
+level. What the crossing costs is written in that script: teleporters are
+dropped, armour becomes health, eight Quake weapons become four of ours, movers
+this engine has no counterpart for arrive frozen, and a room built for other
+players gains the spawners, the shrine, the maw and the ward slots that make it
+an arena here.
+
+**And then the walls came too.** The import above kept LibreQuake's geometry and
+threw away its surface: every face was looked up in a table and given one of
+*this* project's materials — `med_csl_brk14b` became `wall_stone`, four
+`met_brn_*` collapsed into `wall_metal` and `wall_track`, four woods into one
+`pwood`. Twenty-three names became eleven, and the result was LibreQuake's room
+wearing somebody else's walls.
+
+`assets/sprites/import-librequake-textures.py` inverts it. It reads the wads a
+map's `worldspawn` names, fetches exactly the textures its faces use, and writes
+them as the only thing `src/png.c` will read — 8-bit RGBA, non-interlaced,
+never wider than the 128-pixel cell `sprite.c` places a wall drawing into, and
+**never upscaled**: LibreQuake authored at 16, 64 and 128, and enlarging a 64
+costs four times the bytes to invent detail that is not there. The project's own
+materials were not removed to make room; they are still in `textures.txt` and
+still used by the weapons, the fixture map and everything procedural. A second
+set arrived beside the first.
+
+The licence is on firmer ground here than the maps were. LibreQuake's own note
+enumerates the BSD-3 side as *"models, textures and sounds"* — so the textures
+are permissive **by enumeration**, where the maps are permissive only by residue.
+
+| | |
+|---|---|
+| textures imported | 23, from 6 wads |
+| faces resolving to real art | **4,314 / 4,314** (was 6 / 4,746 the day the map landed) |
+| draw calls | 13 → **24** — one run per material, and there are 23 now |
+| binary | 595,456 → **953,344** of 1,474,560 (64.7%, 521 KB free) |
+
+**It cost 358 KB and uncovered a bug that had been shipping.** `sprite.c` centres
+a drawing in its cell and clears the rest, which is right for a creature and
+wrong for a wall — a wall's whole job is to repeat. `wall_meat`, the one 64×64
+surface this project shipped, was **75.0% pure black**: exactly
+(128²−64²)/128², its cleared border tiled along with the art. Nothing pointed at
+it because no shipped map used that material; an imported map naming a 64×64
+surface wears it on every face, and fourteen of the twenty-three are 64 or 16.
+Walls tile into their cell now, and `tools/texprobe.c` pins it.
+
+That test is worth its own note, because its first version was wrong. It measured
+how much of the material came out **black**, which is what the bug looks like —
+and it failed on `black` (a texture that is black) and `sky5_blu` (a night sky
+that is 22% dark). Darkness is content. A cleared cell is not dark, it is
+*unwritten*, and the two are the same colour only by coincidence. It asks
+`sprite_wall` for the cell and counts pixels with alpha 0 instead, which says
+nothing at all about how dark the art is.
+
+**A wave arena is not yet a boss arena, and that gap used to be documented
+rather than closed.** This section previously said of the imported maps that
+"neither carries `info_ward_*` markers, so a maw raised in one would have
+nothing to hide behind" — true, and harmless while the boss was fought in
+hand-authored `glasstower`. It stops being harmless the moment an imported map
+*becomes* `WORLD_BOSS_ARENA`, and the failure would not have looked like a bug:
+`enemy_ward_place` with no candidates raises nothing, leaves the maw open from
+its first frame, and plays as "this fight is oddly easy".
+
+So the importer places them, on the same argument the spawners are placed by —
+a deathmatch start or an item pickup is a point the map's author put something
+at and therefore *checked*. It takes the starts the furniture did not use,
+falls back to item positions, splits the pool at its own median height, and
+picks 8 + 8 by farthest-point sampling so that `enemy_ward_place`'s "somewhere
+the last cycle did not use" means somewhere across the room rather than a step
+away. The high half summon flyers: `info_ward_air` selects a *summon table*,
+not a floating position — `enemy.h` is explicit that the difference is "off
+what walks out rather than off the ward" — which is why this needs no geometry
+query it could not honestly answer. Solstice gets 16 candidates, the same
+number `glasstower` was hand-authored with.
+
+### The arena was lit by a sun the import left behind
+
+Solstice looked wrong after the textures came across, and not in the way the
+albedo work had fixed: light did not fall in pools, it bled along one side of a
+mesh and stopped dead at a seam, and every face was one flat tone. That is not a
+shading bug. **It is a room with almost no light in it.**
+
+`tools/lightprobe.c` measured the bake rather than guessing at it:
+
+| | |
+|---|---|
+| vertices with **no** baked light | **22,587 of 24,957 — 91%** |
+| mean baked light | 0.016, against an ambient of 0.32 |
+| vertex-light pairs rejected on distance | **93.3%** of 798,624 |
+| …rejected by shadow | 2.7% |
+
+The lamps are not the problem — they are 9 to 14 m and the room is
+**82 × 63 × 43 m**. They are accents. The map's worldspawn says what actually
+lights it:
+
+```
+"_sun_mangle" "136  -73 0"     a directional sun
+"_sunlight"   "120"
+"_sunlight2"  "50"             sky-dome ambient
+```
+
+**Solstice is lit by a sun and a sky, and the import took neither.** The engine
+had no idea either existed, so the whole room fell back on the shader's fixed
+key direction — one constant vector, so `dot(n, key)` cannot vary across a face,
+so a wall is one value corner to corner and its neighbour is another. Exactly
+the reported symptom.
+
+`level.c` reads all three now and **bakes the sun with a shadow trace**, which is
+the half that matters: a directional term with no trace is just `dot(n, dir)`,
+constant across a face and no better than the key it replaces. What makes light
+read as *shaped* is that part of a wall is occluded and part is not. The sky
+dome gets one ray straight up — is this surface under open sky or under a roof —
+weighted `0.5 + 0.5·n.y` for the hemisphere a surface can see.
+
+**Then the sun was blocked by the sky.** This engine has no sky pass, so a
+`sky5_blu` face is drawn and collided with as the solid it physically is — and
+every ray toward the sun hit it first. Quake's compiler answers this by treating
+a ray that reaches sky as a ray that reached the sun; `light_blocked` does the
+same from the other side, stepping past a sky hit and tracing on.
+
+That took two goes, and the first was wrong in a way worth recording: it stepped
+**2 cm past the face it hit**, which leaves the ray still inside a skybox wall
+metres thick. Four passes advanced eight centimetres and the ray never came out
+— sunlit vertices went from 174 to 209 of 12,504, *the shape of a fix that is
+not fixing anything*. It steps past the **whole brush** now, by a slab test
+against the bounding box that was already computed.
+
+| | before | after |
+|---|---|---|
+| vertices with no baked light | 91% | **73%** |
+| mean baked light | 0.016 | **0.065** |
+| sunlit vertices | 174 | **3,201** |
+| load | 5 ms | 6 ms |
+
+Purely additive: a level that declares no `_sunlight` gets zero and bakes
+exactly as before, which is every hand-authored level in this project.
+
+`tools/lightprobe.c` measured all of this, and measuring is all it did — which
+made it a file `build.ps1 -Test` ran, and passed, without it ever being able to
+fail. It makes one claim now: **of the surfaces that face the sun, the sun
+reaches at least a twentieth.** Both broken walks were re-applied to check the
+claim bites:
+
+| walk | share of sun-facing surfaces the sun reaches |
+|---|---|
+| as it ships | **25.6%** |
+| stepping past the face, not the brush | 1.67% |
+| sky treated as opaque | 1.39% |
+
+The first version of that test also asserted the highest upward-facing vertex in
+the level is sunlit — nothing is above it, so nothing can shadow it. The logic
+holds and the check is worthless: that vertex is *above* the skybox, its ray
+leaves without touching anything, and it stayed green under both mutations. **A
+landmark picked for being unobstructed cannot test the code that handles
+obstruction.** It was deleted rather than kept as reassurance.
+
+The probe also replicated the sky walk so it could ask its question, which is a
+test that agrees with itself — the copy would have carried the same
+two-centimetre step, passed, and said nothing. `level_sun_reaches()` is public
+now for exactly one caller, and the copy is gone.
+
+**And two gates that could never open.** `lqdm1`'s doors are Quake `func_door`s
+with `angle 90` and `angle 270` — sideways, which is what the engine already
+does with them — and `targetname gate1`. The only thing that fired that name
+was a `trigger_once`, which the importer drops because this engine has no
+counterpart for it. `level.c` reads `targetname` into `DoorDef::tag`, and
+`door.c` branches on it:
+
+```c
+if (d->tag > 0) asked = tagged;
+else            asked = dist_to_outline(st, ...) <= DOOR_TOUCH_DIST;
+```
+
+So both gates arrived **tagged, waiting on a switch the conversion had already
+deleted**, and nothing a player could do would move them. The untagged branch is
+the behaviour that was wanted anyway — it opens within `DOOR_TOUCH_DIST` and
+re-arms `DOOR_OPEN_TIME` every frame the player is near, so walking away lets it
+close by itself. **A name nothing surviving can call is a promise the crossing
+broke**, so the importer frees it; a door still driven by a switch that *did*
+cross keeps its tag and keeps needing the switch. `doortest` asks the shipped
+arena directly — not where its doors are, which is layout, but whether a player
+can open them, which no built fixture can answer.
+
+**The PlayStation look is off.** Both halves: `PSX_SNAP_COARSE` and
+`PSX_AFFINE` are 0. The machinery is intact and one edit from returning — what
+changed is that the arena did. Both artefacts scale with how much screen a
+single polygon covers, and `PSX_AFFINE`'s own note already said where that ends:
+*"a brush level has single faces bigger than a PlayStation drew in a whole
+room... those faces crease along their diagonal hard enough to read as a broken
+renderer."* Solstice's longest edge is **72 metres**. Turned off together
+because the call site is explicit that they are halves of one thing — *"the
+vertices wobble and the texture between them swims. Turning on either alone
+reads as a fault in the renderer rather than as a period"* — so removing the
+wobble and leaving the swim would trade one artefact for a worse one.
+
+**And the map arrived with seventy walls that are not there.** Quake mappers use
+`clip` to smooth a staircase, round off a doorframe or fence a player away from
+a ledge: a brush that is solid and drawn as nothing. `brush.c` honours both
+halves — it skips those faces in `brush_geometry` and leaves `Brush::solid` set
+— which is a fair trade in the game those maps were built for, where the only
+thing you do to a wall is bump into it. **This game has a grapple.** An
+invisible wall is a hook point hanging in mid-air, and Solstice had seventy of
+them across 406 faces.
+
+The importer drops them, and only them: of 807 brushes, 70 are *entirely* clip
+and **zero** mix clip faces with drawn ones, so there is no case where dropping
+the brush would delete a wall. `trigger` is deliberately not on the list — a
+trigger volume is also invisible and also bounds space, but the engine *reads*
+it, so dropping one would delete behaviour rather than an obstacle. 807 brushes
+became 737 and 4,746 faces became 4,340.
+
+**Raising the brush cap retired it, and a test that could no longer pass said
+so.** `BR_MAX_BRUSHES` 1024 → 2048 looked like a self-contained decision;
+`maptest` generates `BR_MAX_BRUSHES + 8` cubes and asserts the parser stops at
+the cap having stored `BR_MAX_BRUSHES * 6` faces — which now asked for 12,288
+faces out of a pool of 8,192. Six faces is the fewest a closed solid can have,
+so **2,048 brushes cannot exist under a pool of 8,192**: the pool fills at ~1,365
+brushes, `parse_brush` drops the rest on its `count <= 0` path — which is not a
+refusal and reports nothing — and the brush cap sits behind it unreachable,
+refusing nothing, forever. The face pool went to 16384, and a `_Static_assert`
+now says the relationship instead of a paragraph. Real content agrees with the
+six: Solstice is 5.88 faces per brush.
+
+**The same failure was hiding a second one in the fixture.** `maptest` laid its
+cubes in a row 16 units apart, which put cube 1,024 at x = 16,384 — exactly
+`BRUSH_MAX_COORD`, the half-extent of the world a `.map` may describe. Every
+cube past it clipped to nothing and was skipped in silence. It went unnoticed
+because the old cap fired on the very cube the row reached the edge of the world
+at; raising the cap made the *layout* the binding constraint, and the test then
+reported the cap as 1,024 — a fixture measuring its own geometry and calling it
+a capacity. It lays out a grid now.
+
+**And a third threat, because the arena had two of the same one — twice over.**
+The furniture was hound, caster, hound — two rushers and a shooter, nothing in
+the air.
+`wavetest` asks the *shipped* arena whether at least one spawner is a flyer's
+and then whether anything is off the ground, and both went red the day an
+imported map became that arena. The assertions were right and the furniture was
+wrong: `wraith` carries `MON_FLIES` and is the only type that does, so a room
+without one is a room where the flying path is authored, tested elsewhere, and
+never entered in play. The boss's air wards already summon flyers — so the arena
+knew how to be three-dimensional during a boss fight and not for the fifteen
+waves before it. The duplicate rusher was the thing to spend.
+
+**Having the entity is not having the behaviour.** With the wraith spawner
+placed, "at least one of them is a flyer's" passed and "and something is off the
+ground" still failed — because the importer puts every spawner on a deathmatch
+start, and a start is by construction a place a player's *feet* go. `enemy.c` is
+explicit that "a flyer keeps the height it was spawned at and never asks the
+floor about it", so a wraith made at a start hovers at floor level for its whole
+life: a flying monster that never flies. A flyer's spawner is lifted 64 units —
+two metres at `BRUSH_UNIT` — which clears a player's head and sits under any
+ceiling a deathmatch start has above it, since a start must already have
+standing and jump room or the author could not have spawned there.
+
+**And the boss itself, which the importer had no reason to know about until
+now.** A wave arena needs spawners; a boss arena also needs something to fight,
+and `enemy_boss_summon` raises the maw at the level's `monster_maw` marker.
+`bosstest` has asserted "the shipped boss arena places a maw" all along — the
+check was already there, pointed at hand-authored `glasstower`, and it is what
+would have caught this. The importer places one now, at the spare deathmatch
+start **farthest from the altar**: the altar is where the reward lands and so
+where every wave ends, the maw is what you cross the room to reach, and putting
+them at opposite ends is the difference between an arena and a corridor. In
+Solstice that is 1,150 units apart.
+
+**And then the maw arrived too early, which is the same premise failing a third
+time.** Story mode had no wave gate at all, deliberately: *"the story arena IS
+the boss fight, and a player who has to survive to wave five to meet it is
+playing endless mode with a cutscene."* That is exact reasoning about
+`glasstower` — seven brushes, a ring of ward slots, nothing else in the room to
+be dropped into. Measured on Solstice, the maw stood up **one frame after the
+intro cutscene ended**, at wave 1, with four wards already placed and five
+monsters already walking: the player met the boss before reaching any of the
+twenty-six weapons and pickups the map lays out, in a room they had not seen.
+
+`WORLD_BOSS_STORY_WAVE` is 2 now — one wave, not five. Long enough to pick up a
+gun and learn where the walls are; short enough that the story arena is still
+the boss fight rather than a survival mode with a cutscene. The sentence
+rejecting five waves is still right; it was never about one. `bosstest` used to
+be two lines here — a fresh arena has no maw, and two frames later it does —
+both true, and the second one *was* the bug. It pins the negative half now, with
+the wave held open for a full second so the gate is what is under test rather
+than a wave that happened not to clear.
+
+**How a DM map is picked, twice, and why the second answer is different.** All
+thirteen LibreQuake deathmatch maps were run through the importer and measured
+against the engine's caps rather than guessed at from file size. Against the
+caps of the day:
+
+| | brushes /512 | entities /96 | lights /64 | verdict |
+|---|---|---|---|---|
+| `lqdm13` | 244 | 83 | 13 | fits |
+| `lqdm11` | 425 | 90 | 47 | fits |
+| `lqdm12` | 428 | **127** | 32 | over on entities and doors |
+| `lqdm2` | **607** | **127** | 47 | over |
+| the other nine | **807 – 2191** | up to **2704** | up to **2590** | far over |
+
+`BR_MAX_BRUSHES` was the wall, and it was not close for most of them. The
+single-player maps are worse (0.5–8 MB of `.map` text each), and the four that
+*are* small enough turn out to be unfinished stubs: 24 brushes and three
+entities apiece. So `lqdm11` and `lqdm13` were imported, and the honest note at
+the time was that the survey was the point, not the two that survived it —
+"the smallest file" was how `lqdm13` got picked first, and smallest is not a
+quality measure.
+
+**It was worse than not a quality measure. It was anti-correlated with one.**
+Measuring the share of faces carrying LibreQuake's `lq_dev.wad` *development*
+textures across all thirteen maps gives a clean bimodal split:
+
+| | `lq_dev.wad` faces | |
+|---|---|---|
+| `lqdm11` | **99.1%** | greybox |
+| `lqdm12` | **93.6%** | greybox |
+| `lqdm13` | **91.1%** | greybox |
+| every other map | 0.0 – 0.2% | art-passed |
+
+The three maps that were small enough to fit are the three that had not been
+built yet. A greybox is small *because* it is a greybox. And `lqdm11`
+specifically is the map LibreQuake **demoted** out of its `lqdm1` slot in
+December 2023 — commit `8ae29a30`, "Detailed lqdm1; switched lqdm1 with
+lqdm11" — when the map that is now `lqdm1` was finished and put in its place.
+This project imported the loser of that swap.
+
+**And the map arrived with none of its art on screen.** The importer's texture
+table maps LibreQuake's WAD names onto this project's materials, and every entry
+in it was an `lq_dev.wad` name — because it was built against the two greyboxes,
+and a table that covered them completely covered nothing else. Solstice came
+through with **6 of its 4,746 drawn faces resolving to a real material. 0.1%.**
+The map chosen over the greyboxes *for being art-passed* would have rendered
+almost entirely in the unknown-material fallback, and nothing would have said so:
+a material `textures.txt` cannot resolve is not a failure the engine reports —
+it is a surface, drawn as whatever the fallback happens to be. It would have
+looked like a rendering bug, or like the map being bad, and not like a lookup
+table with 22 holes in it. Mapped by role, it is 100% now across 11 materials,
+and the draw calls went *down* — 24 runs to 13 — because 22 distinct texture
+names collapsed into 11 real ones.
+
+**`wall_plain` is not plain**, which is the second thing that table taught. The
+first pass sent Solstice's snowfields and sky to it on the strength of the name;
+it is a sandstone panel carved with hieroglyphs, and snow rendered in
+hieroglyphs is a worse answer than the fallback it replaced. They go to
+`wall_marble` — mottled pale grey, which is what a snowfield and an overcast
+winter sky have in common. The check that caught it was opening the PNG. A
+material chosen off its name is a material nobody looked at.
+
+**So the arena is `lqdm1` now, and the two greyboxes are gone.** Solstice is
+807 brushes, fully art-passed, and the map LibreQuake's own
+`docs/deathmatch-setup-guide.txt` tells a first-time host to start on. It cost
+one cap — `BR_MAX_BRUSHES` 1024 → 2048, +32 KB of `.bss` — because 807 against
+1024 is 79%, inside the cap and outside the headroom rule `mapcap` asserts.
+Nothing else moved: 4,746 of 8,192 faces and 24,957 of 49,152 vertices were
+already inside it.
+
+**Why not `lqdm3` "Hyperborea", which is the pack's actual showpiece.** It is
+the newest map, the only DM map LibreQuake ever announced by name, 2,191
+brushes, 51 textures and zero dev faces — and it loses on cost and on shape. It
+wants **four** caps, not one: brushes → 4096, the face pool → 24576 (16384 fails
+the headroom rule at 80%, ≈ +2.4 MB `.bss`), `LEVEL_BUF_VERTS` → 131072, which
+is *heap allocated for every level regardless of size* — 2.1 MB becomes 5.6 MB,
+paid while loading `spire` and its 612 vertices — and `BR_MAX_FACES` 32 → 36,
+because two of its brushes carry 33 faces and `BR_MAX_POLY` must follow it.
+Then 51 texture entries instead of 23. And it is **6152 × 5136** against
+Solstice's 2614 × 2016: in a wave shooter that is not grandeur, it is kiting
+distance, and four wards to hunt across it is a walk rather than a fight. A
+defensible upgrade once this pipeline has been proven on a smaller map; not the
+cheaper or the safer answer now.
+
+Retiring `lqdm11` and `lqdm13` is not tidying. **Neither was ever entered by the
+game** — `WORLD_BOSS_ARENA` pointed at `glasstower` and `WORLD_START_LEVEL` at
+`spire` — so they were 47 KB of a 1.44 MB budget spent on two rooms no player
+could reach.
+
+**And then the same test was applied to everything else, and the binary went from
+four `.map` files to one.** The question "is this reachable" had exactly one right
+answer per map and nobody had asked it of the whole directory:
+
+| | was | verdict |
+|---|---|---|
+| `lqdm1` | — | **the arena, and now the title backdrop too** |
+| `spire` | the title backdrop | deleted — a hand-authored arena kept alive to be the thing a menu is drawn over |
+| `glasstower` | the boss arena | deleted — superseded; seven brushes, and the ward reference is now the importer |
+| `atrium` | on the campaign chain | **kept as a file, dropped from the bake** — see below |
+
+**`atrium` is a fixture, not a level, and that is the difference between the
+file and the asset.** `tools/tracetest.c` makes 108 assertions against its
+geometry — a balcony at engine (−5, −5) whose top is at 3 m over a floor at 0,
+which is *"the pair of heights a sector could not hold"* and the reason brush
+levels exist at all — plus its doors, triggers, keys, hazards and entities. No
+other map has that combination and `lqdm1` has almost none of it: two doors, no
+triggers, no hazards, no keys. Deleting the file would delete the test.
+
+So `bake.ps1` grew a `$mapsNotBaked` list and the file stops being an asset
+without stopping being a file. Every tool is an authoring build and reads
+`assets\maps\<name>.map` from disk (see `data.c`'s `HOT_RELOAD` half), so the
+fixture is exactly as available as it was; the shipped build reads the blob, and
+the blob has one map in it.
+
+That cost one test variant, recorded where it used to be declared:
+`tracetest_baked` built the same assertions without `HOT_RELOAD` so they ran
+against the blob. **A fixture deliberately kept out of the blob cannot be read
+through the blob** — it was not failing because something broke. What it
+protected was "the blob reproduces the file", and `maptest`'s `test_bake_matches`
+checks exactly that, plane for plane, texture for texture, UV for UV and key for
+key — on `lqdm1`, the map that actually ships, which the variant never touched.
+
+`WORLD_START_DEFAULT` is `lqdm1` now, which the `WORLD_BOSS_ARENA` note used to
+argue against: loading the arena behind the menu "would mean the room the player
+is about to be dropped into has already been walked through by nobody, and its
+spawners are one `title = 0` away from arming." Both halves have answers.
+`step_confirm` is the only thing that clears `RunState::title`, and
+`screen_takes_press` returns 0 whenever a menu is open — `MENU_TITLE` always is;
+the only path that reaches it is demo playback, which drives recorded input in
+the room it was recorded in. And choosing STORY does not reuse the backdrop:
+`world_begin` reloads with `WORLD_ENTER_NEW`, a fresh level and a cleared run.
+The aesthetic half was about `glasstower` — a greybox tower nobody would want
+behind a menu. A finished deathmatch map is a better backdrop than a room kept
+alive to be one.
+
+**The redone survey found three silent refusals, and none of them was a cap
+being full.** Re-measuring the pack against today's numbers turned up bugs
+rather than verdicts, which is the useful kind of result:
+
+- **The importer was measuring against caps that no longer existed.** Its cap
+  table was a hand-copied list under a comment reading *"a copy that drifts is a
+  copy that reports the wrong cap"* — and it had drifted: it reported every map
+  against `BR_MAX_BRUSHES` 512 and `BR_MAX_ENTS` 96 while the engine carried
+  1024 and 192, calling maps too big that fitted. It reads the headers now, and
+  refuses to run rather than invent a number it cannot find.
+- **`_tb_transformation` was being truncated into an unattributable counter.**
+  TrenchBroom writes its own bookkeeping into a `.map` — layer, linked-group and
+  a 4×4 placement matrix — and a compiler discards it. This engine has no
+  compiler, so the matrix reached `brush.c` at 98–136 characters against a
+  `BR_VAL` of 64, got cut, and raised `DIAG_MAPENT_CAP`. `lqdm2` and `lqdm4`
+  both reported `mapent=2` while sitting at 104 and 91 entities against a cap of
+  192 — a refusal named after a cap that was nowhere near full. The two maps
+  already shipped carried no linked groups, so it was invisible until a map that
+  used them was measured. The importer drops `_tb_*` now.
+- **`BR_MAX_FACES` was named and never counted.** The importer's cap table has
+  listed faces-per-brush since it was written, and nothing ever compared
+  anything to it — so `lqdm3`, which carries two brushes of 33 faces against a
+  cap of 32, lost a face from each without a word. A brush missing a face is not
+  a smaller brush; it is an open box.
+
+What is worth carrying away is that a third of the original survey was decided
+by a draw-call number that a reordering of `brush_geometry` later deleted, and
+the rest of it by a file-size heuristic that selected for unfinished work.
 
 `build\leveltrans.exe` walks the whole chain from `WORLD_START_LEVEL` and
 asserts what has to be true of any campaign: every hop loads, has geometry, has
@@ -1632,13 +2348,45 @@ Four changes moved the fourteen:
 - **`wsprintfA` became `txt_append_int`/`txt_append_str`** in `scene.c`. The
   project already had those, `txt.h` already noted that pulling in `wsprintfA`
   drags `windows.h`, and the HUD was the one place still doing it.
-- **`plat.h`** now holds the three things a non-platform file genuinely cannot
+- **`plat.h`** now holds the four things a non-platform file genuinely cannot
   do without a host: tell the user the driver refused (`plat_fatal`, from the
   renderer's shader-compile failure), find where the executable lives
-  (`plat_exe_dir`), and ask whether a file has changed (`plat_file_stamp`).
-  Each was one Win32 call in the middle of a file with no other reason to know
-  what OS it was on, and each alone was enough to pin its whole translation
-  unit to Windows.
+  (`plat_exe_dir`), find where a save may live (`plat_save_dir`), and ask
+  whether a file has changed (`plat_file_stamp`). Each was one Win32 call in
+  the middle of a file with no other reason to know what OS it was on, and each
+  alone was enough to pin its whole translation unit to Windows.
+
+### What is left inside `main.c`, and what that costs
+
+`main.c` is a declared platform file, so nothing checks it — and the four
+`_Static_assert`s, the `-Portable` sweep and the 36 headless tools all stop at
+its door. That is the deal, and it has a price that is worth naming, because it
+was paid.
+
+**The cursor came up hidden on a screen that had to be clicked.** Cursor
+visibility is one expression — visible while a menu, the title, the death
+screen or a cutscene is up, or while another window has focus — and it was
+evaluated only by the five places that changed one of those. The *earliest* of
+the five is `WM_SETFOCUS`, which arrives while `app_start` is still creating
+the window: before `world_init`, so `run.title` is still `0`, and before
+`menu_open_title`, so no menu is open yet. The one call that ever decided the
+pointer decided it from a `World` that did not exist, hid it, and was never
+asked again.
+
+It had been that way for as long as there had been a title screen and cost
+nothing, because a screen that takes *any* key or *any* click needs no pointer
+to aim with. The first screen that had to be clicked **at** was the first one
+that could not be used.
+
+The fix is the idiom three other lines in that loop already use — `music_play`,
+`audio_set_volume`, `menu_set_unlocked` — *state as a condition, never as an
+event*: ask once a frame, from the state, and delete the five edge calls.
+`cursor_show` was already idempotent, which is what makes that free.
+
+The lesson is not about cursors. **An invariant maintained by every site that
+could break it is an invariant that depends on the order two initialisers
+happen to run in**, and no test in this project can see that order — it is
+behind `WinMain`. What found it was running the game and clicking.
 
 `plat_file_stamp` deliberately returns *an opaque token*, not a modification
 time. Callers only ever compare two for equality, and saying that in the type
@@ -2021,6 +2769,7 @@ is the reason the snap grid is a uniform rather than a compile-time constant.
 | [assets/models.txt](assets/models.txt) | weapon and prop silhouettes — **edit this** |
 | [assets/textures.txt](assets/textures.txt) | material recipes — **edit this** |
 | [assets/sounds.txt](assets/sounds.txt) | sound recipes — **edit this** |
+| [assets/loot.txt](assets/loot.txt) | drop rates, the wave reward, where it lands, how it marks itself — **edit this** |
 | `assets/*.obj` | authored meshes from Blender |
 | [src/mesh.h](src/mesh.h) / [src/mesh.c](src/mesh.c) | integer mesh text → geometry with authored UVs |
 | [src/audio.h](src/audio.h) / [src/audio.c](src/audio.c) | what a sound IS: the oscillator synth, layers, envelopes, voice eviction, distance falloff — no windows.h |
@@ -2051,7 +2800,10 @@ is the reason the snap grid is a uniform rather than a compile-time constant.
 | [src/weaponview.h](src/weaponview.h) / [src/weaponview.c](src/weaponview.c) | the drawn gun: bob/sway pose, muzzle flash — the half of `weapon` that needs a context |
 | [src/proj.h](src/proj.h) / [src/proj.c](src/proj.c) | grenades and bolts: flight, bounce, blast — no GL |
 | [src/fx.h](src/fx.h) / [src/fx.c](src/fx.c) | particle effects, authored as text in `effects.txt` |
-| [src/menu.h](src/menu.h) / [src/menu.c](src/menu.c) | the ESC menu's rows and what each one does |
+| [src/loot.h](src/loot.h) / [src/loot.c](src/loot.c) | who drops what and how often, what a cleared wave pays and where — authored as text in `loot.txt`, no GL |
+| [src/menu.h](src/menu.h) / [src/menu.c](src/menu.c) | the ESC menu's rows and what each one does, plus the title screen that chooses a mode |
+| [src/save.h](src/save.h) / [src/save.c](src/save.c) | the two facts that outlive a run — what is unlocked, how far it got. The only file the shipped exe writes |
+| [src/story.h](src/story.h) / [src/story.c](src/story.c) | the intro, victory and defeat cutscenes, authored as text in `story.txt` — no GL |
 | [src/demo.h](src/demo.h) / [src/demo.c](src/demo.c) | a recorded run: a level name and a list of intents |
 | [src/font.h](src/font.h) / [src/font.c](src/font.c) | the 5x7 glyph atlas, built into a texture at start-up |
 | [src/inflate.h](src/inflate.h) / [src/inflate.c](src/inflate.c) | the deflate decoder the baked assets need — the only cost of compressing them |
@@ -2084,7 +2836,11 @@ is the reason the snap grid is a uniform rather than a compile-time constant.
 | [tools/textest.c](tools/textest.c) | the material recipe interpreter, on a real GL context |
 | [tools/weapontest.c](tools/weapontest.c) | headless weapon rules: spread, recoil, ammo, reload |
 | [tools/fxtest.c](tools/fxtest.c) | headless particle checks |
-| [tools/menutest.c](tools/menutest.c) | headless menu checks: which row does what |
+| [tools/menutest.c](tools/menutest.c) | headless menu checks: which row does what, and which one is locked |
+| [tools/savetest.c](tools/savetest.c) | headless save checks: what survives a process, and what a corrupt file cannot do |
+| [tools/storytest.c](tools/storytest.c) | headless cutscene checks: the shipped `story.txt`, and every cap counted |
+| [assets/maps/import-librequake.py](assets/maps/import-librequake.py) | converts a BSD-3 LibreQuake deathmatch map into a level this engine loads |
+| [tools/mapcap.c](tools/mapcap.c) | what a map costs against every cap that could refuse it — including the ones that refuse silently |
 | [tools/sndtest.c](tools/sndtest.c) | the synth offline — no device, no thread |
 | [tools/mapview.c](tools/mapview.c) | fly through a `.map` with the game's own geometry |
 | [tools/dithershot.c](tools/dithershot.c) | render a level to a PNG, with `-door`/`-yaw` to pose it |
@@ -2116,6 +2872,30 @@ the 3-clause BSD licence. The full text is in
 [docs/LICENSE-Freedoom.txt](docs/LICENSE-Freedoom.txt), reproduced verbatim
 because a tidied licence is not the licence that was granted.
 
+**The `lqdm1` arena — "Solstice" — from
+[LibreQuake](https://github.com/lavenderdotpet/LibreQuake)**, mapped by
+ZungryWare, under the same 3-clause BSD licence — text in
+[docs/LICENSE-LibreQuake.txt](docs/LICENSE-LibreQuake.txt). LibreQuake ships
+under two licences and says so itself: its `docs/COPYING` is BSD-3 project-wide,
+and `docs/README-IMPORTANT-LICENCE-INFO` carves GPL-2 out for the QuakeC,
+`progs.dat` and `pop.lmp`. Nothing on the GPL side is used here.
+
+**The maps are BSD-3 by residue, and this used to be written as if by
+enumeration.** The sentence above said "BSD-3 for the maps, models, textures and
+sounds" — but the word *maps* appears on neither side of LibreQuake's own list,
+which enumerates the permissive half as "models, textures and sounds". Maps are
+permissive because everything not carved out falls under the project-wide
+`COPYING`, which is a sound chain and a different one. Stated precisely because
+the difference is exactly the kind a paraphrase hides: GitHub's own API reports
+this repository as `NOASSERTION` / "Other", so a reader who checks the badge
+rather than the files will not find the answer this project relies on. What
+shores it up further is `docs/CREDITS`, which lists ZungryWare's contributions
+as including *Maps* — so the maps are contributions to the project whose
+`COPYING` this is. Converted by
+[assets/maps/import-librequake.py](assets/maps/import-librequake.py), which is
+kept for the reason every importer here is kept: the map is the *result* of a
+conversion and the script is the recipe.
+
 > Copyright © 2001-2024 Contributors to the Freedoom project. All rights
 > reserved. Redistribution and use in source and binary forms, with or without
 > modification, are permitted provided that the conditions of the 3-clause BSD
@@ -2132,17 +2912,32 @@ it; a notice sitting in `.rdata` that nothing displays is a weaker claim.
 **The build asserts it rather than trusting anyone to remember.** Deleting the
 notice breaks nothing: the game compiles, runs and looks identical, and the only
 difference is that shipping it is no longer permitted. `bake.ps1` therefore
-fails the build when `assets/sprites/` holds artwork and the notice in
-`src/scene.c` does not match:
+fails the build when a licensed work is present and the notice in `src/scene.c`
+is not that work's licence verbatim:
 
 ```
-Freedoom artwork is present in assets\sprites\ but the attribution notice in
-src/scene.c is missing the line: 'Artwork from the Freedoom project.'
+LibreQuake assets are present (assets\maps\) but the NOTICE table in
+src/scene.c is not the licence verbatim: after '...IMPLIED WARRANTIES OF
+MERCHANTABILITY ' the licence says 'AND' but the notice says 'ARE'.
 ```
 
-Keyed on artwork actually being present, so a checkout with none — which is how
-this ships today — is under no obligation and pays nothing. Verified by removing
-the line and watching the build stop.
+Keyed on the assets actually being present, so a checkout with none is under no
+obligation and pays nothing.
+
+**And it did not work.** For as long as this section has claimed it was
+"verified by removing the line and watching the build stop", the check had been
+finding **zero** of the 52 PNGs it watches — `Get-ChildItem $dir -Include *.png`
+matches nothing unless the path ends in `\*`, silently, with no error. The guard
+ran, found nothing to be obliged about, and printed that everything was fine.
+Adding a second work is what found it: the same code was written again, failed
+the same way, and this time somebody mutated the notice to check.
+
+That is the failure mode worth naming. *A guard with false positives gets
+switched off by a person; a guard with false negatives switches itself off and
+keeps reporting success.* The fix is one `\*`; the lesson is that
+"verified by watching it fail" has to be redone whenever the thing it verified
+is rewritten — so both mutations are now written down beside the guard, and both
+were run.
 
 ### Why Freedoom and not the alternatives
 
@@ -2156,6 +2951,76 @@ data proprietary, so "Doom is open source" does not make its sprites usable.
 | LibreQuake | BSD-3 art *plus* GPL-2 game code, in `docs/` | legitimate, but mixed, younger, and mostly 3D models |
 | OpenArena, Xonotic | GPL for code *and* assets | copyleft reaches the whole game |
 | Doom, Quake data | proprietary | not usable at any price |
+
+**The same table answered a second question later, and gave a different name.**
+When a Quake-format *arena* was wanted, "mostly 3D models" stopped being an
+objection — a map is not a model — and "mixed" stopped being one too, because
+LibreQuake's split is written down in its own docs and the maps are on the
+permissive side of it. So the row that lost for sprites won for a level, on the
+identical test. OpenArena and Xonotic lost again and for exactly the reason
+recorded above: this game bakes its maps *into* the executable, so a copyleft
+map is a copyleft binary. `spirit-quake-maps-gpl`, the other sizeable collection
+of Quake `.map` sources on GitHub, is GPL-2 throughout and falls the same way.
+
+Worth stating because it is the point of writing a rule down rather than a
+decision: the rule was reusable and the decision would not have been.
+
+### And a third time, when the ask was "the most famous map"
+
+The same rule was put to the hardest version of the question — not "is there a
+permissive arena" but "can we have a *famous* one" — and the answer is a clean
+negative that is worth recording so nobody runs the search again.
+
+**There is no famous Quake-lineage arena with a permissive `.map` source. Not
+one.** The emptiness is structural rather than a failed search: the famous
+arenas were built 1996–2000, before anyone attached a licence to a level. They
+shipped as a `.bsp` and a readme, and the readme says who made it, not what you
+may do with it. Licensing norms arrived with the GitHub generation, by which
+time the maps that matter were twenty years old. **Fame and permissive licensing
+in this field are close to anti-correlated**, and under this project's own rule
+no licence is not a gap to fill with optimism — it is all rights reserved.
+
+What that costs, named plainly, because it is the price of the constraint:
+
+| off the table | why |
+|---|---|
+| **aerowalk** (Preacher, 1998) — the most-ported competitive map in FPS history, official in Quake Live and Quake Champions | no `.map` source has ever been published anywhere; the 1998 readme contains no licence and no grant |
+| **ztndm3 / Blood Run** (ztn, 1997) — an official Quake Champions arena today | same: `.bsp` only, no licence |
+| **id's own `dm2`, `dm3`, `dm4`, `dm6`, `e1m1`** — Romero's Oct 2006 `quake_map_source.zip` | a **double bind with no third reading**, below |
+| **Arcane Dimensions**, the most acclaimed Quake level design there is | did release source maps — GPL-2-or-later |
+| **Quetoo** (38 `.map` sources, the best non-LibreQuake pool in existence) | CC-BY-**SA**-4.0 |
+| Xonotic, Nexuiz, OpenArena, Unvanquished, Tremulous, Turtle Arena, Red Eclipse, Warsow | GPL-2 or CC-BY-SA, without a single exception found |
+| the `..::LvL` / Quaddicted custom-map catalogue, where the famous high-craft maps actually are | no-commercial / no-derivative readme boilerplate — **stricter** than the GPL already rejected |
+
+**The Romero double bind, because it is a stronger exclusion than "GPL-2".**
+The 11 Oct 2006 blog post carried no licence language at all; the GPL was an
+amendment days later, the version is stated nowhere by Romero, and the copy
+re-uploaded after his site migration lacked `gpl.txt` again — so the artefact
+most people hold asserts "id Software © 1996" and grants nothing. Either the
+grant is valid, and the maps are copyleft, and a copyleft map baked into this
+binary is a copyleft binary; **or it is not valid** — he had been ten years gone
+from id, 1996 level design was work-for-hire, and neither id nor ZeniMax nor
+Microsoft has ever restated it — **and the maps are unlicensed, which is worse.**
+There is no third reading. Corroborated by the best available source:
+LibreQuake's own maintainers examined this in their issue #23 and declined to
+use them. The project whose maps this game *does* take from looked at the ones
+it does not, and reached this verdict first.
+
+**Two permissive labels over non-permissive contents**, recorded because the
+shape will recur and a search engine hands you the label, not the licence:
+
+- `jdolan/quetoo-data` — the repository *description*, which is what appears in
+  search results, reads "Creative Commons Attribution license". `LICENSE.md` is
+  CC-BY-**SA**-4.0. Anyone who greps descriptions rather than licence files gets
+  this one wrong.
+- `quake-leveldesign-starterkit` — GitHub's badge says CC0-1.0. The CC0 covers
+  the kit; the maps inside are Romero's 2006 release. A permissive wrapper
+  around GPL contents.
+
+So the ask could not be satisfied as stated, and the honest framing is that
+"highest quality **and** most famous" collapses to "highest quality": this is
+the best arena that can legally be baked in, not the most famous one, because
+the most famous one is not for sale at any price.
 
 ### Turning a Freedoom sprite into one of ours
 

@@ -116,6 +116,22 @@ typedef enum {
     DIAG_SOUND_CAP,     /**< Recipe text exceeded MAX_SOUNDS or MAX_LAYERS. / 레시피 텍스트가 MAX_SOUNDS 또는 MAX_LAYERS를 초과했습니다. */
     DIAG_DOOR_CAP,      /**< Level declared more doors than LVL_MAX_DOORS. / 레벨이 LVL_MAX_DOORS보다 많은 문을 선언했습니다. */
     DIAG_ASSET_INFLATE, /**< A baked asset did not expand to its recorded length. / 구워 넣은 에셋이 기록된 길이로 펼쳐지지 않았습니다. */
+
+    /**
+     * @brief A drawing would not decode: not RGBA8, too large, or malformed.
+     *
+     * ENGLISH: A sprite that fails to decode is a monster that shows its
+     * GENERATED silhouette instead -- which looks exactly like a monster
+     * nobody has drawn yet, and is the intended appearance of one. So "not
+     * drawn" and "would not decode" are indistinguishable on screen, and this
+     * counter is the only thing that tells them apart.
+     *
+     * 한국어: 디코딩에 실패한 스프라이트는 *생성된* 실루엣을 대신 보여 주는 몬스터가
+     * 됩니다. 그것은 아직 아무도 그리지 않은 몬스터와 똑같이 보이며, 실제로 그런
+     * 몬스터의 의도된 모습입니다. 그래서 "그려지지 않음"과 "디코딩되지 않음"은 화면에서
+     * 구분되지 않으며, 둘을 가려 주는 것은 이 계수기뿐입니다.
+     */
+    DIAG_PNG,
     /**
      * @brief A door's saved shape belongs to a sector its definition no longer
      *        names -- ::door_reset was not called for the level being stepped.
@@ -327,6 +343,46 @@ typedef enum {
     DIAG_ENT_CAP,
 
     /**
+     * @brief A boss fight wanted more ward positions than the map marked.
+     *
+     * ENGLISH
+     * -------
+     * Raised when ::enemy_ward_place cannot fill ::BOSS_WARDS from one of its
+     * two candidate lists -- including the case where the map marked NONE, in
+     * which case the maw is open from its first frame and the fight is over as
+     * soon as the player finds it.
+     *
+     * A ROW OF ITS OWN AND NOT ::DIAG_ENT_CAP, which already means three other
+     * things and would send a reader to the entity ceiling when the real answer
+     * is "this map never marked any". That is the rule ::DIAG_MAPENT_CAP was
+     * split out under: reading one counter and finding the other cap was the
+     * real one sends the reader to the wrong number.
+     *
+     * @note Not a fault by itself. A map may deliberately mark fewer than
+     *       ::BOSS_WARDS, and the placement clamps rather than failing. It is
+     *       here so that "the fight was easier than designed" is distinguishable
+     *       from "the fight was designed that way".
+     *
+     * 한국어
+     * ------
+     * @brief 보스전이 맵이 표시한 것보다 많은 결계핵 자리를 원했습니다.
+     *
+     * ::enemy_ward_place가 두 후보 목록 중 하나에서 ::BOSS_WARDS를 채우지 못할 때 올립니다.
+     * 맵이 *하나도* 표시하지 않은 경우도 포함하며, 그때 아귀는 첫 프레임부터 열려 있고 전투는
+     * 플레이어가 그것을 찾는 즉시 끝납니다.
+     *
+     * *::DIAG_ENT_CAP이 아니라 자기 행인 이유는*, 그것이 이미 다른 세 가지를 뜻하며 진짜 답이
+     * "이 맵은 애초에 하나도 표시하지 않았다"일 때 독자를 엔티티 상한으로 보내기 때문입니다.
+     * ::DIAG_MAPENT_CAP이 갈라져 나온 규칙이 그것입니다. 한 카운터를 읽고 실제 원인은 다른
+     * 상한임을 알게 되는 것은 독자를 엉뚱한 숫자로 보내는 일입니다.
+     *
+     * @note 그 자체로 결함은 아닙니다. 맵은 의도적으로 ::BOSS_WARDS보다 적게 표시할 수 있고,
+     *       배치는 실패하는 대신 제한합니다. 이것이 있는 이유는 "전투가 설계보다 쉬웠다"와
+     *       "전투를 원래 그렇게 설계했다"를 구별하기 위해서입니다.
+     */
+    DIAG_WARD_CAND,
+
+    /**
      * @brief A level declared more sectors than ::LVL_MAX_SECTORS holds; the
      *        surplus was dropped.
      *
@@ -384,6 +440,79 @@ typedef enum {
      * 읽어야 합니다.
      */
     DIAG_POINT_CAP,
+
+    /**
+     * @brief The save file could not be written, so an unlock did not persist.
+     *
+     * ENGLISH: The one counter here that is not a capacity. It is here anyway
+     * because it fails the same way every capacity in this list does -- in
+     * silence, correctly this session and wrongly the next one. A player who
+     * beats the maw, quits, and comes back to a locked ENDLESS row has been
+     * told the fight did not count, and nothing on their screen distinguishes
+     * that from a game that never meant to unlock anything.
+     *
+     * Raised per failed write rather than latched, so a save directory that
+     * went away mid-session counts once per attempt and the number says how
+     * often the game tried.
+     *
+     * @note NOT raised when the file is merely absent on load. A first launch
+     *       has no save and that is not a fault; ::save_init treats a missing
+     *       file as an empty one, which is the whole reason it can.
+     *
+     * 한국어
+     * ------
+     * @brief 저장 파일을 쓸 수 없어 해금이 남지 않았습니다.
+     *
+     * 이곳에서 용량이 아닌 유일한 카운터입니다. 그럼에도 여기 있는 이유는, 이 목록의 모든
+     * 용량과 *같은 방식으로* 실패하기 때문입니다. 조용히, 이번 세션에는 옳게, 다음 세션에는
+     * 틀리게. 아귀를 쓰러뜨리고 종료했다가 잠긴 ENDLESS 행으로 돌아온 플레이어는 그 전투가
+     * 세어지지 않았다고 들은 것이며, 화면의 어느 것도 그것을 애초에 아무것도 해금할 생각이
+     * 없던 게임과 구별해 주지 않습니다.
+     *
+     * 래치가 아니라 실패한 쓰기마다 올립니다. 세션 도중에 사라진 저장 디렉토리는 시도마다 한
+     * 번씩 세어지며, 그 숫자가 게임이 몇 번 시도했는지를 말합니다.
+     *
+     * @note 로드 시 파일이 단지 *없는* 경우에는 올리지 않습니다. 첫 실행에는 저장이 없고
+     *       그것은 결함이 아닙니다. ::save_init은 없는 파일을 빈 파일로 다루며, 그것이 그럴 수
+     *       있는 이유 전부입니다.
+     */
+    DIAG_SAVE_IO,
+
+    /**
+     * @brief A cutscene had more than it could hold; the surplus is not shown.
+     *
+     * ENGLISH
+     * -------
+     * A page past ::STORY_PAGES, a line past ::STORY_LINES, or a line longer
+     * than ::STORY_LINE_MAX. All three end the same way -- the file says
+     * something the screen does not -- and all three are otherwise silent,
+     * because a cutscene that stops one page early looks exactly like a
+     * cutscene that was written one page shorter.
+     *
+     * ONE ROW FOR THREE CONSTANTS, and the split ::DIAG_POINT_CAP was made
+     * under was considered and refused here. That rule exists because reading
+     * one counter and finding a different cap was the real one "sends the
+     * reader to the wrong number" -- which bites when the evidence is a
+     * fifty-nine sector map nobody can hold in their head. assets/story.txt is
+     * a dozen lines and every one of the three refusals is visible in it at a
+     * glance, so a reader who is told "something in story.txt did not fit" is
+     * already looking at the answer.
+     *
+     * 한국어
+     * ------
+     * @brief 컷신이 담을 수 있는 것보다 많은 것을 가졌습니다. 초과분은 표시되지 않습니다.
+     *
+     * ::STORY_PAGES를 넘는 페이지, ::STORY_LINES를 넘는 줄, 또는 ::STORY_LINE_MAX보다 긴 줄.
+     * 셋 다 같은 결말입니다. 파일이 말하는 것을 화면이 말하지 않습니다. 그리고 셋 다 그 외에는
+     * 조용합니다. 한 페이지 일찍 끝나는 컷신은 한 페이지 짧게 쓰인 컷신과 똑같아 보입니다.
+     *
+     * *상수 셋에 행 하나*이며, ::DIAG_POINT_CAP이 갈라져 나온 분리를 이곳에서 검토하고
+     * 거절했습니다. 그 규칙은 한 카운터를 읽고 실제 원인이 다른 상한임을 알게 되는 것이 "독자를
+     * 엉뚱한 숫자로 보내기" 때문에 존재하며, 증거가 아무도 머릿속에 담을 수 없는 59개 섹터의
+     * 맵일 때 물어뜯습니다. assets/story.txt는 열두 줄이고 세 거절 중 어느 것이든 한눈에 보이므로,
+     * "story.txt의 무언가가 들어가지 않았다"고 들은 독자는 이미 답을 보고 있습니다.
+     */
+    DIAG_STORY_CAP,
 
     DIAG_COUNT          /**< Number of counters. / 카운터의 개수. */
 } DiagKind;

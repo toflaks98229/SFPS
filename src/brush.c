@@ -1521,6 +1521,61 @@ void brush_translate(BrushMap *m, int first, int count, v3 delta) {
  */
 static const char *const NODRAW[] = { "__TB_empty", "clip", "skip", "trigger" };
 
+
+/* Is this face the sky?
+ *
+ * ENGLISH
+ * -------
+ * BY PREFIX, WHICH IS QUAKE'S OWN RULE. Every sky texture in that lineage is
+ * named `sky` plus whatever the author called it -- `sky5_blu`, `sky_void`,
+ * `sky1` -- and the compiler decides what is sky the same way. A table of
+ * names would need an entry for every sky anybody ever draws; the prefix needs
+ * none, and it is the convention the maps were authored under rather than a
+ * guess about them.
+ *
+ * NOT ::brush_tex_nodraw's list, deliberately. A sky face IS drawn -- this
+ * engine has no sky pass, so it draws as the solid it physically is, which
+ * import-librequake.py records as one of the four things that do not survive
+ * the crossing. What it is not is OPAQUE TO LIGHT, and that is a different
+ * question asked in a different place.
+ *
+ * 한국어
+ * ------
+ * *접두사로 판단하며, 그것이 Quake 자신의 규칙입니다.* 그 계보의 모든 하늘 텍스처는 `sky`에
+ * 제작자가 붙인 것을 이어 붙인 이름이고, 컴파일러도 같은 방식으로 무엇이 하늘인지 정합니다.
+ * 이름의 표는 누군가 그리는 모든 하늘마다 항목이 필요하지만 접두사는 하나도 필요하지 않으며,
+ * 그것이 이 맵들이 저작된 관습입니다.
+ *
+ * *일부러 ::brush_tex_nodraw의 목록이 아닙니다.* 하늘 면은 *그려집니다.* 이 엔진에는 하늘
+ * 패스가 없으므로 물리적으로 그것인 고체로 그려지며, import-librequake.py가 건너오면서
+ * 살아남지 못하는 네 가지 중 하나로 기록해 둔 것입니다. 하늘이 아닌 것은 *빛에 대해
+ * 불투명한 것*이며, 그것은 다른 곳에서 묻는 다른 질문입니다. */
+int brush_tex_sky(const char *tex) {
+    if (!tex) return 0;
+    return tex[0] == 's' && tex[1] == 'k' && tex[2] == 'y';
+}
+
+/* Whether every drawn face of this brush is sky, which is what makes the whole
+   brush transparent to a light ray: a brush with one sky face and five stone
+   ones is a wall that happens to touch the ceiling, and light must not pass it.
+   이 브러시의 그려지는 모든 면이 하늘인가입니다. 그것이 브러시 전체를 광선에 대해 투명하게
+   만듭니다. 하늘 면 하나와 돌 면 다섯을 가진 브러시는 천장에 닿아 있을 뿐인 벽이며, 빛이
+   그것을 통과해서는 안 됩니다. */
+int brush_is_sky(const BrushMap *m, int bi) {
+    if (!m || bi < 0 || bi >= m->n_brushes) return 0;
+    const Brush *b = &m->brushes[bi];
+    int drawn = 0;
+    for (int i = 0; i < b->n_faces; i++) {
+        int fi = b->first_face + i;
+        if (fi < 0 || fi >= m->n_faces) continue;
+        const char *t = m->faces[fi].tex;
+        if (brush_tex_nodraw(t)) continue;
+        drawn++;
+        if (!brush_tex_sky(t)) return 0;
+    }
+    return drawn > 0;
+}
+
 int brush_tex_nodraw(const char *tex) {
     if (!tex) return 1;
     for (int i = 0; i < (int)(sizeof(NODRAW) / sizeof(NODRAW[0])); i++)
@@ -1560,6 +1615,23 @@ static void push_range(MdlRange *r, int *n, int max, const char *tex,
     (*n)++;
 }
 
+/* Which faces this call has already emitted.
+ *
+ * ONE BIT A FACE, in .bss, which the floppy budget does not count. It is what
+ * lets the emission below be grouped by material without a table of material
+ * NAMES to overflow: the outer loop walks to the first face nobody has drawn
+ * yet, and that face's texture is the next run.
+ *
+ * 이 호출이 이미 내보낸 면들입니다.
+ *
+ * *면당 한 비트*이며 .bss에 있고 플로피 예산은 그것을 세지 않습니다. 이것이 아래의 방출을,
+ * 넘칠 수 있는 재질 *이름* 표 없이 재질별로 묶을 수 있게 합니다. 바깥 루프는 아직 아무도 그리지
+ * 않은 첫 면까지 걸어가고, 그 면의 텍스처가 다음 구간이 됩니다. */
+static unsigned char g_emitted[(BR_MAX_TOTAL_FACES + 7) / 8];
+
+static int face_done(int i)   { return g_emitted[i >> 3] &   (1u << (i & 7)); }
+static void mark_face(int i)  {        g_emitted[i >> 3] |= (unsigned char)(1u << (i & 7)); }
+
 int brush_geometry(MeshBuf *b, const BrushMap *m, int first, int count,
                    MdlRange *ranges, int max_ranges) {
     if (!b || !m) return 0;
@@ -1568,18 +1640,86 @@ int brush_geometry(MeshBuf *b, const BrushMap *m, int first, int count,
     if (first < 0) first = 0;
     if (first + count > m->n_brushes) count = m->n_brushes - first;
 
+    /* --- grouped by material, not by brush ------------------------------
+     *
+     * WHAT THIS REPLACED. The loop was `for each brush, for each face, emit`,
+     * which is author order -- and ::push_range only merges a face into the
+     * previous run when the texture matches, so a run ended every time the
+     * material changed as the brush list was walked. That is a property of the
+     * order somebody built the room in, and it is bounded by nothing:
+     * tools/mapcap.c measured lqdm11 wanting 338 runs from 425 brushes and
+     * lqdm4 wanting 3,001 from 1,180. Both imported arenas shipped OVER
+     * ::LVL_MAX_RANGES, so 428 and 734 runs were merged into their neighbours
+     * and drew with the wrong texture.
+     *
+     * Emitting one material at a time makes the run count the number of
+     * DISTINCT materials instead -- ten for lqdm13, not 262 -- which is a fact
+     * about the map's texture set rather than about its build order, and it is
+     * one draw call each.
+     *
+     * O(materials x faces), and both are load-time numbers. The outer loop
+     * advances only past faces already emitted, so it runs once per distinct
+     * material; ten passes over 2,564 faces is nothing next to the light bake
+     * that follows it.
+     *
+     * WHAT IT DOES NOT CHANGE is the only thing that depends on order: the
+     * vertices of one call stay one contiguous block, so ::brush_geometry_half
+     * still appends STATIC entirely before MOVING and
+     * ::Scene::level_static_verts is still the boundary between them.
+     * ::bake_light is per-vertex and does not care.
+     *
+     * --- 브러시가 아니라 재질별로 묶어 내보냅니다 -----------------------
+     *
+     * *무엇을 대체했는가.* 루프는 `브러시마다, 면마다, 내보내기`였고 그것은 제작 순서입니다.
+     * 그리고 ::push_range는 텍스처가 일치할 때만 직전 구간에 면을 병합하므로, 브러시 목록을
+     * 훑는 동안 재질이 바뀔 때마다 구간이 끝났습니다. 그것은 누군가 그 방을 만든 *순서*의
+     * 성질이며 무엇으로도 한정되지 않습니다. tools/mapcap.c가 lqdm11은 브러시 425개에서 구간
+     * 338개를, lqdm4는 1,180개에서 3,001개를 원한다고 측정했습니다. 가져온 두 아레나 모두
+     * ::LVL_MAX_RANGES를 넘긴 채 출하되었고, 428개와 734개의 구간이 이웃에 병합되어 틀린
+     * 텍스처로 그려졌습니다.
+     *
+     * 재질을 한 번에 하나씩 내보내면 구간 수가 대신 *서로 다른 재질의 수*가 됩니다. lqdm13이면
+     * 262가 아니라 열입니다. 그것은 빌드 순서가 아니라 맵의 텍스처 집합에 대한 사실이며, 각각이
+     * 드로우 콜 하나입니다.
+     *
+     * O(재질 x 면)이고 둘 다 로드 시점의 숫자입니다. 바깥 루프는 이미 내보낸 면만 지나치므로
+     * 서로 다른 재질마다 한 번 돕니다. 면 2,564개를 열 번 훑는 것은 그 뒤에 오는 조명 베이크에
+     * 비하면 아무것도 아닙니다.
+     *
+     * *바꾸지 않는 것*은 순서에 의존하는 유일한 것입니다. 한 호출의 정점은 여전히 하나의 연속된
+     * 블록으로 남으므로, ::brush_geometry_half는 여전히 STATIC 전체를 MOVING보다 먼저 덧붙이고
+     * ::Scene::level_static_verts는 여전히 그 둘의 경계입니다. ::bake_light는 정점 단위이며
+     * 그것에 신경 쓰지 않습니다. */
+    for (int i = 0; i < (int)sizeof(g_emitted); i++) g_emitted[i] = 0;
+
+    for (int seed_b = first; seed_b < first + count; seed_b++) {
+        const Brush *sbr = &m->brushes[seed_b];
+
+        for (int seed_f = 0; seed_f < sbr->n_faces; seed_f++) {
+            int si = sbr->first_face + seed_f;
+            if (si < 0 || si >= m->n_faces) continue;
+            if (face_done(si)) continue;
+
+            const char *want = m->faces[si].tex;
+            if (brush_tex_nodraw(want)) { mark_face(si); continue; }
+
+            int start = b->count;
+
     for (int bi = first; bi < first + count; bi++) {
         const Brush *br = &m->brushes[bi];
 
         for (int fi = 0; fi < br->n_faces; fi++) {
-            const BrushFace *f = &m->faces[br->first_face + fi];
-            if (brush_tex_nodraw(f->tex)) continue;
+            int gi = br->first_face + fi;
+            if (gi < 0 || gi >= m->n_faces) continue;
+            if (face_done(gi)) continue;
+
+            const BrushFace *f = &m->faces[gi];
+            if (!txt_eq(f->tex, want)) continue;
+            mark_face(gi);
 
             v3 poly[BR_MAX_POLY];
             int n = brush_face_poly(m, bi, fi, poly, BR_MAX_POLY);
             if (n < 3) continue;
-
-            int start = b->count;
 
             /* Fanned from vertex 0. A brush face is convex by construction --
                it is the intersection of half-spaces -- so a fan is always
@@ -1597,9 +1737,20 @@ int brush_geometry(MeshBuf *b, const BrushMap *m, int first, int count,
                     mb_vtx(b, tri[k], f->normal, u, v);
                 }
             }
+        }
+    }
 
+            /* ONE RANGE FOR THE WHOLE MATERIAL, pushed after the inner sweep
+               rather than after each face. The old code pushed per face and
+               leaned on ::push_range merging neighbours that happened to
+               match; this one has already gathered them, so there is nothing
+               left to merge and the count is exact.
+               *재질 하나에 구간 하나이며*, 면마다가 아니라 안쪽 훑기가 끝난 뒤에 넣습니다.
+               예전 코드는 면마다 넣고 마침 일치하는 이웃을 ::push_range가 병합해 주는 것에
+               기댔습니다. 이쪽은 이미 모아 두었으므로 병합할 것이 남지 않고 개수가
+               정확합니다. */
             if (ranges)
-                push_range(ranges, &n_ranges, max_ranges, f->tex,
+                push_range(ranges, &n_ranges, max_ranges, want,
                            start, b->count - start);
         }
     }

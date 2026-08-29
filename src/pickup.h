@@ -160,6 +160,88 @@ typedef struct {
      */
     v3    vel;
 
+    /**
+     * @brief Seconds of "I just arrived" left on it. Zero for a level's own items.
+     *
+     * ENGLISH
+     * -------
+     * The other half of ::vel doubling as the flight flag, and the same trick:
+     * ZERO IS THE ORDINARY CASE. An item the level laid out has always been
+     * there, so it starts at zero and announces nothing; only ::pickup_toss
+     * ever sets it, because only a tossed item is one the player has to be told
+     * about.
+     *
+     * HELD, NOT COUNTED DOWN, WHILE IT IS STILL FLYING. The hurried rate is
+     * supposed to still be running when the item lands -- that is the frame the
+     * player looks at it -- and an arc lasting most of ::LootMote::hold would
+     * otherwise spend the whole announcement in mid-air and settle on arrival.
+     *
+     * A DURATION AND NOT A FLAG, so that shortening ::LootMote::hold in the
+     * file cuts short the items already on the floor rather than only the next
+     * one to land, which is exactly the edit an author is watching for.
+     *
+     * 한국어
+     * ------
+     * @brief "방금 도착했다"가 남아 있는 시간(초). 레벨 자신의 아이템은 0입니다.
+     *
+     * ::vel이 비행 플래그를 겸하는 것의 나머지 절반이며 같은 수법입니다. *0이 평범한
+     * 경우입니다.* 레벨이 배치한 아이템은 늘 그 자리에 있었으므로 0에서 시작하고 아무것도
+     * 알리지 않습니다. 이것을 설정하는 것은 ::pickup_toss뿐인데, 플레이어에게 알려야 하는
+     * 것은 던져진 아이템뿐이기 때문입니다.
+     *
+     * 아직 날고 있는 동안에는 줄지 않고 *유지됩니다*. 서둘러 내보내는 속도는 아이템이 착지할
+     * 때에도 여전히 돌고 있어야 하며(그 프레임이 플레이어가 그것을 보는 프레임입니다),
+     * 그러지 않으면 ::LootMote::hold의 대부분을 차지하는 포물선이 알림 전체를 공중에서
+     * 소진하고 도착하는 순간 잦아들게 됩니다.
+     *
+     * 플래그가 아니라 *지속 시간*이므로, 파일에서 ::LootMote::hold를 줄이면 다음에 착지할
+     * 아이템뿐 아니라 바닥에 이미 있는 아이템들도 함께 짧아집니다. 그것이야말로 제작자가
+     * 지켜보고 있는 편집입니다.
+     */
+    float flare;
+
+    /**
+     * @brief Seconds until this item gives off its next mote.
+     *
+     * ENGLISH
+     * -------
+     * The countdown ::pickup_update paces `itemmote` off, the same arrangement
+     * world.c has with the lava smoke: one particle per spawn and a timer out
+     * here deciding how often, because ::fx_spawn only knows how to be a burst
+     * and what an item needs is a trickle that is still going in five seconds.
+     *
+     * PER ITEM RATHER THAN ONE CLOCK FOR THE POOL, because a single timer makes
+     * every item on the floor emit on the same frame -- twelve specks appearing
+     * together and then nothing, which reads as the room blinking rather than
+     * as twelve items. Staggered at birth and never resynchronised after.
+     *
+     * IT KEEPS RUNNING OUT OF RANGE, and the spawn is what is skipped. A timer
+     * paused past ::LootMote::range would hand its whole backlog over the
+     * instant the player walked close enough, which is a puff of specks with no
+     * cause -- and holding at zero instead would emit on the first frame in
+     * range for every item at once, which is the blink again.
+     *
+     * 한국어
+     * ------
+     * @brief 이 아이템이 다음 티끌을 내보내기까지의 시간(초).
+     *
+     * ::pickup_update가 `itemmote`를 조절해 뿌리는 카운트다운이며, world.c가 용암 연기와
+     * 맺는 것과 같은 배치입니다. 생성당 입자 하나이고 얼마나 자주인지는 바깥의 이 타이머가
+     * 정합니다. ::fx_spawn은 폭발이 될 줄만 알지만 아이템에게 필요한 것은 5초 뒤에도
+     * 이어지고 있는 흐름이기 때문입니다.
+     *
+     * *풀 전체의 시계 하나가 아니라 아이템마다인* 이유는, 타이머가 하나면 바닥의 모든
+     * 아이템이 같은 프레임에 내보내기 때문입니다. 알갱이 열둘이 함께 나타났다가 아무것도
+     * 없는 것은 아이템 열둘이 아니라 방이 깜박이는 것으로 읽힙니다. 태어날 때 어긋나게 하고
+     * 그 뒤로 다시 맞추지 않습니다.
+     *
+     * *사거리 밖에서도 계속 돌며*, 건너뛰는 것은 생성입니다. ::LootMote::range 밖에서 멈춘
+     * 타이머는 플레이어가 충분히 가까이 걸어온 순간 밀린 것을 통째로 내놓는데, 그것은 원인
+     * 없는 알갱이 뭉치입니다. 대신 0에서 붙들어 두면 사거리에 든 첫 프레임에 모든 아이템이
+     * 한꺼번에 내보내며, 그것은 다시 깜박임입니다.
+     */
+    float mote;
+
     int   active;      /**< 0 once collected. / 획득되면 0이 됩니다. */
 } Pickup;
 

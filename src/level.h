@@ -640,6 +640,54 @@ typedef struct {
  *       어두운 방은 상한이 원인이라는 단서를 주지 않기 때문입니다.
  */
 #define LVL_MAX_LIGHTS  64
+
+/**
+ * @brief How far a sun or sky shadow ray runs, metres.
+ *
+ * ENGLISH: A directional light has no position, so the ray cannot stop at one.
+ * This is "past anything in the level": ::BRUSH_MAX_COORD is 16384 map units
+ * either way, and a level cannot be wider than that, so twice it in metres
+ * clears any geometry a ray could meet. It is a bound rather than a distance.
+ * 한국어: 방향성 광원에는 위치가 없으므로 광선이 어느 점에서도 멈출 수 없습니다. 이것은
+ * "레벨의 무엇보다 먼"이라는 뜻입니다. 거리가 아니라 경계입니다.
+ */
+#define LVL_SUN_REACH 1024.0f
+
+/** @brief How many sky faces one light ray may pass before it gives up. / 광선 하나가 포기하기 전에 지날 수 있는 하늘 면의 수. */
+#define LVL_LIGHT_SKY_PASSES 4
+
+/** @brief How far past a sky face a light ray resumes, metres. Small enough not to skip geometry, large enough not to restart inside what it left. / 광선이 하늘 면을 지나 재개하는 거리(미터). */
+#define LVL_LIGHT_BIAS 0.02f
+
+
+/**
+ * @brief What one unit of ericw's `_sunlight` is worth to ::bake_light.
+ *
+ * ENGLISH
+ * -------
+ * A point light here contributes `att * lam * (power * 0.01)`, and its power
+ * is 100, so a lamp at its centre is worth 1.0 of the shader's 0.32..1.0
+ * illumination range. This puts a Quake sun on the same scale: `_sunlight 120`
+ * -- what `lqdm1` declares, and an ordinary value for an outdoor map -- lands
+ * at 0.47, which is a strong sun that does not on its own saturate a surface
+ * that also has ambient and a key light on it.
+ *
+ * @note Deliberately not tuned per map. A number that has to be chosen again
+ *       for every level is a number nobody can predict, and the whole reason
+ *       to read `_sunlight` at all is that the author already chose one.
+ *
+ * 한국어
+ * ------
+ * 이곳의 점광원은 `att * lam * (power * 0.01)`을 기여하고 그 power는 100이므로, 중심에 선
+ * 램프는 셰이더의 0.32~1.0 조도 범위에서 1.0의 값어치입니다. 이 값은 Quake의 태양을 같은
+ * 눈금에 올립니다. `lqdm1`이 선언하는 `_sunlight 120`은 0.47이 되며, 주변광과 주광이 함께
+ * 얹힌 표면을 혼자서 포화시키지는 않는 강한 태양입니다.
+ *
+ * @note 맵마다 다시 맞추지 않습니다. 레벨마다 다시 골라야 하는 수는 아무도 예측할 수 없는
+ *       수이고, 애초에 `_sunlight`를 읽는 이유가 제작자가 이미 골랐다는 데 있습니다.
+ */
+#define LVL_SUN_SCALE (1.0f / 255.0f)
+
 #define LVL_MAT         16     ///< @brief Maximum length of a material or entity kind name. / 재질 또는 엔티티 종류 이름의 최대 길이.
 
 /**
@@ -648,21 +696,115 @@ typedef struct {
  * ENGLISH
  * -------
  * @note Levels need their own range bound: ::MDL_MAX_RANGES is sized for a
- *       weapon's handful of parts, and a level can reach three materials per
- *       sector. Six materials in the arena already overflowed it, and the
- *       surplus walls were silently dropped. All of this lives in .bss, which
- *       costs nothing on disk.
+ *       weapon's handful of parts, and a level reaches every material its
+ *       author used. All of this lives in .bss, which costs nothing on disk.
+ * @note The number is derived rather than sampled -- see the derivation below.
  *
  * 한국어
  * ------
  * @brief 레벨 지오메트리가 생성할 수 있는 최대 재질 구간 수입니다.
  * @note 레벨에는 자체적인 구간 한계가 필요합니다. ::MDL_MAX_RANGES는 무기의 몇 안
- *       되는 부품을 기준으로 정해진 값인 반면, 레벨은 섹터당 최대 3개의 재질에
- *       도달할 수 있습니다. 아레나의 재질 6개만으로도 이미 한계를 넘어섰고, 초과된
- *       벽은 조용히 누락되었습니다. 이 데이터는 모두 .bss에 위치하므로 디스크
- *       용량을 차지하지 않습니다.
+ *       되는 부품을 기준으로 정해진 값인 반면, 레벨은 제작자가 쓴 모든 재질에
+ *       도달합니다. 이 데이터는 모두 .bss에 위치하므로 디스크 용량을 차지하지
+ *       않습니다.
+ * @note 이 수는 표본이 아니라 유도된 것입니다. 아래의 유도를 참조하십시오.
  */
-#define LVL_MAX_RANGES (LVL_MAX_SECTORS * 3)
+/* WHAT A RUN IS CHANGED UNDER THIS CAP, so the number had to be derived again
+ * from what a run now means.
+ *
+ * THE OLD MEANING. `LVL_MAX_SECTORS * 3` is exact reasoning for the loader it
+ * was written for: a sector has a floor, a ceiling and walls, so three runs per
+ * sector bounds it. A BRUSH level has no sectors. Its run count was the number
+ * of times the material CHANGED as ::brush_geometry walked the brush list,
+ * which is a fact about the order the author happened to build in and was
+ * bounded by nothing in this header.
+ *
+ * WHAT THAT COST, measured by tools/mapcap.c: both imported arenas were already
+ * over. lqdm11 wanted 338 runs and lqdm13 262, against a cap of 192 -- so 734
+ * and 428 runs were MERGED into their neighbours, and brush.c merges rather
+ * than drops on purpose ("the surplus draws with the wrong texture, which is
+ * visible; dropping it would delete the wall, which is not"). Both maps shipped
+ * with surfaces drawing the wrong material and nothing above the diagnostic
+ * counter said so.
+ *
+ * THE NEW MEANING. ::brush_geometry emits one material at a time rather than
+ * one brush at a time, so a call's runs are the DISTINCT materials among the
+ * brushes it was handed, not the changes between them. The same two maps now
+ * want 4 and 6. Measured through the path the game actually builds by:
+ *
+ *     spire       9        atrium      8   (splits)
+ *     glasstower  4        lqdm13      6   (splits)
+ *     lqdm11      4
+ *
+ * WHY IT IS A FORMULA AGAIN, and this time of the right thing.
+ * ::scene_build_level splits a level with a brush door into a static half and a
+ * moving one, and ::level_geometry_part calls ::brush_geometry once per
+ * contiguous STRETCH of brushes on its side of that split -- grouping cannot
+ * cross a call. The demand is therefore (stretches x materials per stretch),
+ * and both factors are bounded: ::LVL_MAX_DOORS doors cut the brush list into
+ * at most `2 * LVL_MAX_DOORS + 1` stretches, and the materials are bounded by
+ * the palette an author picks from -- assets/textures.txt defines 30, and
+ * tools/mapedit.c offers MAX_MATS (32) of them. So 32 is the editor's palette,
+ * and the product is every stretch of a level using every material in it.
+ *
+ * THE ASSUMPTION IS THE MATERIAL LIBRARY, which is worth saying out loud
+ * because a map may name whatever it likes. An unknown name still gets its own
+ * run -- `spire` carries two, see the truncation note in tools/mapcap.c -- so a
+ * map inventing forty names per stretch overflows this however it is sized.
+ * ::DIAG_MAT_RANGES counts exactly that and mapcap fails on it, which is the
+ * difference between a cap that CAN be exceeded and one that IS exceeded
+ * quietly.
+ *
+ * WHAT IT COSTS: 60 bytes a run in ::Scene -- a ::MdlRange and a ::Mat -- so
+ * 62KB of .bss, free on disk and the cheapest thing in the machine. The measured
+ * demand is nine. This cap is not sized to the maps that exist. It is sized so
+ * that no map the other caps admit can reach it.
+ *
+ * *이 상한 아래에서 구간이 무엇인지가 바뀌었으므로*, 수를 구간의 새로운 의미로부터 다시
+ * 유도해야 했습니다.
+ *
+ * *옛 의미.* `LVL_MAX_SECTORS * 3`은 그것이 쓰인 로더에 대해서는 정확한 추론입니다. 섹터에는
+ * 바닥과 천장과 벽이 있으므로 섹터당 세 구간이 그것을 한정합니다. *브러시* 레벨에는 섹터가
+ * 없습니다. 그 구간 수는 ::brush_geometry가 브러시 목록을 훑는 동안 재질이 *바뀌는*
+ * 횟수였으며, 그것은 제작자가 마침 어떤 순서로 만들었는가에 대한 사실이고 이 헤더의 무엇도
+ * 그것을 한정하지 않았습니다.
+ *
+ * *그것이 치른 대가*, tools/mapcap.c의 측정: 가져온 두 아레나가 이미 초과 상태였습니다.
+ * lqdm11은 338구간, lqdm13은 262구간을 원했는데 상한은 192였습니다. 그래서 734건과 428건이
+ * 이웃으로 *병합*되었고, brush.c는 의도적으로 버리지 않고 병합합니다("초과분은 잘못된
+ * 텍스처로 그려지며 그것은 눈에 보입니다. 버리면 벽이 사라지고 그것은 보이지 않습니다").
+ * 두 맵 모두 일부 면이 틀린 재질로 그려지는 채로 출하되었고, 진단 카운터 위의 어느 것도
+ * 그렇다고 말하지 않았습니다.
+ *
+ * *새 의미.* ::brush_geometry는 브러시를 하나씩이 아니라 재질을 하나씩 내보내므로, 한 호출의
+ * 구간 수는 건네받은 브러시들 안의 *서로 다른* 재질의 수이지 그것들 사이의 변화 횟수가
+ * 아닙니다. 같은 두 맵이 이제 4와 6을 원합니다. 게임이 실제로 생성하는 경로로 잰 값:
+ *
+ *     spire       9        atrium      8   (분할)
+ *     glasstower  4        lqdm13      6   (분할)
+ *     lqdm11      4
+ *
+ * *왜 다시 공식인가*, 그리고 이번에는 옳은 것에 대한 공식인가. ::scene_build_level은 브러시
+ * 문이 있는 레벨을 정적인 절반과 움직이는 절반으로 나누고, ::level_geometry_part는 자기 쪽
+ * 브러시의 *연속된 덩어리*마다 ::brush_geometry를 한 번씩 부릅니다. 묶기는 호출을 넘어가지
+ * 못합니다. 따라서 요구량은 (덩어리 수 x 덩어리당 재질 수)이며, 두 인수 모두 한정됩니다.
+ * ::LVL_MAX_DOORS개의 문은 브러시 목록을 많아야 `2 * LVL_MAX_DOORS + 1`개의 덩어리로 자르고,
+ * 재질 쪽은 제작자가 고르는 팔레트가 한정합니다. assets/textures.txt는 30개를 정의하고
+ * tools/mapedit.c는 그중 MAX_MATS(32)개를 제시합니다. 그러므로 32는 에디터의 팔레트이며,
+ * 그 곱은 레벨의 모든 덩어리가 그 안의 모든 재질을 쓰는 경우입니다.
+ *
+ * *가정은 재질 라이브러리이며*, 맵은 무엇이든 이름 댈 수 있으므로 소리 내어 말해 둘 값어치가
+ * 있습니다. 알 수 없는 이름도 자기 구간을 갖습니다. `spire`가 둘을 지니고 있으며
+ * tools/mapcap.c의 잘림 각주를 보십시오. 그러므로 덩어리마다 이름 마흔 개를 지어내는 맵은
+ * 크기를 어떻게 잡든 이것을 넘칩니다. ::DIAG_MAT_RANGES가 바로 그것을 세고 mapcap이 그것으로
+ * 실패하며, 그것이 넘길 *수 있는* 상한과 조용히 넘겨진 상한의 차이입니다.
+ *
+ * *드는 비용:* ::Scene에서 구간당 60바이트(::MdlRange 하나와 ::Mat 하나)이므로 .bss 62KB이며,
+ * 디스크에서 공짜이고 기계에서 가장 싼 것입니다. 측정된 요구량은 아홉입니다. 이 상한은 존재하는
+ * 맵에 맞춰 잡은 것이 아닙니다. 다른 상한들이 허용하는 어떤 맵도 이것에 닿을 수 없도록 잡은
+ * 것입니다.
+ */
+#define LVL_MAX_RANGES ((2 * LVL_MAX_DOORS + 1) * 32)
 
 /**
  * @brief Enough spans for an edge cut into eight pieces.
@@ -1330,6 +1472,67 @@ typedef struct {
     int     n_ents;                       /**< Number of entities in use. / 사용 중인 엔티티의 수. */
     Light   lights[LVL_MAX_LIGHTS];       /**< Point lights. / 점광원. */
     int     n_lights;                     /**< Number of lights in use. / 사용 중인 광원의 수. */
+
+    /**
+     * @brief The direction the sun is IN, unit length, or all zero for none.
+     *
+     * ENGLISH
+     * -------
+     * WHAT AN IMPORTED MAP TURNED OUT TO BE LIT BY. `lqdm1`'s worldspawn
+     * carries `_sun_mangle "136 -73 0"`, `_sunlight "120"` and
+     * `_sunlight2 "50"` -- a directional sun and a sky dome, which is how
+     * ericw-tools lights an outdoor Quake level. Its thirty-two point lamps
+     * are ACCENTS, and measured by tools/lightprobe.c they are exactly that:
+     * of 798,624 vertex-light pairs, 93.3% fail on distance alone and 0.5%
+     * light anything. The room is 82 x 63 x 43 metres and the lamps reach 9 to
+     * 14, so importing only the lamps imported the garnish and left the meal.
+     *
+     * WITHOUT IT EVERY FACE IS ONE FLAT TONE. The shader's key light is a
+     * constant direction, so `dot(n, key)` does not vary across a face; with
+     * no baked light either, a wall is one value from corner to corner and its
+     * neighbour is another, which reads as light that bleeds along one side of
+     * a mesh and stops dead at a seam. That is the reported defect, and it is
+     * not a shading bug -- it is a room with almost no light in it.
+     *
+     * @note Points TOWARD the sun, which is the opposite of the mangle in the
+     *       file: `_sun_mangle` names the direction light TRAVELS. Stored the
+     *       way the bake wants to use it, so the negation happens once at
+     *       parse rather than at every vertex.
+     * @note Zero for a level that declares none, and ::bake_light skips the
+     *       whole term on zero. Every hand-authored level in this project is
+     *       such a level, so this is purely additive: nothing that looked
+     *       right before changes.
+     *
+     * 한국어
+     * ------
+     * @brief 태양이 있는 방향의 단위 벡터. 태양이 없으면 전부 0입니다.
+     *
+     * *가져온 맵이 무엇으로 조명되고 있었는지.* `lqdm1`의 worldspawn은 `_sun_mangle`,
+     * `_sunlight`, `_sunlight2`를 지닙니다. 방향성 태양과 하늘 돔이며, ericw-tools가 야외
+     * Quake 레벨을 조명하는 방식입니다. 그 맵의 점광원 서른둘은 *장식*이고, tools/lightprobe.c로
+     * 재어 보면 정확히 그렇습니다. 정점-광원 쌍 798,624개 중 93.3%가 거리에서만 걸러지고 0.5%만
+     * 무언가를 밝힙니다. 방은 82 x 63 x 43미터이고 램프는 9~14미터를 미치므로, 램프만 가져온
+     * 것은 곁들임만 가져오고 본식을 두고 온 것입니다.
+     *
+     * *그것이 없으면 모든 면이 하나의 평평한 톤입니다.* 셰이더의 주광은 고정된 방향이므로
+     * `dot(n, key)`는 면 안에서 변하지 않습니다. 구워진 빛도 없으면 벽은 모서리에서 모서리까지
+     * 한 값이고 이웃 벽은 다른 한 값이며, 그것이 빛이 메쉬의 한쪽을 따라 번지다 이음매에서 뚝
+     * 끊기는 것으로 읽힙니다. 그것이 보고된 결함이며, 셰이딩 버그가 아니라 *빛이 거의 없는 방*
+     * 입니다.
+     */
+    float   sun[3];
+
+    /**
+     * @brief Sun brightness, and the sky dome's, as `_sunlight` / `_sunlight2`.
+     *
+     * ENGLISH: Kept in the file's own numbers and scaled at the bake, so the
+     * one place that decides what a Quake brightness is worth here is the one
+     * place that uses it. 0 disables each independently -- a map may declare a
+     * sun and no sky, and `lqdm1` declares both.
+     * 한국어: 파일 자신의 수 그대로 두고 베이크에서 환산합니다. Quake의 밝기가 이곳에서
+     * 얼마인지를 정하는 곳이 그것을 쓰는 곳 하나가 되게 하기 위함입니다. 각각 0이면 꺼집니다.
+     */
+    short   sun_power, sky_power;
     DoorDef doors[LVL_MAX_DOORS];         /**< Moving sectors, as authored. / 제작된 그대로의 이동 섹터. */
     int     n_doors;                      /**< Number of doors in use. / 사용 중인 문의 수. */
 
@@ -2263,6 +2466,14 @@ int level_trace(const Level *l, v3 origin, v3 dir, float max_dist,
  *          보지 못하며, 이를 AI 버그로 오해하기 쉽습니다.
  */
 int level_blocked(const Level *l, v3 origin, v3 dir, float max_dist);
+
+/* Does the sun this level declares reach `from`? 0 when it declares none.
+   `from` must already be lifted off the surface it belongs to.
+   Exists for tools/lightprobe.c: the walk that answers this passes THROUGH sky
+   brushes, and a test that replicated it would carry the same mistakes.
+   이 레벨이 선언한 태양이 `from`에 닿습니까. 선언하지 않았다면 0입니다. 이 답을 내는 걸음은
+   하늘 브러시를 통과하며, 그것을 복제한 테스트는 같은 실수를 그대로 가질 것입니다. */
+int level_sun_reaches(const Level *l, v3 from);
 
 /**
  * @brief Returns the sector governing a point.

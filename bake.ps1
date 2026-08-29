@@ -22,7 +22,9 @@ $sets = @(
     @{ Name = 'ASSET_SOUNDS';  File = 'assets\sounds.txt'   },
     @{ Name = 'ASSET_LEVELS';  File = 'assets\levels.txt'   },
     @{ Name = 'ASSET_EFFECTS'; File = 'assets\effects.txt'  },
-    @{ Name = 'ASSET_MUSIC';   File = 'assets\music\music.txt' }
+    @{ Name = 'ASSET_MUSIC';   File = 'assets\music\music.txt' },
+    @{ Name = 'ASSET_LOOT';    File = 'assets\loot.txt'    },
+    @{ Name = 'ASSET_STORY';   File = 'assets\story.txt'   }
 )
 
 # Wavefront .obj -> the integer mesh text the game parses.
@@ -401,512 +403,57 @@ foreach ($s in $sets) {
     }
 }
 
-# PNG -> palette-indexed RLE text.
+# PNG -> the binary, unchanged.
 #
-# Aseprite is the authoring tool, and its output is not what should be shipped
-# for the same reason Blender's is not: a 32x32 sprite is 4096 bytes of raw
-# RGBA, and shipping the PNG instead would mean carrying a PNG decoder --
-# roughly 15KB of inflate and filter reconstruction -- to save 3KB of pixels.
-# Converting here means the game contains no image decoder at all.
+# THIS USED TO QUANTISE. Every drawing was cut to fifteen colours per subject
+# by median cut and run-length packed into text, and the note that stood here
+# justified it like this: shipping the PNG would mean carrying a decoder,
+# "roughly 15KB of inflate and filter reconstruction, to save 3KB of pixels."
 #
-# The format is a stream of directives, read in one forward pass:
+# Both halves of that were wrong, and it took measuring to see it.
 #
-#   pal <n> <rrggbb> ...     palette for the sprites that FOLLOW it
-#   s <name> <w> <h>         begin a sprite, w*h being its own size
-#   o <x> <y>                where it sits in its cell  (optional)
-#   m <x> <y>                muzzle, relative to the drawing  (optional)
-#   r <char pairs>           RLE: one char run (1..63), one char index
-#   p <char pairs>           packed: three 4-bit indices per two chars
+# The inflate was already here. gen_assets.h deflates every asset and
+# src/inflate.c expands them, so DEFLATE -- which is the whole of PNG's
+# compression -- was paid for before a single sprite was drawn. What a decoder
+# actually adds over that is src/png.c: a chunk walk and five predictors.
 #
-# `pal` appearing more than once is not an error and is how each subject gets
-# its own sixteen colours: the decoder replaces the current palette wherever it
-# meets one. Without `o`, a drawing is centred in its cell and sits on the
-# floor, which is what everything did before cropping existed.
+# And it was not 3KB. Measured across the 53 drawings, in the binary after
+# deflate: the quantised form is 95,291 bytes and the PNGs are 212,269. So the
+# lossy step was buying 117KB -- 7.9% of a floppy with 71% of it unspent --
+# and paying for it with a brute cut from 707 colours to 15.
 #
-# Both data opcodes use a 64-character printable alphabet, so every byte of
-# .rdata carries six bits of picture instead of a hex digit's four.
+# It also cost the one thing no measurement shows: sprites were the last
+# authored asset that could not hot reload, because what the game held was not
+# the drawing but a derivative only this script knew how to produce. Now the
+# file on disk and the bytes in the binary are the same format.
 #
-# Two encodings because neither wins everywhere. RLE exploits the horizontal
-# runs that separate pixel art from a photograph, and on flat art it is a
-# large win -- a measured 32x32 went from 4096 bytes raw to 227. But it costs
-# two characters per RUN, so heavy dithering, which breaks runs down to one or
-# two pixels, makes it worse than storing the indices directly: the same size
-# sprite drawn with dithering came out 1048 as RLE and 1024 flat. Both are
-# encoded and the smaller is kept, per sprite.
+# The stream is one record per drawing, and the length is what separates them
+# rather than a delimiter a PNG could contain -- the same shape the .map blob
+# uses, and for the same reason:
 #
-# ONE PALETTE PER SUBJECT, CHOSEN RATHER THAN COLLECTED.
+#   s <name> <bytes> <that many bytes of PNG>
 #
-# Both halves of that replaced something that only worked by accident.
+# 이것은 예전에 양자화했습니다. 모든 그림이 median cut으로 주제당 15색으로 잘려 런렝스로
+# 텍스트에 담겼고, 이 자리에 있던 설명은 이렇게 정당화했습니다. PNG를 그대로 실으면 디코더를
+# 져야 하는데 "대략 15KB의 inflate와 필터 복원을 들여 3KB의 픽셀을 아끼는 일"이라고.
 #
-# The palette used to be filled first-come: walk the pixels in filename order,
-# take each new colour until sixteen were spent, snap everything after that to
-# the nearest. On four flat placeholder guns it was fine. On real art it is
-# not a quantiser at all -- it is "whatever brute0.png happened to contain",
-# and the first import produced four greens, eleven near-identical greys and
-# black. The pink creature, the gold one and the shotgun all snapped to grey,
-# because nothing red or gold ever got a slot. Median cut instead: split the
-# colour cloud on its widest axis at the median until there are as many boxes
-# as slots, and average each box. Frequency decides what gets resolution, so
-# an unusual colour that covers a lot of pixels keeps its entry.
+# 그 두 절반이 모두 틀렸고, 알아보는 데 측정이 필요했습니다.
 #
-# And the palette is per SUBJECT rather than per set. Sixteen colours across a
-# green soldier, silver armour, pink flesh, a gold floater and a grey gun is
-# three colours each, which no amount of clever selection rescues. The
-# original argument for sharing was that a common palette makes a set look
-# like one game -- true, and it is why this held while the art was
-# placeholders, but the art now comes FROM one game and arrives sharing Doom's
-# palette already. Paying for coherence that the source material provides for
-# free costs about three quarters of the colour resolution.
+# inflate는 이미 이곳에 있었습니다. gen_assets.h가 모든 에셋을 deflate하고 src/inflate.c가
+# 펼치므로, PNG 압축의 전부인 DEFLATE는 스프라이트가 한 장 그려지기도 전에 이미 지불되어
+# 있었습니다. 디코더가 그 위에 실제로 더하는 것은 src/png.c, 즉 청크 훑기와 예측기 다섯입니다.
 #
-# The decoder needed nothing for this: it reads `pal` as a directive in a
-# single forward pass and replaces the current palette wherever it appears, so
-# a palette line per group is a bake-side change alone.
+# 그리고 3KB가 아니었습니다. 53장에 대해 deflate 이후 바이너리에서 재면 양자화된 형태가
+# 95,291바이트이고 PNG가 212,269바이트입니다. 즉 손실 단계가 사들이고 있던 것은 117KB이며,
+# 그것은 71%가 비어 있는 플로피의 7.9%였고, 그 대가로 707색짜리 브루트를 15색으로 잘랐습니다.
 #
-# Aseprite can export an indexed PNG, but this does not require it -- any RGB
-# image is quantised to the nearest entry, so a sprite drawn without thinking
-# about the palette still lands in one.
+# 어떤 측정에도 나타나지 않는 것 하나도 함께 치렀습니다. 스프라이트는 핫 리로드가 되지 않는
+# 마지막 저작 에셋이었습니다. 게임이 들고 있던 것이 그림이 아니라 이 스크립트만이 만들 줄
+# 아는 파생물이었기 때문입니다. 이제 디스크의 파일과 바이너리의 바이트가 같은 형식입니다.
+#
+# 스트림은 그림마다 레코드 하나이며, 그것들을 가르는 것은 PNG가 담을 수도 있는 구분자가
+# 아니라 *길이*입니다. .map 블롭과 같은 형태이고 이유도 같습니다.
 
-# Read a PNG once into a flat array of packed RGB, -1 where transparent.
-# Separated from encoding because the palette cannot be chosen until every
-# sprite in the group has been seen, and reading each file twice would double
-# the slowest part of the bake.
-function Get-SpritePixels([string]$path) {
-    Add-Type -AssemblyName System.Drawing
-    $bmp = New-Object System.Drawing.Bitmap $path
-    try {
-        $w = $bmp.Width; $h = $bmp.Height
-        $px = New-Object int[] ($w * $h)
-        $muzX = -1; $muzY = -1
-        for ($y = 0; $y -lt $h; $y++) {
-            for ($x = 0; $x -lt $w; $x++) {
-                $c = $bmp.GetPixel($x, $y)
-                if ($c.A -ge 128 -and $c.R -gt 240 -and $c.G -lt 16 -and $c.B -gt 240) {
-                    $muzX = $x; $muzY = $y
-                    $px[$y * $w + $x] = -1
-                } elseif ($c.A -lt 128) {
-                    $px[$y * $w + $x] = -1
-                } else {
-                    # [int] casts are load-bearing: -shl keeps the type of its
-                    # LEFT operand, and Color.R is a Byte, so [byte]200 -shl 16
-                    # is 0 rather than 13107200. Without these every colour
-                    # packs down to its blue channel alone, and the palette
-                    # comes out as a ramp of pure blues.
-                    # [int] 캐스팅은 반드시 필요합니다. -shl은 *왼쪽* 피연산자의 타입을
-                    # 유지하는데 Color.R은 Byte이므로 [byte]200 -shl 16은 13107200이
-                    # 아니라 0입니다. 이것이 없으면 모든 색이 파랑 채널만 남고, 팔레트는
-                    # 순수한 파랑의 계조로 나옵니다.
-                    $px[$y * $w + $x] = (([int]$c.R) -shl 16) -bor
-                                        (([int]$c.G) -shl 8)  -bor ([int]$c.B)
-                }
-            }
-        }
-        return [pscustomobject]@{ W = $w; H = $h; Px = $px; MuzX = $muzX; MuzY = $muzY }
-    } finally {
-        $bmp.Dispose()
-    }
-}
-
-# Median cut over every opaque pixel of a group, to $slots colours.
-function Select-Palette($frames, [int]$slots) {
-    $hist = @{}
-    foreach ($f in $frames) {
-        foreach ($v in $f.Px) {
-            if ($v -ge 0) { $hist[$v] = 1 + $hist[$v] }
-        }
-    }
-    if ($hist.Count -eq 0) { return @() }
-
-    # One box holding every distinct colour, then split until we run out of
-    # slots or of boxes worth splitting.
-    $boxes = @(, @($hist.Keys))
-    while ($boxes.Count -lt $slots) {
-        # Split the box with the widest spread in any single channel: that is
-        # where two colours are being forced to share one entry.
-        $bi = -1; $bchan = 0; $bspread = 0
-        for ($i = 0; $i -lt $boxes.Count; $i++) {
-            if ($boxes[$i].Count -lt 2) { continue }
-            for ($k = 0; $k -lt 3; $k++) {
-                $sh = 16 - 8 * $k
-                $lo = 255; $hi = 0
-                foreach ($v in $boxes[$i]) {
-                    $c = ($v -shr $sh) -band 255
-                    if ($c -lt $lo) { $lo = $c }
-                    if ($c -gt $hi) { $hi = $c }
-                }
-                if (($hi - $lo) -gt $bspread) { $bspread = $hi - $lo; $bi = $i; $bchan = $k }
-            }
-        }
-        if ($bi -lt 0) { break }
-
-        $sh = 16 - 8 * $bchan
-        $sorted = @($boxes[$bi] | Sort-Object { ($_ -shr $sh) -band 255 })
-        # Split at the median PIXEL, not the median colour, so a hundred
-        # near-identical shades of one colour do not outvote a region that
-        # actually covers the sprite.
-        $total = 0
-        foreach ($v in $sorted) { $total += $hist[$v] }
-        $half = [int]($total / 2)
-        $acc = 0; $cut = 1
-        for ($i = 0; $i -lt $sorted.Count - 1; $i++) {
-            $acc += $hist[$sorted[$i]]
-            if ($acc -ge $half) { $cut = $i + 1; break }
-            $cut = $i + 2
-        }
-        # BOTH HALVES MUST BE NON-EMPTY, and the median pixel does not
-        # guarantee it: the scan stops one short of the end, so when the last
-        # colour alone holds more than half the pixels -- a wall's background
-        # shade, every time -- the cut lands on Count. Then the "first half" is
-        # the whole box and the "second" is PowerShell's reversed out-of-range
-        # slice, so the box is split into itself. It has the widest spread
-        # still, so the next pass picks it again, and the loop spends every
-        # remaining slot re-splitting one box while the other colours never get
-        # an entry.
-        #
-        # Measured on wall_brick: 21 distinct colours went in and 8 came out,
-        # at 15 slots and at 255 alike. This predates the wide palette -- `q`
-        # only made it visible, by asking for 255 entries and getting 255
-        # copies of eight colours.
-        #
-        # 두 조각 모두 비어 있지 않아야 하는데, 중앙 픽셀은 그것을 보장하지 않습니다.
-        # 주사가 끝에서 하나 앞서 멈추므로, 마지막 색 하나가 픽셀의 절반을 넘게 차지하면
-        # -- 벽의 배경색은 늘 그렇습니다 -- cut이 Count에 놓입니다. 그러면 "앞 조각"은
-        # 상자 전체이고 "뒤 조각"은 PowerShell이 뒤집어 주는 범위 밖 슬라이스라, 상자가
-        # 자기 자신으로 쪼개집니다. 여전히 폭이 가장 넓으니 다음 회차가 같은 상자를 다시
-        # 고르고, 루프는 남은 슬롯을 전부 한 상자를 다시 쪼개는 데 쓰며 나머지 색은
-        # 끝내 자리를 받지 못합니다.
-        #
-        # wall_brick 실측: 21색이 들어가 8색이 나왔습니다. 슬롯 15에서도 255에서도
-        # 같았습니다. 이것은 넓은 팔레트보다 앞선 결함이며, `q`는 255칸을 요청했다가
-        # 여덟 색의 사본 255개를 받아 오면서 그것을 드러냈을 뿐입니다.
-        if ($cut -ge $sorted.Count) { $cut = $sorted.Count - 1 }
-        $new = @()
-        for ($i = 0; $i -lt $boxes.Count; $i++) {
-            if ($i -eq $bi) { $new += , @($sorted[0..($cut - 1)]); $new += , @($sorted[$cut..($sorted.Count - 1)]) }
-            else { $new += , $boxes[$i] }
-        }
-        $boxes = $new
-    }
-
-    # Each entry is its box's pixel-weighted average, so it lands where the
-    # pixels are rather than in the middle of the box's extremes.
-    $out = @()
-    foreach ($b in $boxes) {
-        $n = 0; $r = 0.0; $g = 0.0; $bl = 0.0
-        foreach ($v in $b) {
-            $c = $hist[$v]; $n += $c
-            $r  += (($v -shr 16) -band 255) * $c
-            $g  += (($v -shr 8)  -band 255) * $c
-            $bl += ( $v          -band 255) * $c
-        }
-        if ($n -eq 0) { continue }
-        $out += ('{0:x2}{1:x2}{2:x2}' -f [int][math]::Round($r / $n),
-                                         [int][math]::Round($g / $n),
-                                         [int][math]::Round($bl / $n))
-    }
-    return $out
-}
-
-function ConvertFrom-Png([string]$path, [string]$name, [System.Collections.ArrayList]$pal) {
-    Add-Type -AssemblyName System.Drawing
-    $bmp = New-Object System.Drawing.Bitmap $path
-    try {
-        $w = $bmp.Width; $h = $bmp.Height
-
-        # Index every pixel against the shared palette, growing it as new
-        # colours appear and snapping to the nearest entry once it is full.
-        $idx = New-Object int[] ($w * $h)
-        $muzX = -1; $muzY = -1
-        for ($y = 0; $y -lt $h; $y++) {
-            for ($x = 0; $x -lt $w; $x++) {
-                $c = $bmp.GetPixel($x, $y)
-
-                # MAGENTA IS A MARKER, NOT A COLOUR: it says "the muzzle is
-                # here" and is never drawn.
-                #
-                # A weapon sprite has to say where its flash and tracers come
-                # from, and the alternative is a constant in weapon.c that
-                # somebody edits to match the art. This project already learned
-                # what that costs: placing the shotgun by editing constants,
-                # rebuilding and squinting at screenshots failed three times in
-                # a row, which is why modeledit puts a draggable muzzle on the
-                # 3D model. A marker pixel is the same idea for a drawing --
-                # redraw the gun and the flash follows it, because the muzzle IS
-                # part of the drawing.
-                #
-                # FF00FF because no one paints with it by accident, and it is
-                # the convention half of games have used for exactly this.
-                #
-                # 마젠타는 색이 아니라 *표식*입니다. "총구가 여기 있다"는 뜻이며 결코
-                # 그려지지 않습니다. 무기 스프라이트는 화염과 예광탄이 어디서 나오는지
-                # 말해야 하는데, 대안은 누군가 아트에 맞춰 수정하는 weapon.c의 상수입니다.
-                # 이 프로젝트는 그 대가를 이미 배웠습니다. 상수를 고치고 다시 빌드해
-                # 스크린샷을 들여다보는 방식으로 샷건을 배치하려다 세 번 연속 실패했고,
-                # 그래서 modeledit이 3D 모델에 끌 수 있는 총구를 둡니다. 표식 픽셀은
-                # 그림에 대해 같은 발상입니다. 총을 다시 그리면 화염이 따라옵니다. 총구가
-                # 그림의 *일부*이기 때문입니다.
-                if ($c.A -ge 128 -and $c.R -gt 240 -and $c.G -lt 16 -and $c.B -gt 240) {
-                    $muzX = $x; $muzY = $y
-                    $idx[$y * $w + $x] = 0
-                    continue
-                }
-
-                # Fully transparent pixels are all the same pixel regardless
-                # of what RGB Aseprite left under them, and they must share
-                # index 0 so the decoder can treat it as "draw nothing".
-                if ($c.A -lt 128) { $idx[$y * $w + $x] = 0; continue }
-
-                $key = '{0:x2}{1:x2}{2:x2}' -f $c.R, $c.G, $c.B
-                $at  = $pal.IndexOf($key)
-                if ($at -lt 0) {
-                    if ($pal.Count -lt 16) {
-                        $at = $pal.Add($key)
-                    } else {
-                        # Full: snap to the nearest entry. Squared distance in
-                        # RGB is not perceptually ideal, but at 16 colours the
-                        # entries are far apart and a fancier metric would pick
-                        # the same one.
-                        $best = 1; $bestD = [int]::MaxValue
-                        for ($p = 1; $p -lt $pal.Count; $p++) {
-                            $pr = [Convert]::ToInt32($pal[$p].Substring(0,2),16)
-                            $pg = [Convert]::ToInt32($pal[$p].Substring(2,2),16)
-                            $pb = [Convert]::ToInt32($pal[$p].Substring(4,2),16)
-                            $d  = ($pr-$c.R)*($pr-$c.R) + ($pg-$c.G)*($pg-$c.G) + ($pb-$c.B)*($pb-$c.B)
-                            if ($d -lt $bestD) { $bestD = $d; $best = $p }
-                        }
-                        $at = $best
-                    }
-                }
-                $idx[$y * $w + $x] = $at
-            }
-        }
-
-        # CROP TO THE INK BEFORE ENCODING ANYTHING.
-        #
-        # A drawing is placed in a cell whose size is set by the largest frame,
-        # so most frames carry a margin of nothing. RLE barely notices -- a run
-        # of transparency is two characters however long it is -- but the
-        # packed opcode spends two characters per three pixels whether they are
-        # picture or margin, and packing is what dense art chooses. Measured
-        # over the imported set: 13% overall, 34% on the frames that pack, 0%
-        # on the ones that already RLE. The margins are also partly an artefact
-        # of upscaling a 41x57 drawing to fill a 64x96 cell, which is storing a
-        # result this project would rather not store at all.
-        #
-        # The offset is emitted as its own line so the default -- centre it,
-        # sit it on the floor -- still applies to anything without one.
-        #
-        # 무엇이든 인코딩하기 전에 잉크에 맞춰 잘라 냅니다. 그림은 가장 큰 프레임이 크기를
-        # 정한 셀에 놓이므로 대부분의 프레임은 빈 여백을 함께 나릅니다. RLE는 이를 거의
-        # 개의치 않지만(투명한 런은 길이와 무관하게 두 글자입니다) packed opcode는 그것이
-        # 그림이든 여백이든 픽셀 셋마다 두 글자를 씁니다. 그리고 조밀한 아트가 고르는 것이
-        # 바로 패킹입니다. 이식한 세트에서 측정한 값은 전체 13%, 패킹하는 프레임에서 34%,
-        # 이미 RLE인 프레임에서 0%입니다.
-        $ix0 = $w; $iy0 = $h; $ix1 = -1; $iy1 = -1
-        for ($y = 0; $y -lt $h; $y++) {
-            for ($x = 0; $x -lt $w; $x++) {
-                if ($idx[$y * $w + $x] -ne 0) {
-                    if ($x -lt $ix0) { $ix0 = $x }
-                    if ($x -gt $ix1) { $ix1 = $x }
-                    if ($y -lt $iy0) { $iy0 = $y }
-                    if ($y -gt $iy1) { $iy1 = $y }
-                }
-            }
-        }
-        if ($ix1 -lt 0) { $ix0 = 0; $iy0 = 0; $ix1 = 0; $iy1 = 0 }
-
-        $cellW = $w; $cellH = $h
-        $iw = $ix1 - $ix0 + 1; $ih = $iy1 - $iy0 + 1
-        if ($iw -ne $w -or $ih -ne $h) {
-            $crop = New-Object int[] ($iw * $ih)
-            for ($y = 0; $y -lt $ih; $y++) {
-                for ($x = 0; $x -lt $iw; $x++) {
-                    $crop[$y * $iw + $x] = $idx[($y + $iy0) * $w + ($x + $ix0)]
-                }
-            }
-            $idx = $crop
-            # The muzzle was recorded in cell coordinates; move it with the
-            # pixels or the flash stays where the margin used to be.
-            if ($muzX -ge 0) { $muzX -= $ix0; $muzY -= $iy0 }
-            $w = $iw; $h = $ih
-        }
-
-        # Two encodings, and the smaller one wins per sprite.
-        #
-        # RLE is the obvious choice for pixel art and is usually right, but it
-        # is not always: it stores two characters per RUN, so it only beats a
-        # packed index stream when runs average longer than three pixels. Heavy
-        # dithering -- which is a legitimate pixel-art technique, and one this
-        # game's own renderer leans on -- breaks runs down to 1-2 px and makes
-        # RLE actively worse than storing the indices directly. Measured on
-        # two test sprites: a flat one averaged 15.3 px per run, a dithered
-        # one 2.1.
-        #
-        # Rather than forcing a choice on the artist, encode both and keep the
-        # shorter. The decoder reads whichever opcode it finds, so a sprite
-        # that changes character between edits changes encoding with it and
-        # nobody has to think about which to use.
-        #
-        # BOTH now spend a full printable character rather than a hex digit.
-        # The first version used hex, which throws away half of every byte: a
-        # character carries six usable bits and a hex digit uses four. Worse,
-        # spending one digit on a run length capped a run at 15 pixels, so on
-        # flat-shaded art it was the CAP breaking the runs up rather than the
-        # picture. Measured on viewmodel-sized gun art, lifting the cap to 63
-        # and packing the indices was 2.2x smaller on flat art and 1.2x on
-        # dithered -- the same drawing, the same palette, purely the encoding:
-        #
-        #     128x96 flat     2,098 -> 946 bytes
-        #     160x120 flat    3,224 -> 1,298
-        #     128x96 dithered 6,272 -> 5,332
-        #
-        # 64 characters that need no escaping inside a C string literal: no
-        # backslash, no double quote, and no '?' (which can start a trigraph).
-        $A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-'
-
-        # Run-length: one character for the run, one for the palette index.
-        $rle = New-Object System.Text.StringBuilder
-        $i = 0
-        while ($i -lt $idx.Length) {
-            $j = $i
-            while ($j -lt $idx.Length -and $idx[$j] -eq $idx[$i] -and ($j - $i) -lt 63) { $j++ }
-            [void]$rle.Append($A[$j - $i]).Append($A[$idx[$i]])
-            $i = $j
-        }
-
-        # Packed: three 4-bit indices (12 bits) in two 6-bit characters, so 1.5
-        # pixels per byte where a hex digit managed 1. This is what wins when
-        # the art is noisy enough that runs stop paying for themselves.
-        # $p0/$p1/$p2 rather than $a/$b/$c, and that is not a style choice.
-        # PowerShell variable names are CASE-INSENSITIVE, so `$a = $idx[$i]`
-        # overwrites $A -- the alphabet this loop is about to index. $A then
-        # holds an integer, indexing an integer returns the integer, and every
-        # pixel encodes as the character '0'. It went unseen because a packed
-        # sprite had never actually been produced: all the placeholder art was
-        # flat, RLE won every time, and the first drawing dense enough to
-        # choose packing was the first to be corrupted by it.
-        # $a/$b/$c가 아니라 $p0/$p1/$p2인 것은 취향의 문제가 아닙니다. PowerShell의
-        # 변수명은 *대소문자를 구분하지 않으므로* `$a = $idx[$i]`는 이 루프가 곧
-        # 인덱싱할 알파벳인 $A를 덮어씁니다. 그러면 $A는 정수가 되고, 정수를 인덱싱하면
-        # 그 정수가 돌아오며, 모든 픽셀이 문자 '0'으로 인코딩됩니다. 드러나지 않았던
-        # 이유는 packed 스프라이트가 실제로 만들어진 적이 없었기 때문입니다. 플레이스홀더
-        # 아트가 전부 평면이라 매번 RLE가 이겼고, 패킹을 고를 만큼 조밀한 첫 그림이
-        # 곧 이 버그에 당한 첫 그림이었습니다.
-        $packed = New-Object System.Text.StringBuilder
-        for ($i = 0; $i -lt $idx.Length; $i += 3) {
-            $p0 = $idx[$i]
-            $p1 = if ($i + 1 -lt $idx.Length) { $idx[$i + 1] } else { 0 }
-            $p2 = if ($i + 2 -lt $idx.Length) { $idx[$i + 2] } else { 0 }
-            $v = ($p0 -shl 8) -bor ($p1 -shl 4) -bor $p2
-            [void]$packed.Append($A[$v -shr 6]).Append($A[$v -band 63])
-        }
-
-        # Wide: one 8-bit index in two characters, for a drawing whose palette
-        # will not fit in four bits. Neither of the two forms above can name a
-        # colour past 15, so this is not a contest they enter -- a group with a
-        # wide palette gets `q` and that is the whole rule.
-        #
-        # Four of the twelve bits go unused, deliberately. Packing tighter
-        # would save characters that deflate was going to remove anyway:
-        # measured over the eight walls, `q` costs 13KB more than `p` after
-        # compression while carrying every colour the artist drew, and a denser
-        # form would recover a fraction of that in exchange for arithmetic
-        # nobody can read.
-        #
-        # 넓은 형식입니다. 팔레트가 4비트에 들어가지 않는 그림을 위해 8비트 인덱스 하나를
-        # 두 문자에 담습니다. 위의 두 형식은 15를 넘는 색을 지목할 수 없으므로 애초에
-        # 경쟁 상대가 아닙니다. 팔레트가 넓은 그룹은 `q`를 쓰며 그것이 규칙의 전부입니다.
-        #
-        # 12비트 중 4비트를 일부러 쓰지 않습니다. 더 조밀하게 담아 봐야 deflate가 어차피
-        # 없앨 문자를 아끼는 것입니다. 벽 여덟 장으로 실측하면 `q`는 압축 후 `p`보다 13KB
-        # 더 들면서 화가가 그린 모든 색을 나르며, 더 조밀한 형식은 아무도 읽을 수 없는
-        # 산술과 맞바꿔 그 일부를 되찾을 뿐입니다.
-        $wide = New-Object System.Text.StringBuilder
-        foreach ($ix in $idx) {
-            [void]$wide.Append($A[$ix -shr 6]).Append($A[$ix -band 63])
-        }
-
-        if ($pal.Count -gt 16) {
-            $op = 'q'; $data = $wide.ToString()
-        } elseif ($rle.Length -le $packed.Length) {
-            $op = 'r'; $data = $rle.ToString()
-        } else {
-            $op = 'p'; $data = $packed.ToString()
-        }
-
-        # DECODE WHAT WAS JUST ENCODED AND COMPARE. sprtest exercises the C
-        # decoder against hand-written text, which proves the decoder reads the
-        # format -- it cannot prove this writes it. The two halves live in
-        # different languages and only meet in the built game, so nothing was
-        # checking the one direction that matters, and the $a/$A collision
-        # above rode along for as long as no sprite chose packing. A round trip
-        # here costs one pass over the indices and fails the build instead.
-        # 방금 인코딩한 것을 되돌려 디코딩해 비교합니다. sprtest는 손으로 쓴 텍스트로 C
-        # 디코더를 검사하므로 디코더가 포맷을 *읽는다*는 것은 증명하지만, 이쪽이 포맷을
-        # *쓴다*는 것은 증명할 수 없습니다. 두 절반은 서로 다른 언어에 살고 빌드된
-        # 게임에서만 만나므로 정작 중요한 방향을 아무도 검사하지 않았고, 위의 $a/$A
-        # 충돌은 어떤 스프라이트도 패킹을 고르지 않는 동안 계속 묻어갔습니다. 여기서의
-        # 왕복 검사는 인덱스를 한 번 훑는 비용으로 대신 빌드를 실패시킵니다.
-        $back = New-Object int[] $idx.Length
-        $n = 0
-        if ($op -eq 'r') {
-            for ($k = 0; $k -lt $data.Length - 1; $k += 2) {
-                $run = $A.IndexOf($data[$k]); $val = $A.IndexOf($data[$k + 1])
-                for ($qq = 0; $qq -lt $run -and $n -lt $back.Length; $qq++) { $back[$n++] = $val }
-            }
-        } elseif ($op -eq 'q') {
-            for ($k = 0; $k -lt $data.Length - 1; $k += 2) {
-                if ($n -lt $back.Length) {
-                    $back[$n++] = $A.IndexOf($data[$k]) * 64 + $A.IndexOf($data[$k + 1])
-                }
-            }
-        } else {
-            for ($k = 0; $k -lt $data.Length - 1; $k += 2) {
-                $v = $A.IndexOf($data[$k]) * 64 + $A.IndexOf($data[$k + 1])
-                foreach ($sh2 in 8, 4, 0) {
-                    if ($n -lt $back.Length) { $back[$n++] = ($v -shr $sh2) -band 15 }
-                }
-            }
-        }
-        if ($n -ne $idx.Length) {
-            throw ("$name : '$op' encoding produced $n pixels for a $w x $h sprite " +
-                   "($($idx.Length) expected). bake.ps1 and sprite.c disagree about the format.")
-        }
-        for ($k = 0; $k -lt $idx.Length; $k++) {
-            if ($back[$k] -ne $idx[$k]) {
-                throw ("$name : '$op' encoding does not round-trip. Pixel $k " +
-                       "($($k % $w),$([int]($k / $w))) went in as index $($idx[$k]) and " +
-                       "came back as $($back[$k]). bake.ps1 is writing something " +
-                       "sprite.c will not read back as the same picture.")
-            }
-        }
-
-        # The muzzle marker, when the drawing carried one. Emitted BEFORE the
-        # data line so the decoder has it while the sprite is still the current
-        # one -- the parser is a single forward pass and never looks back.
-        # 그림에 표식이 있었다면 총구를 기록합니다. 디코더가 해당 스프라이트를 처리하는
-        # 동안 값을 갖도록 데이터 줄보다 *앞에* 놓습니다. 파서는 단방향 1회 통과이며
-        # 되돌아보지 않습니다.
-        $muz = if ($muzX -ge 0) { "m $muzX $muzY`n" } else { '' }
-
-        # Where the cropped drawing goes in its cell. Omitted when the drawing
-        # still fills the cell, so the decoder's default placement -- centred,
-        # sitting on the floor -- keeps serving everything that never needed
-        # an offset, and an older sprite text stays readable.
-        # 잘라 낸 그림이 셀의 어디에 놓이는지입니다. 그림이 여전히 셀을 가득 채우면
-        # 생략하므로, 오프셋이 필요 없던 모든 것에는 디코더의 기본 배치가 그대로
-        # 적용되고 이전의 스프라이트 텍스트도 계속 읽힙니다.
-        $orig = if ($w -ne $cellW -or $h -ne $cellH) { "o $ix0 $iy0`n" } else { '' }
-
-        return [pscustomobject]@{
-            Text = "s $name $w $h`n$orig$muz$op $data`n"
-            W    = $cellW
-            H    = $cellH
-            Enc  = $op
-        }
-    } finally {
-        $bmp.Dispose()
-    }
-}
 
 # Every .obj in assets\ becomes one entry in a single mesh library, so the
 # game has one text blob to parse rather than a file table to manage.
@@ -938,7 +485,6 @@ if ($escMesh.Length -eq 0) {
 }
 [void]$sb.AppendLine('    ;')
 [void]$sb.AppendLine()
-
 # --- attribution, checked rather than remembered ---------------------------
 #
 # The artwork this project uses comes from Freedoom, whose 3-clause BSD licence
@@ -973,19 +519,111 @@ if ($escMesh.Length -eq 0) {
 # 정확히 같은 조건으로 요구되며, assets\sprites\만 지켜보는 가드는 아트가 그것이 다루는
 # 유일한 대상이 아니게 되는 순간 조용해졌을 것입니다. 규칙이 아니라 사례에 대고 검사를
 # 쓰는 일의 전형적인 실패입니다.
-$freedoomAssets = @()
-foreach ($d in @('assets\sprites', 'assets\sounds')) {
-    $dir = Join-Path $root $d
-    if (Test-Path $dir) {
-        $freedoomAssets += @(Get-ChildItem $dir -Include *.png, *.wav -File `
-                             -ErrorAction SilentlyContinue |
-                             Where-Object { $_.Name -notlike '_*' })
+# THE TABLE, and the loop under it, replace a check written against one work.
+# The comment above already names the failure that shape has -- "writing a check
+# against the example rather than against the rule" -- and a second work is what
+# turns that from a prediction into a diff. Everything inside the loop is the
+# Freedoom guard unchanged; only the three things that were Freedoom's are now
+# the row's: what makes it apply, which licence backs it, and what to say.
+#
+# 표와 그 아래의 루프가, 저작물 하나에 대고 쓰인 검사를 대체합니다. 위의 주석이 그 형태의
+# 실패를 이미 이름 짓고 있으며("규칙이 아니라 사례에 대고 검사를 쓰는 일"), 두 번째 저작물이
+# 그것을 예측에서 diff로 바꿉니다. 루프 안의 모든 것은 그대로의 Freedoom 가드이고, Freedoom의
+# 것이었던 셋만이 이제 행의 것입니다. 무엇이 이 검사를 적용시키는가, 어떤 라이선스가 뒤에
+# 있는가, 그리고 무엇이라고 말하는가입니다.
+$licensedWorks = @(
+    @{
+        Name       = 'Freedoom'
+        Where      = 'assets\sprites\, assets\sounds\'
+        Dirs       = @('assets\sprites', 'assets\sounds')
+        Include    = @('*.png', '*.wav')
+        Licence    = (Join-Path $root 'docs\LICENSE-Freedoom.txt')
+        LicenceRel = 'docs/LICENSE-Freedoom.txt'
+        Restore    = 'https://github.com/freedoom/freedoom/blob/master/COPYING.adoc'
     }
-}
-if ($freedoomAssets.Count -gt 0) {
-        $licPath = Join-Path $root 'docs\LICENSE-Freedoom.txt'
+    # The imported arena. Keyed on the .map being present rather than on its
+    # name: a second LibreQuake map would owe the same notice, and a guard that
+    # watched for `lqdm13` would go quiet the day somebody imported another one.
+    # What marks a file as theirs is the line import-librequake.py writes into
+    # it, which is also the line that cannot survive somebody replacing the map
+    # with one of their own.
+    # 가져온 아레나입니다. 이름이 아니라 .map의 존재를 기준으로 삼습니다. 두 번째 LibreQuake
+    # 맵도 같은 고지를 빚지며, `lqdm13`을 지켜보는 가드는 누군가 다른 것을 가져오는 날
+    # 조용해집니다. 어떤 파일이 그들의 것인지 표시하는 것은 import-librequake.py가 그 안에 쓰는
+    # 줄이고, 그 줄은 누군가 그 맵을 자기 것으로 바꾸면 살아남지 못하는 줄이기도 합니다.
+    @{
+        Name       = 'LibreQuake'
+        Where      = 'assets\maps\'
+        Dirs       = @('assets\maps')
+        Include    = @('*.map')
+        Marker     = 'from LibreQuake'
+        Licence    = (Join-Path $root 'docs\LICENSE-LibreQuake.txt')
+        LicenceRel = 'docs/LICENSE-LibreQuake.txt'
+        Restore    = 'https://github.com/lavenderdotpet/LibreQuake/blob/main/docs/COPYING'
+    }
+)
+
+foreach ($work in $licensedWorks) {
+    $found = @()
+    foreach ($d in $work.Dirs) {
+        $dir = Join-Path $root $d
+        if (-not (Test-Path $dir)) { continue }
+
+        # THE `\*` IS LOAD-BEARING AND ITS ABSENCE MADE THIS GUARD INERT.
+        # -Include filters the items a path EXPANDS to, and a bare directory
+        # expands to the directory. Without -Recurse or a trailing wildcard it
+        # matches nothing at all -- silently, with no error and no warning, so
+        # `$found.Count` was 0 and the whole check `continue`d past every file
+        # it was written to watch.
+        #
+        # Measured on this tree at the moment it was found: 52 PNGs under
+        # assets\sprites\ and the guard saw none of them. README.md said the
+        # check had been "verified by removing the line and watching the build
+        # stop", and that had stopped being true. A guard with false positives
+        # gets switched off by a person; a guard with false negatives switches
+        # itself off and keeps printing that everything is fine.
+        #
+        # It is checked now rather than believed: the mutation below the table
+        # -- shorten either notice, run the bake, watch it throw -- is the test,
+        # and it is written down because a guard nobody can see fail is a guard
+        # nobody can see pass either.
+        #
+        # `\*`는 구조적으로 필요하며, 그것의 부재가 이 가드를 무력하게 만들었습니다.
+        # -Include는 경로가 *전개된* 항목들을 거르는데, 맨 디렉토리는 그 디렉토리로 전개됩니다.
+        # -Recurse도 끝의 와일드카드도 없으면 아무것도 일치하지 않습니다. 조용히, 오류도 경고도
+        # 없이 그렇게 되므로 `$found.Count`는 0이었고, 검사 전체가 자신이 지켜보려고 쓰인 모든
+        # 파일을 지나쳐 `continue`했습니다.
+        #
+        # 발견된 시점에 이 트리에서 측정한 값: assets\sprites\ 아래 PNG 52개, 그리고 가드는 그중
+        # 하나도 보지 못했습니다. README.md는 이 검사가 "줄을 지우고 빌드가 멈추는 것을 보아
+        # 확인했다"고 적고 있었고, 그것은 참이기를 그만둔 상태였습니다. 거짓 양성을 내는 가드는
+        # 사람이 끄지만, 거짓 음성을 내는 가드는 스스로 꺼지고 계속 이상 없다고 인쇄합니다.
+        #
+        # 이제는 믿지 않고 검사합니다. 표 아래의 변이(둘 중 아무 고지나 줄이고 베이크를 돌려
+        # 예외가 나는지 보기)가 그 검사이며, 적어 두는 이유는 실패하는 것을 아무도 볼 수 없는
+        # 가드는 통과하는 것도 아무도 볼 수 없기 때문입니다.
+        $hits = @(Get-ChildItem (Join-Path $dir '*') -Include $work.Include -File `
+                  -ErrorAction SilentlyContinue |
+                  Where-Object { $_.Name -notlike '_*' })
+        # A marker narrows "every file of this type" to "the files that came
+        # from this work". Without one, every .map in the tree would be claimed
+        # by LibreQuake -- including the three this project authored.
+        # 표식이 "이 종류의 모든 파일"을 "이 저작물에서 온 파일"로 좁힙니다. 표식이 없으면
+        # 트리의 모든 .map이 LibreQuake의 것으로 주장되며, 이 프로젝트가 직접 만든 셋도
+        # 그렇게 됩니다.
+        if ($work.Marker) {
+            $hits = @($hits | Where-Object {
+                (Get-Content $_.FullName -TotalCount 12 -ErrorAction SilentlyContinue) `
+                    -join "`n" -match [regex]::Escape($work.Marker)
+            })
+        }
+        $found += $hits
+    }
+    if ($found.Count -eq 0) { continue }
+
+        $licPath = $work.Licence
         if (-not (Test-Path $licPath)) {
-            throw ("Freedoom assets are present but docs/LICENSE-Freedoom.txt is " +
+            throw ("$($work.Name) assets are present but $($work.LicenceRel) is " +
                    "missing. The licence text must be kept with the project.")
         }
 
@@ -1019,7 +657,7 @@ if ($freedoomAssets.Count -gt 0) {
                                 'static const char \*NOTICE\[\] = \{(.*?)\n\s*\};',
                                 'Singleline')
         if (-not $block.Success) {
-            throw ("Freedoom artwork is present in assets\sprites\ but the NOTICE " +
+            throw ("$($work.Name) assets are present ($($work.Where)) but the NOTICE " +
                    "table has gone from src/scene.c. That table is the attribution " +
                    "the BSD licence requires to ship with the binary.")
         }
@@ -1048,9 +686,9 @@ if ($freedoomAssets.Count -gt 0) {
         $licSrc = Get-Content $licPath -Raw -Encoding UTF8
         $span = [regex]::Match($licSrc, 'Copyright .*?SUCH DAMAGE\.', 'Singleline')
         if (-not $span.Success) {
-            throw ("docs/LICENSE-Freedoom.txt no longer contains the BSD text this " +
+            throw ("$($work.LicenceRel) no longer contains the BSD text this " +
                    "build checks the in-game notice against. Restore it from " +
-                   "https://github.com/freedoom/freedoom/blob/master/COPYING.adoc")
+                   "$($work.Restore)")
         }
 
         $want = Normalise-Licence $span.Value
@@ -1082,10 +720,10 @@ if ($freedoomAssets.Count -gt 0) {
                     }
                 }
             }
-            throw ("Freedoom artwork is present in assets\sprites\ but the NOTICE " +
+            throw ("$($work.Name) assets are present ($($work.Where)) but the NOTICE " +
                    "table in src/scene.c is not the licence verbatim: $detail. " +
                    "The BSD licence requires this text to be reproduced with the " +
-                   "binary, and this game IS the binary -- see docs/LICENSE-Freedoom.txt.")
+                   "binary, and this game IS the binary -- see $($work.LicenceRel).")
         }
 }
 
@@ -1099,102 +737,193 @@ if ($freedoomAssets.Count -gt 0) {
 # frames of one creature are the thing that must agree about colour. Anything
 # whose name carries no frame number is its own group, which is the harmless
 # reading for a one-off.
-$spriteText = ''
-$spriteDir  = Join-Path $root 'assets\sprites'
+# --- editor previews are not sprites ----------------------------------------
+#
+# tools\matdump.c renders the materials the fragment shader computes and writes
+# one PNG each into assets\sprites\, because that is the directory TrenchBroom's
+# material browser reads and a face's material name IS its file name -- which is
+# exactly why the `_` escape below cannot be used for them. A preview called
+# `_pwindow` would put `_pwindow` on the face and resolve to nothing in game.
+#
+# They must not be baked. A procedural material has no pixels the game ever
+# reads: tex.c's mat_make calls tex_make only when a recipe has no `proc`, so a
+# PNG named after one is a preview and nothing else. Baking it would spend the
+# floppy on an image nothing draws -- the contact-sheet mistake below in a new
+# costume, and at 256x256 apiece these are 1.9MB of it, larger than the budget.
+#
+# THE RULE IS BY NAME, NOT BY PREFIX. `p*` would be one character and would
+# silently swallow a future sprite that happens to start with p. Asking the
+# recipe text which materials carry `proc` is the same question matdump.c asks
+# to decide what to write, so the two cannot drift apart -- and if a recipe ever
+# stops being procedural, both change together without either being edited.
+#
+# 에디터 미리보기는 스프라이트가 아닙니다.
+#
+# tools\matdump.c는 프래그먼트 셰이더가 계산하는 재질을 렌더링해 PNG를 하나씩
+# assets\sprites\에 씁니다. 그곳이 TrenchBroom의 재질 브라우저가 읽는 디렉터리이고 면의
+# 재질 이름이 곧 *파일 이름*이기 때문이며, 바로 그래서 아래의 `_` 회피책을 쓸 수 없습니다.
+# `_pwindow`라는 미리보기는 면에 `_pwindow`를 얹고 게임에서는 아무것도 해석되지 않습니다.
+#
+# 이들은 구워져서는 안 됩니다. 절차적 재질에는 게임이 읽는 픽셀이 없습니다. tex.c의
+# mat_make는 레시피에 `proc`가 없을 때에만 tex_make를 부르므로, 그 이름의 PNG는 미리보기일
+# 뿐입니다. 그것을 구우면 아무도 그리지 않는 이미지에 플로피를 쓰게 됩니다. 아래의 대조 시트
+# 사고가 옷만 갈아입은 것이며, 256x256짜리 열 장이면 1.9MB로 예산 자체보다 큽니다.
+#
+# *규칙은 접두사가 아니라 이름으로 판단합니다.* `p*`는 한 글자면 되지만 앞으로 p로 시작하는
+# 스프라이트를 조용히 삼킵니다. 어느 재질이 `proc`를 지녔는지 레시피 텍스트에 묻는 것은
+# matdump.c가 무엇을 쓸지 정할 때 던지는 질문과 같으므로 둘이 어긋날 수 없습니다. 그리고
+# 어떤 레시피가 절차적이기를 그만두면 어느 쪽도 편집되지 않은 채 함께 바뀝니다.
+function Get-ProceduralMaterials([string]$recipePath) {
+    $names = @{}
+    if (-not (Test-Path $recipePath)) { return $names }
+    $cur = $null
+    foreach ($line in Get-Content $recipePath) {
+        $line = ($line -replace '#.*$', '').Trim()
+        if (-not $line) { continue }
+        $tok = $line -split '\s+'
+        if ($tok[0] -eq 't' -and $tok.Count -ge 2) {
+            $cur = $tok[1]
+        } elseif ($tok[0] -eq 'proc' -and $cur) {
+            $names[$cur] = $true
+            $cur = $null
+        }
+    }
+    return $names
+}
+$procMats = Get-ProceduralMaterials (Join-Path $root 'assets\textures.txt')
+
+$spriteBytes = New-Object System.Collections.Generic.List[byte]
+$spriteDir   = Join-Path $root 'assets\sprites'
+$skipped     = 0
 
 if (Test-Path $spriteDir) {
-    $groups = [ordered]@{}
-    # A LEADING UNDERSCORE MEANS "NOT A SPRITE", and it is enforced here rather
-    # than left to the decoder. sprite.c already ignores a name that matches no
-    # monster and no weapon, which sounds like enough and is not: ignoring it
-    # happens at DECODE time, so the drawing is still quantised, encoded and
-    # carried in .rdata for the life of the binary. The importer's --preview
-    # contact sheet landed here once and cost 411KB of a 1.44MB budget while
-    # never being drawn a single time.
+    # NOT RECURSIVE, and that is load-bearing rather than incidental:
+    # assets\sprites\.freedoom-walls holds the source patches import-walls.py
+    # fetched, and TrenchBroom's material browser -- which DOES recurse -- has
+    # already put one of those on a wall once. Baking them would make the
+    # mistake permanent instead of merely visible.
+    # 재귀하지 않으며, 그것은 부수적인 것이 아니라 구조적입니다. assets\sprites\.freedoom-walls는
+    # import-walls.py가 받아 둔 원본 패치를 담고 있고, *재귀하는* TrenchBroom의 재질 브라우저는
+    # 이미 한 번 그중 하나를 벽에 올린 적이 있습니다. 그것들을 구우면 그 실수가 눈에 보이는
+    # 데서 그치지 않고 영구해집니다.
     #
-    # 앞의 밑줄은 "스프라이트가 아님"을 뜻하며, 디코더에 맡기지 않고 이곳에서 강제합니다.
-    # sprite.c는 이미 어떤 몬스터에도 무기에도 해당하지 않는 이름을 무시하는데, 그것으로
-    # 충분해 보이지만 아닙니다. 무시는 *디코드* 시점에 일어나므로 그림은 여전히
-    # 양자화되고 인코딩되어 바이너리가 사는 내내 .rdata에 실려 다닙니다. 임포터의
-    # --preview 대조 시트가 한 번 이곳에 떨어져, 단 한 번도 그려지지 않으면서 1.44MB
-    # 예산 중 411KB를 차지했습니다.
+    # A LEADING UNDERSCORE STILL MEANS "NOT A SPRITE". sprite.c ignores a name
+    # that matches nothing, but ignoring happens at DECODE time -- the drawing
+    # would still ride in .rdata for the life of the binary. The importer's
+    # --preview contact sheet landed here once and cost 411KB of 1.44MB while
+    # never being drawn.
+    # 앞의 밑줄은 여전히 "스프라이트가 아님"입니다. sprite.c는 아무것과도 맞지 않는 이름을
+    # 무시하지만 무시는 *디코드* 시점에 일어나므로, 그림은 바이너리가 사는 내내 .rdata에
+    # 실려 다닙니다. 임포터의 --preview 대조 시트가 한 번 이곳에 떨어져, 한 번도 그려지지
+    # 않으면서 1.44MB 중 411KB를 차지했습니다.
     foreach ($png in (Get-ChildItem $spriteDir -Filter *.png |
                       Where-Object { $_.Name -notlike '_*' } | Sort-Object Name)) {
         $name = [System.IO.Path]::GetFileNameWithoutExtension($png.Name)
-        $subject = $name -replace '\d+$', ''
-        if (-not $subject) { $subject = $name }
-        if (-not $groups.Contains($subject)) { $groups[$subject] = @() }
-        $groups[$subject] += , [pscustomobject]@{ Png = $png; Name = $name }
-    }
+        if ($procMats.ContainsKey($name)) { $skipped++; continue }
 
-    foreach ($subject in $groups.Keys) {
-        $members = $groups[$subject]
+        $raw = [IO.File]::ReadAllBytes($png.FullName)
 
-        # Index 0 is reserved for transparent and is never drawn, which is why
-        # the colour stored for it is arbitrary -- so median cut gets 15.
-        $frames = @()
-        foreach ($m in $members) { $frames += , (Get-SpritePixels $m.Png.FullName) }
+        # The dimensions come out of IHDR rather than out of a Bitmap: this
+        # runs once per drawing and only the size report reads the answer, so
+        # loading GDI+ for it would be the slowest part of the bake serving the
+        # least important line of its output.
+        # 크기는 Bitmap이 아니라 IHDR에서 나옵니다. 그림마다 한 번 실행되고 그 답을 읽는 것은
+        # 크기 보고뿐이므로, 그것을 위해 GDI+를 띄우면 베이크에서 가장 느린 부분이 출력에서
+        # 가장 덜 중요한 줄을 섬기게 됩니다.
+        $w = ($raw[16] -shl 24) -bor ($raw[17] -shl 16) -bor ($raw[18] -shl 8) -bor $raw[19]
+        $h = ($raw[20] -shl 24) -bor ($raw[21] -shl 16) -bor ($raw[22] -shl 8) -bor $raw[23]
 
-        # THE PALETTE BUDGET, PER GROUP. Fifteen was the codec: three 4-bit
-        # indices in two characters left no room for a sixteenth colour. The
-        # `q` form lifted that, and the walls are what it was lifted for --
-        # measured, the eight of them carry 15, 15, 15, 21, 22, 40, 41 and 51
-        # distinct colours, so five were being crushed to fit.
-        #
-        # The creatures and pickups stay at fifteen, and that is a decision
-        # rather than an oversight: they are dithered and drawn at 64x96, no
-        # measurement here says what widening them would cost or buy, and
-        # changing their bytes without one would be changing them on a hunch.
-        #
-        # Median cut splits DISTINCT COLOURS, so a budget larger than a
-        # drawing's palette costs nothing and the cut becomes lossless -- which
-        # is why the three walls that already fit keep the narrow `p` encoding.
-        # Their bytes still moved: the cut fix above changed which colours a
-        # 15-slot palette holds, for every drawing in the project.
-        #
-        # 그룹별 팔레트 예산입니다. 15는 코덱이었습니다. 4비트 인덱스 셋을 두 문자에 담으면
-        # 열여섯 번째 색이 들어갈 자리가 없었습니다. `q` 형식이 그것을 풀었고, 그것을 푼
-        # 대상이 벽입니다. 실측하면 여덟 장이 각각 15, 15, 15, 21, 22, 40, 41, 51색을
-        # 지니므로 다섯 장이 깎이고 있었습니다.
-        #
-        # 생물과 아이템은 15에 남으며 이는 실수가 아니라 결정입니다. 그것들은 디더링되어
-        # 64x96으로 그려지고, 넓히는 비용과 이득을 말해 주는 측정이 이곳에 없으며, 측정
-        # 없이 바이트를 바꾸는 것은 짐작으로 바꾸는 일입니다.
-        #
-        # median cut은 *distinct 색*을 나누므로 그림의 팔레트보다 큰 예산은 비용이 0이고
-        # 그 컷은 무손실이 됩니다. 이미 들어맞는 벽 세 장이 좁은 `p` 인코딩을 유지하는
-        # 이유입니다. 다만 그 바이트는 움직였습니다. 위의 cut 수정이 15칸 팔레트가 담는
-        # 색을 프로젝트의 모든 그림에 대해 바꾸었기 때문입니다.
-        $slots = if ($subject -like 'wall_*') { 255 } else { 15 }
-
-        $palette = New-Object System.Collections.ArrayList
-        [void]$palette.Add('000000')
-        foreach ($c in (Select-Palette $frames $slots)) { [void]$palette.Add($c) }
-        # A group with fewer than 15 distinct colours leaves the palette short.
-        # Pad it: the encoder snaps to the NEAREST entry over the whole array,
-        # and an entry that was never filled would be black and would pull dark
-        # pixels away from the colour median cut actually chose for them.
-        # Only up to sixteen. Past that the count is carried by `pal` itself and
-        # there is no unfilled entry to guard against -- padding a wide palette
-        # would spend seven characters an entry saying nothing.
-        # 16까지만 채웁니다. 그 너머는 개수를 `pal` 자신이 나르므로 지켜야 할 빈 항목이
-        # 없으며, 넓은 팔레트를 채우는 것은 항목마다 일곱 문자를 들여 아무 말도 하지 않는
-        # 일입니다.
-        while ($palette.Count -lt 16) { [void]$palette.Add($palette[$palette.Count - 1]) }
-
-        $spriteText += "pal $($palette.Count) $($palette -join ' ')`n"
-
-        foreach ($m in $members) {
-            $conv = ConvertFrom-Png $m.Png.FullName $m.Name $palette
-            $spriteText += $conv.Text
-            $report += [pscustomobject]@{
-                Asset  = "sprites\$($m.Png.Name)"
-                Source = $m.Png.Length
-                Baked  = $conv.Text.Length
-                Saved  = "$([math]::Round((1 - $conv.Text.Length / ($conv.W * $conv.H * 4)) * 100))% vs raw ($($conv.W)x$($conv.H) $($conv.Enc))"
+        # THE NAME MUST BE ASCII AND MUST NOT CONTAIN A SPACE, because the
+        # header is read with the same tokeniser every other asset uses and a
+        # space inside the name would shift the length field one token to the
+        # left -- which would then be read as the name, and the record after it
+        # would begin in the middle of a picture.
+        # 이름은 ASCII여야 하고 공백을 담아서는 안 됩니다. 헤더를 다른 모든 에셋과 같은
+        # 토크나이저로 읽는데, 이름 안의 공백은 길이 필드를 토큰 하나만큼 왼쪽으로 밀고, 그러면
+        # 그것이 이름으로 읽히며 다음 레코드가 그림 한가운데에서 시작합니다.
+        foreach ($ch in $name.ToCharArray()) {
+            if ([int]$ch -gt 127 -or $ch -eq ' ') {
+                throw ("$($png.Name): a sprite name must be ASCII with no spaces.")
             }
         }
+
+        $spriteBytes.AddRange([Text.Encoding]::ASCII.GetBytes("s $name $($raw.Length) "))
+        $spriteBytes.AddRange($raw)
+        $spriteBytes.Add([byte]32)
+
+        $report += [pscustomobject]@{
+            Asset  = "sprites\$($png.Name)"
+            Source = $png.Length
+            Baked  = $raw.Length
+            Saved  = "$([math]::Round((1 - $raw.Length / ($w * $h * 4)) * 100))% vs raw (${w}x${h} png)"
+        }
     }
+}
+
+
+# --- the reference tools\pngtest.c checks the game's decoder against ---------
+#
+# TWO DECODERS THAT AGREE ARE NOT AGREEING BY ACCIDENT. src\png.c reads these
+# files at run time; GDI+ reads them here. They share no code and no author, so
+# a filter reconstructed against the wrong neighbour, a row read one byte off or
+# a Paeth predictor that picks the second-nearest shows up as a disagreement --
+# and every one of those failures otherwise produces an IMAGE, which is a thing
+# that never announces it is wrong.
+#
+# A running sum rather than a hash: what it has to catch is a decoder that is
+# mistaken, not one that is hostile, and a sum says which drawing differs
+# without needing a second table to say what the right answer was.
+#
+# LockBits rather than GetPixel, which the palette pass above uses. Half a
+# million calls across the fifty-three drawings is most of a minute in
+# PowerShell; one locked scan is a few milliseconds, and this file exists to be
+# regenerated on every build rather than to be worth waiting for.
+#
+# 두 디코더가 일치한다면 그것은 우연이 아닙니다. src\png.c가 실행 시점에 이 파일들을 읽고,
+# 이곳에서는 GDI+가 읽습니다. 코드도 저자도 공유하지 않으므로, 잘못된 이웃에 대고 복원된
+# 필터나 한 바이트 어긋나게 읽힌 행이나 두 번째로 가까운 것을 고르는 Paeth 예측기가 불일치로
+# 드러납니다. 그리고 그 실패들은 하나같이 *이미지*를 만들어 내는데, 이미지는 자기가 틀렸다고
+# 결코 알리지 않습니다.
+#
+# 해시가 아니라 단순 합인 이유는, 잡아야 할 것이 적대적인 디코더가 아니라 틀린 디코더이기
+# 때문입니다. 합은 어느 그림이 다른지를 말해 주며, 정답이 무엇이었는지 적어 둘 두 번째 표를
+# 필요로 하지 않습니다.
+$refDir = Join-Path $root 'build'
+if (-not (Test-Path $refDir)) { [void](New-Item -ItemType Directory -Path $refDir) }
+$refLines = New-Object System.Collections.ArrayList
+Add-Type -AssemblyName System.Drawing
+foreach ($png in (Get-ChildItem $spriteDir -Filter *.png |
+                  Where-Object { $_.Name -notlike '_*' } | Sort-Object Name)) {
+    $nm = [System.IO.Path]::GetFileNameWithoutExtension($png.Name)
+    if ($procMats.ContainsKey($nm)) { continue }
+
+    $bmp = New-Object System.Drawing.Bitmap $png.FullName
+    try {
+        $rect = New-Object System.Drawing.Rectangle 0, 0, $bmp.Width, $bmp.Height
+        $data = $bmp.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::ReadOnly,
+                              [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+        try {
+            $bytes = New-Object byte[] ($data.Stride * $bmp.Height)
+            [System.Runtime.InteropServices.Marshal]::Copy($data.Scan0, $bytes, 0, $bytes.Length)
+            # Stride can exceed width*4 with padding, so the sum walks rows
+            # rather than the whole buffer -- padding bytes are not pixels and
+            # the game's decoder never sees any.
+            # Stride는 패딩 때문에 width*4보다 클 수 있으므로 버퍼 전체가 아니라 행 단위로
+            # 더합니다. 패딩 바이트는 픽셀이 아니며 게임의 디코더는 그것을 보지 못합니다.
+            [long]$sum = 0
+            for ($y = 0; $y -lt $bmp.Height; $y++) {
+                $o = $y * $data.Stride
+                for ($x = 0; $x -lt ($bmp.Width * 4); $x++) { $sum += $bytes[$o + $x] }
+            }
+        } finally { $bmp.UnlockBits($data) }
+        [void]$refLines.Add("assets/sprites/$($png.Name) $($bmp.Width) $($bmp.Height) $sum")
+    } finally { $bmp.Dispose() }
+}
+Set-Content (Join-Path $refDir 'png_ref.txt') ($refLines -join "`n") -Encoding ASCII
+Write-Host ("  {0} drawing(s) -> build\png_ref.txt for tools\pngtest.c" -f $refLines.Count) -ForegroundColor DarkGray
+
+if ($skipped) {
+    Write-Host ("  {0} editor preview(s) in assets\sprites\ skipped -- procedural materials, not baked" -f $skipped) -ForegroundColor DarkGray
 }
 
 # --- .map levels -----------------------------------------------------------
@@ -1263,9 +992,53 @@ function ConvertTo-MapText([string]$text) {
 }
 
 $mapDir  = Join-Path $root 'assets\maps'
+
+# --- maps that stay on disk and out of the binary ---------------------------
+#
+# THE GAME SHIPS ONE MAP. `assets\maps\` held four, and three of them were
+# unreachable: `spire` was a room kept alive to be the thing the title menu is
+# drawn over, `glasstower` was the boss arena before `lqdm1` replaced it, and
+# `atrium` sat on a campaign chain nothing walks any more. Two were deleted.
+#
+# ATRIUM WAS NOT, AND THIS LIST IS WHY. It is not a level, it is a FIXTURE:
+# tools/tracetest.c makes 108 assertions against its geometry -- a balcony at
+# engine (-5,-5) whose top is at 3m over a floor at 0, which is "the pair of
+# heights a sector could not hold" and the reason brush levels exist at all --
+# plus its doors, triggers, keys, hazards and entities. No shipped map has that
+# combination and lqdm1 has none of it: two doors, no triggers, no hazards, no
+# keys. Deleting the file would delete the test.
+#
+# So it stays a file and stops being an asset. The authoring build reads
+# `assets\maps\<name>.map` from disk (see data.c's HOT_RELOAD half), which is
+# the build every tool is, so the fixture is exactly as available as it was.
+# The shipped build reads the blob this script writes, and the blob is the
+# thing that has one map in it.
+#
+# @note A name here is a name `data_map` cannot answer in a RELEASE build. That
+#       is the point, and it is also the trap: a test that wants a map both
+#       from disk and from the bake -- maptest's file-versus-baked comparison
+#       is the one -- has to name a map that is baked.
+#
+# *게임은 맵 하나를 출하합니다.* `assets\maps\`에는 넷이 있었고 그중 셋이 도달 불가능했습니다.
+# 둘은 삭제했습니다.
+#
+# *atrium은 삭제하지 않았고, 이 목록이 그 이유입니다.* 그것은 레벨이 아니라 *픽스처*입니다.
+# tools/tracetest.c가 그 지오메트리에 대해 108개의 단언을 합니다. 엔진 좌표 (-5,-5)의 발코니,
+# 바닥 0 위 3m의 윗면 -- "섹터가 담을 수 없었던 높이 한 쌍"이며 브러시 레벨이 존재하는 이유
+# 자체입니다 -- 그리고 그 문·트리거·열쇠·해저드·엔티티들입니다. 출하되는 어떤 맵도 그 조합을
+# 갖지 않으며 lqdm1은 그중 무엇도 갖지 않습니다. 파일을 지우는 것은 그 검사를 지우는 일입니다.
+#
+# 그래서 파일로 남고 에셋이기를 그만둡니다. 저작 빌드는 `assets\maps\<name>.map`을 디스크에서
+# 읽으며(data.c의 HOT_RELOAD 절반) 모든 도구가 그 빌드이므로, 픽스처는 이전과 똑같이 쓸 수
+# 있습니다. 출하 빌드는 이 스크립트가 쓰는 블롭을 읽고, 맵 하나가 든 것은 그 블롭입니다.
+$mapsNotBaked = @('atrium')
+
 $mapText = New-Object Text.StringBuilder
 if (Test-Path $mapDir) {
     foreach ($f in (Get-ChildItem $mapDir -Filter *.map | Sort-Object Name)) {
+        if ($mapsNotBaked -contains [IO.Path]::GetFileNameWithoutExtension($f.Name)) {
+            continue
+        }
         $rawMap = Get-Content $f.FullName -Raw
         $body   = ConvertTo-MapText $rawMap
         $nm     = [IO.Path]::GetFileNameWithoutExtension($f.Name)
@@ -1338,19 +1111,43 @@ if ($escMap.Length -eq 0) {
 [void]$sb.AppendLine('    ;')
 [void]$sb.AppendLine()
 
-$escSpr = $spriteText.Replace('\', '\\').Replace('"', '\"').
-                      Replace("`r", '').Replace("`n", ' ')
-[void]$sb.AppendLine('static const char ASSET_SPRITES[] =')
-if ($escSpr.Length -eq 0) {
-    [void]$sb.AppendLine('    ""')
-} else {
-    for ($i = 0; $i -lt $escSpr.Length; $i += 76) {
-        $len = [Math]::Min(76, $escSpr.Length - $i)
-        [void]$sb.AppendLine("    `"$($escSpr.Substring($i, $len))`"")
-    }
+# ASSET_SPRITES IS BYTES, NOT TEXT, so it is emitted here rather than left to
+# Compress-AssetArrays below. That function recovers a C string literal and
+# calls ASCII.GetBytes on it, which turns every byte over 127 into '?' -- and a
+# PNG is mostly bytes over 127. The deflate is the same call it makes; what is
+# skipped is the round trip through a string that cannot hold this.
+#
+# It is still deflated even though PNG already is. The gain is small and real
+# (the record headers and the runs of similar drawings compress), and a second
+# container shape in gen_assets.h would cost data.c a second code path to read
+# one asset differently from all the others.
+#
+# ASSET_SPRITES는 텍스트가 아니라 바이트이므로, 아래의 Compress-AssetArrays에 맡기지 않고
+# 이곳에서 내보냅니다. 그 함수는 C 문자열 리터럴을 복원해 ASCII.GetBytes를 부르는데, 그것은
+# 127을 넘는 모든 바이트를 '?'로 바꿉니다. 그리고 PNG는 대부분 127을 넘는 바이트입니다.
+# deflate는 그 함수가 하는 것과 같은 호출이며, 건너뛰는 것은 이것을 담을 수 없는 문자열을
+# 거치는 왕복뿐입니다.
+#
+# PNG가 이미 압축되어 있는데도 여전히 deflate합니다. 이득은 작지만 실재하고(레코드 헤더와
+# 비슷한 그림들의 연속이 압축됩니다), gen_assets.h에 두 번째 컨테이너 형태를 두면 data.c가
+# 에셋 하나를 나머지 전부와 다르게 읽는 두 번째 경로를 지게 됩니다.
+$sprRaw = $spriteBytes.ToArray()
+$ms = New-Object IO.MemoryStream
+$ds = New-Object IO.Compression.DeflateStream($ms, [IO.Compression.CompressionLevel]::Optimal)
+$ds.Write($sprRaw, 0, $sprRaw.Length); $ds.Dispose()
+$sprLz = $ms.ToArray()
+
+[void]$sb.AppendLine("/* ASSET_SPRITES: $($sprRaw.Length) bytes of PNG records, deflated to $($sprLz.Length). */")
+[void]$sb.AppendLine("#define ASSET_SPRITES_RAW $($sprRaw.Length)")
+[void]$sb.AppendLine('static const unsigned char ASSET_SPRITES_LZ[] = {')
+for ($i = 0; $i -lt $sprLz.Length; $i += 20) {
+    $n = [Math]::Min(20, $sprLz.Length - $i)
+    $row = ($sprLz[$i..($i + $n - 1)] | ForEach-Object { '0x{0:x2}' -f $_ }) -join ','
+    [void]$sb.AppendLine("    $row,")
 }
-[void]$sb.AppendLine('    ;')
+[void]$sb.AppendLine('};')
 [void]$sb.AppendLine()
+
 
 [void]$sb.AppendLine('#endif')
 

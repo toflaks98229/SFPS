@@ -17,6 +17,14 @@
 
 @PointClass size(-12 -12 -12, 12 12 12) color(120 255 120) = info_exit : "Standing here ends the level. Where it goes is worldspawn's `next`."[]
 
+// The shrine a cleared wave pays at, when assets/loot.txt says `at altar`.
+// Place one where you want the reward to land and the players to have to go;
+// place none and the reward falls at their feet the way it always did. A map
+// may carry several -- the nearest to the player is the one that is used, so
+// an arena with two arenas in it works without anything being told which is
+// which.
+@PointClass size(-16 -16 0, 16 16 8) color(255 210 120) = info_altar : "Where a cleared wave's reward lands. Needs `at altar` in loot.txt. Nearest one to the player wins." []
+
 @PointClass size(-12 -12 -12, 12 12 12) color(120 200 255) = info_push : "A jump pad. Fires once per landing, while grounded."
 [
     speed(integer) : "Launch speed, units per second" : 416
@@ -102,10 +110,66 @@
 
 @baseclass size(-16 -16 -32, 16 16 32) color(220 60 60) = Monster []
 
-@PointClass base(Monster) = monster_imp : "Imp. The baseline: quick enough, dies to one close shotgun." []
+@PointClass base(Monster) = monster_water_spirit : "Water spirit. The baseline. Holds mid range and sprays a cone of bolts rather than closing." []
+// The name this slot had before the water spirit took it. Kept because two
+// shipped maps place it and a rename must not empty them; new maps should use
+// monster_water_spirit.
+@PointClass base(Monster) = monster_imp : "DEPRECATED alias for monster_water_spirit. Placing it still works." []
 @PointClass base(Monster) = monster_brute : "Brute. A wall with health; slow, and hits hard." []
 @PointClass base(Monster) = monster_hound : "Hound. Fast and weak. Punishes standing still." []
 @PointClass base(Monster) = monster_caster : "Caster. Keeps its distance and throws bolts." []
+
+// A monster that HOLDS THE HEIGHT IT IS PLACED AT, and the reason it needs a
+// box of its own rather than the one above.
+//
+// For everything else the origin's Z is only where the search for a floor
+// begins -- level.c calls it that, and the monster settles onto whatever is
+// under the marker. So the Monster box hangs 32 below the origin: snap to the
+// grid and the drawn feet sit on the floor the monster will actually find.
+//
+// A flyer does not do that. make_monster keeps `from_y` when the kind carries
+// MON_FLIES, so the origin IS the feet and the box has to sit ON the origin
+// instead of below it. With the Monster box a wraith would draw one metre
+// lower than it flies -- an editor that disagrees with the game about where a
+// thing is, which is worse than no box at all.
+//
+// 13 x 50 units is the wraith's own 0.40m radius and 1.55m height at 1/32 m per
+// unit, rather than the shared 32 x 64. Something you cannot always reach is
+// worth measuring: the clearance under it is the space the player fights in.
+@baseclass size(-13 -13 0, 13 13 50) color(120 170 230) = Flyer []
+
+@PointClass base(Flyer) = monster_wraith : "Wraith. Holds the air and throws bolts. PLACED HEIGHT IS KEPT -- put the origin where the feet should hover." []
+
+// --- The boss fight ------------------------------------------------------
+//
+// Two kinds of marker and neither behaves like anything else in this file.
+//
+// monster_maw is a monster the way the others are, but it is NOT created at
+// load: enemy_spawn_level records where it stood and the fight decides when
+// there is one. Story mode raises it immediately; endless mode raises it every
+// few waves. Place exactly one. A second is ignored -- the later marker wins,
+// because the last thing written is the position that is kept.
+//
+// info_ward_* mark where a ward MAY appear, which is a kind of statement no
+// other entity here makes: every other marker says a thing IS here. Each cycle
+// the fight raises a random few, avoiding the ones the previous cycle used, so
+// PLACE MORE THAN WILL BE USED -- at least twice as many of each kind as the
+// fight raises, or "somewhere new" cannot be satisfied and positions repeat.
+//
+// They are info_ rather than monster_ on purpose. A ward standing in a room
+// with no boss would make every boss that later arrives invulnerable from its
+// first frame, and there is deliberately no classname that can put one in a
+// level directly.
+//
+// A map with NO ward candidates does not break: the maw is simply open from
+// the moment it arrives and the fight is whatever the player's damage is. The
+// `wardcand` counter says so in a debug build.
+
+@PointClass size(-48 -48 0, 48 48 192) color(200 40 40) = monster_maw : "The Maw. A stationary boss embedded in a wall. Invulnerable while any ward stands. PLACED HEIGHT IS KEPT. Place one." []
+
+@PointClass size(-16 -16 -16, 16 16 16) color(255 200 40) = info_ward_air : "Ward slot (air). A ward raised here summons things that fight at range. PLACED HEIGHT IS KEPT -- put it where the ward should hang. Place several; a few are used each cycle." []
+
+@PointClass size(-16 -16 -16, 16 16 16) color(255 120 40) = info_ward_ground : "Ward slot (ground). A ward raised here summons things that close to melee. Place several; a few are used each cycle." []
 
 // --- Spawners ------------------------------------------------------------
 //
@@ -124,10 +188,17 @@
     maxalive(integer) : "Monsters alive in the level (0 = no ceiling)" : 0
 ]
 
-@PointClass base(Spawner) = monster_spawner_imp : "Keeps making imps." []
+@PointClass base(Spawner) = monster_spawner_water_spirit : "Keeps making water spirits." []
+@PointClass base(Spawner) = monster_spawner_imp : "DEPRECATED alias for monster_spawner_water_spirit." []
 @PointClass base(Spawner) = monster_spawner_brute : "Keeps making brutes." []
 @PointClass base(Spawner) = monster_spawner_hound : "Keeps making hounds." []
 @PointClass base(Spawner) = monster_spawner_caster : "Keeps making casters." []
+
+// The spawner carries the height too: spawners_of stores the marker's origin
+// and every wraith it makes appears at that Z, so this box sits on the origin
+// for the same reason monster_wraith's does. Size and colour override the
+// Spawner baseclass; wait/count/maxalive still come from it.
+@PointClass base(Spawner) size(-13 -13 0, 13 13 50) color(120 170 230) = monster_spawner_wraith : "Keeps making wraiths, at the height it is placed." []
 
 // --- Items ---------------------------------------------------------------
 //

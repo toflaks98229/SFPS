@@ -104,6 +104,22 @@ static int moving_brush_count(const Level *l) {
 }
 
 int main(int argc, char **argv) {
+    /* THE FIXTURE, NOT THE SHIPPED MAP. This was pointed at `lqdm1` for one
+       build and the "match the one-shot build vertex for vertex" assertion went
+       red at vertex 16,497 -- correctly. That check is stronger than the split
+       contract: level_geometry_part walks brushes in ascending index and emits
+       maximal runs, so STATIC-then-MOVING reproduces the one-shot ORDER only
+       when the moving brushes happen to be a suffix of the brush list. In
+       atrium they are; in lqdm1, whose two doors sit in the middle of 807
+       brushes, they are not. Nothing was wrong with the split -- the vertices
+       are the same set in a different order, which is what the two builds
+       promise and all they promise.
+       *출하되는 맵이 아니라 픽스처입니다.* 한 빌드 동안 `lqdm1`을 겨누었고 "한 번에 만든
+       것과 정점 단위로 일치한다"는 단언이 16,497번 정점에서 빨개졌습니다. 옳게 그랬습니다.
+       그 검사는 분할이 약속하는 것보다 강합니다. level_geometry_part는 브러시를 오름차순으로
+       훑으며 최대 연속 구간을 내보내므로, STATIC 다음 MOVING이 한 번에 만든 *순서*를
+       재현하는 것은 움직이는 브러시가 마침 브러시 목록의 접미사일 때뿐입니다. atrium에서는
+       그러하고, 문 둘이 브러시 807개 한가운데 앉아 있는 lqdm1에서는 그렇지 않습니다. */
     const char *name = (argc > 1) ? argv[1] : "atrium";
 
     printf("splittest -- static/moving geometry, on '%s'\n", name);

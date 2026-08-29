@@ -157,6 +157,7 @@ gloss 22
 #
 # Shader k:  1 brick   2 tile    3 panel   4 wood
 #            5 hex     6 marble  7 rust    8 grid
+#            9 lava   10 window
 #
 # Keep this list in step with the PROC_* enum in src/render.h and the switch
 # in procColour(); there is no way to share an enum with GLSL.
@@ -264,6 +265,58 @@ t plava
 base 235 96 22
 proc 9 60
 
+# --- a lit building facade -------------------------------------------------
+# Glazed curtain wall. `base` is the colour of a LIT ROOM behind the glass, not
+# the colour of the glass and not the colour of the frame -- the same rule
+# plava follows, where base is the crack rather than the crust. The dark panes
+# and the metal members choose their own colours in the shader, so a recipe
+# cannot author a facade that no light explains.
+#
+# A UV UNIT IS TWO METRES, NOT ONE, and this number is the whole of what that
+# fact decides. Sector walls carry LEVEL_UV = 0.5 uv per metre (level.c), and a
+# brush face at the editor's face scale of 0.5 comes to 32/(0.5*128) = 0.5 as
+# well -- the two agree on purpose. So the shader sees 0.5 * 1.40 = 0.70 cells
+# per metre: one window column every 1.43m and one row every 1.5/0.70 = 2.14m,
+# the shader's cell being half again as tall as it is wide.
+#
+# That is an office glazing module, and it is chosen against the WALL rather
+# than against the screen: a facade you walk past wants windows you could
+# believe a person stands in.
+#
+# This was 70 first, on the reading that a UV unit was a metre. It made every
+# window 2.86m wide and 4.29m tall -- two and a half storeys of glass in a
+# single pane -- which read as a showroom rather than as a building, and the
+# comment that said 1.43m was simply wrong rather than aspirational.
+#
+# No `gloss`: the world pass does not read it. Specular is computed only for
+# the view model (uMode==1), so a gloss line on a wall material is inert -- see
+# the note on bump below for the one that is NOT.
+#
+# No `bump`: the lit panes are EMISSIVE. Their brightness is light leaving the
+# surface, not a surface turned toward a light, so differencing that brightness
+# for a normal would tilt every lit window away from its own glow. Same reason
+# pgrid has none.
+#
+# 불 켜진 건물 외벽입니다. 유리 커튼월이며, `base`는 유리 색도 창틀 색도 아닌 유리 뒤에 불이
+# 켜진 *방*의 색입니다. plava에서 base가 껍질이 아니라 균열인 것과 같은 규칙입니다. 어두운
+# 창유리와 금속 창살은 셰이더 안에서 스스로 색을 정하므로, 레시피가 어떤 빛으로도 설명되지
+# 않는 외벽을 만들어 낼 수 없습니다.
+#
+# 0.70은 창의 열을 1/0.70 = 1.43단위마다, 행을 1.5/0.70 = 2.14단위마다 놓습니다. 셰이더의
+# 셀이 너비의 1.5배 높이이기 때문입니다. 1단위가 1미터인 이 프로젝트의 척도에서 사무실 유리
+# 모듈에 해당하며, 화면이 아니라 *벽*을 기준으로 골랐습니다. 걸어서 지나치는 외벽에는 사람이
+# 서 있다고 믿을 만한 크기의 창이 필요합니다.
+#
+# `gloss` 없음: 월드 패스는 이 값을 읽지 않습니다. 스페큘러는 뷰 모델(uMode==1)에서만
+# 계산되므로 벽 재질의 gloss 줄은 아무 일도 하지 않습니다.
+#
+# `bump` 없음: 불 켜진 창유리는 *발광*합니다. 그 밝기는 광원을 향한 표면이 아니라 표면에서
+# 나가는 빛이므로, 그것을 차분해 법선을 만들면 불 켜진 창마다 자기 발광에서 멀어지게
+# 기울어집니다. pgrid에 bump가 없는 것과 같은 이유입니다.
+t pwindow
+base 255 214 162        # tungsten office light, seen through glass
+proc 10 140             # x0.5 uv/m = 0.7 window columns per metre
+
 # --- the grapple's tether -------------------------------------------------
 # A twisted hemp rope. `ribs` stripes along the recipe's local x axis, and the
 # tether's ribbon UV runs its u (0..utile) along the rope's own length -- so
@@ -325,6 +378,20 @@ t wall_track
 image wall_track 2
 gloss 25
 
+# FOUR TILES, not two, because this drawing is 64 and the others are 128. The
+# count is the buffer's 256 divided by the source's side, and it is not a
+# preference: any other number lands the wrap somewhere other than the buffer
+# edge, and a seam that is not on the edge is a seam you can see.
+# Its own surface rather than a variant of one: `wall_meat` is not masonry with
+# a different tint, so nothing above it is the right thing to copy.
+# 이 그림은 64이고 나머지는 128이므로 2가 아니라 *4*입니다. 이 수는 버퍼의 256을 원본의
+# 변으로 나눈 값이며 취향이 아닙니다. 다른 수는 되감김을 가장자리가 아닌 곳에 떨어뜨리고,
+# 가장자리가 아닌 이음매는 눈에 보이는 이음매입니다.
+# 위의 어떤 것의 변종이 아니라 자기 표면입니다. `wall_meat`은 색조가 다른 석조가 아니므로,
+# 위의 무엇도 베껴 올 알맞은 대상이 아닙니다.
+t wall_meat
+image wall_meat 4
+
 # The door, and the same door wearing each key's colour. Doom ships DOORRED,
 # DOORBLU and DOORYEL as three textures; here they are three recipes over one
 # drawing, which is the bargain every other material in this file already
@@ -353,3 +420,116 @@ t door_yellow
 image wall_door 1
 tint 110 90 -50
 gloss 35
+
+
+# --- LibreQuake's own surfaces ----------------------------------------------
+#
+# THE MAP BROUGHT ITS WALLS WITH IT. The arena is LibreQuake's `lqdm1`
+# ("Solstice"), and the first version of that import looked every face's
+# texture up in a table and wrote one of the materials ABOVE in its place --
+# `med_csl_brk14b` became `wall_stone`, four `met_brn_*` collapsed into
+# `wall_metal` and `wall_track`, four woods into one `pwood`. Twenty-three
+# names became eleven. The geometry was LibreQuake's and the surface was ours,
+# which is a room wearing somebody else's walls.
+#
+# These are the originals. Nothing above was removed to make room for them:
+# every material this project authored is still here and still used -- by the
+# weapons, by the fixture map, by everything procedural -- and this is a second
+# set beside the first rather than a replacement for it.
+#
+# WHY THE TILE COUNTS DIFFER. `image <name> <tiles>` samples the 256-wide
+# material buffer out of a 128-wide drawing cell, so the count is 256 divided
+# by the SOURCE's side: a 128 texture repeats twice, a 64 texture four times, a
+# 16 one sixteen. LibreQuake authored at all three, and none of them is
+# upscaled on the way in -- sprite.c tiles a drawing smaller than its cell, so
+# a 64x64 source is four copies at a quarter of the bytes rather than an
+# enlargement that invents gradients PNG then charges for.
+#
+# Fetched by assets/sprites/import-librequake-textures.py, which is kept for
+# the reason every importer here is kept: these PNGs are the RESULT of a
+# conversion and the script is the recipe. BSD-3, and by ENUMERATION rather
+# than by residue -- LibreQuake's licence note names "models, textures and
+# sounds" outright. See docs/LICENSE-LibreQuake.txt.
+#
+# *맵이 자기 벽을 가지고 왔습니다.* 아레나는 LibreQuake의 `lqdm1`("Solstice")이고, 그 가져오기의
+# 첫 판은 모든 면의 텍스처를 표에서 찾아 그 자리에 *위의* 재질을 적었습니다. 이름 스물셋이
+# 열하나가 되었습니다. 지오메트리는 LibreQuake의 것이고 표면은 우리 것이었으며, 그것은 남의 벽을
+# 입은 방입니다.
+#
+# 이것들이 원본입니다. 이들을 위해 위의 무엇도 지우지 않았습니다. 이 프로젝트가 만든 모든 재질이
+# 여전히 이곳에 있고 여전히 쓰입니다. 무기가, 픽스처 맵이, 모든 절차적 표면이 씁니다. 이것은
+# 대체가 아니라 첫 집합 옆에 놓인 두 번째 집합입니다.
+#
+# *타일 수가 다른 이유.* `image <name> <tiles>`는 128폭 그림 셀에서 256폭 재질 버퍼를
+# 표본추출하므로, 그 수는 256을 *원본*의 변으로 나눈 값입니다. 128짜리는 두 번, 64짜리는 네 번,
+# 16짜리는 열여섯 번 반복합니다. LibreQuake는 셋 모두로 만들었고, 들어오는 길에 어느 것도
+# 확대하지 않습니다.
+
+t black
+image black 16
+
+t grk_leaf1_1
+image grk_leaf1_1 4
+
+t med_cobstn1_1
+image med_cobstn1_1 2
+
+t med_csl_brk14_f
+image med_csl_brk14_f 2
+
+t med_csl_brk14b
+image med_csl_brk14b 2
+
+t med_csl_flr5_1
+image med_csl_flr5_1 2
+
+t med_dr1a
+image med_dr1a 2
+
+t med_dr3c
+image med_dr3c 2
+
+t med_glass5
+image med_glass5 4
+
+t med_roof4
+image med_roof4 2
+
+t med_tanwall4
+image med_tanwall4 2
+
+t med_wood2_plk1
+image med_wood2_plk1 2
+
+t med_wood3_plk1
+image med_wood3_plk1 2
+
+t med_wood5
+image med_wood5 2
+
+t med_wood_riv1b
+image med_wood_riv1b 2
+
+t met_brn_flat
+image met_brn_flat 4
+
+t met_brn_trim16
+image met_brn_trim16 4
+
+t met_brn_trim32
+image met_brn_trim32 4
+
+t met_brn_trim64
+image met_brn_trim64 4
+
+t sky5_blu
+image sky5_blu 2
+
+t snow1
+image snow1 2
+
+t sq_trim1_2_s
+image sq_trim1_2_s 4
+
+t star_water0
+image star_water0 4

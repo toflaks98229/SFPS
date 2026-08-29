@@ -1,35 +1,79 @@
 /**
  * @file enemy.h
- * @brief 스프라이트 기반 몬스터의 AI 및 충돌을 관리합니다.
+ * @brief Sprite monsters: what makes each kind different, and how they fight.
  *
- * Doom 스타일: 월드는 3D이지만 몬스터는 항상 카메라를 향하는 평면 빌보드입니다.
- * 이 빌보드는 절차적으로 생성된 스프라이트 시트(sprite.c 참조)에서 그려집니다.
- * 이는 수백 킬로바이트 예산으로 얻을 수 있는 결과물입니다. 다각형 몬스터는
- * 모델 데이터에 훨씬 더 많은 비용이 들 것입니다.
+ * ENGLISH
+ * -------
+ * Doom's arrangement. The world is 3D but a monster is a flat billboard that
+ * always faces the camera, drawn from the procedurally generated sprite sheet
+ * -- see sprite.c. That is what a few hundred kilobytes of budget buys;
+ * polygonal monsters would cost far more in model data than the whole renderer
+ * costs in code.
  *
- * AI와 충돌 로직은 GL과 관련 없이 여기에 있으며, 윈도우 없이도 몬스터를
- * 테스트할 수 있습니다. tools/enemytest.c는 몬스터를 바닥에 놓고 플레이어를
- * 향해 걷는지, 공격하기 위해 멈추는지, 총에 맞으면 죽는지 등을 확인합니다.
- * 추격 버그는 게임 내에서 보이지 않으므로, 이동 버그와 동일한 방식으로 분리하는
- * 것이 가치가 있습니다.
+ * The AI and the collision live here, free of GL, so a monster can be tested
+ * with no window at all. tools/enemytest.c stands one on a floor and checks
+ * that it walks towards the player, stops to attack, and dies when shot. A
+ * chase bug is invisible from inside the running game, which makes it worth
+ * separating for the same reason a movement bug is.
+ *
+ * @note Everything here works through a ::Pools, never through module state.
+ *       See proj.h for why the calls take the bundle.
+ * @note ::MonTypeID doubles as the creature's row in the sprite atlas, so the
+ *       two enums must stay in step.
+ *
+ * 한국어
+ * ------
+ * Doom의 구성입니다. 월드는 3D이지만 몬스터는 언제나 카메라를 향하는 평면 빌보드이며,
+ * 절차적으로 생성된 스프라이트 시트에서 그려집니다. sprite.c를 참조하십시오. 수백 킬로바이트
+ * 예산으로 살 수 있는 것이 그것입니다. 다각형 몬스터는 렌더러 전체가 코드로 쓰는 것보다 훨씬
+ * 많은 용량을 모델 데이터로 쓰게 됩니다.
+ *
+ * AI와 충돌은 GL과 무관하게 이곳에 있으므로, 창 없이도 몬스터를 시험할 수 있습니다.
+ * tools/enemytest.c는 몬스터를 바닥에 세워 두고 플레이어를 향해 걷는지, 공격하려고 멈추는지,
+ * 총에 맞으면 죽는지를 확인합니다. 추격 결함은 실행 중인 게임 안에서는 보이지 않으며, 이동
+ * 결함을 분리할 가치가 있는 것과 같은 이유로 이것도 분리할 가치가 있습니다.
+ *
+ * @note 이곳의 모든 것은 모듈 상태가 아니라 ::Pools를 통해 동작합니다. 호출이 그 묶음을 받는
+ *       이유는 proj.h를 참조하십시오.
+ * @note ::MonTypeID는 스프라이트 아틀라스에서 그 생물의 행을 겸하므로, 두 열거형은 보조를
+ *       맞추어야 합니다.
  */
 #ifndef ENEMY_H
 #define ENEMY_H
 
 #include "level.h"
 
-/* --- 매크로 및 상수 --- */
-#define ENEMY_MAX       64      ///< @brief 레벨 당 최대 몬스터 수.
-#define ENEMY_MAX_SHOTS  48     ///< @brief 동시에 활성화될 수 있는 최대 몬스터 발사체 수.
-#define SHOT_RADIUS      0.22f  ///< @brief 발사체의 충돌 반경 (미터).
+/* --- Macros and constants / 매크로 및 상수 --- */
+
+/** @brief Monsters one level may hold, corpses included. / 레벨 하나가 담는 몬스터 수. 시체를 포함합니다. */
+#define ENEMY_MAX       64
+
+/** @brief Monster projectiles that may be in the air at once. / 동시에 공중에 있을 수 있는 몬스터 발사체 수. */
+#define ENEMY_MAX_SHOTS  48
+
+/** @brief Collision radius of a projectile, in metres. / 발사체의 충돌 반경(미터). */
+#define SHOT_RADIUS      0.22f
 
 /**
- * @brief 궤적 파티클 방출 간격 (초).
+ * @brief How often a projectile drops a trail particle, in seconds.
  *
- * 시간 단위이므로 경로상의 간격은 프레임률과 무관하게 일정합니다. 캐스터의 발사체 속도는
- * 11m/s이므로 0.03초 간격은 약 33cm마다 하나를 남기며, 이는 궤적이 점선이 아닌 선으로
- * 읽히기에 충분히 조밀하면서도 비행 한 번이 공유 파티클 풀을 고갈시키지 않을 만큼
- * 성깁니다. 값을 줄이면 궤적이 촘촘해지는 대신 풀 소비가 늘어납니다.
+ * ENGLISH
+ * -------
+ * A TIME rather than a per-frame emit, so the spacing along the path is the
+ * same whatever the frame rate. A caster's bolt travels at 11m/s, so 0.03s
+ * leaves one about every 33cm -- dense enough that the trail reads as a line
+ * rather than a dotted one, sparse enough that a single flight does not drain
+ * the shared particle pool. Lowering it tightens the trail and spends more of
+ * that pool.
+ *
+ * 한국어
+ * ------
+ * @brief 발사체가 궤적 파티클을 남기는 간격(초).
+ *
+ * 프레임당 방출이 아니라 *시간* 기준이므로, 프레임률과 무관하게 경로상의 간격이
+ * 일정합니다. 캐스터의 볼트는 11m/s로 날아가므로 0.03초는 약 33cm마다 하나를 남깁니다.
+ * 궤적이 점선이 아닌 선으로 읽히기에 충분히 조밀하면서도, 비행 한 번이 공유 파티클 풀을
+ * 고갈시키지 않을 만큼 성깁니다. 값을 줄이면 궤적이 촘촘해지는 대신 그 풀을 더 씁니다.
  */
 #define SHOT_TRAIL_INTERVAL 0.03f
 
@@ -89,20 +133,46 @@
  */
 #define SIGHT_PERIOD 4
 
-/* --- 열거형 --- */
+/* --- Enumerations / 열거형 --- */
 
 /**
  * @enum MonTypeID
- * @brief 몬스터 종류를 식별합니다.
+ * @brief Which kind of monster this is.
  *
- * 이 인덱스는 스프라이트 아틀라스(sprite.h 참조)에서 생물체의 행과도
- * 일치하므로 두 열거형은 동기화되어야 합니다.
+ * ENGLISH
+ * -------
+ * @note These indices double as the creature's row in the sprite atlas -- see
+ *       sprite.h -- so the two enums must be kept in step. A row added here
+ *       without one there draws the wrong creature rather than failing.
+ *
+ * 한국어
+ * ------
+ * @brief 몬스터의 종류.
+ *
+ * @note 이 인덱스는 스프라이트 아틀라스에서 그 생물의 행을 겸하므로(sprite.h 참조) 두
+ *       열거형은 보조를 맞추어야 합니다. 이곳에만 행을 더하고 그곳에 더하지 않으면 실패하는
+ *       대신 엉뚱한 생물이 그려집니다.
  */
 enum MonTypeID {
-    MON_IMP,        /**< 임프 */
-    MON_BRUTE,      /**< 브루트 */
-    MON_HOUND,      /**< 하운드 */
-    MON_CASTER,     /**< 캐스터 */
+    /**
+     * @brief The baseline the others are measured against.
+     *
+     * ENGLISH: Named `imp` until a water spirit took the slot -- a melee
+     * creature became a mid-range one, so the name stopped describing it. The
+     * ENUM keeps its position because the position is the sprite atlas row,
+     * and `imp` keeps working as a level name because two shipped maps say it.
+     * See ::MON_LEGACY.
+     *
+     * 한국어: 물의 정령이 이 자리를 차지하기 전까지 `imp`였습니다. 근접 생물이 중거리
+     * 생물이 되면서 그 이름이 더 이상 그것을 설명하지 못하게 되었습니다. *열거형*은 자기
+     * 위치를 유지합니다. 그 위치가 곧 스프라이트 아틀라스의 행이기 때문입니다. 그리고
+     * `imp`는 레벨 이름으로 계속 동작합니다. 배포된 맵 둘이 그렇게 적고 있기 때문입니다.
+     * ::MON_LEGACY를 참조하십시오.
+     */
+    MON_WATER_SPIRIT,
+    MON_BRUTE,      /**< A slow imp with more of everything. / 모든 것이 더 많은 느린 임프. */
+    MON_HOUND,      /**< A fast one with less. / 더 적은 것을 가진 빠른 임프. */
+    MON_CASTER,     /**< Fights at range, with a projectile. / 발사체로 원거리에서 싸웁니다. */
 
     /**
      * @brief The one that is not on the floor.
@@ -135,7 +205,74 @@ enum MonTypeID {
      */
     MON_WRAITH,
 
-    MON_TYPES       /**< 몬스터 종류의 총 수 */
+    /**
+     * @brief The boss: a mouth in the wall that never leaves it.
+     *
+     * ENGLISH
+     * -------
+     * THE FIRST MONSTER THAT IS NOT SOLVED BY AIMING AT IT. Every other row in
+     * this table dies to the gun pointed at it; the maw is invulnerable while a
+     * single ::MON_GUARD stands, so the answer to it is somewhere else in the
+     * room. That is the whole of the fight, and it is why the body is
+     * ::MON_ANCHORED: a boss that walks is a boss you retreat from while facing
+     * it, and then the wards are an errand rather than the fight.
+     *
+     * Its health is spent in thirds -- see ::BOSS_CYCLES and the boundary clamp
+     * in ::enemy_hurt -- so "three cycles" is a fact about the health bar
+     * rather than a counter kept beside it. There is no second death path.
+     *
+     * 한국어
+     * ------
+     * @brief 보스. 벽에서 떠나지 않는 아가리입니다.
+     *
+     * *겨누는 것으로 풀리지 않는 첫 몬스터입니다.* 이 표의 다른 모든 행은 자신을 향한 총에
+     * 죽지만, 아귀는 ::MON_GUARD가 하나라도 서 있는 동안 무적이므로 그에 대한 답은 방의 다른
+     * 곳에 있습니다. 그것이 이 전투의 전부이며, 본체가 ::MON_ANCHORED인 이유입니다. 걸어
+     * 다니는 보스는 마주 본 채 물러나면 되는 보스이고, 그러면 결계핵은 전투가 아니라
+     * 심부름이 됩니다.
+     *
+     * 체력은 3등분으로 소모됩니다(::BOSS_CYCLES와 ::enemy_hurt의 경계 고정 참조). 따라서
+     * "3사이클"은 옆에 따로 둔 계수기가 아니라 체력바에 대한 사실입니다. 두 번째 사망 경로는
+     * 없습니다.
+     */
+    MON_MAW,
+
+    /**
+     * @brief What keeps the maw invulnerable, and what makes the room fill up.
+     *
+     * ENGLISH
+     * -------
+     * ONE TYPE, NOT TWO. A ward that summons flyers and a ward that summons
+     * brawlers differ in what comes out of them and in nothing else -- same
+     * silhouette, same health, same behaviour, same box -- so the difference is
+     * ::Enemy::ward_table, an instance field, rather than a second row here.
+     * Two rows would have cost a second sprite body, a second FGD box, and the
+     * eighth and last ::LOOT_TABLES slot, for a distinction the player reads
+     * off what walks out rather than off the ward.
+     *
+     * It is ::AI_INERT: it never attacks. Its pressure is entirely in
+     * ::Enemy::summon_left -- shooting it is what fills the room, so the player
+     * sets the pace of their own fight. See enemy.c's note on ::WARD_SUMMON_DMG
+     * for why that is a damage THRESHOLD and not a damage EVENT.
+     *
+     * 한국어
+     * ------
+     * @brief 아귀를 무적으로 유지하는 것이자, 방을 채우는 것.
+     *
+     * *두 종류가 아니라 한 종류입니다.* 비행체를 부르는 결계핵과 근접체를 부르는 결계핵은
+     * 무엇이 나오는가에서만 다르고 나머지는 전부 같습니다. 같은 실루엣, 같은 체력, 같은 행동,
+     * 같은 상자입니다. 그래서 그 차이는 이곳의 두 번째 행이 아니라 인스턴스 필드인
+     * ::Enemy::ward_table입니다. 행을 둘로 두면 두 번째 스프라이트 몸통, 두 번째 FGD 상자,
+     * 그리고 ::LOOT_TABLES의 여덟 번째이자 마지막 칸을 치르게 되는데, 정작 플레이어는 그
+     * 구별을 결계핵이 아니라 걸어 나오는 것에서 읽습니다.
+     *
+     * ::AI_INERT이며 결코 공격하지 않습니다. 그 압박은 전부 ::Enemy::summon_left에 있습니다.
+     * 그것을 쏘는 행위가 곧 방을 채우므로 플레이어가 자기 전투의 박자를 정합니다. 그것이 피해
+     * *사건*이 아니라 피해 *문턱*인 이유는 enemy.c의 ::WARD_SUMMON_DMG 주석에 있습니다.
+     */
+    MON_WARD,
+
+    MON_TYPES       /**< How many kinds there are. / 몬스터 종류의 총 수. */
 };
 
 /* --- Quake's fight.qc, in metres / Quake의 fight.qc를 미터로 --------------
@@ -203,17 +340,31 @@ enum MonTypeID {
 
 /**
  * @enum EState
- * @brief 몬스터의 AI 상태를 정의합니다.
+ * @brief What a monster is currently doing.
+ *
+ * ENGLISH
+ * -------
+ * @note ::E_DEAD is a state rather than a freed slot, because a corpse is
+ *       still drawn. It is skipped by collision and by ::enemy_hitscan, which
+ *       is what keeps a body from soaking shots meant for what is behind it.
+ *
+ * 한국어
+ * ------
+ * @brief 몬스터가 지금 무엇을 하고 있는가.
+ *
+ * @note ::E_DEAD는 해제된 슬롯이 아니라 하나의 상태입니다. 시체는 여전히 그려지기
+ *       때문입니다. 충돌과 ::enemy_hitscan은 이를 건너뛰며, 그것이 시체가 뒤에 있는 것을
+ *       겨눈 사격을 대신 받아 내지 않게 합니다.
  */
 typedef enum {
-    E_IDLE,    /**< 플레이어를 보지 못한 상태 */
-    E_CHASE,   /**< 플레이어를 향해 걷는 중 */
-    E_ATTACK,  /**< 공격 준비 또는 재사용 대기 중 */
-    E_HURT,    /**< 피격 후 잠시 경직 상태 */
-    E_DEAD     /**< 시체: 그려지지만 충돌 및 히트스캔 없음 */
+    E_IDLE,    /**< Has not seen the player. / 플레이어를 보지 못한 상태. */
+    E_CHASE,   /**< Walking towards the player. / 플레이어를 향해 걷는 중. */
+    E_ATTACK,  /**< Winding up an attack, or resting after one. / 공격 준비 중이거나 공격 후 휴식 중. */
+    E_HURT,    /**< Briefly flinching after a hit. / 피격 후 잠시 경직된 상태. */
+    E_DEAD     /**< A corpse: drawn, but neither collides nor can be hit. / 시체. 그려지지만 충돌하지도 맞지도 않습니다. */
 } EState;
 
-/* --- 구조체 --- */
+/* --- Structures / 구조체 --- */
 
 /**
  * @enum MonBehaviour
@@ -268,6 +419,23 @@ typedef enum {
 typedef enum {
     AI_BRAWLER,     /**< Closes to arm's length and swings. / 팔 길이까지 붙어 휘두릅니다. */
     AI_CASTER,       /**< Keeps a band of distance and shoots. / 일정 거리를 유지하며 발사합니다. */
+
+    /**
+     * @brief Does nothing at all. Exists to be destroyed.
+     *
+     * ENGLISH: The other two answer "how does it come at you". This one answers
+     * that it does not -- a ward is a target, not an opponent, and its threat
+     * is entirely in what shooting it produces. Given a behaviour of its own
+     * rather than an ::AI_BRAWLER with zero reach, because zero reach is a
+     * number somebody would later "fix" and this is a decision.
+     *
+     * 한국어: 나머지 둘은 "어떻게 덤벼오는가"에 답합니다. 이것은 덤비지 않는다고 답합니다.
+     * 결계핵은 상대가 아니라 표적이며, 그 위협은 전적으로 그것을 쏘았을 때 나오는 것에
+     * 있습니다. 사거리 0인 ::AI_BRAWLER가 아니라 자기 행동을 준 이유는, 사거리 0은 나중에
+     * 누군가 "고칠" 숫자이고 이것은 결정이기 때문입니다.
+     */
+    AI_INERT,
+
     AI_BEHAVIOURS   /**< How many. / 개수. */
 } MonBehaviour;
 
@@ -321,93 +489,238 @@ enum {
      *          됩니다. 그것을 쓰는 크리처는 설계 결정과 스프라이트이며, 둘 다 이 비트와 같은
      *          변경에 속하지 않습니다.
      */
-    MON_FLIES = 1 << 0
+    MON_FLIES = 1 << 0,
+
+    /**
+     * @brief Never moves, and keeps the height it was placed at.
+     *
+     * ENGLISH
+     * -------
+     * A SEPARATE BIT FROM ::MON_FLIES, and the temptation to reuse that one is
+     * exactly why. ::MON_FLIES already means two things to two readers --
+     * ::make_monster reads it as "the placed origin is the feet", and the FGD
+     * draws the editor box sitting ON the origin because of it. A wall-mounted
+     * maw needs the second meaning and not the first, and teaching one bit a
+     * third meaning is how a flag stops being checkable.
+     *
+     * What it suppresses is MOVEMENT, not aiming: an anchored caster still
+     * turns to face the player and still shoots. ::AI_CASTER minus the footwork
+     * is "it shoots", which is the whole of what the maw does.
+     *
+     * 한국어
+     * ------
+     * @brief 결코 움직이지 않으며, 놓인 높이를 그대로 지킵니다.
+     *
+     * *::MON_FLIES와 별개의 비트이며*, 그것을 재사용하고 싶은 유혹이 정확히 그 이유입니다.
+     * ::MON_FLIES는 이미 두 독자에게 두 가지를 뜻합니다. ::make_monster는 "놓인 원점이 발"로
+     * 읽고, FGD는 그 때문에 편집기 상자를 원점 *위에* 그립니다. 벽에 박힌 아귀는 두 번째
+     * 의미만 필요하고 첫 번째는 필요 없으며, 비트 하나에 세 번째 의미를 가르치는 것이 곧
+     * 플래그가 검사 불가능해지는 방식입니다.
+     *
+     * 억제하는 것은 *이동*이지 조준이 아닙니다. 고정된 캐스터도 여전히 플레이어를 향해 돌고
+     * 여전히 쏩니다. 발놀림을 뺀 ::AI_CASTER는 "쏜다"이고, 그것이 아귀가 하는 일의 전부입니다.
+     */
+    MON_ANCHORED = 1 << 1,
+
+    /**
+     * @brief This is the boss. ::world_boss_present is a scan for this bit.
+     *
+     * ENGLISH
+     * -------
+     * world.h used to state that there was no boss flag and deliberately would
+     * not add one, deriving "something big is up" from a live brute instead. It
+     * also stated the condition under which that answer moves: "If a later
+     * bestiary needs a real boss the answer moves into ::MonType and this
+     * function keeps its signature." This is that move. The brute keeps its
+     * stats and loses the soundtrack, which was the point of the derivation and
+     * is now a thing the boss says for itself.
+     *
+     * 한국어
+     * ------
+     * @brief 이것이 보스입니다. ::world_boss_present는 이 비트에 대한 스캔입니다.
+     *
+     * world.h는 보스 플래그가 없으며 의도적으로 만들지 않는다고 밝히고, "큰 것이 떴다"를 살아
+     * 있는 브루트에서 유도했습니다. 동시에 그 답이 옮겨 가는 조건도 밝혔습니다. "이후의 도감이
+     * 진짜 보스를 필요로 하면 답은 ::MonType으로 옮겨 가고 이 함수는 시그니처를 유지합니다."
+     * 이것이 그 이동입니다. 브루트는 수치를 유지하고 사운드트랙을 잃습니다. 그것이 유도의
+     * 요점이었고, 이제는 보스가 스스로 말하는 것이 되었습니다.
+     */
+    MON_BOSS = 1 << 2,
+
+    /**
+     * @brief While one of these lives, every ::MON_BOSS is untouchable.
+     *
+     * ENGLISH: The rule is enforced in ::enemy_hurt and nowhere else, for the
+     * reason the death tally is counted there and nowhere else -- a damage
+     * source added later has to go through that function to exist at all, so it
+     * cannot forget. That is what makes the hook's arrival damage, the
+     * grenade's splash and the shotgun's pellets all obey a rule none of them
+     * has heard of.
+     *
+     * 한국어: 이 규칙은 ::enemy_hurt에서만 강제되며, 사망 집계를 그곳에서만 세는 것과 같은
+     * 이유입니다. 나중에 추가되는 피해원도 존재하려면 그 함수를 거쳐야 하므로 잊을 수가
+     * 없습니다. 훅의 도달 피해, 유탄의 폭발, 샷건의 펠릿이 전부, 들어 본 적도 없는 규칙을
+     * 따르게 되는 이유가 그것입니다.
+     */
+    MON_GUARD = 1 << 3
 };
 
 /** @brief Every bit above, for ::types_check to object to anything else. / 위의 모든 비트. ::types_check가 그 외의 것에 이의를 제기하기 위한 것입니다. */
-#define MON_FLAGS_ALL (MON_FLIES)
+#define MON_FLAGS_ALL (MON_FLIES | MON_ANCHORED | MON_BOSS | MON_GUARD)
 
 /**
  * @struct MonType
- * @brief 한 종류의 몬스터를 다른 몬스터와 다르게 만드는 모든 특성을 정의합니다.
+ * @brief Everything that makes one kind of monster differ from another.
  *
- * 새로운 타입을 추가하는 것은 이 테이블에 한 행을 추가하고 sprite.c에 바디를
- * 추가하는 것으로 충분하며, 새로운 코드 경로는 필요하지 않습니다.
+ * ENGLISH
+ * -------
+ * A stat block, not code. Adding a kind is a row in this table plus a body in
+ * sprite.c, and no new code path -- which is the whole reason the AI switches
+ * on ::MonType::behaviour rather than on the type id.
+ *
+ * @note Read through ::mon_stats, never indexed directly, so an id outside the
+ *       enum lands somewhere that exists.
+ *
+ * 한국어
+ * ------
+ * @brief 한 종류의 몬스터를 다른 몬스터와 다르게 만드는 모든 것.
+ *
+ * 코드가 아니라 수치 묶음입니다. 종류를 추가하는 것은 이 표의 행 하나와 sprite.c의 몸체
+ * 하나이며 새로운 코드 경로는 없습니다. AI가 타입 식별자가 아니라 ::MonType::behaviour로
+ * 분기하는 이유가 바로 그것입니다.
+ *
+ * @note 직접 인덱싱하지 않고 ::mon_stats를 통해 읽으므로, 열거형 바깥의 식별자도 존재하는
+ *       곳에 떨어집니다.
  */
 typedef struct {
-    /**
-     * @brief 이 종류를 배치하는 엔티티 이름. 레벨 텍스트에 기록되는 이름입니다.
-     *
-     * 테이블 안에 두는 이유는, 종류 추가가 "행 하나 + `_pixel` 함수 하나"라는 원칙을
-     * 지키기 위함입니다. 이전에는 mon_type_for가 이름들을 손으로 펼친 문자 비교로
-     * 들고 있어서, 새 몬스터를 추가할 때 손대야 할 곳이 세 군데였고 그중 하나는
-     * 이 테이블에서 멀리 떨어져 있었습니다. 이름이 스탯 옆에 있으면 둘이 어긋날 수
-     * 없습니다.
-     */
+    /** @brief The entity name that places this kind, as written in level text. Beside the stats so the two cannot drift. / 이 종류를 배치하는 엔티티 이름. 수치 옆에 두어 둘이 어긋날 수 없게 합니다. */
     const char *name;
     int   behaviour;    /**< A ::MonBehaviour: how this kind fights. / ::MonBehaviour 값. 이 종류가 어떻게 싸우는가. */
-    int   hp;           /**< 체력. */
-    float speed;        /**< 이동 속도 (m/s). */
-    float radius;       /**< 충돌 반경 (미터). */
-    float height;       /**< 신장 (미터). */
-    float eye;          /**< 발 위의 시선 높이 (미터). */
-    float sight;        /**< 플레이어를 처음 감지할 수 있는 거리 (미터). */
-    float attack;       /**< 근접 공격 거리 또는 원거리 공격 사정거리 (미터). */
-    int   damage;       /**< 공격 당 피해량. */
-    float windup;       /**< 공격 전 준비 시간 (초). */
-    float cooldown;     /**< 공격 후 재사용 대기 시간 (초). */
-    float aspect;       /**< 스프라이트의 가로/세로 비율. */
-    float shot_speed;   /**< 0이 아니면 근접 공격 대신 이 속도(m/s)로 발사체를 발사합니다. */
+    int   hp;           /**< Starting health. / 시작 체력. */
+    float speed;        /**< Walking speed, m/s. / 이동 속도(m/s). */
+
+    /* --- HOW BIG IT IS -----------------------------------------------------
+     *
+     * ENGLISH
+     * -------
+     * These three plus ::aspect are the whole of a monster's size. There is no
+     * per-instance scale, so a kind is exactly as big as its row says.
+     *
+     * THE DRAWN BILLBOARD IS `height` TALL AND `height * aspect` WIDE, which
+     * makes ::height the one number that resizes a monster proportionally.
+     *
+     * WHAT FOLLOWS height ON ITS OWN: the top of the hitscan cylinder, the step
+     * it can climb (height/3), the ceiling clearance a spawn needs, where the
+     * grapple attaches, and where blood sprays.
+     *
+     * WHAT DOES NOT, and has to be scaled by hand in the same edit:
+     *   ::radius  -- the cylinder is `radius` wide and `height` tall, so a
+     *                taller monster left at the old radius is a bigger target
+     *                that is no easier to hit.
+     *   ::eye     -- bolts leave from here and sight is measured from here, so
+     *                a monster that grew without it shoots from its navel.
+     *   ::attack  -- reach is measured from the centre, and a longer body with
+     *                the old reach swings and connects with nothing.
+     *
+     * ::aspect is per kind and NOT the art's own 64x96 cell, so the sprite is
+     * already stretched to it. Leave it alone for a proportional resize.
+     *
+     * @note ::types_check does not look at any of this. `eye` above `height`
+     *       is played rather than caught.
+     *
+     * 한국어
+     * ------
+     * 이 셋과 ::aspect가 몬스터 크기의 전부입니다. 개체별 배율은 없으므로, 한 종류는 정확히
+     * 자기 행이 말하는 크기입니다.
+     *
+     * *그려지는 빌보드는 `height` 높이에 `height * aspect` 너비*이며, 그래서 ::height 하나가
+     * 몬스터를 비례해서 키우고 줄이는 유일한 숫자입니다.
+     *
+     * height를 저절로 따라가는 것: 히트스캔 원기둥의 윗면, 오를 수 있는 턱 높이(height/3),
+     * 스폰에 필요한 천장 높이, 갈고리가 붙는 자리, 피가 튀는 자리.
+     *
+     * 따라가지 *않아* 같은 수정에서 손으로 함께 조정해야 하는 것:
+     *   ::radius  -- 원기둥은 `radius` 굵기에 `height` 높이입니다. 반경을 그대로 둔 채 키운
+     *                몬스터는 커졌는데 맞히기는 쉬워지지 않은 표적입니다.
+     *   ::eye     -- 볼트가 나가는 자리이자 시야를 재는 기준입니다. 이것 없이 커진 몬스터는
+     *                배꼽에서 쏩니다.
+     *   ::attack  -- 사거리는 중심에서 잽니다. 몸만 길어지고 사거리가 그대로면 헛손질입니다.
+     *
+     * ::aspect는 종류별 값이며 아트의 64x96 셀 비율이 *아닙니다.* 스프라이트는 이미 이 값으로
+     * 늘어나 있으므로, 비례 확대만 원한다면 건드리지 마십시오.
+     *
+     * @note ::types_check는 이 중 무엇도 보지 않습니다. `eye`가 `height`보다 높아도 잡히지
+     *       않고 그대로 플레이됩니다. */
+
+    float radius;       /**< Collision and hitscan radius, metres. / 충돌·히트스캔 반경(미터). */
+    float height;       /**< Standing height, metres. Also the drawn height. / 신장(미터). 그려지는 높이이기도 합니다. */
+    float eye;          /**< Eye height above the feet, metres. Where it looks and shoots from. / 발 위의 시선 높이(미터). 보고 쏘는 자리입니다. */
+
+    float sight;        /**< How far away it can first notice the player, metres. / 플레이어를 처음 알아챌 수 있는 거리(미터). */
+    float attack;       /**< Reach of a swing, or range of a shot, metres. Scale with ::height. / 근접 공격 거리 또는 사격 사거리(미터). ::height와 함께 조정합니다. */
+    int   damage;       /**< Damage one attack deals. / 공격 한 번의 피해량. */
+    float windup;       /**< Seconds of telegraph before the attack lands. / 공격이 닿기 전의 예비 동작 시간(초). */
+    float cooldown;     /**< Seconds after an attack before the next may start. / 공격 후 다음 공격까지의 대기 시간(초). */
+    float aspect;       /**< Sprite width over height. See the size block above. / 스프라이트의 가로 대 세로 비율. 위의 치수 블록을 참조하십시오. */
+    float shot_speed;   /**< Projectile speed, m/s. Read only by ::AI_CASTER. / 발사체 속도(m/s). ::AI_CASTER만 읽습니다. */
+
+    /**
+     * @brief Bolts one attack releases at once. 1 is a single aimed shot.
+     *
+     * ENGLISH: A volley is not a faster single shot. One accurate bolt is
+     * answered by stepping aside; five across a cone is answered by leaving the
+     * cone, which is a different move at a different distance. Released
+     * together rather than over time, so no ::Enemy needs a shot counter.
+     *
+     * 한국어: 일제 사격은 더 빠른 단발이 아닙니다. 정확한 볼트 하나에는 옆으로 비켜서면 되고,
+     * 원뿔로 다섯을 뿌리는 쪽에는 그 원뿔에서 벗어나야 합니다. 다른 동작이고 다른 거리입니다.
+     * 시간에 걸치지 않고 한꺼번에 내보내므로 ::Enemy에 발사 계수기가 필요 없습니다.
+     */
+    short burst;
+
+    /**
+     * @brief How wide the volley scatters, as a fraction of the distance.
+     *
+     * ENGLISH: A fraction and not an angle, because what the player judges is
+     * how far to move: a cone of fixed ANGLE doubles in width at twice the
+     * range, so the sidestep would grow with distance. Ignored when ::burst is
+     * 1 -- a single shot that scattered is a monster that misses, not one that
+     * sprays.
+     *
+     * 한국어: 각도가 아니라 비율인 이유는 플레이어가 판단하는 것이 *얼마나 움직일까*이기
+     * 때문입니다. 고정된 각도의 원뿔은 두 배 거리에서 두 배로 넓어져 옆걸음이 거리에 따라
+     * 커집니다. ::burst가 1이면 무시됩니다. 흩어지는 단발은 난사가 아니라 빗맞히는
+     * 몬스터입니다.
+     */
+    float spread;
 
     /**
      * @brief How fast this monster can turn, in degrees per second.
      *
-     * ENGLISH
-     * -------
-     * Quake's `yaw_speed`, and the single biggest reason its monsters feel like
-     * they have mass. Before this the AI wrote `m->yaw = atan2f(...)` every
-     * frame, so a monster faced the player exactly, always, however fast the
-     * player moved around it -- which makes strafing pointless, because there
-     * is no angle you can win. A monster that turns at a finite rate can be
-     * got behind, and that is a whole layer of play that a single assignment
-     * was throwing away.
-     * A per-monster number rather than a constant because it is character: the
-     * brute is a wall that cannot track you, the hound is a beast that can.
+     * ENGLISH: Quake's `yaw_speed`. A monster that snaps to face the player
+     * every frame cannot be got behind, which makes strafing pointless -- there
+     * is no angle left to win. Per monster because it is character: the brute
+     * is a wall that cannot track you, the hound is a beast that can.
      *
-     * 한국어
-     * ------
-     * Quake의 `yaw_speed`이며, 그 몬스터들이 질량을 가진 것처럼 느껴지는 가장 큰
-     * 이유입니다. 이전에는 AI가 매 프레임 `m->yaw = atan2f(...)`를 썼으므로 플레이어가
-     * 아무리 빨리 돌아도 몬스터는 언제나 정확히 플레이어를 향했습니다. 그러면 횡이동이
-     * 무의미해집니다. 이길 수 있는 각도가 없기 때문입니다. 유한한 속도로 도는 몬스터는
-     * 뒤를 잡을 수 있고, 그것은 대입문 하나가 버리고 있던 플레이의 한 층 전체입니다.
-     * 상수가 아니라 몬스터별 수치인 이유는 그것이 성격이기 때문입니다. 브루트는 당신을
-     * 추적하지 못하는 벽이고, 하운드는 추적하는 짐승입니다.
+     * 한국어: Quake의 `yaw_speed`입니다. 매 프레임 플레이어 쪽으로 즉시 도는 몬스터는 뒤를
+     * 잡을 수 없고, 그러면 이길 각도가 없어 횡이동이 무의미해집니다. 몬스터별인 이유는 그것이
+     * 성격이기 때문입니다. 브루트는 추적하지 못하는 벽이고 하운드는 추적하는 짐승입니다.
      */
     float yaw_speed;
 
     /**
      * @brief Seconds of immunity to the flinch after being hurt.
      *
-     * ENGLISH
-     * -------
-     * Quake's `pain_finished`. Without it every hit restarts the flinch, so a
-     * fast enough weapon holds a monster still until it dies -- it never gets
-     * a frame in which it is allowed to act. That was already reachable here
-     * and got worse the moment walking speed went to 10.8: the rapid gun fires
-     * every 0.085s and the flinch lasted 0.16s, so two shots a second past the
-     * flinch's own length was a permanent stun.
-     * Per monster because it is the same lever Quake uses it as: the ogre's 5
-     * seconds is what makes an ogre frightening.
+     * ENGLISH: Quake's `pain_finished`. Without it every hit restarts the
+     * flinch, so any weapon firing faster than the flinch lasts (the rapid gun
+     * fires every 0.085s against a 0.16s flinch) holds a monster still until it
+     * dies. Per monster because it is a character lever: Quake's ogre gets 5
+     * seconds, and that is what makes an ogre frightening.
      *
-     * 한국어
-     * ------
-     * Quake의 `pain_finished`입니다. 이것이 없으면 매 피격이 경직을 다시 시작하므로,
-     * 충분히 빠른 무기는 몬스터가 죽을 때까지 붙잡아 둡니다. 행동할 수 있는 프레임을 단
-     * 한 번도 얻지 못합니다. 여기서도 이미 도달 가능했고, 이동 속도가 10.8이 된 순간 더
-     * 나빠졌습니다. 속사 무기는 0.085초마다 발사되고 경직은 0.16초였으므로, 경직 자체의
-     * 길이를 넘는 초당 두 발이면 영구 스턴이었습니다. 몬스터별인 이유는 Quake가 쓰는
-     * 것과 같은 조절 수단이기 때문입니다. 오우거의 5초가 오우거를 무섭게 만듭니다.
+     * 한국어: Quake의 `pain_finished`입니다. 이것이 없으면 매 피격이 경직을 다시 시작하므로,
+     * 경직보다 빠르게 발사되는 무기는(속사 무기는 0.16초 경직에 0.085초마다 발사됩니다)
+     * 몬스터를 죽을 때까지 붙잡아 둡니다. 몬스터별인 이유는 성격을 정하는 조절 수단이기
+     * 때문입니다. Quake의 오우거는 5초를 받고, 그것이 오우거를 무섭게 만듭니다.
      */
     float pain_lock;
 
@@ -427,43 +740,125 @@ typedef struct {
 
 /**
  * @struct Enemy
- * @brief 레벨에 있는 단일 몬스터의 상태입니다.
+ * @brief One monster in the level, and everything a frame may change about it.
+ *
+ * ENGLISH
+ * -------
+ * All state and no rules: what a monster IS lives in ::MonType, and what it is
+ * DOING lives here. A slot with `active` clear is free; a slot in ::E_DEAD is
+ * a corpse and still drawn.
+ *
+ * 한국어
+ * ------
+ * @brief 레벨에 있는 몬스터 하나와, 한 프레임이 바꿀 수 있는 모든 것.
+ *
+ * 규칙 없이 상태만 있습니다. 몬스터가 *무엇인가*는 ::MonType에 있고, *무엇을 하고 있는가*가
+ * 이곳에 있습니다. `active`가 꺼진 슬롯은 비어 있고, ::E_DEAD인 슬롯은 시체이며 여전히
+ * 그려집니다.
  */
 typedef struct {
-    int    type;        /**< 몬스터 종류 (MonTypeID). */
-    v3     pos;         /**< 발 위치 (월드 좌표). */
-    float  vel_y;       /**< 수직 속도. */
-    float  yaw;         /**< 현재 마주보는 방향 (라디안). */
-    int    health;      /**< 현재 체력. */
-    EState state;       /**< 현재 AI 상태. */
-    float  timer;       /**< 상태 내에서 사용하는 타이머 (예: 공격 준비, 재사용 대기). */
-    float  anim;        /**< 걷기 사이클을 위한 자유 실행 시계. */
-    float  flash;       /**< 피격 시 흰색 섬광 효과 (0으로 감소). */
-    int    swung;       /**< 현재 공격의 피해가 이미 적용되었는지 여부. */
-    int    active;      /**< 이 슬롯이 사용 중인지 여부. */
+    int    type;        /**< Which kind, a ::MonTypeID. / 어느 종류인지. ::MonTypeID 값입니다. */
+    v3     pos;         /**< Foot position, in world metres. / 발 위치. 월드 미터 단위입니다. */
+    float  vel_y;       /**< Vertical velocity. / 수직 속도. */
+    float  yaw;         /**< Which way it is actually facing, radians. / 실제로 향하고 있는 방향(라디안). */
+    int    health;      /**< Health remaining. / 남은 체력. */
+    EState state;       /**< What it is doing. / 무엇을 하고 있는지. */
+    float  timer;       /**< Time within the current state, e.g. wind-up or rest. / 현재 상태 안에서의 시간. 예비 동작이나 휴식 등입니다. */
+    float  anim;        /**< Free-running clock for the walk cycle. / 걷기 사이클을 위한 자유 진행 시계. */
+    float  flash;       /**< White hit flash, decaying to 0. / 피격 시 흰 섬광. 0으로 감쇠합니다. */
+    int    swung;       /**< Whether the current attack has already dealt its damage. / 현재 공격이 이미 피해를 입혔는지 여부. */
+    int    active;      /**< Whether this slot is in use at all. / 이 슬롯이 사용 중인지 여부. */
 
     /**
-     * @brief 마지막으로 측정한 플레이어 시야 확보 여부. 파생값이며 제작값이 아닙니다.
+     * @brief What this corpse still owes the floor. -1 when it owes nothing.
      *
-     * 시야 판정(level_blocked)은 AI가 수행하던 것 중 가장 비쌌으므로, 매 프레임이 아니라
-     * 몇 프레임에 한 번만 측정하고 그 사이에는 이 값을 재사용합니다. 자세한 근거는
-     * enemy.c의 SIGHT_PERIOD를 참조하십시오.
+     * ENGLISH
+     * -------
+     * WHY THE DROP IS DECIDED HERE AND HANDED OVER SOMEWHERE ELSE. The die has
+     * to be rolled at the instant of death, because ::EnemyPool::rng is what a
+     * recorded demo replays and a roll taken a frame later is a roll taken
+     * after some other frame's worth of randomness. But WHAT a box of
+     * ammunition is for is a question about the player's roster, and the
+     * player is not in this module and should not be dragged into it -- a
+     * ::LOOT_HELD stored here is resolved by ::world_step, which knows.
+     *
+     * So this field is the gap between the two: one int, written once by
+     * ::enemy_hurt and read once by ::enemy_take_drop, on the same frame.
+     *
+     * -1 AND NOT 0 for "nothing", because 0 is ::PK_AMMO. A sentinel that
+     * happens to be a real kind is how every monster in the level comes to
+     * drop shells.
+     *
+     * 한국어
+     * ------
+     * @brief 이 시체가 아직 바닥에 빚진 것. 빚진 것이 없으면 -1입니다.
+     *
+     * 왜 드롭은 이곳에서 정해지고 다른 곳에서 건네지는가. 주사위는 죽는 그 순간에 굴려져야
+     * 합니다. 기록된 데모가 재생하는 것이 ::EnemyPool::rng이며, 한 프레임 뒤에 굴린 것은 다른
+     * 프레임의 난수를 거친 뒤에 굴린 것이기 때문입니다. 그러나 탄약 상자가 *무엇을 위한
+     * 것인가*는 플레이어의 보유 목록에 대한 질문이고, 플레이어는 이 모듈에 없으며 끌어들여서도
+     * 안 됩니다. 이곳에 저장된 ::LOOT_HELD는 그것을 아는 ::world_step이 해석합니다.
+     *
+     * 그래서 이 필드가 둘 사이의 틈입니다. int 하나이며, ::enemy_hurt가 한 번 쓰고
+     * ::enemy_take_drop이 같은 프레임에 한 번 읽습니다.
+     *
+     * "없음"이 0이 아니라 -1인 이유는 0이 ::PK_AMMO이기 때문입니다. 우연히 실제 종류이기도 한
+     * 감시값은 레벨의 모든 몬스터가 산탄을 떨어뜨리게 되는 경위입니다.
+     */
+    int    drop;
+
+    /**
+     * @brief The last line-of-sight reading. Derived, never authored.
+     *
+     * ENGLISH
+     * -------
+     * The visibility trace (::level_blocked) was the most expensive thing the
+     * AI did, so it is measured once every few frames and reused in between.
+     * The full reasoning is beside ::SIGHT_PERIOD.
+     *
+     * It matters that this starts at 0, meaning "cannot see". A freshly
+     * spawned monster then waits for its first real reading instead of acting
+     * on an invented one: when it does not yet know, it should be wrong in the
+     * direction of doing nothing.
+     *
+     * @warning NOT used for the check made as a bolt is RELEASED. That one has
+     *          to be live, because it exists to catch a target ducking
+     *          mid-wind-up.
+     *
+     * 한국어
+     * ------
+     * @brief 마지막으로 측정한 시야 확보 여부. 파생값이며 제작값이 아닙니다.
+     *
+     * 시야 판정(::level_blocked)은 AI가 수행하던 것 중 가장 비쌌으므로, 몇 프레임에 한 번만
+     * 측정하고 그 사이에는 이 값을 재사용합니다. 자세한 근거는 ::SIGHT_PERIOD 곁에
+     * 있습니다.
      *
      * 0(볼 수 없음)에서 시작하는 것이 중요합니다. 새로 생성된 몬스터는 지어낸 값으로
-     * 행동하는 대신 첫 실제 측정이 나올 때까지 대기합니다. 아직 모를 때는 아무것도 하지
-     * 않는 쪽으로 틀려야 합니다.
+     * 행동하는 대신 첫 실제 측정이 나올 때까지 기다립니다. 아직 모를 때는 아무것도 하지 않는
+     * 쪽으로 틀려야 합니다.
      *
-     * @warning 볼트를 *발사하는 순간*의 판정에는 쓰이지 않습니다. 그 검사는 시전 도중
+     * @warning 볼트를 *발사하는 순간*의 검사에는 쓰이지 *않습니다*. 그 검사는 예비 동작 도중
      *          대상이 숨는 경우를 잡기 위해 존재하므로 반드시 최신이어야 합니다.
      */
     char   seen;
 
     /**
+     * @brief Frames left before `seen` is measured again.
+     *
+     * ENGLISH
+     * -------
+     * Started at a different value per monster so the refreshes spread out.
+     * Refreshing them all on the same frame costs the same on average but
+     * arrives as a spike every period, which is the shape that lowers the
+     * average and shows up as a stutter.
+     *
+     * 한국어
+     * ------
      * @brief `seen`을 다시 측정하기까지 남은 프레임 수.
      *
      * 몬스터마다 서로 다른 값에서 시작하여 갱신 시점을 분산시킵니다. 전부 같은 프레임에
-     * 갱신하면 평균 비용은 같으면서 주기마다 스파이크로 몰리는데, 그것은 평균이 낮아지는
-     * 대신 끊김으로 나타나는 형태입니다.
+     * 갱신하면 평균 비용은 같으면서 주기마다 스파이크로 몰리는데, 그것은 평균을 낮추는 대신
+     * 끊김으로 나타나는 형태입니다.
      */
     short  sight_age;
 
@@ -493,64 +888,99 @@ typedef struct {
     float  pain_wait;   /**< Seconds until the flinch can fire again. / 경직이 다시 발동할 수 있기까지의 시간. */
     float  attack_wait; /**< Seconds until an attack may even be considered. / 공격을 고려할 수 있기까지의 시간. */
     float  slide_wait;  /**< Seconds left on the current strafe direction. / 현재 횡이동 방향에 남은 시간. */
+
+    /* --- what a ward owes / 결계핵이 빚진 것 ---------------------------------
+     *
+     * ENGLISH
+     * -------
+     * Only ::MON_WARD ever moves these, and they are here rather than in a
+     * side table for the reason ::Enemy::drop is: a ward that is destroyed
+     * takes its unpaid debt with it, and a slot recycled into something else
+     * gets them zeroed by ::make_monster's `Enemy zero = {0}` without anybody
+     * remembering to.
+     *
+     * WHY A DEBT AND NOT A CALL. ::enemy_hurt is where damage is noticed, and
+     * it has neither a ::Level -- which ::make_monster needs for its ground
+     * search -- nor a frame in which to count a telegraph down. So the damage
+     * site records what is owed and ::enemy_update, which has both, pays it.
+     *
+     * 한국어
+     * ------
+     * 이들을 움직이는 것은 ::MON_WARD뿐이며, 별도 표가 아니라 이곳에 두는 이유는
+     * ::Enemy::drop과 같습니다. 파괴된 결계핵은 갚지 않은 빚을 함께 가져가고, 다른 것으로
+     * 재활용된 슬롯은 아무도 기억하지 않아도 ::make_monster의 `Enemy zero = {0}`이 0으로
+     * 만들어 줍니다.
+     *
+     * *왜 호출이 아니라 빚인가.* 피해를 알아채는 곳은 ::enemy_hurt인데, 그곳에는
+     * ::make_monster가 지면 탐색에 필요로 하는 ::Level도 없고 예고를 세어 내릴 프레임도
+     * 없습니다. 그래서 피해 지점은 빚진 것을 기록하고, 둘 다 가진 ::enemy_update가
+     * 갚습니다.
+     */
+    short  summon_dmg;  /**< Damage accrued since the last summon. / 마지막 소환 이후 누적된 피해. */
+    short  summon_left; /**< Monsters still owed. 0 is nothing pending. / 아직 빚진 마리 수. 0이면 대기 없음. */
+    float  summon_warn; /**< Telegraph countdown, or 0 when none is running. / 예고 카운트다운. 진행 중이 아니면 0. */
+
+    /**
+     * @brief Which summon table this ward draws from. 0 ground, 1 air.
+     *
+     * ENGLISH: The whole of the difference between the two wards the author
+     * places, and the reason ::MON_WARD is one row rather than two. Set from
+     * the candidate marker's kind at ::enemy_ward_place; meaningless on every
+     * other type.
+     *
+     * 한국어: 제작자가 배치하는 두 결계핵의 차이 전부이며, ::MON_WARD가 두 행이 아니라 한
+     * 행인 이유입니다. ::enemy_ward_place에서 후보 표식의 종류를 보고 설정하며, 다른 모든
+     * 종류에서는 의미가 없습니다.
+     */
+    short  ward_table;
 } Enemy;
 
 /**
  * @struct Shot
- * @brief 몬스터가 발사한 비행 중인 발사체입니다.
+ * @brief One monster projectile in flight.
  *
- * weapon.c가 자신의 트레이서와 임팩트를 소유하는 것처럼, 이 구조체는
- * enemy 모듈에 의해 소유됩니다. 이들은 몬스터가 발사했기 때문에 존재하며,
- * 레벨과 함께 사라집니다.
+ * ENGLISH
+ * -------
+ * Owned by this module the way weapon.c owns its own tracers and impacts.
+ * These exist because a monster fired them, and they go when the level does.
+ *
+ * 한국어
+ * ------
+ * @brief 비행 중인 몬스터 발사체 하나.
+ *
+ * weapon.c가 자신의 예광탄과 착탄을 소유하는 것처럼 이 모듈이 소유합니다. 몬스터가
+ * 발사했기 때문에 존재하며, 레벨과 함께 사라집니다.
  */
 typedef struct {
-    v3    pos;      /**< 현재 위치. */
-    v3    vel;      /**< 속도 벡터. */
-    float life;     /**< 발사체가 사라지기까지 남은 시간 (초). 0이면 슬롯이 비어있음. */
-    int   damage;   /**< 피해량. */
-    int   active;   /**< 이 슬롯이 활성 상태인지 여부. */
+    v3    pos;      /**< Current position. / 현재 위치. */
+    v3    vel;      /**< Velocity. / 속도. */
+    float life;     /**< Seconds until it expires; 0 means the slot is free. / 사라지기까지 남은 시간(초). 0이면 빈 슬롯입니다. */
+    int   damage;   /**< Damage it deals on impact. / 명중 시 피해량. */
+    int   active;   /**< Whether this slot is in use. / 이 슬롯이 사용 중인지 여부. */
 
     /**
-     * @brief 다음 궤적 파티클을 방출하기까지 남은 시간 (초).
+     * @brief Seconds until the next trail particle is emitted.
      *
-     * 프레임마다 방출하지 않고 일정 간격으로 방출하기 위한 타이머입니다. 프레임 단위로
-     * 방출하면 궤적의 밀도가 프레임률에 좌우되고(60fps와 144fps에서 다르게 보임),
-     * 비행 중인 볼트 하나가 256개짜리 공유 파티클 풀을 혼자 채워 다른 모든 이펙트를
-     * 밀어냅니다. 간격을 두면 궤적이 프레임률과 무관하게 일정해집니다.
+     * ENGLISH
+     * -------
+     * A timer rather than a per-frame emit. Emitting per frame ties the
+     * trail's density to the frame rate -- it looks different at 60 and at 144
+     * -- and lets one bolt in flight fill the 256-entry shared particle pool
+     * by itself, pushing out every other effect. An interval makes the trail
+     * frame-rate independent. See ::SHOT_TRAIL_INTERVAL.
+     *
+     * 한국어
+     * ------
+     * @brief 다음 궤적 파티클을 방출하기까지 남은 시간(초).
+     *
+     * 프레임당 방출이 아니라 타이머입니다. 프레임 단위로 방출하면 궤적의 밀도가 프레임률에
+     * 좌우되어 60fps와 144fps에서 다르게 보이고, 비행 중인 볼트 하나가 256칸짜리 공유 파티클
+     * 풀을 혼자 채워 다른 모든 이펙트를 밀어냅니다. 간격을 두면 궤적이 프레임률과 무관해집니다.
+     * ::SHOT_TRAIL_INTERVAL을 참조하십시오.
      */
     float trail_timer;
 } Shot;
 
-/**
- * @struct EnemyPool
- * @brief The monsters in this level and the shots they have in the air.
- *
- * The last of the five pools to move out of a module and into the run that
- * owns it. It is also the one the others were waiting on: ::proj_blast has
- * carried a `(void)pl` since the projectiles moved, because the monsters it
- * damages were still reachable only through enemy.c's own arrays.
- *
- * `count` bounds the monsters -- they are laid out once when the level loads
- * and a dead one keeps its slot so its corpse can lie there -- while the shots
- * are a ring with no count, because they are spawned and retired constantly
- * and their order does not matter.
- *
- * The RNG moved with them for the reason fx's did: it decides which way a
- * monster dodges, and sharing it would make one World's fights depend on how
- * many the other had run.
- *
- * 다섯 개 풀 중 마지막으로 모듈을 떠나 그것을 소유하는 플레이로 옮겨 온 것입니다. 동시에
- * 나머지가 기다리고 있던 것이기도 합니다. ::proj_blast는 발사체가 옮겨 간 이후로 `(void)pl`을
- * 달고 있었는데, 그것이 피해를 주는 몬스터에 enemy.c 자신의 배열로만 닿을 수 있었기
- * 때문입니다.
- *
- * `count`가 몬스터의 범위를 정합니다. 레벨 로드 시 한 번 배치되고 죽은 몬스터도 시체가 그
- * 자리에 누울 수 있도록 슬롯을 유지합니다. 반면 발사체는 개수 없는 링입니다. 끊임없이
- * 생성되고 회수되며 순서가 중요하지 않기 때문입니다.
- *
- * RNG가 함께 옮겨 온 이유는 fx의 것과 같습니다. 몬스터가 어느 쪽으로 피할지를 정하므로,
- * 공유하면 한 World의 전투가 다른 World가 몇 번을 돌렸는지에 의존하게 됩니다.
- */
 /**
  * @brief How many spawners one level may run.
  *
@@ -767,72 +1197,440 @@ _Static_assert(WAVE_BURST_MAX <= ENEMY_MAX,
 _Static_assert(WAVE_INTERVAL_MIN > 0.0f,
                "a zero interval is a spawner that fires every frame");
 
+/**
+ * @struct EnemyPool
+ * @brief The monsters in this level and the shots they have in the air.
+ *
+ * The last of the five pools to move out of a module and into the run that
+ * owns it. It is also the one the others were waiting on: ::proj_blast has
+ * carried a `(void)pl` since the projectiles moved, because the monsters it
+ * damages were still reachable only through enemy.c's own arrays.
+ *
+ * `count` bounds the monsters -- they are laid out once when the level loads
+ * and a dead one keeps its slot so its corpse can lie there -- while the shots
+ * are a ring with no count, because they are spawned and retired constantly
+ * and their order does not matter.
+ *
+ * The RNG moved with them for the reason fx's did: it decides which way a
+ * monster dodges, and sharing it would make one World's fights depend on how
+ * many the other had run.
+ *
+ * 다섯 개 풀 중 마지막으로 모듈을 떠나 그것을 소유하는 플레이로 옮겨 온 것입니다. 동시에
+ * 나머지가 기다리고 있던 것이기도 합니다. ::proj_blast는 발사체가 옮겨 간 이후로 `(void)pl`을
+ * 달고 있었는데, 그것이 피해를 주는 몬스터에 enemy.c 자신의 배열로만 닿을 수 있었기
+ * 때문입니다.
+ *
+ * `count`가 몬스터의 범위를 정합니다. 레벨 로드 시 한 번 배치되고 죽은 몬스터도 시체가 그
+ * 자리에 누울 수 있도록 슬롯을 유지합니다. 반면 발사체는 개수 없는 링입니다. 끊임없이
+ * 생성되고 회수되며 순서가 중요하지 않기 때문입니다.
+ *
+ * RNG가 함께 옮겨 온 이유는 fx의 것과 같습니다. 몬스터가 어느 쪽으로 피할지를 정하므로,
+ * 공유하면 한 World의 전투가 다른 World가 몇 번을 돌렸는지에 의존하게 됩니다.
+ */
+
+/* --- the boss fight / 보스전 --------------------------------------------- */
+
+/**
+ * @brief How many times the wards must be cleared before the maw can die.
+ *
+ * ENGLISH
+ * -------
+ * THIS IS A DIVISOR OF HEALTH, NOT A COUNTER BESIDE IT. ::enemy_hurt clamps a
+ * boss's health at `hp * (BOSS_CYCLES - cycle - 1) / BOSS_CYCLES`, so a rocket
+ * landed in the first groggy window cannot carry past the first boundary and
+ * the third boundary is zero. Three cycles are then guaranteed by construction
+ * and the death still happens inside ::enemy_hurt like every other death --
+ * which matters, because a cycle counter that killed the boss would be the
+ * second death path this pool's tally is documented to forbid.
+ *
+ * ::MON_MAW's `hp` must be divisible by this or the last boundary is not zero
+ * and the boss survives its third cycle at one or two health. ::types_check
+ * says so in a form that fails.
+ *
+ * 한국어
+ * ------
+ * @brief 아귀가 죽을 수 있게 되기까지 결계를 몇 번 걷어야 하는가.
+ *
+ * *이것은 체력 옆의 계수기가 아니라 체력의 약수입니다.* ::enemy_hurt가 보스의 체력을
+ * `hp * (BOSS_CYCLES - cycle - 1) / BOSS_CYCLES`에서 고정하므로, 첫 그로기 창에 꽂은 로켓도 첫
+ * 경계를 넘지 못하고 세 번째 경계는 0입니다. 그러면 3사이클이 구조적으로 보장되고, 사망은
+ * 여전히 다른 모든 사망과 같이 ::enemy_hurt 안에서 일어납니다. 이것이 중요한 이유는, 보스를
+ * 죽이는 사이클 계수기가 곧 이 풀의 집계 주석이 금지한다고 명시한 *두 번째 사망 경로*이기
+ * 때문입니다.
+ *
+ * ::MON_MAW의 `hp`는 이 값으로 나누어떨어져야 합니다. 그러지 않으면 마지막 경계가 0이 아니고
+ * 보스는 세 번째 사이클을 체력 1~2로 살아남습니다. ::types_check가 그것을 *실패할 수 있는*
+ * 형태로 말합니다.
+ */
+#define BOSS_CYCLES 3
+
+/** @brief Wards raised per cycle, before the candidate count clamps it. / 사이클당 세우는 결계핵 수. 후보 수가 이를 제한하기 전의 값입니다. */
+#define BOSS_WARDS 4
+
+/** @brief Candidate positions a level may mark. Two lists share it. / 레벨이 표시할 수 있는 후보 자리의 수. 두 목록이 나누어 씁니다. */
+#define BOSS_MAX_CAND 16
+
+/**
+ * @brief Seconds a groggy window may last before it is taken away.
+ *
+ * ENGLISH
+ * -------
+ * THE DEFENCE AGAINST A FIGHT THAT CANNOT END. A groggy window has no timer by
+ * design -- it ends when the health crosses the next boundary, which is what
+ * makes three cycles exact -- and that is a promise the player can decline. A
+ * player who stops shooting, runs out of ammunition, or simply cannot find the
+ * maw from where they are standing would otherwise hold an open boss forever
+ * with the wards gone and nothing arriving.
+ *
+ * So the window expires, the wards come back, and the health returns to the
+ * ceiling of the segment it started at -- the cycle does NOT advance. The bar
+ * visibly refills, which is the only honest way to say "that window is gone":
+ * a bar that stayed where it was would report progress the player no longer
+ * has. The guarantee weakens from "exactly three cycles" to "at least three",
+ * and a wasted window is what adds one.
+ *
+ * A MINUTE, and not less, because the window is meant to be spent under
+ * pressure from whatever the wards summoned. Anything short enough to expire
+ * during a real fight is a second failure state nobody asked for.
+ *
+ * 한국어
+ * ------
+ * @brief 그로기 창이 회수되기까지 허용되는 시간(초).
+ *
+ * *끝날 수 없는 전투에 대한 방어입니다.* 그로기 창은 설계상 타이머가 없습니다. 체력이 다음
+ * 경계를 넘을 때 끝나고, 그것이 3사이클을 정확하게 만듭니다. 그런데 그것은 플레이어가 거절할
+ * 수 있는 약속입니다. 쏘기를 멈추거나, 탄약이 떨어지거나, 서 있는 자리에서 아귀를 찾지 못하는
+ * 플레이어는 그러지 않으면 결계가 사라지고 아무것도 오지 않는 채로 열린 보스를 영원히 붙들게
+ * 됩니다.
+ *
+ * 그래서 창은 만료되고, 결계핵이 돌아오며, 체력은 시작했던 구간의 천장으로 되돌아갑니다.
+ * 사이클은 *오르지 않습니다.* 바가 눈에 띄게 되차오르는데, 그것이 "그 창은 날아갔다"를 말하는
+ * 유일하게 정직한 방법입니다. 그대로 머무는 바는 플레이어가 더 이상 갖고 있지 않은 진척을
+ * 보고하게 됩니다. 보장은 "정확히 3사이클"에서 "최소 3사이클"로 약해지고, 낭비된 창이 하나를
+ * 더합니다.
+ *
+ * *1분이며 그보다 짧지 않은 이유는*, 이 창이 결계핵이 부른 것들의 압박 아래에서 쓰이도록
+ * 되어 있기 때문입니다. 실제 전투 중에 만료될 만큼 짧은 값은 아무도 요청하지 않은 두 번째
+ * 실패 상태입니다.
+ */
+#define BOSS_GROGGY_MAX 60.0f
+
+/**
+ * @brief Damage a ward must ACCRUE before it summons once.
+ *
+ * ENGLISH: A threshold rather than a per-hit event, and enemy.c's note in
+ * ::enemy_hurt has the whole argument: one point-blank shotgun blast is six
+ * calls into that function, so "summon when damaged" read literally fills
+ * ::ENEMY_MAX in seconds and then says nothing about it in a release build.
+ * ::MON_WARD's health is a whole multiple of this, so a ward pays a fixed
+ * number of times on its way down however it is killed.
+ *
+ * 한국어: 타격마다의 사건이 아니라 문턱이며, ::enemy_hurt의 enemy.c 주석에 논거 전부가
+ * 있습니다. 근접 샷건 한 발은 그 함수 호출 여섯 번이므로, "피해를 입으면 소환"을 문자 그대로
+ * 받으면 몇 초 만에 ::ENEMY_MAX가 차고 릴리스 빌드는 그에 대해 아무 말도 하지 않습니다.
+ * ::MON_WARD의 체력은 이 값의 정수배이므로, 결계핵은 어떻게 죽든 쓰러지는 동안 정해진 횟수만큼
+ * 지급합니다.
+ */
+#define WARD_SUMMON_DMG 30
+
+/** @brief Monsters one payment is worth. / 한 번의 지급이 내놓는 마리 수. */
+#define WARD_SUMMON_COUNT 2
+
+/**
+ * @brief Live monsters past which a ward's summon is skipped.
+ *
+ * ENGLISH: ::Spawner::max_alive's argument, applied to the other thing in this
+ * file that makes monsters. Deliberately well under ::ENEMY_MAX rather than at
+ * it: the pool is shared with corpses and the eviction path has a defect at
+ * saturation -- every recycled slot receives the same ::Enemy::sight_age, so a
+ * whole regenerated ward set would refresh its sight on one frame, which is the
+ * stagger that field exists to prevent.
+ *
+ * 한국어: ::Spawner::max_alive의 논거를, 이 파일에서 몬스터를 만드는 다른 것에 적용한 것입니다.
+ * ::ENEMY_MAX가 아니라 그보다 한참 아래인 것은 의도적입니다. 풀은 시체와 공유되고, 포화 상태의
+ * 축출 경로에는 결함이 있습니다. 재활용된 슬롯이 전부 같은 ::Enemy::sight_age를 받으므로, 재생된
+ * 결계핵 무리 전체가 한 프레임에 시야를 갱신하게 됩니다. 그 필드가 존재하는 이유인 분산이 바로
+ * 그것입니다.
+ */
+#define WARD_SUMMON_CAP 40
+
+/** @brief Metres a summoned monster appears from the ward that owed it. / 소환된 몬스터가 빚진 결계핵에서 떨어져 나타나는 거리(미터). */
+#define WARD_SUMMON_DIST 2.2f
+
+/**
+ * @struct BossFight
+ * @brief Where the wards may stand, which are standing, and how far in we are.
+ *
+ * ENGLISH
+ * -------
+ * Zero is a valid empty state for every member, which is what lets ::enemy_reset
+ * clear it by clearing the pool and is the promise pools.h makes for all of
+ * these. `active` being the flag that means "there is a fight" rather than
+ * deriving it from a live ::MON_BOSS is deliberate: the maw is dead for a few
+ * frames before anybody notices, and the reward, the line and the respawn all
+ * need to fire exactly once in that gap.
+ *
+ * 한국어
+ * ------
+ * @brief 결계핵이 설 수 있는 자리, 지금 서 있는 것, 그리고 어디까지 왔는가.
+ *
+ * 모든 멤버에 대해 0이 유효한 빈 상태입니다. 그것이 ::enemy_reset이 풀을 지우는 것만으로 이것을
+ * 지울 수 있게 하며, pools.h가 이 모두에 대해 하는 약속입니다. 살아 있는 ::MON_BOSS에서
+ * 유도하지 않고 `active`를 "전투가 있다"는 플래그로 두는 것은 의도적입니다. 아귀는 누군가
+ * 알아채기 몇 프레임 전에 이미 죽어 있고, 보상과 대사와 재소환은 전부 그 틈에서 정확히 한 번
+ * 발동해야 합니다.
+ */
+typedef struct {
+    v3    cand[BOSS_MAX_CAND];      /**< Candidate positions, sorted. / 후보 자리. 정렬되어 있습니다. */
+    char  cand_air[BOSS_MAX_CAND];  /**< 1 if that candidate summons flyers. / 그 후보가 비행체를 부르면 1. */
+    char  cand_used[BOSS_MAX_CAND]; /**< 1 if the PREVIOUS cycle used it. / *이전* 사이클이 썼으면 1. */
+    short n_cand;                   /**< Candidates the level marked. / 레벨이 표시한 후보의 수. */
+
+    /**
+     * @brief Where the level's `monster_maw` marker stood, and whether there was one.
+     *
+     * ENGLISH: Remembered rather than re-read, because endless mode summons its
+     * second and third maw long after ::enemy_spawn_level has finished with the
+     * entity list -- and because the first maw's slot may since have been
+     * recycled into something standing somewhere else entirely.
+     *
+     * 한국어: 다시 읽지 않고 기억합니다. 무한 모드는 ::enemy_spawn_level이 엔티티 목록을 다 쓴
+     * 한참 뒤에 두 번째와 세 번째 아귀를 소환하며, 첫 아귀의 슬롯은 그동안 전혀 다른 곳에 선
+     * 무언가로 재활용되었을 수 있기 때문입니다.
+     */
+    v3    maw_pos;
+    char  have_maw;
+
+    short cycle;      /**< Boundaries crossed so far, 0..::BOSS_CYCLES. / 지금까지 넘은 경계의 수. */
+    float groggy;     /**< Seconds the current window has run. 0 when warded. / 현재 창이 진행된 초. 수호 중이면 0. */
+    short next_wave;  /**< Endless: the wave the next maw is due on. 0 is none. / 무한 모드에서 다음 아귀가 뜰 웨이브. 0이면 예정 없음. */
+    char  active;     /**< A fight is under way. / 전투가 진행 중입니다. */
+    char  was_groggy; /**< Last frame's phase, so the transition fires once. / 지난 프레임의 단계. 전이가 한 번만 발동하도록. */
+
+    /**
+     * @brief Story mode has already summoned its one maw.
+     *
+     * ENGLISH: Distinct from `active`, which goes back to 0 the moment the
+     * fight ends. Without this the story arena would summon a fresh maw on the
+     * frame after the old one died -- forever, since story mode has no wave
+     * gate to hide behind.
+     *
+     * 한국어: `active`와 구별됩니다. 그것은 전투가 끝나는 순간 0으로 돌아갑니다. 이것이 없으면
+     * 스토리 아레나는 이전 아귀가 죽은 다음 프레임에 새 아귀를 소환합니다. 영원히 그렇게 됩니다.
+     * 스토리 모드에는 뒤에 숨을 웨이브 관문이 없기 때문입니다.
+     */
+    char  have_started;
+} BossFight;
+
 typedef struct {
     Enemy    m[ENEMY_MAX];             /**< Monsters, packed to `count`. / `count`까지 채워진 몬스터. */
     int      count;                    /**< How many the level laid out. / 레벨이 배치한 수. */
     Shot     shots[ENEMY_MAX_SHOTS];   /**< Their projectiles, a ring. / 그들의 발사체이며 링입니다. */
     unsigned rng;                      /**< Fight randomness. 0 means "seed me". / 전투 난수. 0이면 "씨앗을 채워라". */
 
+    /**
+     * @brief The boss fight, if this level has one.
+     *
+     * ENGLISH: Here rather than in ::RunState for the reason ::Spawner is here:
+     * it is state ABOUT THE LEVEL that the level cannot re-derive per frame,
+     * and ::enemy_reset -- which every level load goes through -- zeroes it for
+     * free. Putting it on the run would mean a level reload kept a half-finished
+     * fight, and putting it in two places would mean a restart put back one of
+     * them. The BANNER, which is a fact about the playthrough rather than about
+     * the room, is on ::RunState instead; that split is deliberate and is the
+     * one thing a reader has to know about where this lives.
+     *
+     * 한국어: ::Spawner가 이곳에 있는 것과 같은 이유입니다. 이것은 레벨이 매 프레임 다시 유도할
+     * 수 없는 *레벨에 관한* 상태이고, 모든 레벨 로드가 거치는 ::enemy_reset이 공짜로 0으로
+     * 만들어 줍니다. 플레이 쪽에 두면 레벨 재로드가 끝나지 않은 전투를 유지하게 되고, 두
+     * 군데에 두면 재시작이 둘 중 하나만 되돌립니다. *배너*는 방이 아니라 플레이에 관한
+     * 사실이므로 ::RunState에 둡니다. 그 분할은 의도적이며, 이것이 어디에 사는지에 대해
+     * 독자가 알아야 할 유일한 것입니다.
+     */
+    BossFight boss;
+
+    /**
+     * @brief How much SLOWER the spawners run, as a fraction added to 1.
+     *
+     * ENGLISH
+     * -------
+     * ZERO IS NO SUPPRESSION, and that is why it is a slowdown rather than a
+     * scale. pools.h promises that a zeroed ::Pools is a valid empty state; a
+     * `spawn_scale` of 0 would read as "spawn instantly" and break that promise
+     * on the first field anyone added without thinking about it.
+     *
+     * STATED AS A CONDITION, NOT SAVED AND RESTORED. ::enemy_wave_arm rewrites
+     * every spawner's interval on every wave, so a pre-boss value stashed
+     * anywhere would be overwritten before it could be put back. Instead the
+     * effective wait is multiplied wherever a spawner schedules its next group,
+     * and clearing this field is the whole of lifting the suppression -- the
+     * same bargain main.c makes with the soundtrack, which is a per-frame
+     * statement of what should be playing rather than an event that switches it.
+     *
+     * 한국어
+     * ------
+     * @brief 스포너가 얼마나 *느려지는가*. 1에 더해지는 비율입니다.
+     *
+     * *0이 억제 없음이며*, 그것이 배율이 아니라 감속인 이유입니다. pools.h는 0으로 채운
+     * ::Pools가 유효한 빈 상태라고 약속합니다. `spawn_scale`이 0이면 "즉시 생성"으로 읽히고,
+     * 아무 생각 없이 필드를 추가하는 첫 사람에게서 그 약속이 깨집니다.
+     *
+     * *저장했다 되돌리지 않고 조건으로 진술합니다.* ::enemy_wave_arm이 매 웨이브 모든 스포너의
+     * 간격을 덮어쓰므로, 어디에 보관한 보스 이전 값이든 되돌리기 전에 덮어써집니다. 대신
+     * 스포너가 다음 무리를 예약하는 자리에서 실효 대기 시간에 곱하고, 이 필드를 지우는 것이
+     * 억제 해제의 전부입니다. main.c가 사운드트랙과 맺는 것과 같은 약속입니다. 그것을 전환하는
+     * 사건이 아니라 무엇이 재생되어야 하는지에 대한 매 프레임의 진술입니다.
+     */
+    float    spawn_slow;
+
     Spawner spawner[ENEMY_MAX_SPAWNERS]; /**< Markers that keep making monsters. / 몬스터를 계속 만들어 내는 표식. */
     int     n_spawners;                  /**< How many are in use. / 사용 중인 개수. */
+
+    /**
+     * @brief Monsters that have died since the last ::enemy_take_kills.
+     *
+     * ENGLISH
+     * -------
+     * A TALLY OWED, not a total. The run's total belongs to ::RunState, which
+     * is what a restart clears; this pool is rebuilt by every level load and a
+     * total kept here would be a total that resets when the player walks
+     * through an exit. So the pool counts what it has not yet handed over and
+     * the run counts what it has been handed -- the same split ::Enemy::drop
+     * makes with ::enemy_take_drop, for the same reason.
+     *
+     * Raised at the ONE place a monster becomes ::E_DEAD, so it cannot
+     * disagree with the corpses: a second death path added later has to go
+     * through ::enemy_hurt to exist at all.
+     *
+     * 한국어
+     * ------
+     * @brief 마지막 ::enemy_take_kills 이후 죽은 몬스터의 수.
+     *
+     * 누계가 아니라 *빚진 수*입니다. 플레이의 누계는 재시작이 지우는 ::RunState에 속합니다.
+     * 이 풀은 레벨을 로드할 때마다 다시 만들어지므로, 이곳에 둔 누계는 플레이어가 출구를
+     * 지날 때 초기화되는 누계가 됩니다. 그래서 풀은 아직 건네지 않은 것을 세고 플레이는
+     * 건네받은 것을 셉니다. ::Enemy::drop이 ::enemy_take_drop과 맺는 것과 같은 분담이며 같은
+     * 이유입니다.
+     *
+     * 몬스터가 ::E_DEAD가 되는 *한 곳*에서 올리므로 시체와 어긋날 수 없습니다. 나중에 추가된
+     * 두 번째 사망 경로도 존재하려면 ::enemy_hurt를 거쳐야 합니다.
+     */
+    int     deaths;
 } EnemyPool;
 
 /* The bundle that holds this pool. See proj.h for why the calls take it. */
 typedef struct Pools Pools;
 
 
-/* --- 함수 --- */
+/* --- Public function prototypes / 공개 함수 프로토타입 --- */
+
+/* --- The type table / 종류 표 --- */
 
 /**
- * @brief 몬스터 타입 인덱스로 몬스터의 기본 스탯을 가져옵니다.
- * @param type 몬스터 타입 ID (MON_*).
- * @return MonType 구조체에 대한 const 포인터.
+ * @brief The stat block for one kind of monster.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] type A ::MonTypeID.
+ * @return The kind's stats. Never NULL -- an id outside the enum resolves to a
+ *         row that exists rather than being rejected, so no caller has to
+ *         null-check what it is about to read.
+ *
+ * @note The returned table is static and outlives every caller. Do not write
+ *       through it.
+ *
+ * 한국어
+ * ------
+ * @brief 한 종류의 몬스터에 대한 수치 묶음.
+ *
+ * @param[in] type ::MonTypeID 값.
+ * @return 그 종류의 수치. 결코 NULL이 아닙니다. 열거형 바깥의 식별자는 거절되지 않고
+ *         존재하는 행으로 해석되므로, 읽으려는 쪽이 널 검사를 할 필요가 없습니다.
+ *
+ * @note 반환되는 표는 정적이며 모든 호출자보다 오래 살아남습니다. 그것을 통해 쓰지
+ *       마십시오.
  */
 const MonType *mon_stats(int type);
 
 /**
- * @brief 엔티티 종류 문자열에 해당하는 몬스터 타입을 반환합니다.
- * @param kind 엔티티 종류 문자열 (예: "imp", "brute").
- * @return 해당 몬스터 타입 ID, 없으면 -1.
+ * @brief The monster kind an entity name in level text refers to.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] kind Entity kind string, e.g. "imp" or "brute".
+ * @return The ::MonTypeID, or -1 if no kind has that name.
+ *
+ * @note Matched against ::MonType::name, so the names live in the stat table
+ *       and cannot drift from the kinds they place.
+ *
+ * 한국어
+ * ------
+ * @brief 레벨 텍스트의 엔티티 이름이 가리키는 몬스터 종류.
+ *
+ * @param[in] kind 엔티티 종류 문자열. 예를 들어 "imp"나 "brute"입니다.
+ * @return ::MonTypeID 값. 그 이름을 가진 종류가 없으면 -1입니다.
+ *
+ * @note ::MonType::name과 대조하므로 이름이 수치 표 안에 살며, 자신이 배치하는 종류와
+ *       어긋날 수 없습니다.
  */
 int mon_type_for(const char *kind);
 
+/* --- Lifecycle / 수명 주기 --- */
 
 /**
- * @brief 현재 활성화된 발사체의 수를 반환합니다 (비활성 슬롯 포함).
- * @return 스캔할 총 발사체 슬롯 수.
- */
-int enemy_shot_count(const Pools *pl);
-
-/**
- * @brief 지정된 인덱스의 발사체 정보를 가져옵니다.
- * @param i 발사체 인덱스.
- * @return Shot 구조체에 대한 const 포인터, 유효하지 않은 인덱스 시 NULL.
- */
-const Shot *enemy_shot_at(const Pools *pl, int i);
-
-/**
- * @brief 모든 몬스터와 발사체를 초기화합니다. (재)스폰 전에 호출해야 합니다.
+ * @brief Clears every monster and every shot.
+ *
+ * ENGLISH
+ * -------
+ * @param[out] pl Pools to clear.
+ *
+ * @note Call before spawning or respawning.
+ * @note CLEARS THE SPAWNERS TOO, because they are the reason there would be
+ *       more monsters: a reset that left them running would have the previous
+ *       level still delivering into the new one.
+ * @note Leaves ::EnemyPool::rng alone. A zeroed pool means "not seeded yet"
+ *       and is seeded on first use, so clearing it here would restart the
+ *       fight randomness on every level rather than only on a new run.
+ *
+ * 한국어
+ * ------
+ * @brief 모든 몬스터와 모든 발사체를 지웁니다.
+ *
+ * @param[out] pl 지울 풀.
+ *
+ * @note 생성이나 재생성 전에 호출하십시오.
+ * @note *스포너도 함께 지웁니다.* 몬스터가 더 생길 이유가 바로 그것이기 때문입니다. 그것을
+ *       돌려 둔 채로 초기화하면 이전 레벨이 새 레벨로 계속 배달하게 됩니다.
+ * @note ::EnemyPool::rng는 건드리지 않습니다. 0인 풀은 "아직 씨앗이 채워지지 않음"을 뜻하며
+ *       처음 쓰일 때 씨앗을 받습니다. 이곳에서 지우면 전투 난수가 새 플레이마다가 아니라
+ *       레벨마다 다시 시작하게 됩니다.
  */
 void enemy_reset(Pools *pl);
 
 /**
- * @brief 레벨의 "spawn" 종류 엔티티 위치에 몬스터를 스폰합니다.
- * @param l 몬스터를 스폰할 레벨 데이터.
+ * @brief Places monsters at the level's spawn entities.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] pl Pools to fill.
+ * @param[in]     l  Level whose entities say what goes where.
+ *
+ * @note Reads what the level AUTHORED. ::enemy_wave_arm is what multiplies it
+ *       by how deep the run has got; this function knows nothing about waves.
+ *
+ * 한국어
+ * ------
+ * @brief 레벨의 생성 엔티티 자리에 몬스터를 배치합니다.
+ *
+ * @param[in,out] pl 채울 풀.
+ * @param[in]     l  무엇이 어디에 놓이는지를 엔티티가 말해 주는 레벨.
+ *
+ * @note 레벨이 *제작한* 것을 읽습니다. 거기에 플레이가 얼마나 깊어졌는지를 곱하는 것은
+ *       ::enemy_wave_arm이며, 이 함수는 웨이브에 대해 아무것도 알지 못합니다.
  */
 void enemy_spawn_level(Pools *pl, const Level *l);
 
-/**
- * @brief 현재 레벨의 총 몬스터 수를 반환합니다 (시체 포함).
- * @return 몬스터 수.
- */
-int enemy_count(const Pools *pl);
-
-/**
- * @brief 살아있는 몬스터의 수를 반환합니다 (E_DEAD 상태 제외).
- * @return 살아있는 몬스터 수.
- */
-int enemy_alive(const Pools *pl);
+/* --- Waves / 웨이브 --- */
 
 /**
  * @brief Re-arms every spawner for a wave, scaled by which wave it is.
@@ -914,51 +1712,548 @@ void enemy_wave_arm(Pools *pl, int wave);
 int enemy_wave_done(const Pools *pl);
 
 /**
- * @brief How many spawners this pool is running. 0 means "not an arena".
+ * @brief How many spawners this pool is running.
  *
- * 한국어: 이 풀이 돌리는 스포너의 수입니다. 0이면 "아레나가 아님"입니다.
+ * ENGLISH
+ * -------
+ * @param[in] pl Pools to ask.
+ * @return The count. 0 means "not an arena" -- an ordinary level whose
+ *         monsters were laid out rather than sent in waves.
+ *
+ * 한국어
+ * ------
+ * @brief 이 풀이 돌리고 있는 스포너의 수.
+ *
+ * @param[in] pl 질의할 풀.
+ * @return 그 개수. 0은 "아레나가 아님"을 뜻합니다. 몬스터가 웨이브로 보내진 것이 아니라
+ *         배치된 평범한 레벨입니다.
  */
 int enemy_spawner_count(const Pools *pl);
 
 /**
- * @brief 지정된 인덱스의 몬스터 정보를 가져옵니다.
- * @param i 몬스터 인덱스.
- * @return Enemy 구조체에 대한 const 포인터, 유효하지 않은 인덱스 시 NULL.
+ * @brief Borrows one spawner by index.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] pl Pool to query.
+ * @param[in] i  Slot index, below ::enemy_spawner_count.
+ * @return The spawner, or 0 when the index is out of range.
+ * @note Exists because a spawner is WHERE THE FIGHT IS, and that is a question
+ *       from outside this module: `at centre` in loot.txt pays a cleared wave
+ *       at the average of them, which is the middle of the room the player was
+ *       just fighting in rather than the middle of whatever the map's bounding
+ *       box happens to be.
+ *
+ * 한국어
+ * ------
+ * @brief 인덱스로 스포너 하나를 빌려 옵니다.
+ * @param[in] pl 질의할 풀.
+ * @param[in] i  슬롯 인덱스. ::enemy_spawner_count 미만이어야 합니다.
+ * @return 해당 스포너. 인덱스가 범위를 벗어나면 0.
+ * @note 존재하는 이유는 스포너가 곧 *전투가 벌어지는 자리*이며, 그것이 이 모듈 바깥에서
+ *       오는 질문이기 때문입니다. loot.txt의 `at centre`는 정리된 웨이브를 그것들의 평균
+ *       지점에 지급하는데, 그 지점은 맵의 경계 상자 한가운데가 아니라 플레이어가 방금 싸운
+ *       방의 한가운데입니다.
+ */
+const Spawner *enemy_spawner_at(const Pools *pl, int i);
+
+/* --- Per-frame step / 프레임 단위 갱신 --- */
+
+/**
+ * @brief Advances every monster and every shot by one frame.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] pl         Pools to step.
+ * @param[in]     l          Level the monsters collide against.
+ * @param[in]     player_eye Where the player's eye is, in world metres.
+ * @param[in]     dt         Seconds since the last frame.
+ * @return Total damage dealt to the player this frame, melee and projectile
+ *         hits together.
+ *
+ * @note RETURNS the damage rather than applying it. This module never touches
+ *       the player's health; the caller owns that, which is what keeps the AI
+ *       testable with no player at all.
+ * @note `player_eye` is passed rather than read from a global on purpose. A
+ *       cached copy would be a value whose freshness depended on where in the
+ *       call stack it was read.
+ *
+ * 한국어
+ * ------
+ * @brief 모든 몬스터와 모든 발사체를 한 프레임 진행시킵니다.
+ *
+ * @param[in,out] pl         진행시킬 풀.
+ * @param[in]     l          몬스터가 충돌하는 레벨.
+ * @param[in]     player_eye 플레이어의 눈 위치. 월드 미터 단위입니다.
+ * @param[in]     dt         지난 프레임 이후 경과 시간(초).
+ * @return 이번 프레임에 플레이어가 입은 총 피해량. 근접 공격과 발사체 명중을 합한 값입니다.
+ *
+ * @note 피해를 적용하지 않고 *반환합니다*. 이 모듈은 플레이어의 체력을 결코 건드리지
+ *       않습니다. 그것은 호출자의 몫이며, 그 덕분에 플레이어 없이도 AI를 시험할 수 있습니다.
+ * @note `player_eye`를 전역에서 읽지 않고 인자로 받는 것은 의도적입니다. 사본을 두면 호출
+ *       스택의 어디에서 읽느냐에 따라 신선도가 달라지는 값이 됩니다.
+ */
+int enemy_update(Pools *pl, const Level *l, v3 player_eye, float dt);
+
+/* --- Queries / 조회 --- */
+
+/**
+ * @brief How many monster slots this level filled, corpses included.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] pl Pools to ask.
+ * @return The number of slots to scan, not the number that are alive. Pair it
+ *         with ::enemy_at.
+ *
+ * 한국어
+ * ------
+ * @brief 이 레벨이 채운 몬스터 슬롯의 수. 시체를 포함합니다.
+ *
+ * @param[in] pl 질의할 풀.
+ * @return 살아 있는 수가 아니라 훑어야 할 슬롯의 수입니다. ::enemy_at과 함께 쓰십시오.
+ */
+int enemy_count(const Pools *pl);
+
+/**
+ * @brief How many monsters are still alive.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] pl Pools to ask.
+ * @return The count, excluding anything in ::E_DEAD.
+ *
+ * 한국어
+ * ------
+ * @brief 아직 살아 있는 몬스터의 수.
+ *
+ * @param[in] pl 질의할 풀.
+ * @return ::E_DEAD인 것을 제외한 개수.
+ */
+int enemy_alive(const Pools *pl);
+
+/**
+ * @brief One monster by index.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] pl Pools to read.
+ * @param[in] i  Slot index, below ::enemy_count.
+ * @return The monster, or 0 if the index is out of range.
+ *
+ * @note Points into the pool, so it is valid only until that pool is stepped
+ *       or reset.
+ *
+ * 한국어
+ * ------
+ * @brief 인덱스로 지정한 몬스터 하나.
+ *
+ * @param[in] pl 읽을 풀.
+ * @param[in] i  슬롯 인덱스. ::enemy_count 미만이어야 합니다.
+ * @return 해당 몬스터. 인덱스가 범위를 벗어나면 0입니다.
+ *
+ * @note 풀 안을 가리키므로, 그 풀이 진행되거나 초기화되기 전까지만 유효합니다.
  */
 const Enemy *enemy_at(const Pools *pl, int i);
 
 /**
- * @brief 모든 몬스터와 발사체의 상태를 한 프레임 업데이트합니다.
+ * @brief How many projectile slots there are to scan.
  *
- * 이 프레임 동안 플레이어에게 가해진 총 피해량(근접 공격 및 발사체 피격 모두)을
- * 반환합니다. 이 모듈이 플레이어의 체력에 직접 접근하는 대신, 호출자가
- * 플레이어 체력을 관리하도록 합니다.
- * @param l 현재 레벨 데이터.
- * @param player_eye 플레이어의 시점 위치.
- * @param dt 마지막 프레임 이후 경과 시간 (초).
- * @return 플레이어가 입은 총 피해량.
+ * ENGLISH
+ * -------
+ * @param[in] pl Pools to ask.
+ * @return The slot count, inactive slots included. Check ::Shot::active on
+ *         each.
+ *
+ * 한국어
+ * ------
+ * @brief 훑어야 할 발사체 슬롯의 수.
+ *
+ * @param[in] pl 질의할 풀.
+ * @return 비활성 슬롯을 포함한 슬롯 수. 각각의 ::Shot::active를 확인하십시오.
  */
-int enemy_update(Pools *pl, const Level *l, v3 player_eye, float dt);
+int enemy_shot_count(const Pools *pl);
 
 /**
- * @brief 광선이 부딪히는 가장 가까운 살아있는 몬스터를 찾습니다 (수직 실린더로 판정).
+ * @brief One projectile by index.
  *
- * 샷건에서 사용되어 탄환이 몬스터를 통과하지 않고 멈추도록 합니다.
- * @param o 광선의 원점.
- * @param d 광선의 방향 벡터.
- * @param maxdist 최대 탐지 거리.
- * @param out_t [out] 광선이 몬스터에 부딪힌 거리를 저장할 포인터.
- * @param out_idx [out] 부딪힌 몬스터의 인덱스를 저장할 포인터.
- * @return `maxdist` 내에서 몬스터를 맞추면 1, 그렇지 않으면 0.
+ * ENGLISH
+ * -------
+ * @param[in] pl Pools to read.
+ * @param[in] i  Slot index, below ::enemy_shot_count.
+ * @return The shot, or 0 if the index is out of range.
+ *
+ * @note Points into the pool, so it is valid only until that pool is stepped
+ *       or reset.
+ *
+ * 한국어
+ * ------
+ * @brief 인덱스로 지정한 발사체 하나.
+ *
+ * @param[in] pl 읽을 풀.
+ * @param[in] i  슬롯 인덱스. ::enemy_shot_count 미만이어야 합니다.
+ * @return 해당 발사체. 인덱스가 범위를 벗어나면 0입니다.
+ *
+ * @note 풀 안을 가리키므로, 그 풀이 진행되거나 초기화되기 전까지만 유효합니다.
+ */
+const Shot *enemy_shot_at(const Pools *pl, int i);
+
+/* --- Taking damage / 피해 처리 --- */
+
+/**
+ * @brief Finds the nearest living monster a ray hits.
+ *
+ * ENGLISH
+ * -------
+ * @param[in]  pl      Pools to test against.
+ * @param[in]  o       Ray origin.
+ * @param[in]  d       Ray direction. Expected to be normalised.
+ * @param[in]  maxdist How far to look.
+ * @param[out] out_t   Distance along the ray to the hit. Written on a hit.
+ * @param[out] out_idx Index of the monster hit. Written on a hit.
+ * @return 1 if a monster was hit within `maxdist`, 0 otherwise.
+ *
+ * @note Monsters are tested as upright CYLINDERS, not as their billboards. A
+ *       billboard faces the camera, so hit detection against one would depend
+ *       on where the shot was fired from rather than on where the monster is.
+ * @note Skips ::E_DEAD, so a corpse does not absorb a shot meant for what is
+ *       standing behind it.
+ * @note Used by the shotgun so a pellet stops at a monster instead of passing
+ *       through it.
+ *
+ * 한국어
+ * ------
+ * @brief 광선이 맞히는 가장 가까운 살아 있는 몬스터를 찾습니다.
+ *
+ * @param[in]  pl      대상이 되는 풀.
+ * @param[in]  o       광선의 원점.
+ * @param[in]  d       광선의 방향. 정규화되어 있다고 가정합니다.
+ * @param[in]  maxdist 탐색할 최대 거리.
+ * @param[out] out_t   명중 지점까지 광선을 따라간 거리. 명중했을 때 기록됩니다.
+ * @param[out] out_idx 맞은 몬스터의 인덱스. 명중했을 때 기록됩니다.
+ * @return `maxdist` 안에서 몬스터를 맞혔으면 1, 아니면 0입니다.
+ *
+ * @note 몬스터는 빌보드가 아니라 곧게 선 *원기둥*으로 판정합니다. 빌보드는 카메라를 향하므로,
+ *       그것으로 판정하면 몬스터가 어디에 있는지가 아니라 어디에서 쏘았는지에 명중이
+ *       좌우됩니다.
+ * @note ::E_DEAD는 건너뜁니다. 시체가 뒤에 서 있는 것을 겨눈 사격을 대신 받아 내지 않게 하기
+ *       위함입니다.
+ * @note 샷건이 사용하며, 탄환이 몬스터를 통과하지 않고 그곳에서 멈추게 합니다.
  */
 int enemy_hitscan(const Pools *pl, v3 o, v3 d, float maxdist, float *out_t, int *out_idx);
 
 /**
- * @brief 몬스터에게 피해를 입히고, 경직시키거나 죽입니다.
- * @param idx 피해를 입힐 몬스터의 인덱스.
- * @param dmg 피해량.
- * @param dir 사격 방향, 향후 넉백 및 사망 방향에 사용.
+ * @brief Deals damage to a monster, flinching or killing it.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] pl  Pools holding the monster.
+ * @param[in]     idx Index of the monster to hurt. Out of range is ignored.
+ * @param[in]     dmg Damage to deal.
+ * @param[in]     dir Direction the shot came from, for knockback and for which
+ *                    way a death faces.
+ *
+ * @note The flinch is rate-limited per kind by ::MonType::pain_lock, so a fast
+ *       enough weapon cannot hold a monster still until it dies.
+ *
+ * 한국어
+ * ------
+ * @brief 몬스터에게 피해를 입혀 경직시키거나 죽입니다.
+ *
+ * @param[in,out] pl  그 몬스터를 담고 있는 풀.
+ * @param[in]     idx 피해를 입힐 몬스터의 인덱스. 범위를 벗어나면 무시합니다.
+ * @param[in]     dmg 피해량.
+ * @param[in]     dir 사격이 날아온 방향. 넉백과 사망 방향에 쓰입니다.
+ *
+ * @note 경직은 ::MonType::pain_lock으로 종류마다 빈도가 제한되므로, 충분히 빠른 무기라도
+ *       몬스터를 죽을 때까지 붙잡아 둘 수 없습니다.
  */
 void enemy_hurt(Pools *pl, int idx, int dmg, v3 dir);
+
+/**
+ * @brief Takes what a corpse owes the floor, clearing it so it is owed once.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] pl     Pools holding the monsters.
+ * @param[in]     idx    Slot index, below ::enemy_count.
+ * @param[out]    out_at Where to put it -- the body's own feet. Untouched when
+ *                       nothing is owed.
+ * @return A PK_* kind, ::LOOT_HELD, or -1 when this monster owes nothing.
+ *
+ * @note CLEARS AS IT READS, which is the whole contract: a caller that drains
+ *       the pool every frame must not be paid twice by the corpse that lies
+ *       there for ::CORPSE_FADE seconds afterwards.
+ * @note Answers -1 for an empty or out-of-range slot, so a caller may sweep
+ *       [0, ::enemy_count) without testing `active` first.
+ * @note ::LOOT_HELD is returned UNRESOLVED. See ::Enemy::drop for why this
+ *       module cannot answer it, and ::loot_held_kind for who can.
+ *
+ * 한국어
+ * ------
+ * @brief 시체가 바닥에 빚진 것을 가져오며, 한 번만 빚지도록 지웁니다.
+ * @param[in,out] pl     몬스터를 담은 풀.
+ * @param[in]     idx    슬롯 인덱스. ::enemy_count 미만이어야 합니다.
+ * @param[out]    out_at 놓을 자리. 시체 자신의 발치입니다. 빚진 것이 없으면 건드리지 않습니다.
+ * @return PK_* 종류, ::LOOT_HELD, 또는 이 몬스터가 빚진 것이 없으면 -1.
+ *
+ * @note *읽으면서 지우며*, 그것이 계약의 전부입니다. 매 프레임 풀을 훑는 호출자가, 그 뒤
+ *       ::CORPSE_FADE초 동안 그 자리에 누워 있는 시체에게 두 번 지급받아서는 안 됩니다.
+ * @note 비었거나 범위를 벗어난 슬롯에는 -1로 답하므로, 호출자는 `active`를 먼저 검사하지 않고
+ *       [0, ::enemy_count)를 훑어도 됩니다.
+ */
+int enemy_take_drop(Pools *pl, int idx, v3 *out_at);
+
+/**
+ * @brief Takes the monsters that have died since the last call, clearing the tally.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] pl Pools holding the monsters.
+ * @return How many died since this was last asked. Zero on almost every frame.
+ *
+ * @note CLEARS AS IT READS, exactly like ::enemy_take_drop: a caller that
+ *       drains every frame and adds to a total of its own must not be paid
+ *       twice for the same corpse.
+ * @note A drain, not a query, because there is no question this could answer
+ *       otherwise. Corpses keep their slots and are recycled, so counting the
+ *       dead ones in the pool would undercount the moment a slot is reused.
+ *
+ * 한국어
+ * ------
+ * @brief 마지막 호출 이후 죽은 몬스터 수를 가져오며, 그 집계를 지웁니다.
+ * @param[in,out] pl 몬스터를 담은 풀.
+ * @return 마지막으로 물었을 때 이후 죽은 수. 거의 모든 프레임에서 0입니다.
+ *
+ * @note ::enemy_take_drop과 똑같이 *읽으면서 지웁니다*. 매 프레임 훑어 자기 누계에 더하는
+ *       호출자가 같은 시체로 두 번 지급받아서는 안 됩니다.
+ * @note 질의가 아니라 배수인 이유는, 달리 답할 방법이 없기 때문입니다. 시체는 슬롯을 유지하다
+ *       재활용되므로, 풀에서 죽은 슬롯을 세는 방식은 슬롯이 재사용되는 순간 적게 셉니다.
+ */
+int enemy_take_kills(Pools *pl);
+
+/* --- the boss fight / 보스전 --------------------------------------------- */
+
+/**
+ * @brief Which slot holds the living boss, or -1.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] pl The pool.
+ * @return The first live ::MON_BOSS slot, or -1 when none stands.
+ *
+ * A SLOT AND NOT A YES/NO, because ::world_boss_present's caller now wants one
+ * more thing than "is something big up": the health bar needs a SUBJECT. The
+ * predicate is this function compared against zero, which is how world.h keeps
+ * the signature it promised to keep.
+ *
+ * @note First rather than nearest. There is never more than one -- ::step_boss
+ *       refuses to summon while this is non-negative -- and "first" is a rule a
+ *       test can state, where "nearest" would need a position it has no reason
+ *       to take.
+ *
+ * 한국어
+ * ------
+ * @brief 살아 있는 보스가 있는 슬롯. 없으면 -1.
+ * @param[in] pl 풀.
+ * @return 첫 생존 ::MON_BOSS 슬롯. 서 있는 것이 없으면 -1.
+ *
+ * *예/아니오가 아니라 슬롯인 이유는*, ::world_boss_present의 호출자가 이제 "큰 것이 떴는가"
+ * 외에 하나를 더 원하기 때문입니다. 체력바에는 *대상*이 필요합니다. 술어는 이 함수를 0과
+ * 비교한 것이며, 그것이 world.h가 지키겠다고 한 시그니처를 지키는 방법입니다.
+ *
+ * @note 가장 가까운 것이 아니라 첫 번째입니다. 둘 이상은 결코 없으며(::step_boss가 이 값이
+ *       음수가 아닌 동안 소환을 거절합니다), "첫 번째"는 테스트가 진술할 수 있는 규칙인 반면
+ *       "가장 가까운"은 받을 이유가 없는 위치를 필요로 합니다.
+ */
+int enemy_boss_index(const Pools *pl);
+
+/**
+ * @brief How many wards are still standing.
+ *
+ * ENGLISH: Zero is what opens the boss, and ::enemy_hurt asks this on every
+ * blow that lands on a ::MON_BOSS. Bounded by ::ENEMY_MAX and cheap, for the
+ * reason ::world_boss_present's scan was.
+ *
+ * 한국어: 0이 보스를 여는 조건이며, ::enemy_hurt는 ::MON_BOSS에 닿는 모든 타격마다 이것을
+ * 묻습니다. ::ENEMY_MAX로 제한되어 저렴하며, ::world_boss_present의 스캔이 그러했던 것과 같은
+ * 이유입니다.
+ */
+int enemy_guards_alive(const Pools *pl);
+
+/**
+ * @brief Live monsters that a WAVE is responsible for -- boss and wards excluded.
+ *
+ * ENGLISH
+ * -------
+ * ::enemy_wave_done asks this instead of ::enemy_alive, and that one call site
+ * is the whole of the difference. Without it a standing boss freezes the wave
+ * counter: a wave completes only when the arena is empty, the maw is never
+ * empty, and the clock that schedules the NEXT boss stops on the fight it was
+ * scheduling. That is commit 9d8099a's failure approached from the other side.
+ *
+ * @note ::enemy_alive is deliberately NOT changed. ::Spawner::max_alive is a
+ *       ceiling on what occupies a slot, and a boss occupies one.
+ * @note A ward's SUMMONS are ordinary monsters and are counted. They are the
+ *       wave's business; the thing that made them is not.
+ *
+ * 한국어
+ * ------
+ * @brief *웨이브*가 책임지는 생존 몬스터. 보스와 결계핵은 제외합니다.
+ *
+ * ::enemy_wave_done이 ::enemy_alive 대신 이것을 묻고, 그 한 호출 지점이 차이의 전부입니다.
+ * 이것이 없으면 서 있는 보스가 웨이브 계수기를 세웁니다. 웨이브는 아레나가 비어야 끝나는데
+ * 아귀는 결코 비지 않으므로, *다음* 보스를 예약하는 시계가 자신이 예약하던 그 전투에서
+ * 멈춥니다. 커밋 9d8099a의 실패를 반대편에서 만난 것입니다.
+ *
+ * @note ::enemy_alive는 의도적으로 바꾸지 않습니다. ::Spawner::max_alive는 슬롯을 차지하는
+ *       것에 대한 상한이고, 보스는 슬롯을 차지합니다.
+ * @note 결계핵의 *소환물*은 평범한 몬스터이며 셉니다. 그들은 웨이브의 일이고, 그들을 만든
+ *       것은 아닙니다.
+ */
+int enemy_alive_minions(const Pools *pl);
+
+/**
+ * @brief Reads the level's ward CANDIDATE markers into the fight.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] pl The pool whose ::BossFight is filled.
+ * @param[in]     l  The level to read.
+ *
+ * CANDIDATES, NOT WARDS. Nothing is spawned here: a ward exists only while a
+ * fight is under way, so the markers are recorded and ::enemy_ward_place is
+ * what turns some of them into monsters. This is also why the markers are
+ * `info_ward_*` aliases rather than `monster_ward` -- the `monster_` prefix
+ * would have made ::enemy_spawn_level create them at load, which is the one
+ * thing they must not do.
+ *
+ * SORTED BY POSITION before it returns. The entity list is in .map file order,
+ * and world.c already refused that dependency once by name: "'First in the
+ * entity list' is a property of how the map was saved." Without the sort,
+ * regrouping two brushes in TrenchBroom changes which wards a given seed picks,
+ * with nothing in the level diff to explain it.
+ *
+ * 한국어
+ * ------
+ * @brief 레벨의 결계핵 *후보* 표식을 전투로 읽어들입니다.
+ * @param[in,out] pl ::BossFight가 채워질 풀.
+ * @param[in]     l  읽을 레벨.
+ *
+ * *결계핵이 아니라 후보입니다.* 이곳에서 생성되는 것은 없습니다. 결계핵은 전투가 진행 중일
+ * 때만 존재하므로 표식은 기록만 되고, 그중 일부를 몬스터로 만드는 것은 ::enemy_ward_place입니다.
+ * 표식이 `monster_ward`가 아니라 `info_ward_*` 별칭인 이유이기도 합니다. `monster_` 접두사였다면
+ * ::enemy_spawn_level이 로드 시점에 그것을 만들었을 텐데, 그것이야말로 해서는 안 되는 단 하나의
+ * 일입니다.
+ *
+ * 반환 전에 *위치로 정렬합니다.* 엔티티 목록은 .map 파일 순서이고, world.c는 이미 그 의존을
+ * 이름을 붙여 거절한 적이 있습니다. *"«엔티티 목록의 첫 번째»는 맵이 어떻게 저장되었는가의
+ * 성질입니다."* 정렬이 없으면 TrenchBroom에서 브러시 둘을 재정렬한 것만으로 같은 시드가 다른
+ * 결계핵을 고르고, 레벨 diff에는 그것을 설명하는 것이 없습니다.
+ */
+void enemy_ward_scan(Pools *pl, const Level *l);
+
+/**
+ * @brief Raises a fresh set of wards, avoiding the set the last cycle used.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] pl The pool.
+ * @param[in]     l  The level, for the ground search each ward needs.
+ * @return How many wards were actually raised. Fewer than asked is not a fault.
+ *
+ * EXACTLY ::BOSS_WARDS DRAWS FROM THE POOL RNG, whatever it picks and however
+ * many candidates there are. A rejection loop -- "draw again until the set is
+ * new" -- consumes a variable number, and enemy.c already states why that is
+ * fatal here: the drop table spends both of its rolls whether or not the first
+ * succeeds, "because a `chance` that short-circuits the second roll makes the
+ * drop table an input to the AI, which is a demo that desynchronises the first
+ * time a rate moves." A partial Fisher-Yates over the candidate list has the
+ * same property and picks without replacement for free.
+ *
+ * @note Two independent draws, one per list. Drawing ::BOSS_WARDS from a single
+ *       pool can produce an all-air or all-ground cycle by chance, and those
+ *       are two different fights -- three times in a row is reachable.
+ * @note With no candidates at all this raises nothing and returns 0, which
+ *       leaves the maw open from its first frame. That is deliberate: a map
+ *       that marked none would otherwise hold an unkillable boss in a level
+ *       with no exit. ::DIAG_WARD_CAND is raised so it is not silent.
+ *
+ * 한국어
+ * ------
+ * @brief 새 결계핵 무리를 세웁니다. 지난 사이클이 쓴 자리는 피합니다.
+ * @param[in,out] pl 풀.
+ * @param[in]     l  각 결계핵에 필요한 지면 탐색을 위한 레벨.
+ * @return 실제로 세운 결계핵의 수. 요청보다 적은 것은 결함이 아닙니다.
+ *
+ * 무엇을 고르든, 후보가 몇이든, *풀 RNG에서 정확히 ::BOSS_WARDS번 뽑습니다.* "새 조합이 나올
+ * 때까지 다시 뽑기"는 소비하는 횟수가 가변이고, enemy.c는 그것이 왜 여기서 치명적인지 이미
+ * 밝히고 있습니다. 드롭 표는 첫 굴림의 성패와 무관하게 두 굴림을 모두 소비하는데, *"두 번째
+ * 굴림을 건너뛰는 `chance`는 드롭 표를 AI의 입력으로 만들며, 그것은 확률이 처음 움직이는 순간
+ * 어긋나는 데모이기 때문"*입니다. 후보 목록에 대한 부분 Fisher-Yates는 같은 성질을 가지면서
+ * 비복원 추출을 공짜로 줍니다.
+ *
+ * @note 목록마다 하나씩, *독립적인 두 번의 추출*입니다. 하나의 풀에서 ::BOSS_WARDS를 뽑으면
+ *       우연히 전원 공중형이거나 전원 지상형인 사이클이 나올 수 있고, 그 둘은 서로 다른
+ *       전투이며 3연속도 도달 가능합니다.
+ * @note 후보가 아예 없으면 아무것도 세우지 않고 0을 반환하며, 그러면 아귀는 첫 프레임부터
+ *       열린 채입니다. 의도적입니다. 그러지 않으면 후보를 표시하지 않은 맵이 출구 없는 레벨에
+ *       죽일 수 없는 보스를 붙들게 됩니다. 조용하지 않도록 ::DIAG_WARD_CAND를 올립니다.
+ */
+int enemy_ward_place(Pools *pl, const Level *l);
+
+/**
+ * @brief Puts a boss in the level at its ::MON_MAW marker, or anywhere it can.
+ *
+ * ENGLISH: Endless mode summons a second maw long after the level's own marker
+ * has been consumed, so the position is remembered from the marker rather than
+ * re-read. Returns 0 when there is nowhere to put one, which a caller should
+ * treat as "not yet" rather than as a fault -- the next wave will ask again.
+ *
+ * 한국어: 무한 모드는 레벨 자신의 표식이 소비되고 한참 뒤에 두 번째 아귀를 소환하므로, 위치는
+ * 다시 읽지 않고 표식에서 기억해 둡니다. 놓을 자리가 없으면 0을 반환하며, 호출자는 이를 결함이
+ * 아니라 "아직 아님"으로 다루어야 합니다. 다음 웨이브가 다시 물어봅니다.
+ */
+int enemy_boss_summon(Pools *pl, const Level *l);
+
+/**
+ * @brief Puts the boss's health back up to `to`, never down.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] pl The pool.
+ * @param[in]     to The health to restore to.
+ *
+ * WHAT AN EXPIRED GROGGY WINDOW COSTS. ::BOSS_GROGGY_MAX has the argument; in
+ * short, a window with no timer is a promise the player can decline, and taking
+ * the segment back is how declining it costs something.
+ *
+ * @note NEVER DOWNWARD, which is why this is not a plain assignment. Called
+ *       with a ceiling computed from a cycle count, and a cycle count that is
+ *       ever wrong by one would otherwise TAKE health off a boss the player has
+ *       legitimately hurt -- turning an off-by-one into an unwinnable fight
+ *       rather than into a visible glitch.
+ * @note Not a death path and cannot become one: it only raises, so it can never
+ *       reach zero and never has to decide anything. ::enemy_hurt stays the one
+ *       place a monster dies.
+ *
+ * 한국어
+ * ------
+ * @brief 보스의 체력을 `to`까지 되돌립니다. 결코 내리지 않습니다.
+ * @param[in,out] pl 풀.
+ * @param[in]     to 되돌릴 체력.
+ *
+ * 만료된 그로기 창이 치르는 값입니다. 논거는 ::BOSS_GROGGY_MAX에 있습니다. 요약하면, 타이머가
+ * 없는 창은 플레이어가 거절할 수 있는 약속이고, 구간을 회수하는 것이 그 거절에 값을 매기는
+ * 방법입니다.
+ *
+ * @note *결코 내리지 않으며*, 그것이 이것이 단순 대입이 아닌 이유입니다. 사이클 수에서 계산한
+ *       천장을 받는데, 사이클 수가 한 번이라도 1만큼 틀리면 그러지 않을 경우 플레이어가 정당하게
+ *       깎은 보스의 체력을 *빼앗게* 됩니다. off-by-one을 눈에 보이는 결함이 아니라 이길 수 없는
+ *       전투로 만드는 것입니다.
+ * @note 사망 경로가 아니며 그렇게 될 수도 없습니다. 올리기만 하므로 결코 0에 닿지 않고 아무것도
+ *       결정할 필요가 없습니다. ::enemy_hurt가 몬스터가 죽는 유일한 곳으로 남습니다.
+ */
+void enemy_boss_heal(Pools *pl, int to);
 
 #endif

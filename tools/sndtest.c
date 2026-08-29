@@ -167,7 +167,26 @@ static const char *PLAYED[] = {
     "blast",                                  /* proj.c -- was "impact" */
     "hook", "hreel", "hland", "hbite", "hbiteb",  /* hook.c */
     "phurt", "pdie", "win", "exit",           /* main.c */
-    "pammo", "pmed"                           /* pickup.c */
+    "pammo", "pmed",                          /* pickup.c */
+    /* AND THE LIST HAD NEVER COVERED THE MONSTERS. Every voice enemy.c plays
+       -- the whole roster's sight, attack, pain and death -- was absent, which
+       made the one module with the most sound names the one module this check
+       said nothing about. Renaming `edie` would have gone out silently, and a
+       fight where nothing screams reads as a mixer fault rather than a missing
+       recipe.
+       그리고 이 목록은 몬스터를 한 번도 덮은 적이 없었습니다. enemy.c가 재생하는 모든
+       목소리, 즉 구성원 전체의 발견·공격·피격·사망이 빠져 있었습니다. 그래서 사운드 이름이
+       가장 많은 모듈이 이 검사가 아무 말도 하지 않는 유일한 모듈이 되었습니다. `edie`의 이름을
+       바꿔도 조용히 넘어갔을 것이고, 아무도 비명을 지르지 않는 전투는 빠진 레시피가 아니라
+       믹서 결함처럼 읽힙니다. */
+    "sight", "eatt", "epain", "edie", "ecast", "ehit",   /* enemy.c */
+    /* The spawn portal, which is two sounds and a pair: see sounds.txt for why
+       one sweeps up and the other down.
+       소환 포탈이며 두 소리로 이루어진 한 짝입니다. 하나가 위로, 다른 하나가 아래로 쓸어내리는
+       이유는 sounds.txt를 참조하십시오. */
+    "spawnwarn", "spawnpop",                  /* enemy.c, spawners_update */
+    "door", "switch",                         /* door.c */
+    "key"                                     /* pickup.c */
 };
 
 /* Names the game plays that the recipe file must still define.

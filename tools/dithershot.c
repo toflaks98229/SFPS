@@ -32,6 +32,11 @@
 #include "player.h"
 #include "fx.h"
 #include "pools.h"
+/* AXE_SLAM_RADIUS -- the slam is one of the two explosions this can photograph,
+   and it is the wider of them. proj.h arrives with pools.h.
+   AXE_SLAM_RADIUS입니다. 내려찍기는 이 도구가 촬영할 수 있는 두 폭발 중 하나이며 둘 중 더
+   넓은 쪽입니다. proj.h는 pools.h와 함께 옵니다. */
+#include "weapon.h"
 
 /* The pools this file drives. Owned here the way a ::World owns its own; the
    five modules that used to keep these in file-scope arrays hand them back now.
@@ -349,7 +354,29 @@ int main(int argc, char **argv) {
            고릅니다. */
         int at_frame = (argc > 3) ? atoi(argv[3]) : 14;
 
-        fx_spawn(&g_pools, argv[2], at, v3f(0.0f, 1.0f, 0.0f));
+        /* TWO NAMES THAT ARE NOT EFFECTS. An explosion is six of them and the
+           thing worth photographing is what they make together, so `blast` is
+           the grenade's whole detonation and `slam` is the axe's. Both go
+           through ::proj_boom_fx -- the call the game itself makes -- so what
+           lands in the PNG is what the player sees, tint included, rather than
+           a second arrangement of the same layers assembled here and free to
+           drift from it. Neither name exists in effects.txt, so no effect is
+           shadowed by them.
+           *이펙트가 아닌 두 이름입니다.* 폭발은 이펙트 여섯이고 사진에 담을 가치가 있는 것은
+           그것들이 함께 만드는 모습이므로, `blast`는 유탄의 폭발 전체이고 `slam`은 도끼의
+           것입니다. 둘 다 게임 자신이 하는 호출인 ::proj_boom_fx를 거치므로, PNG에 담기는
+           것은 이곳에서 다시 조립되어 그것과 어긋날 수 있는 배열이 아니라 색조를 포함해
+           플레이어가 보는 그대로입니다. 두 이름 모두 effects.txt에 없으므로 가려지는 이펙트도
+           없습니다. */
+        if (!strcmp(argv[2], "blast"))
+            proj_boom_fx(&g_pools, at, v3f(0.0f, 1.0f, 0.0f),
+                         PROJ_BLAST_RADIUS, BLAST_TINT_GRENADE);
+        else if (!strcmp(argv[2], "slam"))
+            proj_boom_fx(&g_pools, at, v3f(0.0f, 1.0f, 0.0f),
+                         AXE_SLAM_RADIUS, BLAST_TINT_SLAM);
+        else
+            fx_spawn(&g_pools, argv[2], at, v3f(0.0f, 1.0f, 0.0f));
+
         for (int i = 0; i < at_frame; i++) fx_update(&g_pools, 1.0f / 60.0f);
 
         v3 cam_right = v3f(cy, 0.0f, -sy);

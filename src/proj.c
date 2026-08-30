@@ -21,6 +21,15 @@
 
 void proj_reset(Pools *pl) {
     for (int i = 0; i < PROJ_MAX; i++) pl->proj.p[i].active = 0;
+
+    /* The log goes with them. A level load that kept it would hand the next
+       level's first frame a blast that went off in the previous one, and the
+       player would be shaken by a grenade thrown in a room that no longer
+       exists.
+       로그도 함께 사라집니다. 이것을 남겨 둔 레벨 로드는 다음 레벨의 첫 프레임에 이전
+       레벨에서 터진 폭발을 건네게 되고, 플레이어는 이제 존재하지 않는 방에서 던져진 유탄에
+       흔들립니다. */
+    pl->proj.n_blast = 0;
 }
 
 int proj_count(const Pools *pl) { (void)pl; return PROJ_MAX; }
@@ -69,6 +78,24 @@ int proj_blast(Pools *pl, v3 at, float radius, int damage) {
     if (radius <= 0.0f) return 0;
     int hits = 0;
 
+    /* RECORDED WHERE THE DAMAGE IS, not where the particles are. This is the
+       one function every explosion in the game passes through -- the grenade's
+       and the slam's -- so a source added later cannot forget to announce
+       itself without also forgetting to hurt anything, which is the kind of
+       mistake that reports itself. ::Blast says why it is recorded rather than
+       acted on.
+       입자가 아니라 *피해가 있는 곳*에서 기록합니다. 게임의 모든 폭발(유탄의 것과
+       내려찍기의 것)이 지나가는 함수가 이것 하나이므로, 나중에 추가되는 원천은 아무것도
+       상하게 하지 못하게 되지 않는 한 자신을 알리는 것을 잊을 수 없습니다. 그런 종류의
+       실수는 스스로를 보고합니다. 행동하지 않고 기록하는 이유는 ::Blast를 참조하십시오. */
+    if (pl->proj.n_blast < PROJ_BLAST_LOG) {
+        pl->proj.blast[pl->proj.n_blast].at     = at;
+        pl->proj.blast[pl->proj.n_blast].radius = radius;
+        pl->proj.n_blast++;
+    } else {
+        DIAG(DIAG_BLAST_CAP);
+    }
+
     for (int i = 0; i < enemy_count(pl); i++) {
         const Enemy *m = enemy_at(pl, i);
         if (!m || !m->active || m->state == E_DEAD) continue;
@@ -107,6 +134,60 @@ int proj_blast(Pools *pl, v3 at, float radius, int damage) {
     return hits;
 }
 
+int proj_take_blasts(Pools *pl, Blast *out, int max) {
+    int n = pl->proj.n_blast;
+    if (n > max) n = max;
+    for (int i = 0; i < n; i++) out[i] = pl->proj.blast[i];
+    pl->proj.n_blast = 0;   /* drained whether or not anything was copied */
+    return n;
+}
+
+void proj_boom_fx(Pools *pl, v3 at, v3 normal, float radius, FxTint tint) {
+    /* THE DOME IS SCALED BY THE RADIUS IT IS DRAWING. Its speed is authored so
+       speed x life reaches one metre, so passing the blast radius makes the
+       shell stop exactly where the damage does -- the point of drawing it at
+       all is that the radius is a gameplay number and a player who cannot see
+       it is guessing.
+       Spawned along +Y rather than the surface normal: a blast is a hemisphere
+       standing on the ground, and one leaning off a wall's normal would claim a
+       shape the damage does not have.
+       돔은 자신이 그리는 반경으로 배율이 정해집니다. speed x life가 1미터에 닿도록
+       작성했으므로 폭발 반경을 넘기면 껍질이 데미지가 멈추는 바로 그 자리에서 멈춥니다.
+       애초에 이것을 그리는 이유가, 반경이 게임플레이 수치이고 그것을 볼 수 없는 플레이어는
+       짐작하게 되기 때문입니다. 표면 법선이 아니라 +Y로 생성하는 이유는, 폭발이 지면에 선
+       반구이고 벽의 법선을 따라 기울어진 돔은 데미지가 갖지 않은 모양을 주장하기
+       때문입니다. */
+    fx_spawn_tinted(pl, "blastdome", at, v3f(0, 1, 0), radius, tint);
+
+    fx_spawn_tinted(pl, "blastcore", at, normal, 1.0f, tint);
+
+    /* THE SMOKE AND THE DEBRIS ARE NOT TINTED, and the split is the whole rule:
+       the tinted layers are the ones that are BURNING, and these two are what
+       burned. Smoke is grey because it is smoke, and a chip of floor thrown by
+       an axe is the same chip thrown by a grenade -- painting them the colour
+       of the flash would say the explosion changed what the room is made of.
+       *연기와 파편에는 색조를 넣지 않으며*, 그 구분이 규칙의 전부입니다. 색조가 들어가는
+       겹은 *타고 있는* 것이고, 이 둘은 *탄* 것입니다. 연기가 회색인 이유는 그것이 연기이기
+       때문이고, 도끼가 튀긴 바닥 조각은 유탄이 튀긴 바로 그 조각입니다. 이것들을 섬광의
+       색으로 칠하는 것은 폭발이 방의 재질을 바꿨다고 말하는 셈입니다. */
+    fx_spawn(pl, "blastsmoke",  at, v3f(0, 1, 0));
+    fx_spawn(pl, "blastdebris", at, normal);
+
+    /* blastburst, NOT boltburst. This borrowed the monster bolt's flash, which
+       cools into that bolt's blue -- so a grenade going off threw blue sparks.
+       The two events want the same SHAPE and opposite colours; sharing one
+       effect gave them the reverse. wp_axe_land held the second copy of that
+       same mistake, and the tint is what let it be deleted rather than
+       duplicated a third time.
+       boltburst가 아니라 blastburst입니다. 이 줄은 몬스터 볼트의 섬광을 빌려 썼고 그것은
+       그 볼트의 파랑으로 식습니다. 그래서 유탄이 터지면 파란 불꽃이 튀었습니다. 두 사건은
+       같은 *형태*와 반대되는 색을 원하는데, 하나를 공유하면 그 반대를 얻습니다. wp_axe_land가
+       같은 실수의 두 번째 사본을 들고 있었고, 색조 덕분에 그것을 세 번째로 복제하는 대신
+       지울 수 있었습니다. */
+    fx_spawn_tinted(pl, "blastburst", at, normal, 1.0f, tint);
+    fx_spawn_tinted(pl, "blastshard", at, normal, 1.0f, tint);
+}
+
 /* A projectile's end: the blast if it has one, otherwise a single-target hit
    that the caller has already applied.
    발사체의 최후입니다. 폭발 반경이 있으면 폭발이고, 없으면 호출자가 이미 적용한 단일
@@ -115,35 +196,12 @@ static void detonate(Pools *pl, Proj *p, v3 at, v3 normal) {
     if (p->blast > 0.0f) {
         proj_blast(pl, at, p->blast, p->damage);
 
-        /* THE DOME IS SCALED BY THE RADIUS IT IS DRAWING. Its speed is
-           authored so speed x life reaches one metre, so passing the blast
-           radius makes the shell stop exactly where the damage does -- the
-           point of drawing it at all is that the radius is a gameplay number
-           and a player who cannot see it is guessing.
-           Spawned along +Y rather than the surface normal: a blast is a
-           hemisphere standing on the ground, and one leaning off a wall's
-           normal would claim a shape the damage does not have.
-           돔은 자신이 그리는 반경으로 배율이 정해집니다. speed x life가 1미터에 닿도록
-           작성했으므로 폭발 반경을 넘기면 껍질이 데미지가 멈추는 바로 그 자리에서
-           멈춥니다. 애초에 이것을 그리는 이유가, 반경이 게임플레이 수치이고 그것을 볼 수
-           없는 플레이어는 짐작하게 되기 때문입니다. 표면 법선이 아니라 +Y로 생성하는
-           이유는, 폭발이 지면에 선 반구이고 벽의 법선을 따라 기울어진 돔은 데미지가 갖지
-           않은 모양을 주장하기 때문입니다. */
-        fx_spawn_scaled(pl, "blastdome", at, v3f(0, 1, 0), p->blast);
-
-        fx_spawn(pl, "blastcore",   at, normal);
-        fx_spawn(pl, "blastsmoke",  at, v3f(0, 1, 0));
-        fx_spawn(pl, "blastdebris", at, normal);
-        /* blastburst, NOT boltburst. This borrowed the monster bolt's
-           flash, which cools into that bolt's blue -- so a grenade going
-           off threw blue sparks. The two events want the same SHAPE and
-           opposite colours; sharing one effect gave them the reverse.
-           boltburst가 아니라 blastburst입니다. 이 줄은 몬스터 볼트의 섬광을
-           빌려 썼고 그것은 그 볼트의 파랑으로 식습니다. 그래서 유탄이 터지면
-           파란 불꽃이 튀었습니다. 두 사건은 같은 *형태*와 반대되는 색을
-           원하는데, 하나를 공유하면 그 반대를 얻습니다. */
-        fx_spawn(pl, "blastburst", at, normal);
-        fx_spawn(pl, "blastshard", at, normal);
+        /* The damage, then the picture of it, in the launcher's own colour.
+           Two calls rather than one function that does both: see
+           ::proj_boom_fx for what the split is worth.
+           피해, 그다음 그 그림이며, 발사기 자신의 색으로 그립니다. 둘 다 하는 함수 하나가
+           아니라 두 번의 호출인 이유는 ::proj_boom_fx를 참조하십시오. */
+        proj_boom_fx(pl, at, normal, p->blast, BLAST_TINT_GRENADE);
 
         /* ITS OWN SOUND, AND FROM WHERE IT HAPPENED. This was `impact`, which
            is DSPUNCH -- a punch -- at a flat gain of 100 wherever in the level

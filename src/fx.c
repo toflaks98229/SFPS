@@ -287,6 +287,49 @@ void fx_spawn(Pools *pl, const char *name, v3 pos, v3 normal) {
 }
 
 void fx_spawn_scaled(Pools *pl, const char *name, v3 pos, v3 normal, float scale) {
+    FxTint none = { 0, 0, 0 };
+    fx_spawn_tinted(pl, name, pos, normal, scale, none);
+}
+
+void fx_tint_colour(FxTint tint, float rgb[3]) {
+    /* {0,0,0} is "as authored", and it is the common case: every effect in the
+       text that nobody recolours arrives here and leaves untouched.
+       {0,0,0}은 "작성된 그대로"이며 그것이 일반적인 경우입니다. 아무도 다시 칠하지 않는
+       텍스트의 모든 이펙트가 이곳에 와서 그대로 나갑니다. */
+    if (!(tint.r | tint.g | tint.b)) return;
+
+    float v = rgb[0] > rgb[1] ? rgb[0] : rgb[1];
+    if (rgb[2] > v) v = rgb[2];
+    if (v <= 0.0f) return;
+
+    float m = rgb[0] < rgb[1] ? rgb[0] : rgb[1];
+    if (rgb[2] < m) m = rgb[2];
+
+    /* How far the authored colour is from white, 0..1. This is the whole of
+       what is borrowed from the text: `v` says how bright the particle is at
+       this instant of its life and `s` says how much colour that instant
+       carries, which together are the ramp the artist drew. The tint only
+       decides WHICH colour.
+       작성된 색이 흰색에서 얼마나 떨어져 있는가입니다(0..1). 텍스트에서 빌려 오는 것은
+       이것이 전부입니다. `v`는 이 순간 입자가 얼마나 밝은지를, `s`는 그 순간이 색을 얼마나
+       띠는지를 말하며, 둘이 합쳐 작성자가 그린 변화 곡선입니다. 색조가 정하는 것은 *어느*
+       색인가뿐입니다. */
+    float s = (v - m) / v;
+
+    float t[3] = { tint.r / 255.0f, tint.g / 255.0f, tint.b / 255.0f };
+    float tv = t[0] > t[1] ? t[0] : t[1];
+    if (t[2] > tv) tv = t[2];
+    if (tv <= 0.0f) return;
+
+    /* Normalised by its own brightest channel, so the tint names a hue and
+       cannot dim what it paints -- see ::FxTint.
+       가장 밝은 자기 채널로 정규화하므로, 색조는 색상을 지칭할 뿐 자신이 칠하는 것을 어둡게
+       만들 수 없습니다. ::FxTint를 참조하십시오. */
+    for (int i = 0; i < 3; i++) rgb[i] = v * (1.0f - s + s * t[i] / tv);
+}
+
+void fx_spawn_tinted(Pools *pl, const char *name, v3 pos, v3 normal, float scale,
+                     FxTint tint) {
     if (!g_parsed) parse_defs();
 
     int di = find_def(name);
@@ -392,6 +435,9 @@ void fx_spawn_scaled(Pools *pl, const char *name, v3 pos, v3 normal, float scale
            정렬된 정사각형들은 모서리가 맞아떨어져 하나의 형태로 읽히기 때문입니다. */
         q->roll     = frand(&pl->fx) * 6.2831853f;
         q->def      = (short)di;
+        q->tint[0]  = tint.r;
+        q->tint[1]  = tint.g;
+        q->tint[2]  = tint.b;
     }
 }
 
@@ -556,7 +602,22 @@ static void draw_pass(const Pools *pl, int blend, v3 cam_right, v3 cam_up) {
             gg += (d->g2 / 255.0f - gg) * u;
             bb += (d->b2 / 255.0f - bb) * u;
         }
-        rd_color(rr, gg, bb, a);
+        /* Last, and after the birth-to-death ramp rather than instead of it: the
+           tint is what this particular blast was made of, and the ramp is what
+           any fire does while it cools. Doing it here rather than at spawn
+           costs a dozen instructions on a particle that was already getting its
+           own draw call, and buys a definition table that stays one entry per
+           SHAPE instead of one per shape per colour. See ::fx_tint_colour.
+           마지막이며, 생성-소멸 변화를 대신하는 것이 아니라 그 뒤에 옵니다. 색조는 *이*
+           폭발이 무엇으로 이루어졌는지이고, 변화 곡선은 어떤 불이든 식으면서 겪는
+           것입니다. 생성 시점이 아니라 이곳에서 하는 비용은 어차피 자기 드로우 호출을
+           받던 입자에 명령 열두어 개이며, 그 대가로 정의 표가 색상별이 아니라 *형태*별로
+           한 행씩 유지됩니다. ::fx_tint_colour를 참조하십시오. */
+        FxTint tint = { q->tint[0], q->tint[1], q->tint[2] };
+        float  col[3] = { rr, gg, bb };
+        fx_tint_colour(tint, col);
+
+        rd_color(col[0], col[1], col[2], a);
         glDrawArrays(GL_TRIANGLES, k * 6, 6);
     }
 }

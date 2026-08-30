@@ -2209,6 +2209,27 @@ void world_shake(World *w, float amount) {
     if (amount > w->run.shake) w->run.shake = amount;
 }
 
+void world_shake_at(World *w, v3 at, float radius, float amount) {
+    if (radius <= 0.0f) return;
+
+    float reach = radius * WORLD_SHAKE_BLAST_REACH;
+    float dist  = v3len(v3sub(w->player.pos, at));
+    if (dist >= reach) return;
+
+    /* Linear, and measured against the REACH rather than against the radius,
+       so the falloff is one ramp over the whole distance the event carries
+       instead of a step at the rim: a player one centimetre outside the damage
+       does not deserve a different camera from one a centimetre inside it. What
+       the radius decides is how far the ramp goes, which is why a wider blast
+       is felt further away without being felt harder.
+       선형이며, 반경이 아니라 *도달 거리*를 기준으로 잽니다. 그래서 감쇠는 가장자리의 계단이
+       아니라 사건이 실어 나르는 거리 전체에 걸친 하나의 경사입니다. 피해 반경 1센티미터
+       바깥의 플레이어가 1센티미터 안쪽의 플레이어와 다른 카메라를 받을 이유는 없습니다.
+       반경이 정하는 것은 그 경사가 얼마나 멀리 가는가이며, 그래서 더 넓은 폭발은 더 세게가
+       아니라 더 멀리서 느껴집니다. */
+    world_shake(w, amount * (1.0f - dist / reach));
+}
+
 int world_frozen(const World *w, int paused) {
     /* THE INTERMISSION FREEZES TOO. It is the same kind of state as the win
        screen: a moment held over a level that is finished with. Without it the
@@ -2367,6 +2388,38 @@ int world_step(World *w, const Input *in, float aspect, float dt) {
        hanging in mid-air behind a pause menu says the game is still running
        when it is not. */
     if (!frozen) proj_update(&w->pools, &w->level, dt);
+
+    /* --- what the explosions of this frame are worth from here -------------
+       AFTER ::proj_update and after ::step_look_move, which is what makes one
+       drain enough: a grenade goes off inside the first and the axe's slam
+       inside the second, and they are the only two things in the game that
+       explode. The argument is ::enemy_take_kills's, one line further down,
+       about the three places a monster can die in a frame.
+
+       Drained unconditionally, outside the freeze gate. Nothing can record a
+       blast while the world is frozen, so the gate would buy nothing -- and it
+       would cost the one case it is meant to protect against, a menu opened on
+       the frame a grenade went off, which would hold the blast until the menu
+       closed and then shake the camera for something that happened a minute
+       ago. See ::ProjPool::blast.
+
+       이번 프레임의 폭발들이 이 자리에서 얼마짜리인가.
+
+       ::proj_update *뒤*이자 ::step_look_move 뒤이며, 그것이 한 번의 배수로 충분한 이유입니다.
+       유탄은 앞의 것 안에서 터지고 도끼의 내려찍기는 뒤의 것 안에서 일어나며, 이 게임에서
+       폭발하는 것은 그 둘뿐입니다. 논거는 몇 줄 아래 ::enemy_take_kills의 것, 한 프레임 안에서
+       몬스터가 죽을 수 있는 세 자리에 대한 것과 같습니다.
+
+       정지 게이트 바깥에서 조건 없이 비웁니다. 월드가 정지한 동안에는 폭발을 기록할 수 있는
+       것이 없으므로 게이트는 얻는 것이 없고, 정작 막으려던 경우를 잃습니다. 유탄이 터진
+       프레임에 메뉴를 연 경우인데, 그때 게이트가 있으면 폭발이 메뉴가 닫힐 때까지 붙들려 있다가
+       1분 전에 일어난 일로 카메라를 흔듭니다. ::ProjPool::blast를 참조하십시오. */
+    {
+        Blast blast[PROJ_BLAST_LOG];
+        int   n = proj_take_blasts(&w->pools, blast, PROJ_BLAST_LOG);
+        for (int i = 0; i < n; i++)
+            world_shake_at(w, blast[i].at, blast[i].radius, WORLD_SHAKE_BLAST);
+    }
 
     /* Particles advance even on the win screen: freezing the world mid-air
        would strand whatever was in flight when the exit was reached.

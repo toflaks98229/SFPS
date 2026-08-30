@@ -399,6 +399,63 @@ int main(void) {
            "and starts at the default muzzle, not at the camera origin");
     }
 
+    /* --- what a blast leaves behind for the frame that owns the camera ----
+       The other half of the check above. That one is what the blast DOES --
+       the damage, falling off with distance -- and this is what it SAYS: a
+       record of where it happened and how far it reached, left in the pool for
+       ::world_step to price against where the player is standing. proj.c
+       cannot do that arithmetic because it has never been told about the
+       player, and ::Blast is the note it leaves instead.
+
+       위 검사의 나머지 절반입니다. 그쪽은 폭발이 *하는 일*(거리에 따라 감쇠하는 피해)이고,
+       이쪽은 폭발이 *말하는 것*입니다. 어디에서 일어났고 얼마나 멀리 닿았는지에 대한 기록을
+       풀에 남겨, ::world_step이 플레이어가 선 자리를 기준으로 값을 매기게 합니다. proj.c는 그
+       산술을 할 수 없습니다. 플레이어에 대해 들은 적이 없기 때문이며, ::Blast가 그 대신
+       남기는 쪽지입니다. */
+    {
+        proj_reset(&g_pools);
+        enemy_reset(&g_pools);
+
+        Blast log[PROJ_BLAST_LOG];
+        okd(proj_take_blasts(&g_pools, log, PROJ_BLAST_LOG) == 0,
+            "a pool nothing has gone off in owes no blasts", 0, 0);
+
+        v3 at = v3f(1.0f, 0.5f, -3.0f);
+        proj_blast(&g_pools, at, PROJ_BLAST_RADIUS, 55);
+
+        int n = proj_take_blasts(&g_pools, log, PROJ_BLAST_LOG);
+        okd(n == 1, "an explosion with nothing to hurt is still an explosion",
+            n, 1);
+        ok(n == 1 && log[0].at.x == at.x && log[0].at.y == at.y
+                  && log[0].at.z == at.z,
+           "recorded where it went off");
+        okf(n == 1 && log[0].radius == PROJ_BLAST_RADIUS,
+            "and how far its damage reached",
+            n == 1 ? log[0].radius : 0.0f, PROJ_BLAST_RADIUS);
+
+        okd(proj_take_blasts(&g_pools, log, PROJ_BLAST_LOG) == 0,
+            "and the second ask gets nothing: it is a debt, not a history",
+            0, 0);
+
+        /* More in one frame than the log holds. The extras are dropped rather
+           than overrunning it -- and the ones kept are still a blast each, so
+           the loudest of a volley is not lost with them.
+           로그가 담을 수 있는 것보다 많은 폭발이 한 프레임에 일어난 경우입니다. 초과분은
+           로그를 넘치게 하지 않고 버려집니다. 그리고 남는 것들도 여전히 각각 하나의
+           폭발이므로, 일제 사격 중 가장 큰 것이 함께 사라지지는 않습니다. */
+        for (int i = 0; i < PROJ_BLAST_LOG + 4; i++)
+            proj_blast(&g_pools, v3f((float)i, 0.0f, 0.0f), PROJ_BLAST_RADIUS, 1);
+        n = proj_take_blasts(&g_pools, log, PROJ_BLAST_LOG);
+        okd(n == PROJ_BLAST_LOG, "a volley fills the log and no further",
+            n, PROJ_BLAST_LOG);
+
+        /* A level load clears it, so nothing shakes for a room that is gone. */
+        proj_blast(&g_pools, at, PROJ_BLAST_RADIUS, 1);
+        proj_reset(&g_pools);
+        okd(proj_take_blasts(&g_pools, log, PROJ_BLAST_LOG) == 0,
+            "and a level load leaves none of the last level's", 0, 0);
+    }
+
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall weapon checks passed\n", fails);
     return fails != 0;
 }

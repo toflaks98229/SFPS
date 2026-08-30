@@ -141,6 +141,52 @@ typedef struct MeshBuf MeshBuf;
 #define FX_NAME_LEN      16   ///< @brief Longest effect name. / 이펙트 이름의 최대 길이.
 
 /**
+ * @struct FxTint
+ * @brief The colour a spawn paints an effect in, or {0,0,0} for the authored one.
+ *
+ * ENGLISH
+ * -------
+ * A TINT RATHER THAN A SECOND SET OF DEFINITIONS. A blast draws in six layers,
+ * so a second kind of blast authored the obvious way is `blastcore2` beside
+ * `blastcore` and five more like it: six rows against a table capped at
+ * ::FX_MAX_DEFS, six copies of every number that has nothing to do with colour,
+ * and six places to edit the next time the SHAPE changes. Colour is the only
+ * thing that differs between one explosion and another, so colour is the only
+ * thing that travels with the spawn.
+ *
+ * ZERO IS "AS AUTHORED". That is what lets ::fx_spawn stay a call with no
+ * colour in it, and it is what keeps pools.h's promise that a zeroed ::Pools is
+ * a valid one: a particle that never went through a tinted spawn carries
+ * {0,0,0} and is drawn in exactly the colours effects.txt gave it.
+ *
+ * A HUE, NOT A BRIGHTNESS. ::fx_tint_colour divides by the brightest channel,
+ * so {255,104,26} and {128,52,13} are the same instruction. The ramp from birth
+ * to death -- white-hot fading into the colour of what burned -- belongs to the
+ * text, and a tint that could flatten or lift it would be a second author for
+ * something that already has one.
+ *
+ * 한국어
+ * ------
+ * @brief 생성 시 이펙트를 칠할 색. {0,0,0}이면 텍스트가 작성한 색 그대로입니다.
+ *
+ * *두 번째 정의 묶음이 아니라 색조입니다.* 폭발은 여섯 겹으로 그려지므로, 두 번째 종류의
+ * 폭발을 뻔한 방식으로 작성하면 `blastcore` 옆의 `blastcore2`와 그런 것 다섯이 더 생깁니다.
+ * ::FX_MAX_DEFS로 제한된 표에 여섯 행, 색과 무관한 모든 수치의 사본 여섯, 그리고 다음에
+ * *형태*가 바뀔 때 고쳐야 할 자리 여섯입니다. 폭발과 폭발 사이에서 다른 것은 색뿐이므로,
+ * 생성과 함께 다니는 것도 색뿐입니다.
+ *
+ * *0은 "작성된 그대로"입니다.* 그래서 ::fx_spawn은 색이 들어가지 않는 호출로 남을 수 있고,
+ * 0으로 채운 ::Pools가 유효하다는 pools.h의 약속도 지켜집니다. 색조 있는 생성을 거치지 않은
+ * 입자는 {0,0,0}을 지니며 effects.txt가 준 색 그대로 그려집니다.
+ *
+ * *밝기가 아니라 색상입니다.* ::fx_tint_colour가 가장 밝은 채널로 나누므로 {255,104,26}과
+ * {128,52,13}은 같은 지시입니다. 생성에서 소멸까지의 변화(흰 열기가 타 버린 것의 색으로
+ * 식어 가는 것)는 텍스트의 것이며, 그것을 눕히거나 들어 올릴 수 있는 색조는 이미 작성자가
+ * 있는 것에 대한 두 번째 작성자가 됩니다.
+ */
+typedef struct { unsigned char r, g, b; } FxTint;
+
+/**
  * @struct FxParticle
  * @brief One live particle.
  *
@@ -175,6 +221,22 @@ typedef struct {
      */
     float roll;
     short def;
+
+    /**
+     * @brief The colour this spawn asked for, or {0,0,0} for the authored one.
+     *
+     * ENGLISH: Per PARTICLE and not per definition, because two blasts of
+     * different colours are alive at the same time more often than not -- a
+     * grenade going off while the slam that threw the player is still burning
+     * -- and the definition they share is one table entry. Three bytes, and
+     * they land in the padding after `def`, so a particle costs what it did.
+     *
+     * 한국어: 정의별이 아니라 *입자별*입니다. 색이 다른 두 폭발이 동시에 살아 있는 경우가
+     * 드물지 않고(플레이어를 던진 내려찍기가 아직 타는 동안 터지는 유탄), 그 둘이 공유하는
+     * 정의는 표의 한 행이기 때문입니다. 3바이트이며 `def` 뒤의 패딩에 들어가므로 입자
+     * 하나의 비용은 예전 그대로입니다.
+     */
+    unsigned char tint[3];
 } FxParticle;
 
 /**
@@ -288,6 +350,82 @@ void fx_spawn(Pools *pl, const char *name, v3 pos, v3 normal);
  *       속력만 조절하면 가장자리가 움직이되 입자는 작성된 크기 그대로 남습니다.
  */
 void fx_spawn_scaled(Pools *pl, const char *name, v3 pos, v3 normal, float scale);
+
+/**
+ * @brief Spawns an effect scaled and painted in a colour of the caller's.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] name   The effect's name.
+ * @param[in] pos    Where it happens.
+ * @param[in] normal The surface normal, or the direction it travels.
+ * @param[in] scale  Multiplies every particle's speed. 1 is the authored size.
+ * @param[in] tint   The colour, or {0,0,0} to keep the one effects.txt wrote.
+ *
+ * @note THE OTHER TWO SPAWNS ARE THIS ONE. ::fx_spawn is this with a scale of 1
+ *       and no tint, ::fx_spawn_scaled is this with no tint; neither has a body
+ *       of its own, so there is one spawn path and the eviction, the diagnostic
+ *       and the dome cannot come apart between three copies of it.
+ * @note What the tint may NOT do is say how bright or how long -- see ::FxTint.
+ *       A source that wants a bigger blast passes a bigger `scale`, and one that
+ *       wants a different shape authors a different effect.
+ *
+ * 한국어
+ * ------
+ * @brief 배율과 호출자가 정한 색으로 이펙트를 생성합니다.
+ * @param[in] tint 색. {0,0,0}이면 effects.txt가 쓴 색을 유지합니다.
+ * @note *나머지 두 생성 함수가 곧 이 함수입니다.* ::fx_spawn은 배율 1에 색조 없음이고
+ *       ::fx_spawn_scaled는 색조 없음입니다. 둘 다 자기 본문을 갖지 않으므로 생성 경로는
+ *       하나이며, 축출과 진단과 돔이 사본 셋 사이에서 어긋날 수 없습니다.
+ * @note 색조가 말할 수 *없는* 것은 얼마나 밝은지와 얼마나 오래인지입니다(::FxTint 참조).
+ *       더 큰 폭발을 원하는 쪽은 더 큰 `scale`을 넘기고, 다른 형태를 원하는 쪽은 다른
+ *       이펙트를 작성합니다.
+ */
+void fx_spawn_tinted(Pools *pl, const char *name, v3 pos, v3 normal, float scale,
+                     FxTint tint);
+
+/**
+ * @brief Recolours one authored colour with a tint, in place.
+ *
+ * ENGLISH
+ * -------
+ * @param[in]     tint The colour asked for; {0,0,0} leaves `rgb` untouched.
+ * @param[in,out] rgb  A colour in 0..1, replaced by the tinted one.
+ *
+ * The rule, and why it is not a multiply: a multiply can only DARKEN, so an
+ * authored orange multiplied toward blue is not a blue explosion, it is a
+ * muddy brown one -- the red channel the text made large is the one the tint
+ * needs to remove. So what is kept from the authored colour is its BRIGHTNESS
+ * and how far it has travelled from white, and what the tint supplies is the
+ * direction it travelled in. A layer that starts white-hot still starts
+ * white-hot; what changes is the colour it cools into.
+ *
+ * @note Public, and not a static in fx.c, because a blast is going to have to
+ *       say the same thing twice -- to the particles here and to the light it
+ *       throws on the wall -- and two derivations of one colour are two
+ *       colours the first time either is tuned. It is also the half a headless
+ *       test can see: the particles' colours are chosen inside ::fx_draw,
+ *       which needs a context, and this needs nothing.
+ *
+ * 한국어
+ * ------
+ * @brief 작성된 색 하나를 색조로 다시 칠합니다. 제자리에서 수정합니다.
+ * @param[in]     tint 요청된 색. {0,0,0}이면 `rgb`를 건드리지 않습니다.
+ * @param[in,out] rgb  0..1 범위의 색. 색조가 적용된 값으로 대체됩니다.
+ *
+ * 규칙과, 그것이 곱셈이 아닌 이유입니다. 곱셈은 *어둡게만* 할 수 있으므로 작성된 주황에
+ * 파랑을 곱한 것은 파란 폭발이 아니라 탁한 갈색입니다. 텍스트가 크게 만든 빨강 채널이야말로
+ * 색조가 걷어 내야 하는 것이기 때문입니다. 그래서 작성된 색에서 지키는 것은 *밝기*와 흰색에서
+ * 얼마나 멀어졌는가이고, 색조가 공급하는 것은 어느 방향으로 멀어졌는가입니다. 희게 타오르며
+ * 시작하는 겹은 여전히 희게 시작하고, 바뀌는 것은 그것이 식어 가는 색입니다.
+ *
+ * @note fx.c의 static이 아니라 공개인 이유는, 폭발이 같은 말을 두 번 해야 하기 때문입니다.
+ *       이곳의 입자에게 한 번, 그것이 벽에 던지는 빛에게 한 번. 한 색에 대한 유도가 둘이면
+ *       어느 한쪽을 조정하는 순간 색이 둘이 됩니다. 헤드리스 테스트가 볼 수 있는 절반이기도
+ *       합니다. 입자의 색은 컨텍스트가 필요한 ::fx_draw 안에서 정해지지만, 이것은 아무것도
+ *       필요로 하지 않습니다.
+ */
+void fx_tint_colour(FxTint tint, float rgb[3]);
 
 /**
  * @brief Advances every live particle one frame.

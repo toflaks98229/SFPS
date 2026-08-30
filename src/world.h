@@ -341,6 +341,79 @@
 #define WORLD_SHAKE_LAND  0.85f
 
 /**
+ * @brief An explosion at its centre, before the distance is taken off.
+ *
+ * ENGLISH
+ * -------
+ * THE LOUDEST THING IN THE LIST, and it has to be: the other three are events
+ * the player's own hands produced, and this one is a room going up. Below
+ * ::WORLD_SHAKE_HURT on purpose, so that being torn into still outranks
+ * standing near something going off -- the hurt shake is the one that must
+ * never be mistaken for scenery.
+ *
+ * Just under ::WORLD_SHAKE_MAX rather than at it, so the ordering is one the
+ * player can actually feel rather than one the clamp erases: a hit that takes
+ * the whole bar is the only thing in the game that reaches the ceiling.
+ *
+ * At the rim of the damage this is already down to two thirds of what it is at
+ * the centre, which is the number that matters: a grenade the player survived
+ * by standing outside its radius still has to be felt, or the radius was never
+ * taught.
+ *
+ * 한국어
+ * ------
+ * @brief 폭발의 중심에서의 세기. 거리에 따른 감쇠 이전 값입니다.
+ *
+ * *목록에서 가장 큰 값이며* 그래야 합니다. 나머지 셋은 플레이어 자신의 손이 만든 사건이고,
+ * 이것은 방 하나가 통째로 터지는 것입니다. 의도적으로 ::WORLD_SHAKE_HURT보다는 아래인데,
+ * 물어뜯기는 것이 무언가가 터지는 곁에 서 있는 것보다 여전히 위여야 하기 때문입니다. 피격의
+ * 흔들림은 결코 배경으로 오인되어서는 안 되는 흔들림입니다.
+ *
+ * ::WORLD_SHAKE_MAX와 같지 않고 그 바로 아래인 이유는, 그 순서가 제한에 의해 지워지지 않고
+ * 플레이어가 실제로 느낄 수 있는 것이 되도록 하기 위함입니다. 상한에 도달하는 것은 체력 바를
+ * 통째로 가져가는 피격 하나뿐입니다.
+ *
+ * 피해 반경의 가장자리에서 이 값은 이미 중심에서의 3분의 2 수준으로 떨어지며, 중요한 것이
+ * 그 숫자입니다. 반경 밖에 서서 살아남은 유탄도 몸으로 느껴져야 합니다. 그러지 않으면 그
+ * 반경은 애초에 가르쳐진 적이 없는 것입니다.
+ */
+#define WORLD_SHAKE_BLAST 0.95f
+
+/**
+ * @brief How far past the damage radius a blast is still felt, as a multiple.
+ *
+ * ENGLISH
+ * -------
+ * THE SHAKE REACHES FURTHER THAN THE DAMAGE, and the gap between the two is
+ * the point of the number rather than a rounding of it. Inside the radius the
+ * player is told by their health bar; outside it there is nothing else to say
+ * "that was close" -- and a blast whose felt edge and damaging edge were the
+ * same edge would teach the opposite lesson, that anything you can feel has
+ * already hurt you.
+ *
+ * Three is what a room is worth: a grenade's 4.2m becomes 12.6m of tremor,
+ * which is most of an arena and none of the level. Linear falloff to nothing
+ * at that edge, for the reason ::proj_blast gives about its own curve -- a
+ * squared one spends its last two thirds below what anybody can feel, so the
+ * reach would be a number that reads as much shorter than it is.
+ *
+ * 한국어
+ * ------
+ * @brief 폭발이 여전히 느껴지는, 피해 반경에 대한 배수.
+ *
+ * *흔들림은 피해보다 멀리 닿으며*, 둘 사이의 간격이 이 수치를 반올림한 것이 아니라 수치의
+ * 존재 이유입니다. 반경 안에서는 체력 표시가 말해 주지만, 반경 밖에서 "아슬아슬했다"고 말해 줄
+ * 것은 달리 없습니다. 그리고 느껴지는 가장자리와 상하게 하는 가장자리가 같은 폭발은 정반대의
+ * 교훈을 가르칩니다. 느껴진다면 이미 맞은 것이라는.
+ *
+ * 3은 방 하나에 해당하는 값입니다. 유탄의 4.2미터는 12.6미터의 진동이 되며, 그것은 아레나의
+ * 대부분이자 레벨의 일부에 지나지 않습니다. 그 가장자리에서 0이 되는 선형 감쇠이며, 이유는
+ * ::proj_blast가 자기 곡선에 대해 말하는 것과 같습니다. 제곱 곡선은 마지막 3분의 2를 아무도
+ * 느낄 수 없는 값으로 보내므로, 도달 거리가 실제보다 훨씬 짧게 읽히는 숫자가 됩니다.
+ */
+#define WORLD_SHAKE_BLAST_REACH 3.0f
+
+/**
  * @brief Downward speed a landing needs before it shakes anything, m/s.
  *
  * ENGLISH: Walking off a step is not an impact. Without a floor here every
@@ -1669,6 +1742,55 @@ int world_frozen(const World *w, int paused);
  *       상태로부터 올립니다.
  */
 void world_shake(World *w, float amount);
+
+/**
+ * @brief Shakes the camera by something that happened SOMEWHERE, with falloff.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] w      The world whose view is shaken.
+ * @param[in]     at     Where it happened, world units.
+ * @param[in]     radius The event's own radius in metres -- for a blast, the
+ *                       radius its DAMAGE reached. Zero or less does nothing.
+ * @param[in]     amount Magnitude at the centre, before the distance is taken
+ *                       off. What ::world_shake would have been given.
+ *
+ * @note THE ONLY THING BETWEEN THIS AND ::world_shake IS THE FALLOFF. It ends
+ *       in that call, so the ceiling, the "louder never the sum" rule and the
+ *       decay are the ones already written and cannot disagree with them.
+ * @note Measured to ::Player::pos, which is the EYE. A shake is what the camera
+ *       does, so the camera is what the distance is measured to -- from the
+ *       feet, a blast on the floor the player is standing on would read as
+ *       1.7m further away than one at their head, which is backwards.
+ * @note Reaches ::WORLD_SHAKE_BLAST_REACH times `radius` and stops. Past that
+ *       the amount would round to nothing anyway, but the test is written
+ *       rather than left to the arithmetic: "a blast across the level does not
+ *       shake you" is a rule, and a rule that is only true because of how a
+ *       multiply turned out is one that stops being true quietly.
+ * @note Public for the same reason ::world_shake is -- the next source that
+ *       happens at a PLACE rather than to the player is one call. A door
+ *       slamming and a boss landing are both that shape.
+ *
+ * 한국어
+ * ------
+ * @brief *어딘가에서* 일어난 일로 카메라를 흔들며, 거리에 따라 감쇠시킵니다.
+ * @param[in]     at     일어난 지점 (월드 단위).
+ * @param[in]     radius 그 사건 자신의 반경(미터). 폭발이라면 *피해*가 닿은 반경입니다.
+ * @param[in]     amount 중심에서의 크기. 거리 감쇠 이전의 값입니다.
+ *
+ * @note *이것과 ::world_shake의 차이는 감쇠뿐입니다.* 마지막에 그 함수를 호출하므로 상한과
+ *       "합이 아니라 큰 쪽" 규칙과 감쇠는 이미 작성된 그것들이며, 그것들과 어긋날 수 없습니다.
+ * @note ::Player::pos, 즉 *눈*까지 잽니다. 흔들리는 것은 카메라이므로 거리를 재는 대상도
+ *       카메라입니다. 발을 기준으로 하면 플레이어가 딛고 선 바닥에서 터진 폭발이 머리 옆에서
+ *       터진 것보다 1.7미터 멀다고 계산되는데, 그것은 거꾸로입니다.
+ * @note `radius`의 ::WORLD_SHAKE_BLAST_REACH배까지 닿고 멈춥니다. 그 너머는 어차피 0으로
+ *       반올림되지만, 산술에 맡기지 않고 검사를 써 둡니다. "레벨 건너편의 폭발은 당신을 흔들지
+ *       않는다"는 것은 규칙이고, 곱셈 결과가 그렇게 나왔기 때문에만 참인 규칙은 조용히 참이기를
+ *       그만둡니다.
+ * @note ::world_shake와 같은 이유로 공개입니다. 플레이어에게가 아니라 *어떤 자리에서* 일어나는
+ *       다음 원천도 호출 하나가 됩니다. 쾅 닫히는 문과 착지하는 보스가 모두 그 형태입니다.
+ */
+void world_shake_at(World *w, v3 at, float radius, float amount);
 
 /**
  * @brief Is something big alive right now?

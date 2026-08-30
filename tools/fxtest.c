@@ -490,6 +490,72 @@ int main(void) {
             found, (int)(sizeof(NAMES)/sizeof(NAMES[0])));
     }
 
+    /* --- the colour a spawn may ask for ----------------------------------
+       ::fx_tint_colour is the whole of what a tint does, and it is the half of
+       the drawing that can be checked without a context: the particles' colours
+       are chosen inside ::fx_draw, which needs one. What is pinned here is not
+       "does it change the colour" -- anything that touched the channels would
+       pass that -- but the three properties the effect files depend on.
+
+       ::fx_tint_colour이 색조가 하는 일의 전부이며, 그리기 중에서 컨텍스트 없이 검사할 수
+       있는 절반입니다. 입자의 색은 컨텍스트가 필요한 ::fx_draw 안에서 정해집니다. 이곳에서
+       고정하는 것은 "색이 바뀌는가"가 아닙니다. 채널을 건드리기만 해도 그것은 통과합니다.
+       이펙트 파일들이 의존하는 세 가지 성질입니다. */
+    {
+        FxTint none  = { 0, 0, 0 };
+        FxTint green = { 60, 255, 90 };
+        FxTint half  = { 30, 128, 45 };   /* the same hue, half as bright */
+
+        /* Nothing asked for, nothing changed. Every effect in the text that
+           nobody recolours goes through this path. */
+        float c[3] = { 1.0f, 0.38f, 0.09f };
+        fx_tint_colour(none, c);
+        ok(c[0] == 1.0f && c[1] == 0.38f && c[2] == 0.09f,
+           "a zero tint leaves the authored colour exactly as it was");
+
+        /* The hue is replaced rather than multiplied. A multiply could only
+           darken, and an authored orange multiplied toward green is a muddy
+           brown -- so the test is that green WINS the channel, not that the
+           colour moved. */
+        float g[3] = { 1.0f, 0.38f, 0.09f };
+        fx_tint_colour(green, g);
+        ok(g[1] > g[0] && g[1] > g[2],
+           "a green tint on an orange effect comes out green");
+
+        /* Brightness survives it: the birth-to-death ramp belongs to the text,
+           and a tint that dimmed what it painted would be a second author for
+           it. The brightest channel of the result is the brightest channel of
+           the input. */
+        float v = g[0] > g[1] ? g[0] : g[1];
+        if (g[2] > v) v = g[2];
+        okf(fabsf(v - 1.0f) < 1e-3f, "and no dimmer than the text drew it", v, 1.0f);
+
+        /* The tint names a hue, so its own brightness is not part of the
+           instruction: {60,255,90} and half of it are the same request. */
+        float h[3] = { 1.0f, 0.38f, 0.09f };
+        fx_tint_colour(half, h);
+        ok(fabsf(h[0] - g[0]) < 0.01f && fabsf(h[1] - g[1]) < 0.01f
+           && fabsf(h[2] - g[2]) < 0.01f,
+           "and a darker copy of the same hue is the same instruction");
+
+        /* White has no hue to replace, which is what keeps a layer that starts
+           white-hot starting white-hot whatever colour it cools into. */
+        float wh[3] = { 1.0f, 1.0f, 1.0f };
+        fx_tint_colour(green, wh);
+        ok(wh[0] == 1.0f && wh[1] == 1.0f && wh[2] == 1.0f,
+           "and white stays white: there is no hue there to replace");
+
+        /* And the spawn carries it. The colour itself is fx_draw's, but a tint
+           that never reached the particle would leave every check above true
+           and every explosion the authored colour.
+           그리고 생성이 그것을 실어 나릅니다. 색 자체는 fx_draw의 것이지만, 입자에 닿지 못한
+           색조는 위의 모든 검사를 참인 채로 두면서 모든 폭발을 작성된 색 그대로 남깁니다. */
+        fx_reload(&g_pools);
+        fx_spawn_tinted(&g_pools, "blastcore", v3f(0, 0, 0), v3f(0, 1, 0),
+                        1.0f, green);
+        ok(fx_live_count(&g_pools) > 0, "a tinted spawn spawns");
+    }
+
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall effect checks passed\n", fails);
     return fails != 0;
 }

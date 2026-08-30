@@ -216,6 +216,90 @@ static void check_shake(void) {
     world_shake(&w, 99.0f);
     ok(w.run.shake == WORLD_SHAKE_MAX, "and the magnitude is capped");
 
+    /* --- and now one that happened SOMEWHERE ------------------------------
+       The three above are things that happened TO the player -- their gun,
+       their health, their landing -- and none of them has a position, because
+       the player was always at it. A blast is the first source that has one,
+       so the first that can be wrong about it: the whole of ::world_shake_at
+       is the arithmetic between where it went off and where the camera is.
+
+       Driven through ::world_step rather than by calling ::world_shake_at
+       here, because the half that is easy to get wrong is not the falloff --
+       it is whether the frame ever asks. ::proj_blast records into the pool
+       and world.c drains it, and a drain that was never wired up leaves a
+       falloff that is perfectly correct and never runs.
+
+       위의 셋은 플레이어*에게* 일어난 일(자기 총, 자기 체력, 자기 착지)이며 어느 것도 위치를
+       갖지 않습니다. 플레이어가 언제나 그 자리에 있었기 때문입니다. 폭발은 위치를 가진 첫
+       원천이므로, 그 위치에 대해 틀릴 수 있는 첫 원천이기도 합니다. ::world_shake_at의 전부가
+       터진 자리와 카메라가 있는 자리 사이의 산술입니다.
+
+       이곳에서 ::world_shake_at을 직접 부르지 않고 ::world_step을 통해 구동하는 이유는, 틀리기
+       쉬운 절반이 감쇠가 아니기 때문입니다. 그것은 프레임이 *묻기는 하는가*입니다. ::proj_blast는
+       풀에 기록하고 world.c가 그것을 비우는데, 연결되지 않은 배수는 완벽하게 올바르면서 결코
+       실행되지 않는 감쇠를 남깁니다. */
+    fixture(&w, 0);
+    proj_blast(&w.pools, v3f(0.0f, 0.0f, -2.0f), PROJ_BLAST_RADIUS, 1);
+    world_step(&w, &idle, 1.777f, 0.016f);
+    float from_near = w.run.shake;
+    ok(from_near > 0.0f, "a blast beside the player shakes the view");
+
+    fixture(&w, 0);
+    proj_blast(&w.pools, v3f(0.0f, 0.0f, -8.0f), PROJ_BLAST_RADIUS, 1);
+    world_step(&w, &idle, 1.777f, 0.016f);
+    ok(w.run.shake > 0.0f && w.run.shake < from_near,
+       "one twice as far away shakes, and shakes less");
+
+    /* Past ::WORLD_SHAKE_BLAST_REACH radii there is nothing, which is the
+       claim the reach makes: a grenade across the level is somebody else's
+       problem.
+       반경의 ::WORLD_SHAKE_BLAST_REACH배를 넘으면 아무것도 없습니다. 도달 거리가 하는 주장이
+       그것입니다. 레벨 건너편의 유탄은 남의 일입니다. */
+    fixture(&w, 0);
+    proj_blast(&w.pools,
+               v3f(0.0f, 0.0f,
+                   -(PROJ_BLAST_RADIUS * WORLD_SHAKE_BLAST_REACH + 1.0f)),
+               PROJ_BLAST_RADIUS, 1);
+    world_step(&w, &idle, 1.777f, 0.016f);
+    ok(w.run.shake == 0.0f, "and one past three radii does not shake at all");
+
+    /* SPENT, not remembered. The log is drained every frame, so one explosion
+       is one jolt -- if it stayed in the pool it would be re-raised on every
+       frame that followed and the shake would never settle, which is the same
+       symptom as a decay that does not run and a completely different bug.
+       기억이 아니라 *소비*입니다. 로그는 매 프레임 비워지므로 폭발 하나는 충격 하나입니다.
+       풀에 남아 있다면 이후 모든 프레임에서 다시 올려져 흔들림이 결코 잦아들지 않을 텐데,
+       그것은 감쇠가 돌지 않는 것과 같은 증상이면서 전혀 다른 버그입니다. */
+    fixture(&w, 0);
+    proj_blast(&w.pools, v3f(0.0f, 0.0f, -2.0f), PROJ_BLAST_RADIUS, 1);
+    for (int i = 0; i < 40; i++) world_step(&w, &idle, 1.777f, 0.016f);
+    ok(w.run.shake == 0.0f, "and one blast is one jolt, not one per frame");
+
+    /* The falloff's own three points, called directly: the centre, the rim of
+       the damage, and the edge of the reach. Two thirds at the rim is not a
+       rounding of the design -- it is what makes the radius a thing the player
+       learns from outside it.
+       감쇠 자신의 세 지점을 직접 호출합니다. 중심, 피해의 가장자리, 그리고 도달 거리의 끝입니다.
+       가장자리에서의 3분의 2는 설계를 반올림한 값이 아니라, 플레이어가 반경을 그 바깥에서
+       배우게 만드는 값입니다. */
+    fixture(&w, 0);
+    world_shake_at(&w, w.player.pos, PROJ_BLAST_RADIUS, WORLD_SHAKE_BLAST);
+    ok(fabsf(w.run.shake - WORLD_SHAKE_BLAST) < 1e-4f,
+       "at the centre a blast is worth its whole magnitude");
+
+    fixture(&w, 0);
+    world_shake_at(&w, v3add(w.player.pos, v3f(PROJ_BLAST_RADIUS, 0.0f, 0.0f)),
+                   PROJ_BLAST_RADIUS, WORLD_SHAKE_BLAST);
+    ok(fabsf(w.run.shake - WORLD_SHAKE_BLAST * 2.0f / 3.0f) < 1e-3f,
+       "at the rim of the damage, two thirds of it");
+
+    fixture(&w, 0);
+    world_shake_at(&w,
+                   v3add(w.player.pos,
+                         v3f(PROJ_BLAST_RADIUS * WORLD_SHAKE_BLAST_REACH, 0.0f, 0.0f)),
+                   PROJ_BLAST_RADIUS, WORLD_SHAKE_BLAST);
+    ok(w.run.shake == 0.0f, "and at the edge of the reach, nothing");
+
     /* A restart puts it back, by construction rather than by being listed --
        which is the whole reason it lives in RunState. */
     run_reset(&w.run, 0);

@@ -1170,8 +1170,29 @@ int wp_axe_land(Weapon *w, Pools *pl, v3 feet, int grounded, float dt) {
        눈이 아니라 발을 중심으로 합니다. 도끼는 바닥으로 내려오며, 1.7m 위를 중심으로 한
        폭발은 플레이어가 뒤에 서 있는 낮은 벽을 넘어갑니다. */
     proj_blast(pl, feet, AXE_SLAM_RADIUS, AXE_SLAM_DAMAGE);
-    fx_spawn(pl, "boltburst", feet, v3f(0, 1, 0));
-    fx_spawn(pl, "spark", feet, v3f(0, 1, 0));
+
+    /* THE SAME EXPLOSION THE GRENADE IS, in the axe's own colour. This was two
+       effects of its own -- `boltburst` and `spark` -- and both were wrong in
+       the same way. `boltburst` is the MONSTERS' flash, so the player's heaviest
+       attack threw the blue that everything trying to kill them is painted in;
+       and neither of them draws a dome, so the widest blast in the game was the
+       one with no visible edge. AXE_SLAM_RADIUS is wider than a grenade's on
+       purpose and the player could not see a metre of it.
+       ::proj_boom_fx solves both by being the same six layers, scaled to the
+       radius that is about to hurt something and tinted with what threw them.
+       유탄과 *같은 폭발*이며, 도끼 자신의 색입니다. 이곳은 자기 이펙트 둘(`boltburst`와
+       `spark`)을 가지고 있었고 둘 다 같은 방식으로 틀렸습니다. `boltburst`는 *몬스터의*
+       섬광이므로 플레이어의 가장 묵직한 공격이 자신을 죽이려는 모든 것의 파랑을 던졌습니다.
+       그리고 둘 다 돔을 그리지 않으므로, 게임에서 가장 넓은 폭발이 보이는 가장자리가 없는
+       폭발이었습니다. AXE_SLAM_RADIUS는 의도적으로 유탄보다 넓은데 플레이어는 그 1미터도 볼 수
+       없었습니다. ::proj_boom_fx가 둘 다 해결합니다. 곧 무언가를 상하게 할 그 반경으로 크기가
+       정해지고 그것을 던진 것의 색으로 칠해진, 같은 여섯 겹이기 때문입니다. */
+    proj_boom_fx(pl, feet, v3f(0, 1, 0), AXE_SLAM_RADIUS, BLAST_TINT_SLAM);
+
+    /* Still `impact` and not `blast`. The picture is a detonation and the sound
+       is a landing, because that is what happened: a body came down on a floor.
+       여전히 `blast`가 아니라 `impact`입니다. 그림은 폭발이지만 소리는 착지입니다. 실제로
+       일어난 일이 그것이기 때문입니다. 몸이 바닥에 떨어진 것입니다. */
     audio_play_at("impact", 100, feet);
 
     w->punch += wp_stats(WP_AXE)->punch * 1.5f;

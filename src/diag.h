@@ -113,6 +113,7 @@ typedef enum {
     DIAG_ENEMY_CAP,     /**< Level wanted more monsters than ENEMY_MAX. / 레벨이 ENEMY_MAX보다 많은 몬스터를 요구했습니다. */
     DIAG_PICKUP_CAP,    /**< Level wanted more pickups than PICKUP_MAX. / 레벨이 PICKUP_MAX보다 많은 아이템을 요구했습니다. */
     DIAG_SHOT_CAP,      /**< A monster wanted to fire with ENEMY_MAX_SHOTS already in flight. / ENEMY_MAX_SHOTS가 이미 비행 중인 상태에서 몬스터가 발사를 시도했습니다. */
+    DIAG_BLAST_CAP,     /**< More explosions in one frame than ::PROJ_BLAST_LOG holds; the extras shook nothing. / 한 프레임의 폭발이 ::PROJ_BLAST_LOG를 초과했습니다. 초과분은 아무것도 흔들지 못했습니다. */
     DIAG_SOUND_CAP,     /**< Recipe text exceeded MAX_SOUNDS or MAX_LAYERS. / 레시피 텍스트가 MAX_SOUNDS 또는 MAX_LAYERS를 초과했습니다. */
     DIAG_DOOR_CAP,      /**< Level declared more doors than LVL_MAX_DOORS. / 레벨이 LVL_MAX_DOORS보다 많은 문을 선언했습니다. */
     DIAG_ASSET_INFLATE, /**< A baked asset did not expand to its recorded length. / 구워 넣은 에셋이 기록된 길이로 펼쳐지지 않았습니다. */

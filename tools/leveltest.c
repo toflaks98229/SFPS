@@ -9,6 +9,7 @@
 #include <math.h>
 #include <time.h>
 #include "level.h"
+#include "brush.h"   /* brush_point_in -- a teleport destination must not sit in its own volume */
 #include "txt.h"    /* txt_is, and txt_to_int, which every number below goes through */
 #include <limits.h> /* INT_MAX / INT_MIN, the two values the saturation lands on */
 #include "player.h"
@@ -1692,6 +1693,66 @@ int main(void) {
             okd(diag_count(DIAG_ENT_KIND) == before,
                 "and none of them authored a kind too long to store",
                 diag_count(DIAG_ENT_KIND) - before, 0);
+        }
+    }
+
+    /* --- teleporters -----------------------------------------------------
+       The shipped arena has two, and the pair is the point: a trigger_teleport
+       is half a mechanism and level.c refuses to store one whose
+       info_teleport_destination did not resolve. So a count of two is not just
+       "two volumes parsed" -- it is two volumes that FOUND the point they name.
+
+       AND THE DESTINATION MUST NOT BE INSIDE ITS OWN VOLUME, which is the
+       assertion worth having here. ::step_teleport leaves after one hop, so a
+       teleporter that lands you back in itself does not hang the game -- it
+       does something worse and quieter: it fires again on the very next frame,
+       every frame, and the player is stuck in place hearing the sound over and
+       over with no way to walk out. An author can draw that by accident and it
+       is invisible in the editor.
+
+       텔레포터입니다. 출하 아레나에 둘이 있고, *짝*이 요점입니다. trigger_teleport는 절반짜리
+       기구이며 level.c는 info_teleport_destination이 해소되지 않은 것을 저장하지 않습니다.
+       그러므로 둘이라는 개수는 "부피 둘이 파싱되었다"가 아니라 "부피 둘이 자기가 지목한 점을
+       *찾았다*"입니다.
+
+       *그리고 목적지는 자기 부피 안에 있어서는 안 되며*, 그것이 이곳에서 가질 값어치가 있는
+       단언입니다. ::step_teleport는 한 번 도약한 뒤 나가므로, 자기 자신 안에 내려놓는
+       텔레포터가 게임을 멈추지는 않습니다. 대신 더 나쁘고 더 조용한 일을 합니다. 바로 다음
+       프레임에 다시 발동하고 매 프레임 그러하며, 플레이어는 그 자리에 붙들린 채 같은 소리를
+       계속 들으면서 걸어 나갈 수 없습니다. 제작자가 실수로 그릴 수 있고 에디터에서는 보이지
+       않습니다. */
+    {
+        Level tl;
+        if (!level_load("lqdm4", &tl)) {
+            ok(0, "the shipped arena loads for the teleport check");
+        } else {
+            printf("\n  teleporters: %d\n", tl.n_teleports);
+            okd(tl.n_teleports == 2,
+                "the arena's two teleporters both found their destination",
+                tl.n_teleports, 2);
+
+            int self = 0, at_origin = 0;
+            for (int i = 0; i < tl.n_teleports; i++) {
+                const TeleportDef *t = &tl.teleports[i];
+                /* The point the PLAYER occupies, not the one the .map wrote:
+                   the marker is the feet and Player::pos is the eye, so a
+                   destination whose feet sit outside a volume can still have
+                   its eye inside one. That is the case that loops.
+                   .map이 적은 점이 아니라 *플레이어가 차지하는* 점입니다. 표식은
+                   발이고 Player::pos는 눈이므로, 발이 부피 바깥인 목적지도 눈은
+                   안에 있을 수 있습니다. 그것이 루프가 되는 경우입니다. */
+                v3 eye = v3f(t->dest.x, t->dest.y + PLAYER_EYE, t->dest.z);
+                if (tl.brushes &&
+                    brush_point_in(tl.brushes, t->first_brush, t->n_brushes,
+                                   eye)) self++;
+                if (t->dest.x == 0.0f && t->dest.y == 0.0f && t->dest.z == 0.0f)
+                    at_origin++;
+            }
+            okd(self == 0,
+                "and none of them lands you back inside itself", self, 0);
+            okd(at_origin == 0,
+                "and none of them resolved to the world origin", at_origin, 0);
+            level_release(&tl);
         }
     }
 

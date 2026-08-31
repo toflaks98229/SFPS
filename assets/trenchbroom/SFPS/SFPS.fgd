@@ -93,6 +93,29 @@
     dmg(integer) : "Damage per second" : 5
 ]
 
+// A teleporter, in Quake's two halves: the volume you walk into and the point
+// it puts you at. Link them with target/targetname the way a door is linked.
+//
+// The destination's `angle` is which way you FACE on arrival, not which way you
+// are thrown -- your speed is kept and turned with you, so running in is
+// running out. It is the one thing in this game that moves the view without the
+// mouse, so point it somewhere the player can read the room from.
+//
+// A trigger_teleport whose target names nothing loads as nothing at all: the
+// volume stays walkable and no teleport happens. Half a mechanism is worse than
+// none, and dropping the player at the world origin is usually dropping them
+// inside rock.
+@SolidClass color(140 90 220) = trigger_teleport : "Walk in here, come out at the info_teleport_destination named by `target`."
+[
+    target(target_destination) : "Destination's targetname"
+]
+
+@PointClass size(-12 -12 -12, 12 12 12) color(140 90 220) = info_teleport_destination : "Where a trigger_teleport puts you. `angle` is which way you face."
+[
+    targetname(target_source) : "Name a trigger_teleport can target"
+    angle(integer) : "Facing on arrival" : 0
+]
+
 // A point light. `light` is Quake's brightness and this engine reads it as
 // reach, because it separates reach from brightness and Quake does not.
 // Baked into the vertices when the level loads, shadowed against the brushes.

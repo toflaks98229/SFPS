@@ -29,6 +29,7 @@
 #include "pickup.h"   /* pickup_spawn_level -- also takes the World's pool now */
 #include "proj.h"     /* proj_reset -- now takes the World's own pool */
 #include "door.h"     /* door_reset, and the DOOR_* axes */
+#include "brush.h"    /* Brush::min/max and brush_point_in -- standing inside a teleport volume */
 #include "diag.h"     /* diag_count -- a stale door is counted, not printed */
 #include "story.h"    /* STORY_DEFEAT -- the screen that is now in front of the death one */
 #include "txt.h"      /* txt_copy -- walking the level chain by name */
@@ -458,6 +459,101 @@ static void check_score(void) {
     run_reset(&w.run, 0);
     ok(w.run.kills == 0 && w.run.alive_time == 0.0f, "a restart clears both");
 }
+
+/* --- a teleporter actually moves the player ------------------------------
+ *
+ * A DIFFERENT CLAIM FROM THE ONE leveltest MAKES. That file asserts the two
+ * volumes parsed and found the points they name, which is about level.c. This
+ * asserts that walking into one goes somewhere, which is about world.c -- and
+ * the half that is easy to get wrong is not the arithmetic, it is whether
+ * ::world_step ever asks. A ::step_teleport that was never called leaves a
+ * perfectly correct teleporter that never fires, exactly as the blast falloff
+ * would have.
+ *
+ * Driven on the SHIPPED arena rather than a fixture, because a teleporter needs
+ * a brush level and the fixture here is a sector box -- and because the thing
+ * worth knowing is that the arena's own two work, not that a synthetic one does.
+ *
+ * leveltest가 하는 주장과 다른 주장입니다. 그쪽은 부피 둘이 파싱되어 자기가 지목한 점을
+ * 찾았다고 단언하며 그것은 level.c에 대한 것입니다. 이곳은 그 안으로 걸어 들어가면 어딘가로
+ * 간다고 단언하며 그것은 world.c에 대한 것입니다. 그리고 틀리기 쉬운 절반은 산술이 아니라
+ * ::world_step이 *묻기는 하는가*입니다. 호출되지 않는 ::step_teleport는 완벽하게 올바르면서
+ * 결코 발동하지 않는 텔레포터를 남기며, 폭발 감쇠가 그러했을 것과 똑같습니다.
+ *
+ * 픽스처가 아니라 *출하 아레나*에서 구동하는 이유는, 텔레포터에 브러시 레벨이 필요한데 이곳의
+ * 픽스처는 섹터 상자이기 때문이고, 알아야 할 것이 합성된 것 하나가 아니라 아레나 자신의 둘이
+ * 작동한다는 사실이기 때문입니다. */
+static void check_teleport(void) {
+    printf("\nteleporters\n");
+
+    static World w;
+    world_init(&w);
+    w.run.title = 0;
+
+    if (!world_load_level(&w, "lqdm4", WORLD_ENTER_NEW)) {
+        ok(0, "the shipped arena loads into a world");
+        return;
+    }
+    ok(1, "the shipped arena loads into a world");
+
+    if (w.level.n_teleports < 1 || !w.level.brushes) {
+        ok(0, "and it has a teleporter to step into");
+        return;
+    }
+
+    const TeleportDef *t = &w.level.teleports[0];
+    v3 dest = t->dest;
+
+    /* The middle of the volume's first brush. ::Brush carries its own bounding
+       box, so this is two adds and a halve -- and `brush_point_in` is asked
+       whether that point really is inside before anything is concluded from
+       standing there. A trigger volume shaped like an L would put its AABB
+       centre outside itself, and the test would then be measuring nothing.
+       부피의 첫 브러시 한가운데입니다. ::Brush가 자기 바운딩 박스를 지니므로 덧셈 둘과 반으로
+       나누기 하나입니다. 그리고 그 점이 정말 안에 있는지를 `brush_point_in`에게 먼저 묻습니다.
+       L자 모양의 트리거 부피는 자기 AABB 중심이 자기 바깥에 놓이고, 그러면 이 검사는 아무것도
+       재지 않게 됩니다. */
+    const Brush *b = &w.level.brushes->brushes[t->first_brush];
+    v3 mid = v3scale(v3add(b->min, b->max), 0.5f);
+    ok(brush_point_in(w.level.brushes, t->first_brush, t->n_brushes, mid),
+       "the middle of the volume is inside the volume");
+
+    float away = v3len(v3sub(mid, dest));
+    ok(away > 1.0f, "and the destination is somewhere else");
+
+    /* Stand in it and let one frame happen. */
+    Input in; memset(&in, 0, sizeof in);
+    w.player.pos      = mid;
+    w.player.vel      = v3f(0.0f, 0.0f, 0.0f);
+    w.player.grounded = 1;
+
+    world_step(&w, &in, 1.777f, 0.016f);
+
+    /* The marker is the feet; ::Player::pos is the eye. Compared where the
+       engine puts it rather than where the .map wrote it -- see ::step_teleport.
+       표식은 발이고 ::Player::pos는 눈입니다. .map이 적은 자리가 아니라 엔진이 놓는 자리에서
+       비교합니다. ::step_teleport를 참조하십시오. */
+    v3 eye_dest = v3f(dest.x, dest.y + PLAYER_EYE, dest.z);
+    float landed = v3len(v3sub(w.player.pos, eye_dest));
+    okf(landed < 0.001f, "one frame in it puts the player at the destination",
+        landed, 0.0f);
+    okf(fabsf(w.yaw - t->yaw) < 0.001f, "facing the way it says",
+        w.yaw, t->yaw);
+
+    /* AND IT DOES NOT FIRE AGAIN. The destination is outside the volume, so the
+       next frame should be an ordinary one -- if the player is still being
+       moved every frame, this is a teleporter that has caught them rather than
+       one they used.
+       *그리고 다시 발동하지 않습니다.* 목적지는 부피 바깥이므로 다음 프레임은 평범한
+       프레임이어야 합니다. 매 프레임 계속 옮겨지고 있다면 그것은 플레이어가 쓴 텔레포터가
+       아니라 그를 붙잡은 텔레포터입니다. */
+    v3 after = w.player.pos;
+    world_step(&w, &in, 1.777f, 0.016f);
+    okf(v3len(v3sub(w.player.pos, after)) < 1.0f,
+        "and the frame after is an ordinary one",
+        v3len(v3sub(w.player.pos, after)), 0.0f);
+}
+
 
 int main(void) {
     printf("steptest\n\n");
@@ -1605,6 +1701,7 @@ int main(void) {
     }
 
     check_shake();
+    check_teleport();
     check_score();
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall frame-order checks passed\n", fails);

@@ -322,6 +322,7 @@ static void level_clear(Level *out) {
     out->n_doors    = 0;
     out->n_triggers = 0;
     out->n_hazards  = 0;
+    out->n_teleports = 0;
     out->name[0]    = 0;
     out->next[0]    = 0;
     out->start[0]   = out->start[1] = out->start[2] = 0;
@@ -1475,6 +1476,100 @@ static void brush_hazards_of(Level *out, BrushMap *bm) {
     }
 }
 
+/**
+ * @brief Reads `trigger_teleport` volumes and the destinations they name.
+ *
+ * ENGLISH
+ * -------
+ * @param[out]    out The level being filled.
+ * @param[in,out] bm  The parsed brush map. Teleport brushes are made non-solid.
+ *
+ * TWO ENTITIES, RESOLVED HERE SO THE RUNTIME NEVER SEES A NAME. Quake links a
+ * `trigger_teleport` to an `info_teleport_destination` through `target` and
+ * `targetname`, which is the same string-matching a ::DoorDef does through
+ * ::TagPool. This does not intern them: a tag is compared every frame by the
+ * door state machine and is worth a number, while a destination is looked up
+ * ONCE and then only its coordinates matter. What survives into ::Level is a
+ * volume and a place.
+ *
+ * A TELEPORTER WITH NO DESTINATION IS NOT STORED, and that is a refusal rather
+ * than an oversight. The alternative -- keeping the volume and leaving `dest`
+ * zeroed -- is a hole in the floor that drops the player at the world origin,
+ * which in a converted map is usually solid rock. A missing destination means
+ * the pair did not survive the crossing, and the honest answer to half a
+ * mechanism is none of it: the volume stays walkable and nothing happens.
+ * ::DIAG_ENT_CAP covers the other refusal, which is running out of slots.
+ *
+ * THE BRUSHES ARE MADE NON-SOLID for ::brush_hazards_of's reason: a volume the
+ * player walks into is one the player must be able to walk into. Quake's own
+ * `trigger` texture is already in brush.c's NODRAW list, so they were never
+ * drawn -- but "not drawn" and "not collided with" are two different bits, and
+ * a teleporter you bounce off is a wall with a good excuse.
+ *
+ * 한국어
+ * ------
+ * @brief `trigger_teleport` 부피와 그것이 지목하는 목적지를 읽습니다.
+ *
+ * *두 개의 엔티티이며, 실행 중에는 이름을 보지 않도록 이곳에서 해소합니다.* Quake는
+ * `trigger_teleport`를 `info_teleport_destination`에 `target`과 `targetname`으로 연결하며,
+ * 그것은 ::DoorDef가 ::TagPool을 통해 하는 것과 같은 문자열 대조입니다. 이곳에서는 그것을
+ * 번호로 사상하지 않습니다. 태그는 문 상태 기계가 매 프레임 비교하므로 숫자일 값어치가 있고,
+ * 목적지는 *한 번* 조회된 뒤로는 그 좌표만이 중요하기 때문입니다. ::Level로 살아남는 것은
+ * 부피와 장소입니다.
+ *
+ * *목적지가 없는 텔레포터는 저장하지 않으며*, 그것은 실수가 아니라 거절입니다. 대안(부피는
+ * 남기고 `dest`를 0으로 두는 것)은 플레이어를 월드 원점에 떨어뜨리는 바닥의 구멍이며, 변환된
+ * 맵에서 그곳은 대개 단단한 바위 속입니다. 목적지가 없다는 것은 그 쌍이 건너오지 못했다는
+ * 뜻이고, 절반짜리 기구에 대한 정직한 답은 아무것도 하지 않는 것입니다. 나머지 거절, 곧 칸이
+ * 떨어지는 경우는 ::DIAG_ENT_CAP이 덮습니다.
+ *
+ * *브러시를 비고체로 만드는 것은* ::brush_hazards_of와 같은 이유입니다. 플레이어가 걸어
+ * 들어가는 부피는 플레이어가 걸어 들어갈 수 있어야 합니다. Quake 자신의 `trigger` 텍스처는 이미
+ * brush.c의 NODRAW 목록에 있어 그려진 적이 없지만, "그려지지 않음"과 "충돌하지 않음"은 서로
+ * 다른 비트이며, 튕겨 나오는 텔레포터는 그럴듯한 핑계를 가진 벽입니다.
+ */
+static void brush_teleports_of(Level *out, BrushMap *bm) {
+    for (int i = 0; i < bm->n_ents; i++) {
+        const BrushEnt *e = &bm->ents[i];
+        const char *cn = brush_ent_value(e, "classname");
+        if (!cn || !txt_eq(cn, "trigger_teleport")) continue;
+        if (e->n_brushes < 1) continue;
+
+        for (int k = 0; k < e->n_brushes; k++)
+            bm->brushes[e->first_brush + k].solid = 0;
+
+        const char *target = brush_ent_value(e, "target");
+        if (!target || !target[0]) continue;
+
+        /* The destination, found by name. A linear scan over the entity list
+           once per teleporter: there are at most ::LVL_MAX_TELEPORTS of these
+           and the list is already in memory, so an index would cost more to
+           build than it saves.
+           이름으로 찾은 목적지입니다. 텔레포터당 엔티티 목록을 한 번 훑습니다. 이것은 많아야
+           ::LVL_MAX_TELEPORTS개이고 목록은 이미 메모리에 있으므로, 색인은 그것이 아끼는
+           것보다 만드는 데 더 듭니다. */
+        v3 dest; int found = 0; float yaw = 0.0f;
+        for (int j = 0; j < bm->n_ents && !found; j++) {
+            const BrushEnt *d = &bm->ents[j];
+            const char *dcn = brush_ent_value(d, "classname");
+            if (!dcn || !txt_eq(dcn, "info_teleport_destination")) continue;
+            const char *name = brush_ent_value(d, "targetname");
+            if (!name || !txt_eq(name, target)) continue;
+            if (!brush_ent_point(d, "origin", &dest)) continue;
+            yaw = brush_ent_num(d, "angle", 0.0f) * (M_PI_F / 180.0f);
+            found = 1;
+        }
+        if (!found) continue;
+
+        if (out->n_teleports >= LVL_MAX_TELEPORTS) { DIAG(DIAG_ENT_CAP); continue; }
+        TeleportDef *t = &out->teleports[out->n_teleports++];
+        t->first_brush = (short)e->first_brush;
+        t->n_brushes   = (short)e->n_brushes;
+        t->dest        = dest;
+        t->yaw         = yaw;
+    }
+}
+
 static void brush_doors_of(Level *out, const BrushMap *bm, TagPool *tp) {
     for (int i = 0; i < bm->n_ents; i++) {
         const BrushEnt *e = &bm->ents[i];
@@ -1770,6 +1865,7 @@ static int load_brush_level(BrushStore *bs, const char *name, Level *out) {
     TagPool tags = {0};
     brush_triggers_of(out, bm, &tags);
     brush_hazards_of(out, bm);
+    brush_teleports_of(out, bm);
     brush_doors_of(out, bm, &tags);
     brush_ents_of(out, bm);
     return 1;

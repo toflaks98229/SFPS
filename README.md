@@ -22,7 +22,7 @@ Models, materials, sounds and levels are all authored as text and hot-reload
 into the running game.
 
 ```
-1,282,048 / 1,474,560 bytes   (86.94% used)
+1,283,072 / 1,474,560 bytes   (87.01% used)
 ```
 
 ## Build
@@ -1623,11 +1623,27 @@ is fought in — `lqdm4`, LibreQuake's **Psychofuge** — is a converted
 LibreQuake deathmatch map, produced by
 [assets/maps/import-librequake.py](assets/maps/import-librequake.py) — no
 compiler in the path, and no `levels.txt` entry needed because the file *is* the
-level. What the crossing costs is written in that script: teleporters are
-dropped, armour becomes health, eight Quake weapons become four of ours, movers
+level. What the crossing costs is written in that script: armour becomes health,
+eight Quake weapons become four of ours, powerups have nowhere to go, movers
 this engine has no counterpart for arrive frozen, and a room built for other
 players gains the spawners, the shrine, the maw and the ward slots that make it
 an arena here.
+
+**Teleporters used to be on that list and are not any more.** A `TeleportDef` is
+a `TriggerDef` with a place instead of a tag — the same non-solid volume, the
+same `brush_point_in` test — so Quake's `trigger_teleport` and the
+`info_teleport_destination` it names both cross, and Psychofuge's two routes
+cross with them. `level.c` resolves the pair at parse time, so the runtime never
+looks a name up: what reaches the level is a volume and the coordinates it sends
+you to. A teleporter whose destination did not resolve is not stored at all —
+half a mechanism is worse than none, and the world origin is usually solid rock.
+
+Stepping in keeps your speed and turns it with you, so running in is running
+out; the view is yanked to the destination's `angle`, which is the one place in
+this game the camera moves without the mouse. At most one hop per frame, because
+two teleporters pointing at each other is a legal thing to draw and an infinite
+loop for anything that keeps testing.
+
 
 > **The arena is `lqdm4` ("Psychofuge") now, and most of what follows measured
 > `lqdm1` ("Solstice").** Everything below about how a LibreQuake map crosses —

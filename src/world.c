@@ -1011,6 +1011,115 @@ static void step_push(World *w) {
 }
 
 /**
+ * @brief Standing in a teleporter: out the other side, facing where it says.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] w The world. Position, look angle and velocity all change.
+ *
+ * AT MOST ONE PER FRAME, and the `return` is the whole guard. Two teleporters
+ * pointed at each other are a legal thing for an author to draw and an infinite
+ * loop for anything that keeps testing: arriving inside the second volume would
+ * send the player back into the first on the same frame, forever, with no frame
+ * ever drawn in between. Leaving after the first hop means the player is *seen*
+ * at the destination before the next one can act, so a loop is a fast round
+ * trip rather than a hang.
+ *
+ * THE VIEW IS YANKED, ON PURPOSE. The destination's `angle` is the author
+ * saying which way you should be looking when you come out, and a teleporter
+ * that dropped you facing whatever you happened to face on the way in would put
+ * you in a corner of a room you have never seen. Quake does the same thing for
+ * the same reason. It is the one place in this game that moves the camera
+ * without the mouse, which is why it is worth saying out loud here.
+ *
+ * MOMENTUM IS ROTATED, NOT KEPT AND NOT DROPPED. Keeping the vector sends a
+ * player who ran in northwards flying north out of a door that faces south --
+ * into a wall, at speed, having done nothing wrong. Dropping it stops a running
+ * player dead, which reads as the teleporter grabbing them. Rotating the
+ * horizontal part by the same delta the view turned through preserves what the
+ * player actually had, which is speed in the direction they were going: run in,
+ * run out. Vertical velocity is left alone -- falling into a teleporter and
+ * arriving still falling is the truthful answer, and the destination is a point
+ * in the air as easily as on a floor.
+ *
+ * @note Tested against ::Player::pos, which is the eye. The volume an author
+ *       draws is a doorway a body walks through, so any point on that body
+ *       entering it is the event; the eye is the one this engine already uses
+ *       for ::TriggerDef and ::HazardDef, and using a different one here would
+ *       make a teleporter and a trigger drawn at the same size behave
+ *       differently.
+ *
+ * 한국어
+ * ------
+ * @brief 텔레포터 안에 서 있는 것: 반대편으로, 그것이 말하는 방향을 보면서.
+ *
+ * *한 프레임에 많아야 하나이며*, `return`이 그 보호 장치의 전부입니다. 서로를 겨눈 텔레포터
+ * 둘은 제작자가 그려도 되는 것이고 계속 검사하는 쪽에게는 무한 루프입니다. 두 번째 부피 안에
+ * 도착하면 같은 프레임에 다시 첫 번째로 보내지고, 그 사이에 한 프레임도 그려지지 않은 채로
+ * 영원히 그렇게 됩니다. 첫 도약 뒤에 나가면 플레이어는 다음 것이 작동하기 전에 목적지에서
+ * *보이므로*, 루프는 멈춤이 아니라 빠른 왕복이 됩니다.
+ *
+ * *시야를 의도적으로 낚아챕니다.* 목적지의 `angle`은 나올 때 어디를 보아야 하는지에 대한
+ * 제작자의 말이며, 들어갈 때 우연히 향하던 쪽으로 내려놓는 텔레포터는 본 적 없는 방의
+ * 구석을 보게 만듭니다. Quake도 같은 이유로 같은 일을 합니다. 이 게임에서 마우스 없이
+ * 카메라를 움직이는 유일한 곳이며, 그래서 이곳에 소리 내어 적어 둘 값어치가 있습니다.
+ *
+ * *운동량은 회전시키며, 유지하지도 버리지도 않습니다.* 벡터를 그대로 두면 북쪽으로 달려 들어간
+ * 플레이어가 남쪽을 향한 문에서 북쪽으로 날아 나갑니다. 아무 잘못도 하지 않았는데 벽으로,
+ * 전속력으로입니다. 버리면 달리던 플레이어가 그 자리에 멈추는데, 그것은 텔레포터가 그를
+ * 붙잡은 것처럼 읽힙니다. 수평 성분을 시야가 돈 것과 같은 각도만큼 회전시키면 플레이어가
+ * 실제로 가지고 있던 것, 곧 *가던 방향으로의 속도*가 보존됩니다. 달려 들어가면 달려
+ * 나옵니다. 수직 속도는 그대로 둡니다. 텔레포터로 떨어져 들어가 여전히 떨어지며 도착하는 것이
+ * 정직한 답이고, 목적지는 바닥만큼이나 쉽게 공중의 한 점일 수 있습니다.
+ *
+ * @note ::Player::pos에 대해 검사하며, 그것은 눈입니다. 제작자가 그리는 부피는 몸이 걸어
+ *       지나가는 문간이므로 그 몸의 어느 점이든 들어서는 것이 사건입니다. 눈은 이 엔진이
+ *       ::TriggerDef와 ::HazardDef에 대해 이미 쓰는 것이며, 이곳에서만 다른 것을 쓰면 같은
+ *       크기로 그려진 텔레포터와 트리거가 다르게 행동하게 됩니다.
+ */
+static void step_teleport(World *w) {
+    const Level *l = &w->level;
+    if (!l->brushes) return;
+
+    for (int i = 0; i < l->n_teleports; i++) {
+        const TeleportDef *t = &l->teleports[i];
+        if (!brush_point_in(l->brushes, t->first_brush, t->n_brushes,
+                            w->player.pos)) continue;
+
+        float turn = t->yaw - w->yaw;
+        float c = cosf(turn), s = sinf(turn);
+        float vx = w->player.vel.x, vz = w->player.vel.z;
+
+        /* THE MARKER IS THE FEET AND ::Player::pos IS THE EYE, which is the
+           convention ::player_spawn already uses: a `start` at floor level
+           becomes `pos.y = PLAYER_EYE`. Putting the eye at the destination
+           instead sinks the body a whole ::PLAYER_EYE into the floor, and what
+           that looks like is not a teleporter that fails -- it is one that
+           works and then shoves the player 1.7m upward on the next frame, which
+           reads as the destination being wrong rather than the offset.
+           *표식은 발이고 ::Player::pos는 눈이며*, 그것이 ::player_spawn이 이미 쓰는
+           약속입니다. 바닥 높이의 `start`는 `pos.y = PLAYER_EYE`가 됩니다. 대신 눈을
+           목적지에 두면 몸이 ::PLAYER_EYE만큼 통째로 바닥에 잠기며, 그 모습은 실패한
+           텔레포터가 아닙니다. 작동한 다음 다음 프레임에 플레이어를 1.7m 위로 밀어 올리는
+           텔레포터이고, 그것은 오프셋이 아니라 목적지가 틀린 것처럼 읽힙니다. */
+        w->player.pos   = v3f(t->dest.x, t->dest.y + PLAYER_EYE, t->dest.z);
+        w->yaw          = t->yaw;
+        w->player.vel.x = vx * c - vz * s;
+        w->player.vel.z = vx * s + vz * c;
+
+        /* The landing thump, because there is no teleport sound in the recipe
+           table and this is the closest thing in it to arriving somewhere. A
+           silent teleport reads as a rendering glitch: the room changes and
+           nothing says the game did it on purpose.
+           착지음입니다. 레시피 표에 텔레포트 소리가 없고, 그 안에서 *어딘가에 도착하는 것*에
+           가장 가까운 것이 이것이기 때문입니다. 소리 없는 텔레포트는 렌더링 결함으로
+           읽힙니다. 방이 바뀌는데 게임이 일부러 그랬다고 말하는 것이 아무것도 없습니다. */
+        audio_play_at("hland", 90, w->player.pos);
+        return;
+    }
+}
+
+/**
  * @brief Reaching the exit: the next level, or the end of the game.
  *
  * ENGLISH
@@ -2475,6 +2584,7 @@ int world_step(World *w, const Input *in, float aspect, float dt) {
        이 순서는 그것을 눈에 띄게 만듭니다. 조용히 레벨이 끝나는 대신 플레이어가 공중으로
        던져집니다. */
     if (!frozen) step_push(w);
+    if (!frozen) step_teleport(w);
 
     /* AFTER the monsters were stepped and BEFORE the exit.
        After, because "is the wave clear" is a question about the state this

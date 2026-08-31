@@ -92,13 +92,16 @@ holds for maps exactly as it holds for sprites.
 
 WHAT DOES NOT SURVIVE THE CROSSING
 ----------------------------------
-A Quake DM map is a room for a game with teleporters, armour, eight weapons and
-no waves. This engine has none of the first three and is built on the fourth, so
-the conversion is not lossless and does not pretend to be:
+A Quake DM map is a room for a game with armour, eight weapons and no waves.
+This engine has none of the first two and is built on the third, so the
+conversion is not lossless and does not pretend to be:
 
-  * TELEPORTERS ARE DROPPED. trigger_teleport, its destination and the relays
-    that drive it have no counterpart here, so the map loses one route. That is
-    a hole in the level's flow and it is reported rather than hidden.
+  * TELEPORTERS CROSS NOW, and this line used to say they were dropped. The
+    engine grew a TeleportDef -- a trigger volume with a place instead of a tag
+    -- so `trigger_teleport` and the `info_teleport_destination` it names both
+    survive, and the route they make survives with them. What still does NOT
+    cross is a teleporter driven by a relay rather than by walking into it;
+    trigger_relay is in DROP and nothing here fires a tag at a teleporter.
   * ARMOUR BECOMES HEALTH. There is no second damage pool in this game.
   * EIGHT WEAPONS BECOME FOUR. The mapping below is by ROLE -- hitscan spread,
     sustained fire, splash -- not by name.
@@ -160,6 +163,7 @@ CAP_NAMES = {
     'lights':     'LVL_MAX_LIGHTS',
     'doors':      'LVL_MAX_DOORS',
     'triggers':   'LVL_MAX_TRIGGERS',
+    'teleports':  'LVL_MAX_TELEPORTS',
     'hazards':    'LVL_MAX_HAZARDS',
     'ward cands': 'BOSS_MAX_CAND',
     'tex name':   'BR_TEX',
@@ -361,8 +365,6 @@ LIGHTS = {
 DROP = {
     'ambient_drip':               'a looping sound with no counterpart here',
     'info_intermission':          'a camera for a scoreboard this game has none of',
-    'info_teleport_destination':  'teleporters are dropped',
-    'trigger_teleport':           'teleporters are dropped',
     'trigger_relay':              'fires a target; nothing here has targets',
     'trigger_once':               'likewise, and its brush would be a dead volume',
     'item_artifact_invisibility': 'no powerups',
@@ -1057,9 +1059,10 @@ def convert(text, report):
     #     if (d->tag > 0) asked = tagged;
     #     else            asked = dist_to_outline(...) <= DOOR_TOUCH_DIST;
     # So a name is a PROMISE that something will call it, and the crossing
-    # breaks that promise on purpose: trigger_once, trigger_relay and
-    # trigger_teleport are all in DROP, because none of them has a counterpart
-    # here. lqdm1's two gates are named `gate1` and the only thing that fired
+    # breaks that promise on purpose: trigger_once and trigger_relay are in DROP,
+    # because neither has a counterpart here. (trigger_teleport was in that list
+    # and is not any more -- it has one now.) lqdm1's two gates were named
+    # `gate1` and the only thing that fired
     # them was a trigger_once. Both arrived tagged, waiting on a switch this
     # converter had already deleted, and could not be opened by any means the
     # game has.
@@ -1147,6 +1150,18 @@ def convert(text, report):
         cn = keys.get('classname', '')
         if cn == 'light':                counts['lights'] = counts.get('lights', 0) + 1
         elif cn == 'trigger_hurt':       counts['hazards'] = counts.get('hazards', 0) + 1
+        # BEFORE the generic `trigger_` branch, because a teleporter is not a
+        # trigger to the engine: level.c stores it in Level::teleports against
+        # LVL_MAX_TELEPORTS (8), not in Level::triggers against LVL_MAX_TRIGGERS
+        # (16). Counting it as a trigger overstated one cap by two and left the
+        # other unwatched -- and this table exists so that a map is refused here
+        # rather than loading with half of itself missing.
+        # 일반 `trigger_` 분기보다 *먼저*입니다. 엔진에게 텔레포터는 트리거가 아니기
+        # 때문입니다. level.c는 그것을 LVL_MAX_TRIGGERS(16)에 대한 Level::triggers가 아니라
+        # LVL_MAX_TELEPORTS(8)에 대한 Level::teleports에 저장합니다. 트리거로 세면 한쪽
+        # 상한을 둘만큼 부풀리고 다른 쪽은 지켜보지 않게 됩니다. 이 표가 존재하는 이유는 맵이
+        # 자기 절반을 잃은 채 로드되는 대신 이곳에서 거절되게 하려는 것입니다.
+        elif cn == 'trigger_teleport': counts['teleports'] = counts.get('teleports', 0) + 1
         elif cn.startswith('trigger_'):  counts['triggers'] = counts.get('triggers', 0) + 1
         elif cn == 'func_door':          counts['doors'] = counts.get('doors', 0) + 1
         elif cn.startswith(('item_', 'monster_')) or cn in ('info_altar',):
@@ -1313,8 +1328,8 @@ def main():
 
     print()
     print('  against the caps that overflow quietly:')
-    for key in ('level ents', 'lights', 'doors', 'triggers', 'hazards',
-                'ward cands'):
+    for key in ('level ents', 'lights', 'doors', 'triggers', 'teleports',
+                'hazards', 'ward cands'):
         cname, cap = CAPS[key]
         got = report['counts'].get(key, 0)
         flag = ' <-- FULL' if got == cap else (' <-- OVER' if got > cap else '')

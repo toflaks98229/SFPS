@@ -1416,6 +1416,60 @@ typedef struct {
     short dps;                     /**< Damage per second while inside. / 안에 있는 동안의 초당 피해량. */
 } HazardDef;
 
+#define LVL_MAX_TELEPORTS 8   ///< @brief Teleport volumes per level. / 레벨당 텔레포트 부피 수.
+
+/**
+ * @struct TeleportDef
+ * @brief A volume that puts the player somewhere else the moment they enter it.
+ *
+ * ENGLISH
+ * -------
+ * A ::TriggerDef WITH A PLACE INSTEAD OF A TAG, and that is the whole shape of
+ * it. Both are non-solid brushes you walk into; a trigger answers "something is
+ * standing here" by firing a number at the doors, and this answers it by moving
+ * the thing that is standing there. The volume test is the same
+ * ::brush_point_in call, which is why this needed no new geometry code at all.
+ *
+ * WHY IT IS NOT A ::TriggerDef WITH A KIND COLUMN. A tag is two bytes and a
+ * destination is sixteen, so folding them into one struct would pay for a
+ * position on every trigger volume in order to store one on two of them. The
+ * pattern this file already uses is one array per THING -- doors, triggers,
+ * hazards -- and the reason is the same each time: the volumes are identical
+ * and what they do with the fact is not.
+ *
+ * QUAKE CALLS THESE `trigger_teleport` AND `info_teleport_destination`, in two
+ * entities linked by name. ::level_load resolves the pair at parse time so the
+ * runtime never looks a name up: what survives into the level is a volume and
+ * the coordinates it sends you to. A teleporter whose destination is missing is
+ * not stored at all -- see ::brush_teleports_of for why that is a refusal
+ * rather than a teleporter to the origin.
+ *
+ * 한국어
+ * ------
+ * @brief 플레이어가 들어서는 순간 그를 다른 곳으로 보내는 부피.
+ *
+ * *태그 대신 장소를 가진 ::TriggerDef*이며, 그것이 이것의 형태 전부입니다. 둘 다 걸어 들어가는
+ * 비고체 브러시입니다. 트리거는 "무언가가 여기 서 있다"에 대해 문들에게 숫자를 던져 답하고,
+ * 이것은 서 있는 그것을 옮겨서 답합니다. 부피 검사는 같은 ::brush_point_in 호출이며, 그래서
+ * 이것에는 새 지오메트리 코드가 전혀 필요하지 않았습니다.
+ *
+ * *왜 종류 열을 가진 ::TriggerDef가 아닌가.* 태그는 2바이트이고 목적지는 16바이트이므로, 둘을
+ * 한 구조체로 접는 것은 그중 둘에 위치를 저장하려고 모든 트리거 부피에 그 값을 치르는 일입니다.
+ * 이 파일이 이미 쓰는 방식은 *하나의 대상마다 하나의 배열*이며(문, 트리거, 위험), 이유도 매번
+ * 같습니다. 부피는 동일하고 그 사실로 무엇을 하는가는 동일하지 않습니다.
+ *
+ * *Quake는 이것을 `trigger_teleport`와 `info_teleport_destination`이라 부르며*, 이름으로 연결된
+ * 두 엔티티입니다. ::level_load가 파싱 시점에 그 쌍을 해소하므로 실행 중에는 이름을 찾는 일이
+ * 없습니다. 레벨로 살아남는 것은 부피와 그것이 보내는 좌표입니다. 목적지가 없는 텔레포터는
+ * 아예 저장되지 않습니다. 그것이 원점으로 보내는 텔레포터가 아니라 거절인 이유는
+ * ::brush_teleports_of에 있습니다.
+ */
+typedef struct {
+    short first_brush, n_brushes;  /**< The volume, in ::BrushMap::brushes. / ::BrushMap::brushes 안의 부피. */
+    v3    dest;                    /**< Where the player comes out, metres. / 플레이어가 나오는 자리(미터). */
+    float yaw;                     /**< Which way they face on arrival, radians. / 도착 시 바라보는 방향(라디안). */
+} TeleportDef;
+
 /**
  * @struct Entity
  * @brief A point marker placed in the level: a spawn, a pickup, a monster, an exit.
@@ -1679,6 +1733,8 @@ typedef struct {
     int     n_triggers;                   /**< Number of triggers in use. / 사용 중인 트리거의 수. */
     HazardDef hazards[LVL_MAX_HAZARDS];   /**< Volumes that burn. / 태우는 부피. */
     int     n_hazards;                    /**< Number of hazards in use. / 사용 중인 위험 부피의 수. */
+    TeleportDef teleports[LVL_MAX_TELEPORTS]; /**< Volumes that move you. / 옮기는 부피. */
+    int     n_teleports;                  /**< Number of teleporters in use. / 사용 중인 텔레포터의 수. */
     short   start[3];                     /**< x, z, and yaw in millidegrees. / x, z 좌표와 밀리도 단위의 yaw. */
 
     /**

@@ -257,9 +257,9 @@ int main(void) {
     printf("caps: brushes %d  faces %d  ents %d  lvlents %d  lights %d\n",
            BR_MAX_BRUSHES, BR_MAX_TOTAL_FACES, BR_MAX_ENTS,
            LVL_MAX_ENTS, LVL_MAX_LIGHTS);
-    printf("      verts %d  ranges %d  doors %d  triggers %d  hazards %d\n\n",
+    printf("      verts %d  ranges %d  doors %d  triggers %d  hazards %d  teleports %d\n\n",
            LEVEL_BUF_VERTS, LVL_MAX_RANGES, LVL_MAX_DOORS,
-           LVL_MAX_TRIGGERS, LVL_MAX_HAZARDS);
+           LVL_MAX_TRIGGERS, LVL_MAX_HAZARDS, LVL_MAX_TELEPORTS);
 
     /* `rng` is what the game asks for and `split` says how it asked. A level
        with a brush door builds in two halves and pays for the materials of
@@ -268,9 +268,9 @@ int main(void) {
        `rng`는 게임이 요구하는 값이고 `split`은 어떻게 요구했는지를 말합니다. 브러시 문이 있는
        레벨은 두 절반으로 생성되어 각 절반의 재질을 치르므로, 두 열을 함께 보는 것이 숫자와 그
        숫자의 이유의 차이입니다. */
-    printf("%-12s %6s %6s %5s %5s %5s %5s %5s %5s %5s %5s\n",
+    printf("%-12s %6s %6s %5s %5s %5s %5s %5s %5s %5s %5s %5s\n",
            "map", "brush", "face", "ent", "lvlent", "light", "vert", "rng",
-           "split", "door", "hazrd");
+           "split", "door", "hazrd", "tele");
     printf("%s\n", "------------------------------------------------------"
                    "-------------------------");
 
@@ -350,10 +350,11 @@ int main(void) {
                            "%s%s=%d", rp ? " " : "", WATCH[k].n, d);
         }
 
-        printf("%-12s %6d %6d %5d %6d %5d %6d %5d %5s %5d %5d %5dms  %s\n",
+        printf("%-12s %6d %6d %5d %6d %5d %6d %5d %5s %5d %5d %5d %5dms  %s\n",
                MAPS[i], nb, nf, ne, l->n_ents, l->n_lights, verts, split,
                level_geometry_split(l) ? "yes" : "no",
-               l->n_doors, l->n_hazards, load_ms, refused[0] ? refused : "-");
+               l->n_doors, l->n_hazards, l->n_teleports, load_ms,
+               refused[0] ? refused : "-");
         if (split != ranges)
             printf("    ^ the two halves want %d runs where one build wants %d\n",
                    split, ranges);

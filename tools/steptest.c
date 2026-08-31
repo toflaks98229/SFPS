@@ -44,6 +44,43 @@
 
 static int fails;
 
+/* Builds a level's geometry with a sun on it, and reports what that left in
+ * the light cache.
+ *
+ * ENGLISH
+ * -------
+ * THE SUN IS PUT THERE BECAUSE NOTHING DECLARES ONE. ::bake_light is a sun
+ * bake -- the point lamps left it, and then `lqdm1`'s worldspawn keys left too
+ * -- so it returns on its first line for every level the game loads and the
+ * cache it feeds stays empty. The checks below are about a cache being DROPPED
+ * on the paths that make a level into a different level, and "the cache is
+ * empty after a reload" is worth nothing if it was empty before.
+ *
+ * Overhead and bright, because the subject is the reset rather than the
+ * lighting. Re-applied at every fill rather than once: each of the paths under
+ * test reloads the level, and a reload is exactly what puts ::Level::sun back
+ * to the zero the file declares.
+ *
+ * 한국어
+ * ------
+ * *태양을 이곳에서 놓는 이유는 그것을 선언하는 것이 없기 때문입니다.* ::bake_light는 태양
+ * 베이크입니다. 점광원이 그것을 떠났고 그다음 `lqdm1`의 worldspawn 키도 떠났으므로, 게임이
+ * 로드하는 모든 레벨에서 첫 줄에 반환하며 그것이 채우는 캐시는 비어 있습니다. 아래의 검사는
+ * 레벨을 *다른* 레벨로 만드는 경로에서 캐시가 *버려지는지*에 관한 것이고, "다시 로드한 뒤
+ * 캐시가 비어 있다"는 그 전에도 비어 있었다면 아무 가치가 없습니다.
+ *
+ * 주제가 조명이 아니라 리셋이므로 머리 위이고 밝은 태양입니다. 한 번이 아니라 채울 때마다 다시
+ * 적용합니다. 검사 대상인 각 경로가 레벨을 다시 로드하고, 다시 로드하는 것이야말로
+ * ::Level::sun을 파일이 선언하는 0으로 되돌리는 일이기 때문입니다.
+ */
+static int fill_light_cache(World *w, MeshBuf *b) {
+    w->level.sun[0] = 0.0f; w->level.sun[1] = 1.0f; w->level.sun[2] = 0.0f;
+    w->level.sun_power = 200;
+    mb_reset(b);
+    level_geometry(b, &w->level, 0, 0);
+    return level_light_cache_count();
+}
+
 static void ok(int cond, const char *what) {
     printf("  %-58s %s\n", what, cond ? "ok" : "FAIL");
     if (!cond) fails++;
@@ -220,32 +257,45 @@ static void check_shake(void) {
        The three above are things that happened TO the player -- their gun,
        their health, their landing -- and none of them has a position, because
        the player was always at it. A blast is the first source that has one,
-       so the first that can be wrong about it: the whole of ::world_shake_at
-       is the arithmetic between where it went off and where the camera is.
+       so the first that can be wrong about it: the whole of ::step_blast is
+       the arithmetic between where it went off and where the camera is.
 
-       Driven through ::world_step rather than by calling ::world_shake_at
-       here, because the half that is easy to get wrong is not the falloff --
-       it is whether the frame ever asks. ::proj_blast records into the pool
-       and world.c drains it, and a drain that was never wired up leaves a
-       falloff that is perfectly correct and never runs.
+       Driven through ::world_step rather than by reaching into ::step_blast,
+       because the half that is easy to get wrong is not the falloff -- it is
+       whether the frame ever asks. ::proj_flash records into the pool and
+       world.c walks it, and a walk that was never wired up leaves a falloff
+       that is perfectly correct and never runs.
+
+       RECORDED WITH ::proj_flash AND NOT ::proj_blast, which is the one thing
+       to know when reading this beside the damage tests. They are two calls
+       because they are two questions -- who got hurt, and who saw it -- and a
+       blast that lit the room without hurting anybody is a decoration this
+       engine is allowed to have.
 
        위의 셋은 플레이어*에게* 일어난 일(자기 총, 자기 체력, 자기 착지)이며 어느 것도 위치를
        갖지 않습니다. 플레이어가 언제나 그 자리에 있었기 때문입니다. 폭발은 위치를 가진 첫
-       원천이므로, 그 위치에 대해 틀릴 수 있는 첫 원천이기도 합니다. ::world_shake_at의 전부가
+       원천이므로, 그 위치에 대해 틀릴 수 있는 첫 원천이기도 합니다. ::step_blast의 전부가
        터진 자리와 카메라가 있는 자리 사이의 산술입니다.
 
-       이곳에서 ::world_shake_at을 직접 부르지 않고 ::world_step을 통해 구동하는 이유는, 틀리기
-       쉬운 절반이 감쇠가 아니기 때문입니다. 그것은 프레임이 *묻기는 하는가*입니다. ::proj_blast는
-       풀에 기록하고 world.c가 그것을 비우는데, 연결되지 않은 배수는 완벽하게 올바르면서 결코
-       실행되지 않는 감쇠를 남깁니다. */
+       ::step_blast에 직접 손을 뻗지 않고 ::world_step을 통해 구동하는 이유는, 틀리기 쉬운
+       절반이 감쇠가 아니기 때문입니다. 그것은 프레임이 *묻기는 하는가*입니다. ::proj_flash가
+       풀에 기록하고 world.c가 그것을 훑는데, 연결되지 않은 순회는 완벽하게 올바르면서 결코
+       실행되지 않는 감쇠를 남깁니다.
+
+       *::proj_blast가 아니라 ::proj_flash로 기록합니다.* 피해 검사들 곁에서 이것을 읽을 때
+       알아야 할 한 가지입니다. 둘이 별개의 호출인 이유는 별개의 질문이기 때문입니다. 누가
+       다쳤는가와 누가 그것을 보았는가이며, 아무도 다치게 하지 않고 방만 밝힌 폭발은 이 엔진이
+       가져도 되는 연출입니다. */
     fixture(&w, 0);
-    proj_blast(&w.pools, v3f(0.0f, 0.0f, -2.0f), PROJ_BLAST_RADIUS, 1);
+    proj_flash(&w.pools, v3f(0.0f, 0.0f, -2.0f),
+               PROJ_BLAST_RADIUS, 1.0f, FLASH_BLAST, -1);
     world_step(&w, &idle, 1.777f, 0.016f);
     float from_near = w.run.shake;
     ok(from_near > 0.0f, "a blast beside the player shakes the view");
 
     fixture(&w, 0);
-    proj_blast(&w.pools, v3f(0.0f, 0.0f, -8.0f), PROJ_BLAST_RADIUS, 1);
+    proj_flash(&w.pools, v3f(0.0f, 0.0f, -8.0f),
+               PROJ_BLAST_RADIUS, 1.0f, FLASH_BLAST, -1);
     world_step(&w, &idle, 1.777f, 0.016f);
     ok(w.run.shake > 0.0f && w.run.shake < from_near,
        "one twice as far away shakes, and shakes less");
@@ -256,49 +306,42 @@ static void check_shake(void) {
        반경의 ::WORLD_SHAKE_BLAST_REACH배를 넘으면 아무것도 없습니다. 도달 거리가 하는 주장이
        그것입니다. 레벨 건너편의 유탄은 남의 일입니다. */
     fixture(&w, 0);
-    proj_blast(&w.pools,
+    proj_flash(&w.pools,
                v3f(0.0f, 0.0f,
                    -(PROJ_BLAST_RADIUS * WORLD_SHAKE_BLAST_REACH + 1.0f)),
-               PROJ_BLAST_RADIUS, 1);
+               PROJ_BLAST_RADIUS, 1.0f, FLASH_BLAST, -1);
     world_step(&w, &idle, 1.777f, 0.016f);
-    ok(w.run.shake == 0.0f, "and one past three radii does not shake at all");
+    ok(w.run.shake == 0.0f, "and one past the reach does not shake at all");
 
-    /* SPENT, not remembered. The log is drained every frame, so one explosion
-       is one jolt -- if it stayed in the pool it would be re-raised on every
-       frame that followed and the shake would never settle, which is the same
-       symptom as a decay that does not run and a completely different bug.
-       기억이 아니라 *소비*입니다. 로그는 매 프레임 비워지므로 폭발 하나는 충격 하나입니다.
-       풀에 남아 있다면 이후 모든 프레임에서 다시 올려져 흔들림이 결코 잦아들지 않을 텐데,
-       그것은 감쇠가 돌지 않는 것과 같은 증상이면서 전혀 다른 버그입니다. */
+    /* THE MIDDLE SATURATES, and that is the point of ::WORLD_SHAKE_BLAST being
+       set past ::WORLD_SHAKE_MAX rather than just under it. What the player
+       reads off a blast is near against far, and spending the top of the range
+       distinguishing the strongest jolt from the second strongest would cost
+       exactly that.
+       *한가운데는 포화합니다.* ::WORLD_SHAKE_BLAST를 ::WORLD_SHAKE_MAX 바로 아래가 아니라 그
+       위로 잡은 이유가 그것입니다. 플레이어가 폭발에서 읽는 것은 가까움과 멂이며, 가장 센
+       충격과 두 번째로 센 충격을 구별하는 데 범위의 꼭대기를 쓰는 것은 정확히 그것을
+       희생합니다. */
     fixture(&w, 0);
-    proj_blast(&w.pools, v3f(0.0f, 0.0f, -2.0f), PROJ_BLAST_RADIUS, 1);
+    proj_flash(&w.pools, w.player.pos, PROJ_BLAST_RADIUS, 1.0f, FLASH_BLAST, -1);
+    world_step(&w, &idle, 1.777f, 0.016f);
+    ok(w.run.shake == WORLD_SHAKE_MAX,
+       "and one at the player's feet reaches the cap");
+
+    /* SPENT, not remembered. A flash lives ::PROJ_FLASH_TIME and fades over it,
+       and ::WORLD_SHAKE_DECAY outruns that curve within two frames -- so one
+       explosion is one jolt. If the flash were re-raising at full strength on
+       every frame it lived, the shake would sit at the ceiling for a third of a
+       second and then drop, which is a different bug with the same first frame.
+       기억이 아니라 *소비*입니다. 섬광은 ::PROJ_FLASH_TIME 동안 살며 그동안 사그라들고,
+       ::WORLD_SHAKE_DECAY가 두 프레임 안에 그 곡선을 앞지릅니다. 그래서 폭발 하나는 충격
+       하나입니다. 섬광이 사는 매 프레임마다 최대 세기로 다시 올린다면 흔들림은 0.3초 동안
+       천장에 머물다 떨어질 텐데, 그것은 첫 프레임이 같은 다른 버그입니다. */
+    fixture(&w, 0);
+    proj_flash(&w.pools, v3f(0.0f, 0.0f, -2.0f),
+               PROJ_BLAST_RADIUS, 1.0f, FLASH_BLAST, -1);
     for (int i = 0; i < 40; i++) world_step(&w, &idle, 1.777f, 0.016f);
     ok(w.run.shake == 0.0f, "and one blast is one jolt, not one per frame");
-
-    /* The falloff's own three points, called directly: the centre, the rim of
-       the damage, and the edge of the reach. Two thirds at the rim is not a
-       rounding of the design -- it is what makes the radius a thing the player
-       learns from outside it.
-       감쇠 자신의 세 지점을 직접 호출합니다. 중심, 피해의 가장자리, 그리고 도달 거리의 끝입니다.
-       가장자리에서의 3분의 2는 설계를 반올림한 값이 아니라, 플레이어가 반경을 그 바깥에서
-       배우게 만드는 값입니다. */
-    fixture(&w, 0);
-    world_shake_at(&w, w.player.pos, PROJ_BLAST_RADIUS, WORLD_SHAKE_BLAST);
-    ok(fabsf(w.run.shake - WORLD_SHAKE_BLAST) < 1e-4f,
-       "at the centre a blast is worth its whole magnitude");
-
-    fixture(&w, 0);
-    world_shake_at(&w, v3add(w.player.pos, v3f(PROJ_BLAST_RADIUS, 0.0f, 0.0f)),
-                   PROJ_BLAST_RADIUS, WORLD_SHAKE_BLAST);
-    ok(fabsf(w.run.shake - WORLD_SHAKE_BLAST * 2.0f / 3.0f) < 1e-3f,
-       "at the rim of the damage, two thirds of it");
-
-    fixture(&w, 0);
-    world_shake_at(&w,
-                   v3add(w.player.pos,
-                         v3f(PROJ_BLAST_RADIUS * WORLD_SHAKE_BLAST_REACH, 0.0f, 0.0f)),
-                   PROJ_BLAST_RADIUS, WORLD_SHAKE_BLAST);
-    ok(w.run.shake == 0.0f, "and at the edge of the reach, nothing");
 
     /* A restart puts it back, by construction rather than by being listed --
        which is the whole reason it lives in RunState. */
@@ -385,10 +428,10 @@ static void check_score(void) {
     /* THE ONE THAT WOULD NOT BE NOTICED. The corpse is still in its slot and
        still dead, so anything that answers "how many dead monsters are there"
        instead of "how many died since you last asked" counts it again every
-       frame -- and reports several hundred kills for one imp.
+       frame -- and reports several hundred kills for one monster.
        알아채지 못할 바로 그것입니다. 시체는 여전히 자기 슬롯에 죽은 채로 있으므로, "죽은
        몬스터가 몇인가"에 답하는 것은 "마지막으로 물은 뒤 몇이 죽었는가" 대신 매 프레임 그것을
-       다시 세고, 임프 하나로 수백 처치를 보고합니다. */
+       다시 세고, 몬스터 하나로 수백 처치를 보고합니다. */
     for (int i = 0; i < 60; i++) world_step(&w, &in, ASPECT, DT);
     ok(w.run.kills == 1, "a corpse is paid out once, not once per frame");
 
@@ -1314,6 +1357,8 @@ int main(void) {
        leveltest가 아니라 이곳에서 검사하는 이유는 이것들이 *월드* 경로이기 때문입니다.
        재시작, 스테이지 전환, 새 플레이이며, 그것들을 소유하는 것은 world.c입니다. */
     printf("\n  --- the light cache belongs to one level ---\n");
+    /* The three fills below go through ::fill_light_cache, which gives the
+       level a sun first. See it for why. */
     {
         static World w;
         MeshBuf b;
@@ -1327,8 +1372,7 @@ int main(void) {
            않습니다. */
         world_init(&w);
         world_load_level(&w, w.cur_level, WORLD_ENTER_NEW);
-        level_geometry(&b, &w.level, 0, 0);
-        int filled = level_light_cache_count();
+        int filled = fill_light_cache(&w, &b);
         ok(filled > 0, "a build fills the cache, so an empty one means something");
 
         /* 1. A fresh load. */
@@ -1336,7 +1380,7 @@ int main(void) {
         ok(level_light_cache_count() == 0, "loading a level drops the cache");
 
         /* 2. A restart, which replays the stage the player is in. */
-        level_geometry(&b, &w.level, 0, 0);
+        fill_light_cache(&w, &b);
         world_restart(&w);
         ok(level_light_cache_count() == 0, "and so does a restart");
 
@@ -1345,8 +1389,7 @@ int main(void) {
               does rather than calling the loader directly.
               step_between은 인터미션 시계가 끝나면 다음 레벨을 로드하므로, 로더를 직접
               호출하지 않고 프레임이 하는 방식으로 구동합니다. */
-        level_geometry(&b, &w.level, 0, 0);
-        int before_stage = level_light_cache_count();
+        int before_stage = fill_light_cache(&w, &b);
 
         w.run.between      = 1;
         w.run.between_time = 0.0f;

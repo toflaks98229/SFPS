@@ -148,9 +148,20 @@ typedef struct {
      * faces and a lightmap would need a second texture, a second set of UVs
      * and a packer to go with them.
      *
+     * WHAT IS IN IT IS THE SUN, and it is worth knowing that this narrowed. A
+     * level's point lamps were compiled in here too, and they left: at THIS
+     * resolution -- one sample per corner of a face metres across -- a lamp's
+     * pool is not a pool, it is a gradient smeared over a wall. A directional
+     * term survives the same sampling because what it varies with is shadow,
+     * and shadow changes at the edges of geometry, which is where the vertices
+     * are. level.c's bake_light and scene.c's note above ::MoveLight are the
+     * two halves of that argument; the lamps do not light anything from the
+     * shader's loop either, and the second half says why.
+     *
      * ZERO EVERYWHERE IT IS NOT BAKED, so the change is purely additive: a
      * model or a sprite carries 0 and is lit exactly as it was, and only level
-     * geometry gains anything.
+     * geometry gains anything -- and a level that declares no sun now carries
+     * 0 as well, and is lit entirely from the loop.
      *
      * 한국어
      * ------
@@ -167,8 +178,18 @@ typedef struct {
      * 면으로 이루어진 섹터이고, 라이트맵을 쓰려면 두 번째 텍스처와 두 번째 UV 세트, 그리고
      * 그것들을 담을 패커가 필요하기 때문입니다.
      *
+     * *그 안에 든 것은 태양*이며, 범위가 좁아졌다는 사실은 알아 둘 가치가 있습니다. 레벨의
+     * 점광원도 이곳에 구워졌지만 셰이더의 반복문으로 돌아갔습니다. *이* 해상도에서는(몇
+     * 미터짜리 면의 모서리마다 표본 하나) 등의 웅덩이가 웅덩이가 아니라 벽에 번진
+     * 그러데이션입니다. 방향성 항이 같은 표본추출을 견디는 이유는 그것이 변하는 대상이
+     * 그림자이고, 그림자는 지오메트리의 모서리에서 바뀌며, 정점이 바로 그곳에 있기
+     * 때문입니다. level.c의 bake_light와 scene.c의 ::MoveLight 위 설명이 그 논거의 두
+     * 절반입니다. 등은 셰이더의 반복문에서도 아무것도 밝히지 않으며, 그 두 번째 절반이 왜
+     * 그런지를 말합니다.
+     *
      * 굽지 않은 곳에서는 전부 0이므로 변경이 순수하게 가산적입니다. 모델이나 스프라이트는
-     * 0을 지니고 이전과 정확히 같이 조명되며, 레벨 지오메트리만 얻습니다.
+     * 0을 지니고 이전과 정확히 같이 조명되며, 레벨 지오메트리만 얻습니다. 그리고 태양을
+     * 선언하지 않는 레벨도 이제 0을 지니며, 전적으로 반복문이 조명합니다.
      */
     float lr, lg, lb;
 } Vtx;

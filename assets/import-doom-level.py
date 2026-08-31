@@ -72,12 +72,20 @@ SCALE = 3
 # of the table: decorations, deathmatch starts and difficulty variants have no
 # counterpart here and inventing one would fill the level with entities the
 # player cannot interpret.
+#
+# The monster side reads off THREE rows, because that is what the bestiary has:
+# a mid-range baseline, a heavy that closes, and a ranged one that flies. Doom's
+# roster is wider, so several of its things land on the same row -- 3004 and 9
+# are both the walking humanoid, 3002 is a rusher and the nearest thing here is
+# still the baseline. The one placement that is a real match rather than a
+# nearest-fit is 3006, the Lost Soul: it flies, and `caster` is the only kind
+# here that does.
 THINGS = {
-    2001: 'rapid',       9: 'imp',        3004: 'imp',
+    2001: 'rapid',       9: 'water_spirit', 3004: 'water_spirit',
     2002: 'rapid',    2003: 'grenade',    2005: 'axe',
     2007: 'rapidammo', 2008: 'ammo',      2010: 'grenadeammo',
     2011: 'health',   2012: 'health',       13: 'redkey',
-    3001: 'hound',    3002: 'hound',      3006: 'hound',
+    3001: 'caster',   3002: 'water_spirit', 3006: 'caster',
     3003: 'brute',      16: 'brute',        68: 'caster',
 }
 PLAYER_START = 1

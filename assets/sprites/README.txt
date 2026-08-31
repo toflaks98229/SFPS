@@ -2,12 +2,17 @@ Hand-drawn sprites. Drop a PNG here and rebuild.
 
 NAMING decides where a drawing lands. The name is "<subject><frame>":
 
-    imp0.png     monster "imp", frame 0
-    brute2.png   monster "brute", frame 2
-    shotgun0.png the weapon "shotgun", pose 0
+    caster0.png       monster "caster", frame 0
+    brute2.png        monster "brute", frame 2
+    shotgun0.png      the weapon "shotgun", pose 0
 
-Monsters:  water_spirit  brute  hound  caster  wraith
+Monsters:  water_spirit  brute  caster
 Frames:    0 walk-A   1 walk-B   2 attack   3 hurt   4 dead
+
+The list is the bestiary and nothing else. It used to carry `hound` and
+`wraith`; both rows left enemy.c, so a `hound0.png` parked here now matches no
+subject and is ignored -- which is the same thing that happens to a typo, and
+is why deleting the drawings was the tidy-up rather than the fix.
 
 A NAME THAT ENDS IN A LETTER MEANS EVERY FRAME.
 
@@ -29,6 +34,10 @@ replaces exactly its own. Adding `brute4.png` later is dropping in a file.
 `water_spirit`, `brute` and `caster` are each one drawing today, which is why
 they have no digits. Their death frames are not drawn yet -- frame 4 is
 currently the same picture as the rest, and a `<name>4.png` will take it.
+
+That is the WHOLE monster set. `hound0.png`..`hound4.png` sat here after the
+redraw as the last five imported frames, drawings of a creature the bestiary no
+longer had a row for, and they are gone.
 
 Weapons:   shotgun  grenade  rapid  axe   -- named for weapon.c's WEAPONS table
 Poses:     shotgun  0 idle   1 pump-A  2 pump-B  3 pump-C   (SHTG A B C D)
@@ -181,7 +190,6 @@ frame list tells you which letters are deaths.
 
     ours      Freedoom   why
     imp       POSS       the baseline humanoid
-    hound     SARG       the fast melee charger
     brute     BOSS       the big one
     caster    HEAD       floats, attacks at range
     shotgun   SHTG       the pump shotgun viewmodel

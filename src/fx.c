@@ -86,6 +86,55 @@ typedef struct {
     short drag;             /**< Speed lost per second, percent. / 초당 속도 손실 (퍼센트). */
     short spin;             /**< Roll rate, degrees per second. / 회전 속도 (초당 도). */
     short gravity;          /**< Downward acceleration, cm/s^2. / 하향 가속도 (cm/s^2). */
+    /** Milliseconds of the particle's OWN travel the quad is drawn over, along
+        its velocity. 0 is the square this file has always drawn.
+
+        A SPARK IS NOT A SQUARE AND NEVER WAS. Every burst here is fast enough
+        that a real one would smear across the frame, and the square says the
+        opposite -- it says the thing is sitting still and merely fading. The
+        length is taken from the speed rather than authored outright so that
+        the streak SHORTENS as `drag` bleeds the speed off, which is the part
+        the eye reads as the spark landing rather than as it vanishing.
+
+        / 입자 *자신의* 이동을 몇 밀리초분 그릴지이며, 속도 방향으로 늘입니다. 0이면 이
+        파일이 언제나 그려 온 정사각형입니다.
+
+        *불꽃은 정사각형이 아니며 그런 적도 없습니다.* 이곳의 모든 폭발은 실제라면 화면에
+        번질 만큼 빠르고, 정사각형은 그 반대를 말합니다. 가만히 있으면서 흐려질 뿐이라고
+        말합니다. 길이를 직접 적지 않고 속력에서 가져오는 이유는, `drag`가 속력을 빼는
+        동안 줄무늬가 *짧아지게* 하기 위해서입니다. 눈이 불꽃이 사라진다가 아니라
+        내려앉는다고 읽는 것이 바로 그 부분입니다. */
+    short stretch;
+    /** The effect this particle leaves BEHIND it, as an index into this table,
+        or -1 for none. See ::FxDef::trail_ms for the pacing and the note above
+        ::spawn_def for why a wake cannot have a wake of its own.
+        / 이 입자가 *뒤에* 남기는 이펙트이며, 이 표의 인덱스입니다. 없으면 -1입니다. 간격은
+        ::FxDef::trail_ms를, 자취가 자기 자취를 가질 수 없는 이유는 ::spawn_def 위의
+        설명을 참조하십시오. */
+    short trail;
+    /** Milliseconds between wakes. Fixed time, not per frame, for the reason
+        ::SHOT_TRAIL_INTERVAL exists: a rate that follows the frame rate makes
+        the same spark denser on a faster machine and lets one burst empty the
+        shared pool. What is alive at once is life / trail_ms per particle, and
+        THAT is the number to budget against ::FX_MAX_PARTICLES -- not the
+        total spawned, which is far larger and does not matter.
+        / 자취 사이의 밀리초입니다. 프레임마다가 아니라 고정 시간인 이유는
+        ::SHOT_TRAIL_INTERVAL이 존재하는 이유와 같습니다. 프레임률을 따르는 방출은 같은
+        불꽃을 빠른 기기에서 더 조밀하게 만들고, 한 번의 폭발이 공유 풀을 비우게 합니다.
+        동시에 살아 있는 수는 입자당 life / trail_ms이며, ::FX_MAX_PARTICLES에 대해
+        예산을 잡아야 하는 것은 *그 수*입니다. 총 생성 수가 아닙니다. 그쪽은 훨씬 크고
+        중요하지 않습니다. */
+    short trail_ms;
+    /** The wake's NAME, held until the whole file has been read. A definition
+        may name one that appears further down the file -- `blastember` names
+        `emberwake`, which is written after it because that is the order they
+        are read in -- so the index cannot be resolved at the line that sets
+        it. ::resolve_trails does it once, after the last `e`.
+        / 자취의 *이름*이며, 파일 전체를 읽을 때까지 들고 있습니다. 정의는 파일 아래쪽에
+        나오는 것을 이름으로 댈 수 있으므로(`blastember`가 `emberwake`를 대며, 그것은
+        읽는 순서가 그러하기에 뒤에 쓰여 있습니다) 그 줄에서는 인덱스를 확정할 수
+        없습니다. 마지막 `e` 뒤에 ::resolve_trails가 한 번에 처리합니다. */
+    char  trail_name[FX_NAME_LEN];
     short blend;            /**< FX_BLEND_*. */
     short face;             /**< FX_FACE_*. */
 } FxDef;
@@ -153,6 +202,15 @@ static float frand_signed(FxPool *fx) { return frand(fx) * 2.0f - 1.0f; }
  * 매개변수를 언급했다는 이유로 그 외에는 멀쩡한 파일의 로드를 거부하게 되며, 오래된
  * 빌드를 깨뜨리지 않고는 형식을 확장할 수 없게 됩니다.
  */
+/* Forward-declared for the one line at the bottom of ::parse_defs that needs
+   it. The definition sits beside ::find_def instead, because the name lookup
+   is the whole of what it does and a reader who wants to check it wants both
+   at once.
+   ::parse_defs 맨 아래의 한 줄을 위해 전방 선언합니다. 정의는 ::find_def 곁에 두었습니다.
+   이름 찾기가 하는 일의 전부이며, 확인하려는 독자는 둘을 함께 보고 싶어 하기
+   때문입니다. */
+static void resolve_trails(void);
+
 static void parse_defs(void) {
     const char *p = data_text(DATA_EFFECTS);
     FxDef *cur = 0;
@@ -201,6 +259,16 @@ static void parse_defs(void) {
             cur->dome = 0; cur->disc = 0;
             cur->gravity = 0; cur->blend = FX_BLEND_ALPHA;
             cur->face = FX_FACE_CAMERA;
+            /* No streak and no wake unless the definition asks. Both are read
+               on every particle of every effect, so the default has to be the
+               one that costs nothing -- and it has to be the behaviour the
+               thirty-five definitions written before these existed already
+               expect.
+               정의가 요청하지 않는 한 줄무늬도 자취도 없습니다. 둘 다 모든 이펙트의 모든
+               입자에서 읽히므로 기본값은 비용이 없는 쪽이어야 하고, 이들이 생기기 전에
+               작성된 서른다섯 개의 정의가 이미 기대하고 있는 동작이어야 합니다. */
+            cur->stretch = 0; cur->trail = -1; cur->trail_ms = 0;
+            cur->trail_name[0] = 0;
             continue;
         }
 
@@ -233,6 +301,19 @@ static void parse_defs(void) {
             { p = txt_read_int(p, &v[0], &ok); if (ok) cur->drag = (short)v[0]; }
         else if (txt_is(t, len, "spin"))
             { p = txt_read_int(p, &v[0], &ok); if (ok) cur->spin = (short)v[0]; }
+        else if (txt_is(t, len, "stretch"))
+            { p = txt_read_int(p, &v[0], &ok); if (ok) cur->stretch = (short)v[0]; }
+        else if (txt_is(t, len, "trailms"))
+            { p = txt_read_int(p, &v[0], &ok); if (ok) cur->trail_ms = (short)v[0]; }
+        else if (txt_is(t, len, "trail")) {
+            /* The NAME, not a number: the effect it points at may not have
+               been read yet. ::resolve_trails turns these into indices after
+               the last definition.
+               숫자가 아니라 *이름*입니다. 가리키는 이펙트가 아직 읽히지 않았을 수
+               있습니다. 마지막 정의 뒤에 ::resolve_trails가 이것을 인덱스로 바꿉니다. */
+            const char *m = txt_token(p, &len);
+            if (m) { p = m + len; txt_copy(cur->trail_name, FX_NAME_LEN, m, len); }
+        }
         else if (txt_is(t, len, "rgb2")) {
             p = txt_read_int(p, &v[0], &ok);
             p = txt_read_int(p, &v[1], &ok);
@@ -268,6 +349,7 @@ static void parse_defs(void) {
         /* anything else: skipped, see the note above */
     }
 
+    resolve_trails();
     g_parsed = 1;
 }
 
@@ -280,15 +362,29 @@ static int find_def(const char *name) {
     return -1;
 }
 
-/* --- Public API / 공개 API --- */
-
-void fx_spawn(Pools *pl, const char *name, v3 pos, v3 normal) {
-    fx_spawn_scaled(pl, name, pos, normal, 1.0f);
-}
-
-void fx_spawn_scaled(Pools *pl, const char *name, v3 pos, v3 normal, float scale) {
-    FxTint none = { 0, 0, 0 };
-    fx_spawn_tinted(pl, name, pos, normal, scale, none);
+/**
+ * @brief Turns every `trail <name>` into an index, once the file is fully read.
+ *
+ * ENGLISH: A name that matches nothing leaves the trail at -1, which is the
+ * same as not having asked for one -- the file's own rule for every other
+ * unknown token, and the rule ::fx_spawn_scaled already follows when it is
+ * handed a name that is not there. A DEFINITION MAY NAME ITSELF and the loop
+ * does not stop it: a particle that emits a copy of itself every trail_ms is a
+ * chain that ends anyway, because ::spawn_def refuses the second link. That is
+ * a property of the emitter and not of this table, so this function has no
+ * opinion about it.
+ *
+ * 한국어: 아무것과도 맞지 않는 이름은 자취를 -1로 남기며, 이는 자취를 요청하지 않은 것과
+ * 같습니다. 다른 모든 미지의 토큰에 대한 이 파일 자신의 규칙이고, 없는 이름을 건네받았을
+ * 때 ::fx_spawn_scaled가 이미 따르는 규칙입니다. *정의는 자기 자신을 이름으로 댈 수
+ * 있으며* 이 반복문은 그것을 막지 않습니다. trail_ms마다 자기 복제를 방출하는 입자도 결국
+ * 끝나는 사슬입니다. ::spawn_def가 두 번째 고리를 거절하기 때문입니다. 그것은 방출하는
+ * 쪽의 성질이지 이 표의 성질이 아니므로, 이 함수는 그에 대해 아무 견해도 갖지 않습니다.
+ */
+static void resolve_trails(void) {
+    for (int i = 0; i < g_n_defs; i++)
+        g_defs[i].trail = g_defs[i].trail_name[0]
+                        ? (short)find_def(g_defs[i].trail_name) : (short)-1;
 }
 
 void fx_tint_colour(FxTint tint, float rgb[3]) {
@@ -328,12 +424,40 @@ void fx_tint_colour(FxTint tint, float rgb[3]) {
     for (int i = 0; i < 3; i++) rgb[i] = v * (1.0f - s + s * t[i] / tv);
 }
 
-void fx_spawn_tinted(Pools *pl, const char *name, v3 pos, v3 normal, float scale,
-                     FxTint tint) {
-    if (!g_parsed) parse_defs();
-
-    int di = find_def(name);
-    if (di < 0) return;                 /* unknown name: nothing, and not an error */
+/* --- Spawning / 생성 --------------------------------------------------------
+ *
+ * ENGLISH
+ * -------
+ * The whole of spawning, taking a resolved INDEX rather than a name. The two
+ * public entry points below look the name up and call this; ::fx_update calls
+ * it with the index a definition's `trail` already holds, which is the reason
+ * the split exists at all -- a wake is emitted sixteen times a second per
+ * particle and must not pay for a string compare against every definition in
+ * the file each time.
+ *
+ * `wake` IS WHERE THE CHAIN ENDS, and it ends by construction rather than by
+ * validation. A particle spawned as somebody's wake is created with no wake of
+ * its own, so `trail` can never be more than one link deep however the text is
+ * written -- including the case where a definition names itself. The
+ * alternative was to check the table for cycles at parse time, which is a rule
+ * that has to be right in a place nobody looks, to prevent something the
+ * emitter can simply decline to do.
+ *
+ * 한국어
+ * ------
+ * 생성의 전부이며, 이름이 아니라 확정된 *인덱스*를 받습니다. 아래의 두 공개 진입점이
+ * 이름을 찾아 이것을 호출하고, ::fx_update는 정의의 `trail`이 이미 들고 있는 인덱스로
+ * 호출합니다. 분리한 이유가 바로 그것입니다. 자취는 입자 하나당 초당 열여섯 번쯤
+ * 방출되며, 그때마다 파일의 모든 정의와 문자열을 비교하는 값을 치를 수 없습니다.
+ *
+ * *`wake`가 사슬이 끝나는 곳이며*, 검증이 아니라 구조로 끝납니다. 누군가의 자취로 생성된
+ * 입자는 자기 자취 없이 만들어지므로, 텍스트를 어떻게 쓰든 `trail`은 한 고리보다 깊어질
+ * 수 없습니다. 정의가 자기 자신을 이름으로 대는 경우까지 포함해서입니다. 대안은 파싱
+ * 시점에 표에서 순환을 검사하는 것이었는데, 그것은 아무도 보지 않는 곳에서 옳아야 하는
+ * 규칙이며, 막으려는 대상은 방출하는 쪽이 그냥 하지 않으면 그만인 일입니다.
+ */
+static void spawn_def(Pools *pl, int di, v3 pos, v3 normal, float scale, int wake,
+                      FxTint tint) {
     const FxDef *d = &g_defs[di];
 
     /* A basis around the normal, so `spread` can throw particles off-axis
@@ -438,7 +562,44 @@ void fx_spawn_tinted(Pools *pl, const char *name, v3 pos, v3 normal, float scale
         q->tint[0]  = tint.r;
         q->tint[1]  = tint.g;
         q->tint[2]  = tint.b;
+
+        /* WHEN THIS ONE FIRST LEAVES SOMETHING BEHIND, and a negative means
+           never -- which is what a wake gets, and what anything with no
+           `trail` gets for free.
+           The first interval is a fraction of a whole one rather than a whole
+           one, because a burst of fourteen embers spawns on a single frame and
+           fourteen wakes emitted together, forever, on the same frame, is a
+           dotted line of clumps rather than a trail. Scattering the first
+           interval is all it takes; after that they stay apart on their own.
+           *이것이 처음으로 무언가를 뒤에 남기는 시점*이며, 음수는 결코 남기지 않음을
+           뜻합니다. 자취가 받는 값이고, `trail`이 없는 것이 거저 받는 값입니다.
+           첫 간격이 온전한 하나가 아니라 그 일부인 이유는, 불티 열넷이 한 프레임에
+           생성되는데 열넷의 자취가 언제까지나 같은 프레임에 함께 방출되면 궤적이 아니라
+           덩어리들의 점선이 되기 때문입니다. 첫 간격만 흩어 놓으면 되고, 그 뒤로는 스스로
+           떨어져 있습니다. */
+        q->trail_t  = (wake && d->trail >= 0 && d->trail_ms > 0)
+                    ? d->trail_ms * 0.001f * frand(&pl->fx) : -1.0f;
     }
+}
+
+/* --- Public API / 공개 API --- */
+
+void fx_spawn(Pools *pl, const char *name, v3 pos, v3 normal) {
+    fx_spawn_scaled(pl, name, pos, normal, 1.0f);
+}
+
+void fx_spawn_scaled(Pools *pl, const char *name, v3 pos, v3 normal, float scale) {
+    FxTint none = { 0, 0, 0 };
+    fx_spawn_tinted(pl, name, pos, normal, scale, none);
+}
+
+void fx_spawn_tinted(Pools *pl, const char *name, v3 pos, v3 normal, float scale,
+                     FxTint tint) {
+    if (!g_parsed) parse_defs();
+
+    int di = find_def(name);
+    if (di < 0) return;                 /* unknown name: nothing, and not an error */
+    spawn_def(pl, di, pos, normal, scale, 1, tint);
 }
 
 void fx_update(Pools *pl, float dt) {
@@ -468,6 +629,51 @@ void fx_update(Pools *pl, float dt) {
 
         q->life -= dt;
         if (q->life < 0.0f) q->life = 0.0f;
+
+        /* --- the wake / 자취 -------------------------------------------
+           A thrown ember reads as thrown because of what is behind it, not
+           because of the ember: a bright dot arcing across a dark room is a
+           dot moving, and the same dot with a metre of smoke trailing it is
+           something that was HURLED out of the blast. That is the one thing
+           in the reference this file could not say, because every effect here
+           begins and ends at the point it was spawned at.
+           LAST IN THE BODY AND NOTHING AFTER IT, deliberately. The spawn
+           writes through the pool's ring cursor, and the ring may land on this
+           very slot -- the pool overwrites oldest-first and makes no exception
+           for the particle whose own update is in progress. Everything this
+           iteration needed from `q` has been read and written by the time the
+           call happens, so the worst case is a particle that ends one frame
+           early in favour of the wake that replaced it, which is the trade
+           ::FX_MAX_PARTICLES already makes everywhere else.
+           던져진 불티가 던져진 것으로 읽히는 이유는 불티 자체가 아니라 그 *뒤에* 있는
+           것 때문입니다. 어두운 방을 가로질러 포물선을 그리는 밝은 점은 그냥 움직이는
+           점이고, 같은 점에 1미터의 연기가 딸리면 폭발에서 *내던져진* 무언가입니다.
+           참고한 영상에서 이 파일이 말할 수 없었던 것이 그 하나입니다. 이곳의 모든
+           이펙트가 생성된 지점에서 시작해 그 지점에서 끝나기 때문입니다.
+           *본문의 마지막이며 뒤에 아무것도 없습니다.* 의도적입니다. 생성은 풀의 링 커서를
+           통해 쓰이고, 링은 바로 이 슬롯에 내려앉을 수 있습니다. 풀은 오래된 것부터
+           덮어쓰며 자기 갱신이 진행 중인 입자라고 예외를 두지 않습니다. 이 반복이 `q`에서
+           필요로 한 모든 것은 호출 시점에 이미 읽고 쓰였으므로, 최악의 경우는 자신을
+           대체한 자취에게 자리를 내주고 한 프레임 일찍 끝나는 입자이며, 그것은
+           ::FX_MAX_PARTICLES가 이미 다른 모든 곳에서 하고 있는 거래입니다. */
+        if (q->trail_t >= 0.0f && q->life > 0.0f) {
+            q->trail_t -= dt;
+            if (q->trail_t <= 0.0f) {
+                q->trail_t = d->trail_ms * 0.001f;
+
+                /* Thrown BACKWARD along the flight, so whatever spread the
+                   wake has drifts behind the particle rather than ahead of
+                   it -- the same rule enemy.c's bolt trail follows, and for
+                   the same reason.
+                   비행 방향의 *반대로* 던집니다. 그래야 자취가 가진 산포가 입자 앞이
+                   아니라 뒤로 흩어집니다. enemy.c의 볼트 궤적이 따르는 규칙과 같고,
+                   이유도 같습니다. */
+                float sp = v3len(q->vel);
+                v3 back = sp > 1e-4f ? v3scale(q->vel, -1.0f / sp) : v3f(0, 1, 0);
+                FxTint wt = { q->tint[0], q->tint[1], q->tint[2] };
+                spawn_def(pl, d->trail, q->pos, back, 1.0f, 0, wt);
+            }
+        }
     }
 }
 
@@ -571,6 +777,47 @@ static void draw_pass(const Pools *pl, int blend, v3 cam_right, v3 cam_up) {
             v3 rr = v3add(v3scale(tt,  cr), v3scale(bb, sr));
             v3 uu = v3add(v3scale(tt, -sr), v3scale(bb, cr));
             mb_billboard(&g_buf, q->pos, rr, uu, sz, sz);
+        } else if (d->stretch && v3len(q->vel) > 1e-4f) {
+            /* --- the streak / 줄무늬 ------------------------------------
+               Along the velocity, not along the roll: the direction of travel
+               IS the orientation here, so `spin` and the random starting angle
+               have nothing to say and are not read. A spark whose streak sat
+               at its own angle would be a streak pointing somewhere the spark
+               is not going, which is worse than the square it replaces.
+               The length is speed x time and the width is the authored size,
+               so a definition tunes the streak by tuning `stretch` alone and
+               `size` keeps meaning what it means everywhere else in the file.
+               회전이 아니라 속도 방향입니다. 이곳에서는 진행 방향이 곧 방향이므로 `spin`과
+               무작위 시작 각도는 할 말이 없고 읽히지도 않습니다. 자기 각도로 놓인 줄무늬는
+               불꽃이 가지 않는 쪽을 가리키는 줄무늬이며, 그것이 대체하는 정사각형보다
+               나쁩니다. 길이는 속력 x 시간이고 폭은 작성된 크기이므로, 정의는 `stretch`
+               하나만 조정해 줄무늬를 다듬고 `size`는 파일의 다른 모든 곳에서 뜻하는 바를
+               그대로 유지합니다. */
+            float sp = v3len(q->vel);
+            v3 vd  = v3scale(q->vel, 1.0f / sp);
+            v3 fwd = v3cross(cam_right, cam_up);
+
+            /* The screen-space perpendicular. Degenerate exactly when the
+               particle is flying at the camera, where a streak has no
+               direction on screen to have -- cam_right is as good an answer as
+               any and the quad is square-on anyway.
+               화면 공간의 수직입니다. 입자가 카메라를 향해 날아올 때 정확히 퇴화하는데,
+               그때 줄무늬는 화면상에 가질 방향이 없습니다. cam_right가 다른 어떤 답 못지
+               않고, 어차피 사각형은 정면을 향합니다. */
+            v3 side = v3cross(vd, fwd);
+            side = v3len(side) > 1e-3f ? v3norm(side) : cam_right;
+
+            float len = sz + sp * d->stretch * 0.001f;
+
+            /* Pulled back by what the stretch added, so the HEAD stays at the
+               particle. Centred on it instead, a fast spark draws half its
+               streak in front of itself and arrives somewhere it has not got
+               to yet -- and the bright end is the end the eye tracks.
+               늘어난 만큼 뒤로 당깁니다. 그래야 *머리*가 입자 위에 남습니다. 대신 중심을
+               맞추면 빠른 불꽃은 줄무늬의 절반을 자기 앞에 그리며 아직 도달하지 않은 곳에
+               도착하고, 눈이 따라가는 쪽은 그 밝은 끝입니다. */
+            v3 at = v3sub(q->pos, v3scale(vd, (len - sz) * 0.5f));
+            mb_billboard(&g_buf, at, side, vd, sz, len);
         } else {
             v3 rr = v3add(v3scale(cam_right,  cr), v3scale(cam_up, sr));
             v3 uu = v3add(v3scale(cam_right, -sr), v3scale(cam_up, cr));

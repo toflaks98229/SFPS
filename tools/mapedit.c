@@ -139,7 +139,7 @@ static POINT g_drag_prev;
 static float g_drag_ox, g_drag_oz;    /* cursor-to-sector offset while dragging */
 
 static int   g_ent_kind = 0;
-static const char *ENT_KINDS[] = { "water_spirit", "brute", "hound", "caster",
+static const char *ENT_KINDS[] = { "water_spirit", "brute", "caster",
                                    "ammo", "health", "exit" };
 #define N_ENT_KINDS ((int)(sizeof(ENT_KINDS) / sizeof(ENT_KINDS[0])))
 

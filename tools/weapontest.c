@@ -204,18 +204,261 @@ int main(void) {
             proj_live(&g_pools), 0);
     }
 
+    /* --- a detonation outlives the round that made it ---------------------
+       WHAT THIS IS GUARDING IS A LIFETIME, not a picture. The light an
+       explosion casts and the jolt it gives the camera both read one record --
+       see ::Flash -- and that record exists because the projectile does not:
+       ::detonate clears `active` on the frame it goes off, and everything a
+       player experiences of an explosion happens afterwards. If the flash were
+       ever folded back onto the ::Proj it came from, or aged on the
+       projectile's clock, the symptom would be the room going dark on the
+       brightest frame in the game -- which is exactly the state this engine was
+       in before the pool existed.
+
+       THE AGEING SPLIT IS CHECKED HERE AND NOWHERE ELSE. ::proj_update must not
+       touch a flash: it is frozen with the world and a light is not, because
+       the particles it is lighting are not either. That is one line's worth of
+       decision in world.c and nothing about the code makes it visible -- a
+       flash aged inside ::proj_update would pass every other check in this
+       file, and the fault would surface as a paused game whose explosion had
+       frozen half-lit under a smoke cloud that was still growing.
+
+       이것이 지키는 것은 그림이 아니라 수명입니다. 폭발이 던지는 빛과 카메라에 주는 충격은
+       모두 하나의 기록을 읽으며(::Flash 참조), 그 기록이 존재하는 이유는 발사체가 존재하지
+       않기 때문입니다. ::detonate는 터지는 프레임에 `active`를 지우고, 플레이어가 폭발에서
+       겪는 모든 것은 그 뒤에 일어납니다. 섬광을 그것이 나온 ::Proj에 다시 접어 넣거나
+       발사체의 시계로 나이 먹인다면, 증상은 게임에서 가장 밝은 프레임에 방이 어두워지는
+       것이며, 그것이 이 풀이 생기기 전 엔진이 놓여 있던 상태 그대로입니다.
+
+       나이 먹이기의 분리는 이곳에서만 검사됩니다. ::proj_update는 섬광을 건드려서는 안
+       됩니다. 그것은 월드와 함께 멈추지만 빛은 멈추지 않습니다. 빛이 밝히고 있는 입자들도
+       멈추지 않기 때문입니다. 그것은 world.c의 한 줄짜리 결정이고 코드의 무엇도 그것을 눈에
+       보이게 하지 않습니다. ::proj_update 안에서 나이 먹는 섬광은 이 파일의 다른 모든 검사를
+       통과하며, 결함은 아직 커지고 있는 연기 구름 아래에 반쯤 밝혀진 채 얼어붙은 폭발로
+       드러납니다. */
+    {
+        proj_reset(&g_pools);
+        enemy_reset(&g_pools);
+        okd(proj_flash_live(&g_pools) == 0,
+            "nothing is lit before anything has gone off",
+            proj_flash_live(&g_pools), 0);
+
+        const WeaponType *S = wp_stats(WP_GRENADE);
+        proj_fire(&g_pools, v3f(0, 1.0f, 0), v3f(0, 0, -1), S->proj_speed,
+                  S->proj_gravity, S->damage, PROJ_BLAST_RADIUS, PROJ_FUSE);
+
+        /* Past the fuse, and then a full second further. The extra second is
+           the point: ::proj_update is the only thing running here, so a flash
+           that has faded by the end of it is one being aged on the wrong clock.
+           도화선을 지나고 다시 1초를 더 돌립니다. 그 1초가 요점입니다. 이곳에서 돌고 있는
+           것은 ::proj_update뿐이므로, 그것이 끝날 때 사그라든 섬광은 틀린 시계로 나이를 먹고
+           있는 섬광입니다. */
+        for (int i = 0; i < (int)((PROJ_FUSE + 1.0f) * 60.0f); i++)
+            proj_update(&g_pools, &L, 1.0f / 60.0f);
+
+        okd(proj_live(&g_pools) == 0, "the grenade is gone",
+            proj_live(&g_pools), 0);
+        okd(proj_flash_live(&g_pools) == 1,
+            "and the light it threw is not", proj_flash_live(&g_pools), 1);
+
+        const Flash *f = 0;
+        for (int i = 0; i < proj_flash_count(&g_pools); i++) {
+            const Flash *c = proj_flash_at(&g_pools, i);
+            if (c && c->life > 0.0f) { f = c; break; }
+        }
+        ok(f != 0, "and it can be read back out of the pool");
+
+        /* THE RADIUS IS THE DAMAGE RADIUS, unmultiplied. Both readers scale it
+           by their own factor and the factors differ -- scene.c's light reaches
+           1.7 radii, world.c's shake 2.5 -- so a pre-scaled number stored here
+           would make two of the three wrong. Compared exactly because it is
+           copied rather than computed.
+           반경은 배율이 적용되지 않은 피해 반경입니다. 두 독자가 각자의 배율을 곱하며 그
+           배율은 서로 다릅니다(scene.c의 빛은 1.7배, world.c의 흔들림은 2.5배). 그러므로 미리
+           배율을 곱한 수를 저장하면 셋 중 둘이 틀리게 됩니다. 계산이 아니라 복사이므로 정확히
+           비교합니다. */
+        okf(f && f->radius == PROJ_BLAST_RADIUS,
+            "carrying the damage radius, not a scaled one",
+            f ? f->radius : 0.0f, PROJ_BLAST_RADIUS);
+        okf(f && proj_flash_fade(f) > 0.999f,
+            "still at full strength, because proj_update does not age it",
+            f ? proj_flash_fade(f) : 0.0f, 1.0f);
+
+        /* NOT A LINEAR RAMP. Halfway through the life the curve must be near a
+           quarter, not near a half: an explosion arrives at full and is most of
+           the way gone before the eye finishes registering it, and a light that
+           walks evenly down to nothing reads as a lamp being dimmed. Every
+           other check here passes with the square taken out.
+           선형 램프가 아닙니다. 수명의 절반 지점에서 곡선은 1/2이 아니라 1/4 근처여야
+           합니다. 폭발은 최대치로 도착해서 눈이 그것을 인지하기를 마치기도 전에 거의
+           사라지며, 고르게 0까지 걸어 내려가는 빛은 조명이 어두워지는 것으로 읽힙니다. 이곳의
+           다른 모든 검사는 제곱을 빼도 통과합니다. */
+        proj_flash_update(&g_pools, PROJ_FLASH_TIME * 0.5f);
+        okf(f && proj_flash_fade(f) < 0.30f && proj_flash_fade(f) > 0.20f,
+            "and it collapses on a curve rather than a ramp",
+            f ? proj_flash_fade(f) : 0.0f, 0.25f);
+
+        /* WHAT MADE IT, which is the field the renderer picks a colour from.
+           A blast is white going orange; a bolt is its own hue the whole way.
+           The kinds are indistinguishable in every other measure on this
+           record -- position, radius, power and life are all plausible for
+           either -- so a flash tagged wrong is a room lit the wrong colour
+           with nothing else out of place to notice.
+           *무엇이 만들었는가*이며, 렌더러가 색을 고르는 필드입니다. 폭발은 흰색에서
+           주황으로 가고 볼트는 내내 자기 색조입니다. 이 기록의 다른 모든 척도에서 두 종류는
+           구분되지 않습니다. 위치도 반경도 세기도 수명도 어느 쪽으로든 그럴듯하므로, 잘못
+           표시된 섬광은 알아챌 다른 이상이 하나도 없는 채로 틀린 색으로 밝혀진 방입니다. */
+        okd(f && f->kind == FLASH_BLAST,
+            "and says a charge is what made it",
+            f ? f->kind : -1, FLASH_BLAST);
+
+        proj_flash_update(&g_pools, PROJ_FLASH_TIME);
+        okd(proj_flash_live(&g_pools) == 0,
+            "and is over once its own time is up",
+            proj_flash_live(&g_pools), 0);
+    }
+
+    /* --- a bolt landing is a flash too, and a different one ----------------
+       The rapid's impact carried no light at all until this pass. The bolt
+       lights the wall green for the whole of its flight -- scene.c offers one
+       per live projectile -- and then stopped existing, so the brightest thing
+       about a hit was the frame the wall went dark again. That is the fault
+       ::proj_flash was written for on the grenade's side, unaddressed on this
+       one for as long as both have existed.
+
+       WHAT IS ACTUALLY BEING GUARDED IS THE KIND. That a flash appears at all
+       is one line; that it appears tagged FLASH_BOLT is what makes it green
+       rather than the blast's orange, and orange is the colour this weapon
+       spent its whole impact wearing by mistake before this. The radius is
+       checked too because it is the other number a bolt cannot inherit from a
+       charge: a hit that claimed a grenade's 4.2m would light the room like
+       one, eleven times a second.
+
+       연사의 피탄은 이 작업 전까지 빛을 전혀 지니지 않았습니다. 볼트는 비행 내내 벽을 녹색으로
+       밝히다가(scene.c가 살아 있는 발사체마다 하나씩 제안합니다) 존재하기를 그만두므로, 피탄에서
+       가장 밝은 것은 벽이 다시 어두워지는 프레임이었습니다. 유탄 쪽에서 ::proj_flash가 쓰인
+       이유인 그 결함이, 둘이 함께 존재해 온 내내 이쪽에서는 다뤄지지 않았습니다.
+
+       *실제로 지키는 것은 종류입니다.* 섬광이 나타난다는 것 자체는 한 줄입니다. 그것이
+       FLASH_BOLT로 표시되어 나타난다는 것이 그것을 폭발의 주황이 아니라 녹색으로 만들며,
+       주황은 이 무기가 이전까지 피탄 내내 실수로 걸치고 있던 색입니다. 반경도 검사하는 이유는
+       그것이 볼트가 장약에서 물려받을 수 없는 나머지 한 수이기 때문입니다. 유탄의 4.2m를
+       주장하는 피탄은 초당 열한 번 방을 그만큼 밝히게 됩니다. */
+    {
+        proj_reset(&g_pools);
+        enemy_reset(&g_pools);
+
+        const WeaponType *R = wp_stats(WP_RAPID);
+        proj_fire(&g_pools, v3f(0, 1.0f, 0), v3f(0, 0, -1), R->proj_speed,
+                  R->proj_gravity, R->damage, 0.0f, 0.0f);
+
+        /* The room is 40m across, so the wall is 20m out and 70 m/s reaches it
+           in under a third of a second. Half a second of frames is comfortably
+           past that and comfortably short of ::PROJ_FLASH_TIME running out.
+           방은 가로 40m이므로 벽은 20m 밖이고 70m/s이면 3분의 1초가 안 되어 닿습니다. 0.5초분의
+           프레임이면 그것을 넉넉히 지나면서 ::PROJ_FLASH_TIME이 끝나기에는 넉넉히 짧습니다. */
+        for (int i = 0; i < 30; i++) proj_update(&g_pools, &L, 1.0f / 60.0f);
+
+        okd(proj_live(&g_pools) == 0, "the bolt has landed",
+            proj_live(&g_pools), 0);
+        okd(proj_flash_live(&g_pools) == 1,
+            "and it lit the wall it landed on", proj_flash_live(&g_pools), 1);
+
+        const Flash *b = 0;
+        for (int i = 0; i < proj_flash_count(&g_pools); i++) {
+            const Flash *c = proj_flash_at(&g_pools, i);
+            if (c && c->life > 0.0f) { b = c; break; }
+        }
+        okd(b && b->kind == FLASH_BOLT,
+            "in the bolt's own colour rather than a charge's",
+            b ? b->kind : -1, FLASH_BOLT);
+        okf(b && b->radius == PROJ_HIT_RADIUS,
+            "and at a hit's reach, not a blast's",
+            b ? b->radius : 0.0f, PROJ_HIT_RADIUS);
+
+        proj_flash_update(&g_pools, PROJ_FLASH_TIME);
+    }
+
+    /* --- the axe's slam is the same event without the fire -----------------
+       ::wp_axe_land calls ::proj_blast, so it makes a crater by every measure
+       the code has. What it did not do was say so: it threw `boltburst` -- the
+       MONSTER bolt's flash, which cools into that bolt's blue -- and left the
+       geometry unlit, so the player's own axe coming down was drawn in the
+       colour scene.c's palette reserves for something shooting at them.
+
+       The two numbers checked here are the two that cannot be derived from each
+       other. The radius is the slam's, which is LARGER than a grenade's; the
+       power is a third, because a mass of metal hitting stone is not a charge
+       going off. Anything taking brightness from reach would light the room
+       harder for the one with no fire in it, which is the whole reason
+       ::AXE_SLAM_FLASH exists as a number of its own.
+
+       ::wp_axe_land는 ::proj_blast를 호출하므로, 코드가 가진 모든 척도에서 구덩이를 만듭니다.
+       하지 않던 것은 그렇다고 말하는 것이었습니다. `boltburst`, 즉 몬스터 볼트의 섬광을
+       던졌고 그것은 그 볼트의 파랑으로 식으며, 지오메트리는 밝혀지지 않은 채였습니다. 그래서
+       플레이어 자신의 도끼가 내려찍는 장면이, scene.c의 팔레트가 자신을 쏘는 무언가를 위해
+       예약해 둔 색으로 그려졌습니다.
+
+       이곳에서 검사하는 두 수는 서로에게서 유도할 수 없는 두 수입니다. 반경은 내려찍기의
+       것이며 유탄의 것보다 넓습니다. 세기는 3분의 1인데, 금속 덩어리가 돌을 때리는 것은 장약이
+       터지는 것이 아니기 때문입니다. 밝기를 도달 거리에서 가져오는 것은 무엇이든 불이 없는
+       쪽을 위해 방을 더 세게 밝히게 되며, ::AXE_SLAM_FLASH가 자기 수로 존재하는 이유가
+       그것입니다. */
+    {
+        proj_reset(&g_pools);
+        enemy_reset(&g_pools);
+
+        Weapon aw;
+        wp_init(&aw);
+        aw.leaping    = 1;
+        aw.leap_timer = 0.0f;
+
+        int landed = wp_axe_land(&aw, &g_pools, v3f(0, 0, 0), 1, 1.0f / 60.0f);
+        ok(landed, "the slam lands");
+        okd(proj_flash_live(&g_pools) == 1, "and lights the room it landed in",
+            proj_flash_live(&g_pools), 1);
+
+        const Flash *f = 0;
+        for (int i = 0; i < proj_flash_count(&g_pools); i++) {
+            const Flash *c = proj_flash_at(&g_pools, i);
+            if (c && c->life > 0.0f) { f = c; break; }
+        }
+        okf(f && f->radius == AXE_SLAM_RADIUS,
+            "at the slam's reach, which is wider than a grenade's",
+            f ? f->radius : 0.0f, AXE_SLAM_RADIUS);
+        okf(f && f->power < 1.0f && f->power == AXE_SLAM_FLASH,
+            "and dimmer than one, because nothing here is on fire",
+            f ? f->power : 0.0f, AXE_SLAM_FLASH);
+
+        /* And a level load takes them with it. A light left over from a
+           grenade thrown in the previous room would arrive in the new one at
+           full strength, with nothing there to have made it.
+           그리고 레벨 로드가 그것들을 함께 가져갑니다. 이전 방에서 던진 유탄이 남긴 빛은 새
+           방에 최대 세기로 도착하며, 그 방에는 그것을 만든 무엇도 없습니다. */
+        proj_reset(&g_pools);
+        okd(proj_flash_live(&g_pools) == 0, "and a level load clears them",
+            proj_flash_live(&g_pools), 0);
+    }
+
     /* --- the blast reaches a group, and falls off with distance ----------
        A grenade that hurt exactly one monster would be a slow shotgun. */
     {
         proj_reset(&g_pools);
         enemy_reset(&g_pools);
 
-        /* Three imps: one at the centre, one near the rim, one outside. */
+        /* Three water spirits: one at the centre, one near the rim, one
+           outside. The BASELINE kind on purpose -- the falloff below is read
+           against one health total, and the retired `imp` this fixture used to
+           name now resolves to the caster, which has different health and does
+           not stand on the floor. */
         Level E = L;
         E.n_ents = 0;
         for (int k = 0; k < 3; k++) {
             Entity *e = &E.ents[E.n_ents++];
-            e->kind[0]='i'; e->kind[1]='m'; e->kind[2]='p'; e->kind[3]=0;
+            const char *kind = "water_spirit";
+            int ki = 0;
+            while (kind[ki]) { e->kind[ki] = kind[ki]; ki++; }
+            e->kind[ki] = 0;
             e->x = (short)(k * 300);   /* 0m, 3m, 6m */
             e->z = 0;
         }
@@ -397,63 +640,6 @@ int main(void) {
         v3 d = WP_MUZZLE_DEFAULT;
         ok(w.muzzle.x == d.x && w.muzzle.y == d.y && w.muzzle.z == d.z,
            "and starts at the default muzzle, not at the camera origin");
-    }
-
-    /* --- what a blast leaves behind for the frame that owns the camera ----
-       The other half of the check above. That one is what the blast DOES --
-       the damage, falling off with distance -- and this is what it SAYS: a
-       record of where it happened and how far it reached, left in the pool for
-       ::world_step to price against where the player is standing. proj.c
-       cannot do that arithmetic because it has never been told about the
-       player, and ::Blast is the note it leaves instead.
-
-       위 검사의 나머지 절반입니다. 그쪽은 폭발이 *하는 일*(거리에 따라 감쇠하는 피해)이고,
-       이쪽은 폭발이 *말하는 것*입니다. 어디에서 일어났고 얼마나 멀리 닿았는지에 대한 기록을
-       풀에 남겨, ::world_step이 플레이어가 선 자리를 기준으로 값을 매기게 합니다. proj.c는 그
-       산술을 할 수 없습니다. 플레이어에 대해 들은 적이 없기 때문이며, ::Blast가 그 대신
-       남기는 쪽지입니다. */
-    {
-        proj_reset(&g_pools);
-        enemy_reset(&g_pools);
-
-        Blast log[PROJ_BLAST_LOG];
-        okd(proj_take_blasts(&g_pools, log, PROJ_BLAST_LOG) == 0,
-            "a pool nothing has gone off in owes no blasts", 0, 0);
-
-        v3 at = v3f(1.0f, 0.5f, -3.0f);
-        proj_blast(&g_pools, at, PROJ_BLAST_RADIUS, 55);
-
-        int n = proj_take_blasts(&g_pools, log, PROJ_BLAST_LOG);
-        okd(n == 1, "an explosion with nothing to hurt is still an explosion",
-            n, 1);
-        ok(n == 1 && log[0].at.x == at.x && log[0].at.y == at.y
-                  && log[0].at.z == at.z,
-           "recorded where it went off");
-        okf(n == 1 && log[0].radius == PROJ_BLAST_RADIUS,
-            "and how far its damage reached",
-            n == 1 ? log[0].radius : 0.0f, PROJ_BLAST_RADIUS);
-
-        okd(proj_take_blasts(&g_pools, log, PROJ_BLAST_LOG) == 0,
-            "and the second ask gets nothing: it is a debt, not a history",
-            0, 0);
-
-        /* More in one frame than the log holds. The extras are dropped rather
-           than overrunning it -- and the ones kept are still a blast each, so
-           the loudest of a volley is not lost with them.
-           로그가 담을 수 있는 것보다 많은 폭발이 한 프레임에 일어난 경우입니다. 초과분은
-           로그를 넘치게 하지 않고 버려집니다. 그리고 남는 것들도 여전히 각각 하나의
-           폭발이므로, 일제 사격 중 가장 큰 것이 함께 사라지지는 않습니다. */
-        for (int i = 0; i < PROJ_BLAST_LOG + 4; i++)
-            proj_blast(&g_pools, v3f((float)i, 0.0f, 0.0f), PROJ_BLAST_RADIUS, 1);
-        n = proj_take_blasts(&g_pools, log, PROJ_BLAST_LOG);
-        okd(n == PROJ_BLAST_LOG, "a volley fills the log and no further",
-            n, PROJ_BLAST_LOG);
-
-        /* A level load clears it, so nothing shakes for a room that is gone. */
-        proj_blast(&g_pools, at, PROJ_BLAST_RADIUS, 1);
-        proj_reset(&g_pools);
-        okd(proj_take_blasts(&g_pools, log, PROJ_BLAST_LOG) == 0,
-            "and a level load leaves none of the last level's", 0, 0);
     }
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall weapon checks passed\n", fails);

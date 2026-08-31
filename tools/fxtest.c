@@ -301,6 +301,126 @@ int main(void) {
             flat, 0.95f);
     }
 
+    /* --- the ground wave is a disc AND it is scaled ------------------------
+       Both halves are already checked above, separately, and the reason to
+       check them together is that they are two DIFFERENT LINES of fx.c. The
+       dome case proves ::fx_spawn_scaled multiplies the speed on the dome
+       branch. The altarring case proves the disc branch lays its particles
+       flat. Neither of them reaches the disc branch's own `* scale`, which is a
+       second copy of the same multiplication a few lines further down.
+
+       A copy nothing reads is a copy that can be deleted, mistyped, or left out
+       of the next branch somebody adds, and the symptom here would be specific
+       and quiet: a blast whose ground ring is one metre across no matter what
+       the grenade's radius is. It would look like a ring. It would just be
+       telling the player the wrong distance -- the failure fxtest's dome check
+       exists for, on the layer that check cannot see.
+
+       `blastwave` is the only effect in the file that is both a disc and
+       scaled, so it is the only place that line can be reached from.
+
+       두 가지 모두 위에서 따로 검사되어 있으며, 함께 검사하는 이유는 그 둘이 fx.c의 서로
+       *다른 줄*이기 때문입니다. 돔 검사는 ::fx_spawn_scaled가 돔 분기에서 속력에 배율을
+       곱한다는 것을 증명합니다. altarring 검사는 디스크 분기가 입자를 평평하게 눕힌다는 것을
+       증명합니다. 둘 중 어느 것도 디스크 분기 자신의 `* scale`에 닿지 않으며, 그것은 몇 줄
+       아래에 있는 같은 곱셈의 두 번째 사본입니다.
+
+       아무도 읽지 않는 사본은 지워지거나, 잘못 입력되거나, 다음에 누군가 추가하는 분기에서
+       빠질 수 있는 사본이며, 이곳의 증상은 구체적이면서 조용합니다. 유탄의 반경이 얼마이든
+       지면 고리가 언제나 1미터인 폭발입니다. 고리처럼 보이기는 할 것입니다. 다만 플레이어에게
+       틀린 거리를 말할 뿐입니다. fxtest의 돔 검사가 존재하는 이유인 그 실패를, 그 검사가 볼 수
+       없는 겹에서 일으키는 것입니다.
+
+       `blastwave`는 이 파일에서 디스크이면서 동시에 배율이 적용되는 유일한 이펙트이므로, 그
+       줄에 닿을 수 있는 유일한 곳입니다. */
+    {
+        const v3 AT = { 6.0f, 0.5f, 1.0f };
+        float mean[2], width[2];
+        const float WANT[2] = { 1.0f, 4.2f };   /* unit, and the grenade's */
+
+        for (int k = 0; k < 2; k++) {
+            fx_reload(&g_pools);
+            fx_spawn_scaled(&g_pools, "blastwave", AT, v3f(0, 1, 0), WANT[k]);
+            ok(fx_live_count(&g_pools) > 0, k ? "blastwave spawns at 4.2m"
+                                              : "blastwave spawns at 1m");
+            /* 300ms of life; stop just short of it, the same way the dome
+               check does, so the ring is at full extent and still alive.
+               수명 300ms이므로 돔 검사와 마찬가지로 그 직전에 멈춥니다. 고리가 최대로
+               퍼졌으면서 아직 살아 있는 시점입니다. */
+            for (int i = 0; i < 17; i++) fx_update(&g_pools, DT);
+            fx_radius_spread(&g_pools, AT, &mean[k], &width[k]);
+        }
+
+        float ratio = mean[0] > 0.0f ? mean[1] / mean[0] : 0.0f;
+        okf(ratio > 4.2f * 0.9f && ratio < 4.2f * 1.1f,
+            "the ground wave runs out to the radius it was given", ratio, 4.2f);
+
+        float flat = mean[1] > 0.0f ? width[1] / mean[1] : 0.0f;
+        okf(flat > 0.95f,
+            "and does it along the floor rather than into the air",
+            flat, 0.95f);
+    }
+
+    /* --- the lit rim and the dust rim stop in the same place ---------------
+       `blastring` is a SECOND copy of the authored arithmetic the check above
+       exists for. speed x life = 100cm is what lets fx_spawn_scaled put a rim
+       on the exact radius the damage has, and blastwave writes it as 333 x
+       300ms where blastring writes it as 238 x 420ms -- two different pairs of
+       numbers that have to come out at the same distance, in a file where
+       nothing connects them but this note and this test.
+
+       The failure is quiet and specific, and it is the one the blastwave check
+       already names from the other side: a bright ring that stops short of the
+       damage teaches the player a radius the grenade does not have, and it
+       teaches it more convincingly than the dust does, because the lit edge is
+       the one that can be seen in a dark room. Getting `blend add` on a ring
+       that lands in the wrong place makes the mistake more legible, not less.
+
+       MEASURED AT THE SAME FRACTION OF EACH LIFE (17 of 18 frames, 24 of 25),
+       not at the same instant, because they do not travel together -- the dust
+       is done in 300ms and the light takes 420. What is being compared is
+       where each one STOPS.
+
+       `blastring`은 위의 검사가 존재하는 이유인 작성된 산술의 *두 번째 사본*입니다.
+       speed x life = 100cm가 fx_spawn_scaled로 하여금 피해가 가진 정확한 반경에 테두리를
+       놓게 하는데, blastwave는 그것을 333 x 300ms로 쓰고 blastring은 238 x 420ms로 씁니다.
+       같은 거리에서 나와야 하는 서로 다른 두 쌍의 수이며, 이 설명과 이 검사 말고는 둘을
+       잇는 것이 파일에 없습니다.
+
+       실패는 조용하고 구체적이며, 위의 blastwave 검사가 이미 반대쪽에서 이름 붙인 바로
+       그것입니다. 피해에 미치지 못하고 멈추는 밝은 고리는 유탄이 갖지 않은 반경을
+       플레이어에게 가르치고, 먼지보다 더 설득력 있게 가르칩니다. 어두운 방에서 보이는
+       것은 빛나는 가장자리이기 때문입니다. 엉뚱한 자리에 놓인 고리에 `blend add`를 주면
+       실수가 덜 보이는 것이 아니라 더 잘 보이게 됩니다.
+
+       *같은 순간이 아니라 각자 수명의 같은 비율에서* 잽니다(18프레임 중 17, 25프레임 중
+       24). 둘은 함께 이동하지 않기 때문입니다. 먼지는 300ms에 끝나고 빛은 420ms가
+       걸립니다. 비교하는 것은 각자가 *멈추는* 자리입니다. */
+    {
+        const v3 AT = { 6.0f, 0.5f, 1.0f };
+        float dust = 0.0f, ring = 0.0f, wide = 0.0f;
+
+        fx_reload(&g_pools);
+        fx_spawn_scaled(&g_pools, "blastwave", AT, v3f(0, 1, 0), 4.2f);
+        ok(fx_live_count(&g_pools) > 0, "blastwave spawns for the rim check");
+        for (int i = 0; i < 17; i++) fx_update(&g_pools, DT);
+        fx_radius_spread(&g_pools, AT, &dust, &wide);
+
+        fx_reload(&g_pools);
+        fx_spawn_scaled(&g_pools, "blastring", AT, v3f(0, 1, 0), 4.2f);
+        ok(fx_live_count(&g_pools) > 0, "blastring spawns for the rim check");
+        for (int i = 0; i < 24; i++) fx_update(&g_pools, DT);
+        fx_radius_spread(&g_pools, AT, &ring, &wide);
+
+        float agree = dust > 0.0f ? ring / dust : 0.0f;
+        okf(agree > 0.94f && agree < 1.06f,
+            "the lit rim stops where the dust rim stops", agree, 1.0f);
+
+        float flat = ring > 0.0f ? wide / ring : 0.0f;
+        okf(flat > 0.95f, "and runs along the floor rather than into the air",
+            flat, 0.95f);
+    }
+
     /* --- gravity actually acts --------------------------------------------
        `blood` is authored with gravity; a particle thrown sideways under it
        must end up lower than it started. This is the one property that proves
@@ -362,6 +482,63 @@ int main(void) {
             blood_y, smoke_y);
     }
 
+    /* --- a particle's own wake --------------------------------------------
+       `trail` is the one keyword whose value is a NAME rather than a number,
+       and a name that matches nothing resolves to "no trail" in silence --
+       the same rule every unknown token in the file gets, and the reason it
+       is worth a check here: the symptom of a mistyped wake is an effect that
+       still spawns, still moves and still looks broadly right, minus the
+       layer nobody can see is absent.
+
+       Counted rather than measured. Fourteen embers are spawned and the count
+       is read again after the first wake interval has passed, so what the
+       assertion rests on is that MORE particles exist than were asked for,
+       which can only have come from the emitter. The second half is that the
+       chain stops: a wake with a wake of its own would not settle at a
+       bounded count, it would climb until the pool was full and the flood
+       check above is the one that would then start failing instead.
+
+       `trail`은 값이 숫자가 아니라 *이름*인 유일한 키워드이며, 아무것과도 맞지 않는 이름은
+       조용히 "자취 없음"으로 해석됩니다. 파일의 모든 미지의 토큰이 받는 것과 같은 규칙이고,
+       그래서 이곳에서 검사할 값어치가 있습니다. 오타 난 자취의 증상은, 여전히 생성되고
+       여전히 움직이고 여전히 대체로 맞아 보이되 아무도 없음을 알 수 없는 겹 하나가 빠진
+       이펙트이기 때문입니다.
+
+       재는 것이 아니라 셉니다. 불티 열넷을 생성하고 첫 자취 간격이 지난 뒤 수를 다시 읽으므로,
+       단언이 딛고 선 것은 요청한 것보다 *많은* 입자가 존재한다는 사실이며 그것은 방출기에서만
+       나올 수 있습니다. 나머지 절반은 사슬이 멈춘다는 것입니다. 자기 자취를 가진 자취라면
+       한계 있는 수에 머무르지 않고 풀이 찰 때까지 올라갔을 것이고, 그러면 위의 범람 검사가
+       대신 실패하기 시작했을 것입니다. */
+    {
+        fx_reload(&g_pools);
+        fx_spawn(&g_pools, "blastember", v3f(0, 0, 0), v3f(0, 1, 0));
+        int born = fx_live_count(&g_pools);
+        ok(born > 0, "blastember spawns for the wake check");
+
+        /* 70ms between wakes, so a fifth of a second is three of them per
+           ember and none of the 420ms wakes has retired yet.
+           자취 간격이 70ms이므로 0.2초면 불티당 셋이고, 420ms짜리 자취는 아직 하나도
+           사라지지 않았습니다. */
+        for (int i = 0; i < 12; i++) fx_update(&g_pools, DT);
+        int after = fx_live_count(&g_pools);
+        okd(after > born, "an ember lays down a wake behind it", after, born + 1);
+
+        /* Every wake is `emberwake`, which has no trail of its own -- and even
+           if the file gave it one, ::spawn_def refuses the second link. Left
+           to run out the embers' full 1.5 seconds, the count has to come back
+           DOWN rather than climb: a chain one link deep is bounded by
+           life / trailms per ember, and one that is not is bounded by nothing.
+           모든 자취는 `emberwake`이고 그것에는 자기 자취가 없습니다. 파일이 하나 주더라도
+           ::spawn_def가 두 번째 고리를 거절합니다. 불티의 1.5초를 전부 흘려보내면 수는
+           올라가는 것이 아니라 *내려와야* 합니다. 한 고리 깊이의 사슬은 불티당
+           life / trailms로 한계 지어지고, 그렇지 않은 사슬은 아무것에도 한계 지어지지
+           않습니다. */
+        for (int i = 0; i < 150; i++) fx_update(&g_pools, DT);
+        int settled = fx_live_count(&g_pools);
+        okd(settled < after, "and the chain is one link deep, not a cascade",
+            settled, after - 1);
+    }
+
     /* --- a reload drops live particles ------------------------------------
        Deliberate: a particle holds an INDEX into the definition table, and a
        reload rewrites that table in place. Carrying particles across would let
@@ -407,9 +584,22 @@ int main(void) {
                                    이 목록이 막으려던 실패가 목록 자신에게서 일어난
                                    것입니다. */
                                 "hookbite", "hookbiteb", "hookland",
-                                /* the blast, in layers */
-                                "blastdome", "blastcore", "blastsmoke",
-                                "blastdebris",
+                                /* The blast, in layers -- NINE of them now.
+                                   The flash, the ground wave and the embers
+                                   joined the six that were here, and they are
+                                   written down on the same change that spawns
+                                   them rather than on the one after somebody
+                                   noticed this list had fallen behind for a
+                                   third time. The note further down records
+                                   the first two.
+                                   여러 겹의 폭발이며 이제 *아홉* 겹입니다. 섬광과 지면
+                                   파동과 불티가 기존 여섯에 합류했습니다. 누군가 이 목록이
+                                   세 번째로 뒤처졌음을 알아챈 다음이 아니라, 그것들을
+                                   생성하는 바로 그 변경에서 함께 적었습니다. 앞의 두 번은
+                                   아래의 설명이 기록하고 있습니다. */
+                                "blastdome", "blastwave", "blastflash",
+                                "blastcore", "blastsmoke", "blastdebris",
+                                "blastember",
                                 /* the saw, which has contact instead of a
                                    muzzle */
                                 "sawspark", "sawgrind",
@@ -432,6 +622,43 @@ int main(void) {
                                    못할 수 있는 이름입니다. */
                                 "landdust",
                                 "blastburst", "blastshard", "boltshard",
+                                /* AND THE LAYERS ADDED WITH THE REFERENCE
+                                   PASS. `blastfire` is the fireball the blast
+                                   spends its second as, `blastring` the lit
+                                   half of the ground rim, and the other three
+                                   are what a projectile now leaves behind it
+                                   in the air -- proj.c emits the first two on
+                                   one timer, enemy.c the third.
+                                   `emberwake` is NOT here and must not be: it
+                                   is reached only through `blastember`'s
+                                   `trail`, and the check for that is its own
+                                   block further up. A name in this list is a
+                                   promise that code calls it.
+                                   그리고 참고 영상 작업에서 더해진 겹들입니다. `blastfire`는
+                                   폭발이 1초를 보내는 화구이고, `blastring`은 지면 테두리의
+                                   빛나는 절반이며, 나머지 셋은 발사체가 이제 공중에 뒤로
+                                   남기는 것입니다. 앞의 둘은 proj.c가 하나의 타이머로,
+                                   셋째는 enemy.c가 방출합니다.
+                                   `emberwake`는 이곳에 *없으며* 있어서도 안 됩니다. 그것은
+                                   `blastember`의 `trail`을 통해서만 닿으며, 그에 대한 검사는
+                                   위쪽의 자기 블록에 있습니다. 이 목록의 이름은 코드가 그것을
+                                   부른다는 약속입니다. */
+                                "blastfire", "blastring",
+                                "fusespark", "fusetrail", "boltwake",
+                                /* AND THE LAYERS A LANDING GOT. `scorch` is
+                                   named from two files at once -- proj.c for
+                                   the player's bolt and enemy.c for a
+                                   monster's -- and a shared name is the kind
+                                   this list is worst at protecting: renaming
+                                   it fixes one call site, leaves the other
+                                   spawning nothing, and the game still runs.
+                                   그리고 착탄이 얻은 겹들입니다. `scorch`는 두 파일에서 동시에
+                                   이름이 불립니다. 플레이어의 볼트에 대해서는 proj.c가,
+                                   몬스터의 것에 대해서는 enemy.c가 부릅니다. 공유된 이름은 이
+                                   목록이 가장 지켜 내기 어려운 종류입니다. 이름을 바꾸면 한
+                                   호출 지점은 고쳐지고 다른 하나는 아무것도 생성하지 않게
+                                   되는데, 게임은 그대로 돌아갑니다. */
+                                "scorch", "zapflash", "zapburst",
                                 /* AND A THIRD TIME, for the spawn portal.
                                    `spawnwarp` has been spawned by
                                    ::spawners_update since the telegraph

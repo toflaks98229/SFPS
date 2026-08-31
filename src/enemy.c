@@ -60,7 +60,10 @@
    참조하십시오. */
 #include "loot.h"
 #include "diag.h"
-#include "player.h" /* PLAYER_EYE / PLAYER_RADIUS: the projectile hit box / 발사체 히트 박스용 */
+#include "player.h" /* PLAYER_EYE / PLAYER_RADIUS: the projectile hit box; PLAYER_STEP and
+                       PLAYER_GRAVITY: the stairs and the fall, shared with whoever
+                       else is in this world / 발사체 히트 박스, 그리고 이 세계에 함께 있는
+                       누구와도 공유하는 계단과 낙하 */
 
 /* --- File-local macros / 파일 지역 매크로 --- */
 /* The seed a pool starts from; a zeroed EnemyPool means "not seeded yet".
@@ -69,31 +72,44 @@
    구성과 그 이유는 fx.c를 참조하십시오. */
 #define ENEMY_RNG_SEED 0x9e3779b9u
 
-/* `spawn`은 종류가 하나뿐이던 시절의 이름이며, 기존 맵들이 여전히 사용합니다.
-   TYPES에 넣지 않고 별칭으로 두는 이유는, 그것이 실제로 별칭이기 때문입니다. 테이블에
-   넣으면 다섯 번째 *종류*가 되어 스프라이트 아틀라스에 행 하나를 요구하고
-   enemytest가 검사하는 종류 수를 바꾸게 됩니다.
-   A legacy name from when there was only one kind, still used by existing maps.
-   Kept as an alias rather than a TYPES row because that is what it is: a row
-   would make it a fifth KIND, demanding an atlas row and changing the type
-   count enemytest checks. */
-/* A TABLE NOW, because there are two. `spawn` is from when there was one kind;
-   `imp` is what this slot was called before a water spirit took it, and two
-   shipped maps still place it. Renaming a creature must not empty the levels
-   that already have it -- the same promise ::PK_AMMO keeps for `ammo`.
-   Aliases rather than TYPES rows: a row would make each a fifth and sixth
-   KIND, demanding a sprite atlas row apiece and changing the type count
-   enemytest checks.
-   이제 표입니다. 둘이기 때문입니다. `spawn`은 종류가 하나뿐이던 시절의 것이고, `imp`는
-   물의 정령이 이 자리를 차지하기 전 이 슬롯의 이름이며 배포된 맵 둘이 여전히 그것을
-   배치합니다. 생물의 이름을 바꾸는 일이 이미 그것을 가진 레벨을 비워서는 안 됩니다.
-   ::PK_AMMO가 `ammo`에 대해 지키는 것과 같은 약속입니다.
-   TYPES 행이 아니라 별칭인 이유는, 행으로 만들면 각각 다섯 번째와 여섯 번째 *종류*가 되어
-   스프라이트 아틀라스 행을 하나씩 요구하고 enemytest가 검사하는 종류 수를 바꾸기
-   때문입니다. */
+/* NAMES THAT NO LONGER NAME A ROW, and where each of them now arrives.
+   `spawn` is from when there was one kind. `imp` is what MON_WATER_SPIRIT's
+   slot was called before a water spirit took it. `hound` and `wraith` were rows
+   until the bestiary lost its fast melee creature and its second flyer.
+
+   A RETIRED NAME POINTS AT WHAT REPLACED IT, not at where it used to live, and
+   that is the only judgement in this table. A `hound` was the thing that came
+   at you in numbers, so it arrives as a water spirit; `imp` and `wraith` were
+   the mid-range slot and the flying one, and both are the caster now that the
+   caster flies. Renaming or retiring a creature must not empty the levels that
+   already have it -- the same promise ::PK_AMMO keeps for `ammo` -- and a map
+   that says `hound` should get a monster rather than a hole.
+
+   Aliases rather than TYPES rows: a row would make each a further KIND,
+   demanding a sprite atlas row apiece and changing the type count enemytest
+   checks. That is exactly what removing them bought, so putting them back
+   here as rows would spend it again.
+
+   더 이상 어떤 행도 가리키지 않는 이름들과, 그 각각이 이제 도착하는 곳입니다.
+   `spawn`은 종류가 하나뿐이던 시절의 것입니다. `imp`는 물의 정령이 차지하기 전
+   MON_WATER_SPIRIT 슬롯의 이름이었습니다. `hound`와 `wraith`는 도감이 빠른 근접 생물과
+   두 번째 비행체를 잃기 전까지 행이었습니다.
+
+   *은퇴한 이름은 예전에 살던 자리가 아니라 그것을 대신한 것을 가리키며*, 이 표에 있는 판단은
+   그것 하나뿐입니다. 하운드는 수로 달려들던 것이므로 물의 정령으로 도착합니다. `imp`와
+   `wraith`는 중거리 자리와 나는 자리였고, 캐스터가 날게 된 지금 둘 다 캐스터입니다. 생물의
+   이름을 바꾸거나 은퇴시키는 일이 이미 그것을 가진 레벨을 비워서는 안 됩니다. ::PK_AMMO가
+   `ammo`에 대해 지키는 것과 같은 약속이며, `hound`라고 적은 맵은 구멍이 아니라 몬스터를 얻어야
+   합니다.
+
+   TYPES 행이 아니라 별칭인 이유는, 행으로 만들면 각각이 또 하나의 *종류*가 되어 스프라이트
+   아틀라스 행을 하나씩 요구하고 enemytest가 검사하는 종류 수를 바꾸기 때문입니다. 행을 지워서
+   산 것이 정확히 그것이므로, 이곳에 행으로 되돌리는 것은 그 값을 다시 치르는 일입니다. */
 static const struct { const char *was; int now; } MON_LEGACY[] = {
-    { "spawn", MON_WATER_SPIRIT },
-    { "imp",   MON_WATER_SPIRIT },
+    { "spawn",  MON_WATER_SPIRIT },
+    { "imp",    MON_CASTER       },
+    { "hound",  MON_WATER_SPIRIT },
+    { "wraith", MON_CASTER       },
 };
 
 /**
@@ -171,19 +187,20 @@ static const struct { const char *was; int now; } MON_LEGACY[] = {
 static const MonType TYPES[MON_TYPES] = {
     /* the baseline: fast enough to matter, and one point-blank blast kills it
        기준선. 충분히 빠르고, 근접 샷건 한 방에 죽습니다. */
-    { "water_spirit", AI_CASTER,   40, 3.0f, 0.40f, 1.70f, 1.30f, 34.0f,  7.5f,   4, 0.30f, 0.85f, 0.70f,  9.0f,    5, 0.16f, 260.0f, 0.6f, 0         },
+    { "water_spirit", AI_CASTER,   40, 3.0f, 0.52f, 1.70f, 1.30f, 34.0f,  7.5f,   4, 0.30f, 0.85f, 0.70f,  9.0f,    5, 0.16f, 260.0f, 0.6f, 0         },
     /* a wall with health -- closes slowly, hits hard, and cannot be stun-locked
        체력이 높은 벽. 느리게 다가와 강하게 때리며, 스턴 락에 걸리지 않습니다. */
-    { "brute",        AI_BRAWLER, 120, 1.9f, 0.62f, 2.35f, 1.80f, 34.0f,  2.3f,  24, 0.55f, 1.50f, 0.85f,  0.0f,    1,  0.0f, 130.0f, 2.2f, 0         },
-    /* fast and frail: the punishment for standing still
-       빠르고 약한 야수. 가만히 서 있는 것에 대한 응징입니다. */
-    { "hound",        AI_BRAWLER,  18, 5.3f, 0.38f, 1.25f, 0.70f, 40.0f,  1.5f,   5, 0.18f, 0.65f, 1.00f,  0.0f,    1,  0.0f, 400.0f, 0.3f, 0         },
-    /* holds its range instead of closing, so cover and angles matter, not footwork
-       접근하지 않고 사거리를 지킵니다. 발놀림이 아니라 엄폐와 각도의 문제입니다. */
-    { "caster",       AI_CASTER,   26, 2.4f, 0.42f, 1.90f, 1.45f, 40.0f, 13.0f,  12, 0.85f, 1.40f, 0.80f, 11.0f,    1,  0.0f, 180.0f, 0.9f, 0         },
-    /* the only one off the floor -- backing away is a fall, so it is frail and short-ranged
-       유일하게 바닥에 없는 것. 물러나는 것이 곧 추락이라, 무르고 사거리가 짧습니다. */
-    { "wraith",       AI_CASTER,   22, 3.1f, 0.40f, 1.55f, 0.80f, 44.0f, 10.0f,  10, 0.70f, 1.15f, 0.85f, 13.0f,    1,  0.0f, 260.0f, 0.5f, MON_FLIES },
+    { "brute",        AI_BRAWLER, 120, 1.9f, 0.806f, 2.35f, 1.80f, 34.0f,  2.3f,  24, 0.55f, 1.50f, 0.85f,  0.0f,    1,  0.0f, 130.0f, 2.2f, 0         },
+    /* holds its range instead of closing, and holds it in the AIR -- so cover
+       and angles matter, and so does the ceiling. Nothing about the numbers
+       changed when MON_FLIES arrived: this is the same creature, no longer
+       standing on anything. The row it replaced ("wraith") was these stats
+       minus four health and a metre of reach, which is not a monster.
+       접근하지 않고 사거리를 지키며, 그것을 *공중에서* 지킵니다. 그래서 엄폐와 각도의 문제이고
+       천장의 문제이기도 합니다. MON_FLIES가 붙을 때 수치는 하나도 바뀌지 않았습니다. 아무것도
+       딛고 있지 않게 되었을 뿐 같은 생물입니다. 이것이 대신한 행("wraith")은 여기서 체력 4점과
+       사거리 1미터를 뺀 것이었고, 그것은 별개의 몬스터가 아닙니다. */
+    { "caster",       AI_CASTER,   26, 2.4f, 0.546f, 1.90f, 1.45f, 40.0f, 13.0f,  12, 0.85f, 1.40f, 0.80f, 11.0f,    1,  0.0f, 180.0f, 0.9f, MON_FLIES },
     /* the boss: a caster with the footwork taken away. Its hp is spent in
        BOSS_CYCLES equal thirds and must divide by it -- types_check says so.
        The pain lock is effectively infinite because a boss that flinches is a
@@ -227,11 +244,15 @@ static void spawners_of(Pools *pl, const Level *l);
 static int spawner_crowded(const Spawner *s, v3 player_eye);
 static int spawners_update(Pools *pl, const Level *l, v3 player_eye, float dt);
 
-static void shot_fire(Pools *pl, v3 from, v3 at, float speed, int damage);
+static void shot_fire(Pools *pl, v3 from, v3 at, float speed, int damage,
+                      int type);
 static int shots_update(Pools *pl, const Level *l, v3 player_eye, float dt);
 
+static float mon_step(const MonType *S);
 static int foot_ok(const Level *l, const MonType *S, float x, float z, float feet, float *floor);
 static int air_ok(const Level *l, const MonType *S, float x, float z, float y);
+static int holds_height(const MonType *S, const Enemy *m);
+static void monster_fall(const Level *l, const MonType *S, Enemy *m, float dt);
 static void move_toward(const Level *l, const MonType *S, Enemy *m, float dx, float dz);
 static void change_yaw(Enemy *m, float yaw_speed_deg, float dt);
 static void ai_run_slide(Pools *pl, const Level *l, const MonType *S, Enemy *m, float dt);
@@ -396,14 +417,14 @@ void enemy_spawn_level(Pools *pl, const Level *l)
            the same deterministic sight offset. Two ways to create a monster is
            one more than there are kinds of monster, and it cost exactly what
            duplication costs: the flyer's height was taught to one of them and
-           a `wraith` marker went on making something that stood on the floor,
-           while a `spawner_wraith` a metre away made one in the air.
+           the flyer's own marker went on making something that stood on the
+           floor, while its spawner a metre away made one in the air.
            스포너가 이미 쓰던 ::make_monster를 통합니다. 이곳에 있던 스무 줄은 같은 스무 줄을 다시
            적은 것이었습니다. 같은 지면 탐색, 같은 상한 검사, 같은 필드, 같은 결정론적 시야
            오프셋입니다. 몬스터를 만드는 방법이 둘인 것은 몬스터의 종류 수보다 하나 많은
            것이며, 중복이 치르는 비용을 정확히 치렀습니다. 비행체의 높이를 둘 중 하나에만
-           가르쳤고, `wraith` 표식은 계속 바닥에 선 것을 만들었으며 한 미터 옆의
-           `spawner_wraith`는 공중에 만들었습니다. */
+           가르쳤고, 비행체의 표식은 계속 바닥에 선 것을 만들었으며 한 미터 옆의 그 스포너는
+           공중에 만들었습니다. */
         make_monster(pl, l, type, e->x * 0.01f, e->y * 0.01f, e->z * 0.01f);
     }
 
@@ -533,10 +554,43 @@ int enemy_update(Pools *pl, const Level *l, v3 player_eye, float dt)
         if (m->flash > 0.0f)
             m->flash -= dt * 4.0f;
 
+        /* A CORPSE IS STILL SUBJECT TO THE FLOOR, and this `continue` used to
+           skip that along with everything else. What follows is what a monster
+           DOES, and a dead one does nothing -- but falling is not something it
+           does, it is something done to it, and leaving the frame here left it
+           out.
+
+           On the ground the mistake was invisible: what dies standing on the
+           floor is already on the floor, so the corpse lay where it should. The
+           caster is the only kind that is somewhere else when it dies. It died
+           six metres up and stayed there, a sprite pinned to the air at the
+           height it was shot, for as long as the level lasted.
+
+           ::monster_fall is the same block the living run at the bottom of this
+           loop, called from both places rather than copied, so a body and a
+           corpse can never come to disagree about gravity. ::holds_height is
+           what differs between them, and it is where the caster stops flying.
+
+           시체도 여전히 바닥의 지배를 받으며, 이 `continue`는 다른 모든 것과 함께 그것까지
+           건너뛰었습니다. 뒤따르는 것은 몬스터가 *하는* 일이고 죽은 것은 아무것도 하지
+           않습니다. 그러나 낙하는 그것이 하는 일이 아니라 그것에게 일어나는 일이며, 이곳에서
+           프레임을 떠나면 그것이 빠집니다.
+
+           지상에서는 이 실수가 보이지 않았습니다. 바닥에 서서 죽는 것은 이미 바닥에 있으므로
+           시체는 있어야 할 자리에 누웠습니다. 죽을 때 다른 곳에 있는 종류는 캐스터뿐입니다.
+           캐스터는 6미터 위에서 죽어 그 자리에 머물렀습니다. 총에 맞은 높이에 스프라이트가
+           공중에 박힌 채로, 레벨이 끝날 때까지 말입니다.
+
+           ::monster_fall은 이 루프 아래쪽에서 살아 있는 것이 실행하는 바로 그 블록이며,
+           복제하지 않고 양쪽에서 호출합니다. 그래야 몸과 시체가 중력에 대해 서로 다른 말을
+           하게 될 수 없습니다. 둘 사이에서 달라지는 것은 ::holds_height이고, 캐스터가 나는
+           것을 그만두는 곳이 그곳입니다. */
         if (m->state == E_DEAD)
         {
             if (m->timer > 0.0f)
                 m->timer -= dt;
+            if (!holds_height(S, m))
+                monster_fall(l, S, m, dt);
             continue;
         }
 
@@ -756,63 +810,36 @@ int enemy_update(Pools *pl, const Level *l, v3 player_eye, float dt)
         }
 
         /* --- what holds it up ---------------------------------------------
-           THE FALL, and the one assumption ::MON_FLIES exists to vary. A flyer
-           keeps the height it was spawned at and never asks the floor about it;
-           everything else is pulled down to whatever is under it.
+           THE FALL, and the two assumptions ::MON_FLIES and ::MON_ANCHORED
+           exist to vary. The whole of the question is ::holds_height, asked
+           here and in the ::E_DEAD branch above -- two call sites because the
+           two answers differ, which is the point: a flyer stops flying when it
+           dies, and a thing bolted to a wall does not come off it.
 
-           The rate is ::PLAYER_GRAVITY rather than a literal, which it was --
-           a bare 22.0f here, the same number player.h names, with nothing
-           tying them together. Retune the player's snappier-than-real fall and
-           the monsters would have kept the old one, silently. They fall the
-           same way because they are in the same world; if a kind ever needs its
-           own rate, that is a column and not a second literal.
+           The rate lives in ::monster_fall and is ::PLAYER_GRAVITY rather than
+           a literal, which it was -- a bare 22.0f here, the same number
+           player.h names, with nothing tying them together. Retune the player's
+           snappier-than-real fall and the monsters would have kept the old one,
+           silently. They fall the same way because they are in the same world;
+           if a kind ever needs its own rate, that is a column and not a second
+           literal.
 
-           무엇이 그것을 떠받치는가. *낙하*이며, ::MON_FLIES가 달리하려고 존재하는 단 하나의
-           가정입니다. 비행체는 생성된 높이를 유지하며 바닥에 그것을 묻지 않습니다. 그 외의
-           모든 것은 아래에 있는 것으로 끌어내려집니다.
+           무엇이 그것을 떠받치는가. *낙하*이며, ::MON_FLIES와 ::MON_ANCHORED가 달리하려고
+           존재하는 두 가정입니다. 질문 전체가 ::holds_height이며, 이곳과 위의 ::E_DEAD
+           분기에서 묻습니다. 호출 지점이 둘인 이유는 두 곳의 답이 다르기 때문이고, 그것이
+           요점입니다. 비행체는 죽으면 나는 것을 그만두고, 벽에 박힌 것은 떨어져 나오지
+           않습니다.
 
-           비율은 리터럴이 아니라 ::PLAYER_GRAVITY입니다. 이전에는 리터럴이었습니다. 이곳의 맨
-           22.0f였고, player.h가 이름 붙인 것과 같은 숫자였으며, 둘을 묶는 것이 없었습니다.
-           플레이어의 현실보다 경쾌한 낙하를 조정하면 몬스터는 조용히 옛 값을 유지했을 것입니다.
-           그들이 같은 방식으로 떨어지는 이유는 같은 세계에 있기 때문입니다. 어떤 종류가 자기
-           비율을 필요로 하게 된다면 그것은 열이지 두 번째 리터럴이 아닙니다. */
-        /* ::MON_ANCHORED IS THE SECOND THING THAT DOES NOT FALL, and this is
-           the second of the two places that had to be told -- ::make_monster
-           was the first. The two bits reach the same answer from opposite
-           directions: a flyer holds its height because it is flying, and an
-           anchored thing holds its height because it is part of the wall. Left
-           out here, a maw placed two metres up sinks to the floor over the
-           first seconds of the fight, and the flag looks broken when what is
-           broken is that "does not move" was only ever taught to the walk.
-           tools/bosstest.c found this by standing one for ten seconds.
-           ::MON_ANCHORED가 떨어지지 않는 두 번째이며, 이곳이 그것을 알려야 했던 두 곳 중
-           두 번째입니다. 첫 번째는 ::make_monster였습니다. 두 비트는 반대 방향에서 같은 답에
-           닿습니다. 비행체는 날고 있어서 높이를 유지하고, 고정된 것은 벽의 일부여서 높이를
-           유지합니다. 이곳에서 빠뜨리면 2미터 위에 놓인 아귀가 전투 첫 몇 초 동안 바닥으로
-           가라앉고, 정작 고장 난 것은 "움직이지 않는다"를 걷기에만 가르쳤다는 사실인데
-           플래그가 고장 난 것처럼 보입니다.
-           tools/bosstest.c가 하나를 10초간 세워 두어 이것을 찾았습니다. */
-        if (S->flags & (MON_FLIES | MON_ANCHORED)) continue;
+           비율은 ::monster_fall에 있으며 리터럴이 아니라 ::PLAYER_GRAVITY입니다. 이전에는
+           리터럴이었습니다. 이곳의 맨 22.0f였고, player.h가 이름 붙인 것과 같은 숫자였으며,
+           둘을 묶는 것이 없었습니다. 플레이어의 현실보다 경쾌한 낙하를 조정하면 몬스터는
+           조용히 옛 값을 유지했을 것입니다. 그들이 같은 방식으로 떨어지는 이유는 같은 세계에
+           있기 때문입니다. 어떤 종류가 자기 비율을 필요로 하게 된다면 그것은 열이지 두 번째
+           리터럴이 아닙니다. */
+        if (holds_height(S, m))
+            continue;
 
-        float f, c;
-        if (level_ground(l, m->pos.x, m->pos.z, m->pos.y, S->height / 3.0f, &f, &c))
-        {
-            if (m->pos.y > f + 0.01f)
-            {
-                m->vel_y -= PLAYER_GRAVITY * dt;
-                m->pos.y += m->vel_y * dt;
-                if (m->pos.y <= f)
-                {
-                    m->pos.y = f;
-                    m->vel_y = 0.0f;
-                }
-            }
-            else
-            {
-                m->pos.y = f;
-                m->vel_y = 0.0f;
-            }
-        }
+        monster_fall(l, S, m, dt);
     }
     return player_damage;
 }
@@ -1152,26 +1179,42 @@ static v3 ward_summon_at(const Enemy *m)
 
 /* Which monster this ward's table sends.
  *
- * TWO TABLES, TWO PAIRS. The air ward sends the two that fight from a distance
- * and the ground ward the two that close, which is the whole of what
- * ::Enemy::ward_table means and the whole of what an author is choosing when
- * they place one marker rather than the other.
+ * TWO TABLES, TWO PAIRS, AND THE WATER SPIRIT IS IN BOTH. The air ward is the
+ * only thing in the game that can put a ::MON_FLIES creature in the room, and
+ * the ground ward is the only thing that sends the brute; the baseline appears
+ * on both sides because it is the baseline -- a pair with one entry is a
+ * constant, and a boss cycle that always sends the same creature from a marker
+ * stops being a draw. That is the whole of what ::Enemy::ward_table means and
+ * the whole of what an author is choosing when they place one marker rather
+ * than the other.
+ *
+ * A THREE-ROW BESTIARY IS WHY THE OVERLAP IS HERE rather than a third table.
+ * These were two disjoint pairs when there were five kinds to draw from. There
+ * are three, one of them flies, and inventing a fourth creature to keep the
+ * tables disjoint would be the tables writing the bestiary.
  *
  * EXACTLY ONE DRAW, ALWAYS. The caller spends it whether or not the summon is
  * refused for a full room; see the note at that call site.
  *
  * 이 결계핵의 표가 보내는 몬스터입니다.
  *
- * *두 표, 두 쌍입니다.* 공중형 결계핵은 거리를 두고 싸우는 둘을, 지상형은 붙는 둘을 보냅니다.
- * 그것이 ::Enemy::ward_table이 뜻하는 전부이며, 제작자가 이 표식이 아니라 저 표식을 놓을 때
- * 고르고 있는 것의 전부입니다.
+ * *두 표, 두 쌍이며, 물의 정령은 양쪽에 있습니다.* 공중형 결계핵은 이 게임에서 ::MON_FLIES
+ * 생물을 방에 들일 수 있는 유일한 것이고, 지상형 결계핵은 브루트를 보내는 유일한 것입니다.
+ * 기준 몬스터가 양쪽에 나타나는 이유는 그것이 기준이기 때문입니다. 항목이 하나인 쌍은 상수이고,
+ * 한 표식에서 언제나 같은 생물을 보내는 보스 사이클은 뽑기이기를 그만둡니다. 그것이
+ * ::Enemy::ward_table이 뜻하는 전부이며, 제작자가 이 표식이 아니라 저 표식을 놓을 때 고르고
+ * 있는 것의 전부입니다.
+ *
+ * *세 행짜리 도감이 세 번째 표가 아니라 겹침을 이곳에 둔 이유입니다.* 뽑을 종류가 다섯이던
+ * 시절에 이 둘은 서로소인 두 쌍이었습니다. 이제 셋이고 그중 하나가 날며, 표를 서로소로
+ * 유지하려고 네 번째 생물을 만들어 내는 것은 표가 도감을 쓰는 일입니다.
  *
  * *언제나 정확히 한 번 뽑습니다.* 방이 가득 차서 소환이 거절되든 아니든 호출자가 그것을
  * 소비합니다. 그 호출 지점의 주석을 참조하십시오. */
 static int ward_summon_type(Pools *pl, const Enemy *m)
 {
-    static const int AIR[2]    = { MON_WRAITH, MON_CASTER };
-    static const int GROUND[2] = { MON_BRUTE,  MON_HOUND  };
+    static const int AIR[2]    = { MON_CASTER, MON_WATER_SPIRIT };
+    static const int GROUND[2] = { MON_BRUTE,  MON_WATER_SPIRIT };
     const int *t = m->ward_table ? AIR : GROUND;
     return t[frand(&pl->enemy) < 0.5f ? 0 : 1];
 }
@@ -1696,7 +1739,7 @@ static int make_monster(Pools *pl, const Level *l, int type,
  *
  * ENGLISH
  * -------
- * The kind carries the monster: `spawner_imp` makes imps. That is the idiom
+ * The kind carries the monster: `spawner_caster` makes casters. That is the idiom
  * this project already uses where a name has to say two things -- sprite.c
  * reads a frame number off the end of a sprite name, and door.c reads a tag off
  * the end of `switch<n>` -- and it costs no second field on ::Entity and no
@@ -1705,7 +1748,7 @@ static int make_monster(Pools *pl, const Level *l, int type,
  * 한국어
  * ------
  * @brief 레벨의 `spawner_*` 표식을 풀로 읽어들입니다.
- * @note 종류가 몬스터를 나릅니다. `spawner_imp`는 임프를 만듭니다. 이름이 두 가지를 말해야 할
+ * @note 종류가 몬스터를 나릅니다. `spawner_caster`는 캐스터를 만듭니다. 이름이 두 가지를 말해야 할
  *       때 이 프로젝트가 이미 쓰는 어법입니다. sprite.c는 스프라이트 이름 끝에서 프레임 번호를
  *       읽고 door.c는 `switch<n>` 끝에서 태그를 읽습니다. ::Entity에 두 번째 필드도, 어디에도
  *       표 하나도 들지 않습니다.
@@ -1988,6 +2031,8 @@ static int spawners_update(Pools *pl, const Level *l, v3 player_eye, float dt)
  * @param[in]     at     조준할 지점. 방향은 이곳에서 한 번만 정해집니다.
  * @param[in]     speed  발사체 속도(m/s).
  * @param[in]     damage 명중 시 피해량.
+ * @param[in]     type   시전한 생물의 ::MonTypeID. 볼트가 어떤 색으로 그려지고 어떤 색으로
+ *                       빛나는지를 결정하며, 그 외의 무엇도 결정하지 않습니다.
  *
  * @note 볼트는 유도가 아니라 *탄도*입니다. 속도가 발사 시점에 고정되므로, 발사된 뒤에
  *       움직인 플레이어는 피할 수 있습니다. 다시 조준하는 발사체는 회피를 불가능하게 하고
@@ -1997,7 +2042,8 @@ static int spawners_update(Pools *pl, const Level *l, v3 player_eye, float dt)
  *       애초에 공격하지 않은 캐스터와 똑같이 보이기 때문입니다. 본문의 설명을 참조하십시오.
  * @note `at`과 `from`이 같은 지점이면 발사할 방향이 없으므로 역시 발사하지 않고 반환합니다.
  */
-static void shot_fire(Pools *pl, v3 from, v3 at, float speed, int damage)
+static void shot_fire(Pools *pl, v3 from, v3 at, float speed, int damage,
+                      int type)
 {
     Shot *s = 0;
     for (int i = 0; i < ENEMY_MAX_SHOTS; i++)
@@ -2034,6 +2080,14 @@ static void shot_fire(Pools *pl, v3 from, v3 at, float speed, int damage)
     s->life = 6.0f;
     s->damage = damage;
     s->active = 1;
+    /* Carried for the renderer and nothing else -- see ::Shot::type. Set here
+       rather than at the call site's convenience because this is the one place
+       a Shot comes into existence, and a field initialised anywhere else is a
+       field some future second call site forgets.
+       렌더러만을 위해 나릅니다. ::Shot::type을 참조하십시오. 호출 지점의 편의가 아니라
+       이곳에서 설정하는 이유는, Shot이 생겨나는 곳이 이곳 하나이기 때문입니다. 다른 곳에서
+       초기화되는 필드는 언젠가 생길 두 번째 호출 지점이 잊어버리는 필드입니다. */
+    s->type   = type;
     /* Zero, not the interval: the first trail particle is laid on the frame
        the bolt appears, so the wake starts at the muzzle rather than a
        fraction of a second down the flight path.
@@ -2117,6 +2171,24 @@ static int shots_update(Pools *pl, const Level *l, v3 player_eye, float dt)
                비행 방향의 반대로 던집니다. 그래야 궤적이 가진 약간의 산포가 볼트 앞이
                아니라 뒤로 흩어집니다. */
             fx_spawn(pl, "bolttrail", s->pos, v3scale(dir, -1.0f));
+
+            /* AND THE RIBBON, on the same timer and for the same reason it
+               cannot be the same effect. `bolttrail` is additive and 280ms:
+               it is the bolt's heat, it sits where the bolt was, and it is
+               gone before the bolt has crossed the room. What a projectile
+               leaves BEHIND is longer than its own flight, widens away from
+               the head, and has to be able to be darker than the wall behind
+               it -- and nothing additive can ever be darker than anything.
+               Two layers with opposite blend modes is the only way one
+               definition's single colour ramp can say both.
+               그리고 *리본*이며, 같은 타이머로, 그리고 같은 이펙트가 될 수 없는 것과 같은
+               이유로 그렇습니다. `bolttrail`은 가산이고 280ms입니다. 볼트의 열이고, 볼트가
+               있던 자리에 놓이고, 볼트가 방을 가로지르기 전에 사라집니다. 발사체가 *뒤에*
+               남기는 것은 자기 비행보다 오래가고, 머리에서 멀어질수록 넓어지며, 뒤의 벽보다
+               어두울 수 있어야 합니다. 그런데 가산인 것은 무엇보다도 어두워질 수 없습니다.
+               블렌드 모드가 반대인 두 겹이, 정의 하나의 색 램프 하나로 둘 다 말할 수 있는
+               유일한 방법입니다. */
+            fx_spawn(pl, "boltwake", s->pos, v3scale(dir, -1.0f));
         }
 
         float t;
@@ -2165,6 +2237,23 @@ static int shots_update(Pools *pl, const Level *l, v3 player_eye, float dt)
                맞은 지점에서 튀어나오는 것으로 읽힙니다. */
             fx_spawn(pl, "boltburst", s->pos, v3scale(dir, -1.0f));
             fx_spawn(pl, "boltshard", s->pos, v3scale(dir, -1.0f));
+
+            /* AND NOTHING ELSE, WHICH IS THE POINT OF THE TWO BRANCHES BEING
+               TWO. The wall below gets a scorch and a puff of stone dust; this
+               is a hit on the PLAYER, and a burn mark hanging in the air where
+               a body was, with grit coming off it, is the effect weapon.c
+               already refuses to put on a monster for the same reason -- it
+               reads as having missed. Until this pair split, both landings
+               played the same two lines and the difference between being shot
+               and being shot AT was not in the picture anywhere.
+               *그리고 그 외에는 아무것도 없으며, 그것이 두 갈래가 둘인 이유입니다.* 아래의 벽은
+               그을음과 돌먼지를 받습니다. 이쪽은 *플레이어*에 대한 명중이며, 몸이 있던 자리의
+               허공에 걸린 화상 자국과 거기서 이는 모래는 weapon.c가 같은 이유로 몬스터에게
+               붙이기를 이미 거부하는 것입니다. 빗맞은 것으로 읽힙니다. 이 쌍이 갈라지기
+               전까지 두 착탄은 같은 두 줄을 재생했고, 맞은 것과 맞을 뻔한 것의 차이는 화면
+               어디에도 없었습니다. */
+            proj_flash(pl, s->pos, PROJ_HIT_RADIUS, PROJ_HIT_POWER,
+                       FLASH_SHOT, s->type);
             continue;
         }
 
@@ -2175,6 +2264,25 @@ static int shots_update(Pools *pl, const Level *l, v3 player_eye, float dt)
             play_at(s->pos, "ehit", 45);
             fx_spawn(pl, "boltburst", s->pos, n);
             fx_spawn(pl, "boltshard", s->pos, n);
+
+            /* THE STONE HALF: a burn and a puff, which is what makes the hit
+               happen TO the wall rather than in front of it. `smokepuff` is
+               the shotgun's -- shared deliberately, the way the axe's slam
+               borrows `blastwave`, because dust off a wall is dust off a wall
+               and a second definition for it would only be a second place to
+               retune. The mark is a `scorch` and not a `bullethole`: a bolt burns and a pellet chips,
+               which is the distinction ioquake3 draws by picking
+               energyMarkShader over bulletMarkShader at the same line.
+               *돌 쪽 절반입니다.* 화상과 퍼프이며, 그것이 피탄을 벽 *앞*이 아니라 벽 *에*
+               일어나게 만듭니다. `smokepuff`는 샷건의 것이고 의도적으로 공유합니다. 도끼의
+               내려찍기가 `blastwave`를 빌리는 것과 같습니다. 벽에서 이는 먼지는 벽에서 이는
+               먼지이고, 그것을 위한 두 번째 정의는 다시 조정할 곳이 하나 더 생기는 것일
+               뿐입니다. 자국은 `bullethole`이 아니라 `scorch`입니다. 볼트는 태우고 산탄은 쪼며, ioquake3이 같은
+               줄에서 bulletMarkShader가 아니라 energyMarkShader를 골라 긋는 구분이 그것입니다. */
+            fx_spawn(pl, "scorch",    s->pos, n);
+            fx_spawn(pl, "smokepuff", s->pos, n);
+            proj_flash(pl, s->pos, PROJ_HIT_RADIUS, PROJ_HIT_POWER,
+                       FLASH_SHOT, s->type);
             continue;
         }
 
@@ -2185,6 +2293,86 @@ static int shots_update(Pools *pl, const Level *l, v3 player_eye, float dt)
 }
 
 /* --- Collision and movement / 충돌과 이동 --- */
+
+/**
+ * @brief How high a ledge this kind walks straight up instead of being stopped by.
+ *
+ * ENGLISH
+ * -------
+ * NEVER LESS THAN ::PLAYER_STEP, and that floor is the whole of this function.
+ * A staircase is a property of the LEVEL, not of whoever is climbing it: an
+ * author builds risers to the height a player can clear -- 16 map units, half a
+ * metre, the dimension brush.h keeps Quake's scale in order to inherit -- and
+ * everything that walks the level has to be able to walk what the level is made
+ * of. A monster with a shorter stride than the player is a monster that cannot
+ * follow you anywhere the level says you may go, and it does not read as a
+ * short creature. It reads as a broken one, standing at the foot of the stairs
+ * running on the spot.
+ *
+ * The hound is who this was written for, and it is gone. A third of its 1.25m
+ * was 0.417m, which clears nothing a map contains; it stopped dead at the first
+ * riser of every staircase in the game while the brute walked up behind it. The
+ * kind whose whole design was that it closes on you was the one kind that could
+ * not.
+ *
+ * THE FLOOR OUTLIVED IT, and deliberately. Nothing walking today is short
+ * enough to need it -- the shortest thing that moves is the water spirit at
+ * 1.70m -- so this looks like a clamp that never fires. It is not a fact about
+ * the current bestiary; it is a fact about what levels are built out of, and it
+ * is what a short creature added tomorrow will land on instead of landing in a
+ * bug report.
+ *
+ * A THIRD OF THE HEIGHT IS KEPT AS THE OTHER HALF of the max, because above
+ * ::PLAYER_STEP it is doing something the floor cannot: a brute steps over
+ * crates and low walls that a player has to go around, and that is the size of
+ * the thing being read off the geometry rather than announced. The floor only
+ * catches the kinds that fall below what the world is built from.
+ *
+ * @param[in] S The monster's kind.
+ * @return The step height in metres, at least ::PLAYER_STEP.
+ *
+ * @note ::MON_FLIES does not come through here at all -- a flyer does not step,
+ *       and ::air_ok passes its own large limit for exactly that reason.
+ *
+ * 한국어
+ * ------
+ * @brief 이 종류가 가로막히지 않고 그대로 걸어 올라가는 턱의 높이.
+ *
+ * *::PLAYER_STEP보다 낮을 수 없으며*, 그 하한이 이 함수의 전부입니다. 계단은 *레벨*의
+ * 속성이지 오르는 자의 속성이 아닙니다. 제작자는 플레이어가 넘을 수 있는 높이로 단을
+ * 만듭니다. 16맵유닛, 0.5미터이며, brush.h가 Quake의 스케일을 지키는 이유가 물려받으려는
+ * 바로 그 치수입니다. 그리고 레벨을 걷는 모든 것은 레벨을 이루는 것을 걸을 수 있어야 합니다.
+ * 플레이어보다 보폭이 짧은 몬스터는 레벨이 가도 된다고 말하는 어디로도 당신을 따라올 수 없는
+ * 몬스터이며, 그것은 작은 생물로 읽히지 않습니다. 계단 아래에서 제자리걸음을 하는 고장 난
+ * 것으로 읽힙니다.
+ *
+ * 이것이 필요했던 것은 하운드이며, 그것은 사라졌습니다. 1.25m의 3분의 1은 0.417m이었고, 맵에
+ * 담긴 무엇도 넘지 못했습니다. 게임 안 모든 계단의 첫 단에서 멈춰 섰고 그 뒤로 브루트가 걸어
+ * 올라갔습니다. 달려든다는 것이 설계의 전부인 종류가, 그러지 못하는 유일한 종류였습니다.
+ *
+ * *하한은 그것보다 오래 남았고, 그것은 의도된 일입니다.* 오늘 걷는 것 중에 이것이 필요할 만큼
+ * 낮은 것은 없습니다. 움직이는 것 중 가장 낮은 것이 1.70m의 물의 정령입니다. 그래서 이것은 결코
+ * 발동하지 않는 고정으로 보입니다. 그러나 이것은 현재 도감에 대한 사실이 아니라 레벨이 무엇으로
+ * 지어지는가에 대한 사실이며, 내일 추가되는 낮은 생물이 버그 리포트가 아니라 이곳에 내려앉게
+ * 하는 것입니다.
+ *
+ * *신장의 3분의 1은 max의 나머지 절반으로 남깁니다.* ::PLAYER_STEP 위에서는 하한이 할 수 없는
+ * 일을 하기 때문입니다. 브루트는 플레이어가 돌아가야 하는 상자와 낮은 벽을 넘어서며, 그것은
+ * 덩치를 선언하는 대신 지오메트리에서 읽히게 하는 방식입니다. 하한이 잡아내는 것은 세계를
+ * 이루는 것보다 낮게 떨어진 종류뿐입니다.
+ *
+ * @param[in] S 몬스터의 종류.
+ * @return 단차 높이(미터). 최소 ::PLAYER_STEP입니다.
+ *
+ * @note ::MON_FLIES는 이곳을 아예 지나지 않습니다. 비행체는 단을 딛지 않으며, ::air_ok가 자기
+ *       큰 상한을 넘기는 이유가 정확히 그것입니다.
+ */
+static float mon_step(const MonType *S)
+{
+    float own = S->height / 3.0f;
+    return own > PLAYER_STEP ? own : PLAYER_STEP;
+}
+
 
 /**
  * @brief Whether this kind of monster can stand at a column.
@@ -2203,8 +2391,7 @@ static int shots_update(Pools *pl, const Level *l, v3 player_eye, float dt)
  * @note Two separate refusals: no ground reachable within a step, and not
  *       enough headroom for ::MonType::height. A monster that fitted through
  *       one but not the other would walk into a crawlspace and stick.
- * @note The step limit is a third of the monster's height, which is why a tall
- *       monster climbs stairs a short one has to walk around.
+ * @note The step limit is ::mon_step, which is where the stairs are decided.
  *
  * 한국어
  * ------
@@ -2222,17 +2409,59 @@ static int shots_update(Pools *pl, const Level *l, v3 player_eye, float dt)
  *       ::MonType::height만큼의 머리 공간이 없는 경우입니다. 한쪽만 통과하는 몬스터는 기어야
  *       하는 좁은 틈으로 걸어 들어가 끼게 됩니다.
  * @note 걸음 높이 제한은 신장의 3분의 1이며, 그래서 키 큰 몬스터는 키 작은 몬스터가 돌아가야
- *       하는 계단을 오릅니다.
+ *       결정되는 곳입니다.
  */
 static int foot_ok(const Level *l, const MonType *S, float x, float z,
                    float feet, float *floor)
 {
-    float f, c;
-    if (!level_ground(l, x, z, feet, S->height / 3.0f, &f, &c))
-        return 0;
-    if (c - f < S->height)
-        return 0;
-    *floor = f;
+    /* FIVE SAMPLES, THE SAME FIVE ::can_stand TAKES, and until this existed
+       ::MonType::radius was not a collision size at all. This function asked
+       about ONE column -- the monster's centre -- so a monster could walk until
+       its middle touched the wall face, with the whole of its body inside the
+       geometry. The player has never been able to do that, because player.c
+       samples its circle and this sampled a point.
+       What that looked like: a sprite is drawn `height * aspect` wide and turns
+       to face the camera, so half of that width swings through whatever the
+       monster is standing against. A brute at a wall buried a metre of itself
+       in it. The billboard was blamed, and the billboard was right -- there was
+       simply nothing holding the body out of the wall.
+       다섯 개의 표본이며, ::can_stand가 취하는 바로 그 다섯 개입니다. 이것이 생기기 전까지
+       ::MonType::radius는 충돌 크기가 아니었습니다. 이 함수는 기둥 *하나*, 몬스터의 중심만
+       물었으므로, 몬스터는 자기 한가운데가 벽면에 닿을 때까지 걸어 들어갈 수 있었고 몸통
+       전체가 지오메트리 안에 있었습니다. 플레이어는 결코 그럴 수 없었습니다. player.c는 자기
+       원을 표본하고 이곳은 점을 표본했기 때문입니다.
+       그 모습은 이렇습니다. 스프라이트는 `height * aspect` 너비로 그려지고 카메라를 향해
+       돌므로, 그 너비의 절반이 몬스터가 기대 선 것을 휩쓸고 지나갑니다. 벽에 붙은 브루트는
+       자기 몸 1미터를 벽에 묻었습니다. 빌보드가 탓을 들었지만 빌보드는 옳았습니다. 애초에
+       몸을 벽 밖에 붙들어 두는 것이 없었을 뿐입니다. */
+    static const float OX[5] = { 0.0f,  1.0f, -1.0f,  0.0f,  0.0f };
+    static const float OZ[5] = { 0.0f,  0.0f,  0.0f,  1.0f, -1.0f };
+
+    float step    = mon_step(S);
+    float highest = -1e30f;
+
+    for (int i = 0; i < 5; i++)
+    {
+        float f, c;
+        if (!level_ground(l, x + OX[i] * S->radius, z + OZ[i] * S->radius,
+                          feet, step, &f, &c))
+            return 0;
+        if (c - f < S->height)
+            return 0;
+        if (f > highest)
+            highest = f;
+    }
+
+    /* THE HIGHEST SAMPLE, not the centre's, for ::can_stand's reason: standing
+       on the middle of a step that only one edge of the circle is over sinks
+       the monster into it. No second step test is needed after this -- every
+       sample was measured against the same `feet` and the same limit, so their
+       maximum is inside it too.
+       중심이 아니라 가장 높은 표본입니다. ::can_stand와 같은 이유로, 원의 한쪽 가장자리만
+       걸친 단의 중간에 서면 몬스터가 그 안으로 가라앉습니다. 이 뒤에 단차 검사를 또 할
+       필요는 없습니다. 모든 표본이 같은 `feet`과 같은 상한으로 재어졌으므로 그 최댓값도
+       상한 안입니다. */
+    *floor = highest;
     return 1;
 }
 
@@ -2247,10 +2476,10 @@ static int foot_ok(const Level *l, const MonType *S, float x, float z,
  * over a chasm has no floor under it and must still be allowed to be there;
  * one under a low ceiling must not.
  *
- * @note The step limit is large rather than ::MonType::height/3, because a
- *       flyer does not step. A small limit makes ::level_ground refuse the
- *       column the moment the floor below drops away, which is exactly the
- *       chasm a flyer exists to hold.
+ * @note The step limit is large rather than ::mon_step, because a flyer does
+ *       not step. A small limit makes ::level_ground refuse the column the
+ *       moment the floor below drops away, which is exactly the chasm a flyer
+ *       exists to hold.
  *
  * 한국어
  * ------
@@ -2261,18 +2490,159 @@ static int foot_ok(const Level *l, const MonType *S, float x, float z,
  * 높이에서 열려 있는가입니다. 협곡 위의 비행체는 아래에 바닥이 없어도 그곳에 있을 수 있어야
  * 하고, 낮은 천장 아래의 비행체는 그럴 수 없어야 합니다.
  *
- * @note 단차 상한이 ::MonType::height/3이 아니라 큰 값인 이유는 비행체가 단차를 딛지 않기
+ * @note 단차 상한이 ::mon_step이 아니라 큰 값인 이유는 비행체가 단차를 딛지 않기
  *       때문입니다. 작은 상한은 아래의 바닥이 떨어지는 순간 ::level_ground가 그 기둥을
  *       거부하게 만들며, 그곳이 바로 비행체가 존재하는 이유인 협곡입니다.
  */
 static int air_ok(const Level *l, const MonType *S, float x, float z, float y)
 {
-    float f, c;
-    if (!level_ground(l, x, z, y, 1e9f, &f, &c))
-        return 0;
-    if (y < f)              return 0;   /* inside the floor */
-    if (y + S->height > c)  return 0;   /* head through the ceiling */
+    /* THE SAME FIVE SAMPLES ::foot_ok TAKES, for the same reason. A flyer is a
+       body of the same width as anything else, and asking about its centre
+       alone let the caster hold station with its middle on the wall face and the
+       rest of it inside. Fixing the walkers and leaving this would have left
+       the one kind that hovers as the one kind still buried -- and it is the
+       kind most likely to be found pressed against something, because backing
+       away from the player is what the caster does.
+       ::foot_ok가 취하는 바로 그 다섯 표본이며, 이유도 같습니다. 비행체도 다른 것과 같은
+       너비의 몸이고, 중심만 묻는 것은 캐스터가 자기 한가운데를 벽면에 둔 채 나머지를 안에
+       넣고 정지 비행하도록 허용했습니다. 걷는 것들만 고치고 이곳을 두었다면, 떠 있는 유일한
+       종류가 여전히 묻혀 있는 유일한 종류로 남았을 것입니다. 그리고 무언가에 눌려 있기
+       가장 쉬운 것이 그 종류입니다. 플레이어에게서 물러나는 것이 캐스터가 하는 일이기
+       때문입니다. */
+    static const float OX[5] = { 0.0f,  1.0f, -1.0f,  0.0f,  0.0f };
+    static const float OZ[5] = { 0.0f,  0.0f,  0.0f,  1.0f, -1.0f };
+
+    for (int i = 0; i < 5; i++)
+    {
+        float f, c;
+        if (!level_ground(l, x + OX[i] * S->radius, z + OZ[i] * S->radius,
+                          y, 1e9f, &f, &c))
+            return 0;
+        if (y < f)              return 0;   /* inside the floor */
+        if (y + S->height > c)  return 0;   /* head through the ceiling */
+    }
     return 1;
+}
+
+/**
+ * @brief Whether something holds its height instead of being pulled to the floor.
+ *
+ * ENGLISH
+ * -------
+ * Everything in this world falls. Two flags say otherwise, they say it for
+ * different reasons, and this function is the one place that difference is
+ * spelled out.
+ *
+ * ::MON_ANCHORED HOLDS THROUGH DEATH. An anchored thing keeps its height
+ * because it is part of the wall, and being killed does not take it out of the
+ * wall -- a maw whose corpse sank to the floor would be a maw that is no longer
+ * in the geometry it was drawn into. Left out of this test entirely, one placed
+ * two metres up sinks over the first seconds of the fight and the flag looks
+ * broken when what is broken is that "does not move" was only ever taught to
+ * the walk. tools/bosstest.c found that by standing one for ten seconds.
+ *
+ * ::MON_FLIES DOES NOT. It holds a monster up because the monster is FLYING,
+ * and a corpse is not flying -- it is a body, and the floor is owed it. This is
+ * the whole of the fix for a caster that died six metres up and hung there; see
+ * the ::E_DEAD branch in ::enemy_update for what that looked like.
+ *
+ * @param[in] S The monster's kind, for its flags.
+ * @param[in] m The monster, for ::Enemy::state -- the flags alone cannot answer.
+ * @return 1 if it keeps the height it is at, 0 if gravity has it.
+ *
+ * @note ::make_monster asks the same question of a monster that does not exist
+ *       yet, and asks it of the flags alone -- it has no state to consult and
+ *       nothing is ever spawned dead. That is the one place the two bits may
+ *       still be read together.
+ *
+ * 한국어
+ * ------
+ * @brief 바닥으로 끌려 내려가는 대신 자기 높이를 유지하는가.
+ *
+ * 이 세계의 모든 것은 떨어집니다. 두 플래그가 그렇지 않다고 말하며, 서로 다른 이유로 그렇게
+ * 말합니다. 그 차이를 적어 두는 단 한 곳이 이 함수입니다.
+ *
+ * *::MON_ANCHORED는 죽음을 넘어 유지됩니다.* 고정된 것이 높이를 지키는 이유는 벽의 일부이기
+ * 때문이고, 죽는다고 벽에서 빠져나오지는 않습니다. 시체가 바닥으로 가라앉은 아귀는 자신이
+ * 그려져 들어간 지오메트리에 더 이상 있지 않은 아귀입니다. 이 검사에서 통째로 빠지면 2미터
+ * 위에 놓인 것이 전투 첫 몇 초 동안 가라앉고, 정작 고장 난 것은 "움직이지 않는다"를 걷기에만
+ * 가르쳤다는 사실인데 플래그가 고장 난 것처럼 보입니다. tools/bosstest.c가 하나를 10초간 세워
+ * 두어 그것을 찾았습니다.
+ *
+ * *::MON_FLIES는 그렇지 않습니다.* 그것이 몬스터를 떠받치는 이유는 몬스터가 *날고 있기*
+ * 때문이며, 시체는 날고 있지 않습니다. 시체는 몸이고, 바닥은 그것을 받을 몫이 있습니다. 6미터
+ * 위에서 죽어 그 자리에 걸린 캐스터에 대한 수정의 전부가 이것입니다. 그것이 어떤 모습이었는지는
+ * ::enemy_update의 ::E_DEAD 분기를 참조하십시오.
+ *
+ * @param[in] S 몬스터의 종류. 플래그를 얻기 위함입니다.
+ * @param[in] m 몬스터. ::Enemy::state를 얻기 위함이며, 플래그만으로는 답할 수 없습니다.
+ * @return 지금 높이를 유지하면 1, 중력이 잡고 있으면 0.
+ *
+ * @note ::make_monster는 아직 존재하지 않는 몬스터에게 같은 질문을 하며, 플래그만으로 묻습니다.
+ *       참조할 상태가 없고 죽은 채로 생성되는 것도 없기 때문입니다. 두 비트를 여전히 함께 읽어도
+ *       되는 유일한 곳입니다.
+ */
+static int holds_height(const MonType *S, const Enemy *m)
+{
+    if (S->flags & MON_ANCHORED)
+        return 1;
+    return (S->flags & MON_FLIES) != 0 && m->state != E_DEAD;
+}
+
+/**
+ * @brief Pulls a monster down to whatever is under it, one frame's worth.
+ *
+ * ENGLISH
+ * -------
+ * @param[in]     l  Level to ask for the floor.
+ * @param[in]     S  The monster's kind, for the step limit its height sets.
+ * @param[in,out] m  Monster to pull down. Position and vertical velocity change.
+ * @param[in]     dt Timestep in seconds.
+ *
+ * @note Run for the living and for corpses alike -- ::holds_height decides who
+ *       is exempt, and this function does not ask. It was inline in
+ *       ::enemy_update and reached by only one of those two, which is how a
+ *       flyer's corpse came to hang in the air.
+ * @note A column with no floor at all -- outside the map -- leaves the monster
+ *       where it is. ::level_ground answering 0 is not a height to fall to, and
+ *       falling to zero would drop it out of the world.
+ *
+ * 한국어
+ * ------
+ * @brief 몬스터를 그 아래에 있는 것으로 한 프레임만큼 끌어내립니다.
+ *
+ * @param[in]     l  바닥을 물어볼 레벨.
+ * @param[in]     S  몬스터의 종류. 신장이 정하는 단차 상한을 얻기 위함입니다.
+ * @param[in,out] m  끌어내릴 몬스터. 위치와 수직 속도가 바뀝니다.
+ * @param[in]     dt 시간 간격(초).
+ *
+ * @note 살아 있는 것과 시체 모두에 대해 실행됩니다. 누가 면제인지는 ::holds_height가 정하며 이
+ *       함수는 묻지 않습니다. 이것은 ::enemy_update 안에 인라인으로 있었고 그 둘 중 하나에서만
+ *       닿았습니다. 비행체의 시체가 공중에 걸리게 된 경위가 그것입니다.
+ * @note 바닥이 아예 없는 기둥, 즉 맵 바깥에서는 몬스터를 그대로 둡니다. ::level_ground의 0은
+ *       떨어질 높이가 아니며, 0으로 떨어뜨리면 세계 밖으로 빠집니다.
+ */
+static void monster_fall(const Level *l, const MonType *S, Enemy *m, float dt)
+{
+    float f, c;
+    if (!level_ground(l, m->pos.x, m->pos.z, m->pos.y, mon_step(S), &f, &c))
+        return;
+
+    if (m->pos.y > f + 0.01f)
+    {
+        m->vel_y -= PLAYER_GRAVITY * dt;
+        m->pos.y += m->vel_y * dt;
+        if (m->pos.y <= f)
+        {
+            m->pos.y = f;
+            m->vel_y = 0.0f;
+        }
+    }
+    else
+    {
+        m->pos.y = f;
+        m->vel_y = 0.0f;
+    }
 }
 
 /**
@@ -2331,13 +2701,13 @@ static void move_toward(const Level *l, const MonType *S, Enemy *m,
     /* A FLYER KEEPS ITS ALTITUDE THROUGH A MOVE, and this is the third and last
        place that had to be told. ::MON_FLIES skips the fall and ::make_monster
        places it high, and then this function put `m->pos.y = f` on every step
-       it took -- so a wraith spawned six metres up sank to the floor over the
+       it took -- so a caster spawned six metres up sank to the floor over the
        first second of walking, one move at a time, and the flag looked broken
        when what was broken was the assumption three functions deep that a
        monster's height is whatever is under it.
        비행체는 이동 중에도 고도를 유지하며, 이곳이 그것을 알려야 했던 세 번째이자 마지막
        지점입니다. ::MON_FLIES가 낙하를 건너뛰고 ::make_monster가 높이 배치하는데, 그다음 이
-       함수가 걸음마다 `m->pos.y = f`를 놓았습니다. 그래서 6미터 위에 생성된 레이스가 걷기
+       함수가 걸음마다 `m->pos.y = f`를 놓았습니다. 그래서 6미터 위에 생성된 캐스터가 걷기
        시작한 첫 1초 동안 한 걸음씩 바닥으로 가라앉았고, 플래그가 고장 난 것처럼 보였지만
        실제로 고장 난 것은 몬스터의 높이가 그 아래에 있는 것이라는, 함수 셋 깊이의
        가정이었습니다. */
@@ -2875,7 +3245,7 @@ static void release_bolt(Pools *pl, const Level *l, const MonType *S, Enemy *m, 
             float ry = (frand(&pl->enemy) * 2.0f - 1.0f) * S->spread * dist;
             aim = v3add(aim, v3add(v3scale(right, rx), v3scale(up, ry)));
         }
-        shot_fire(pl, from, aim, S->shot_speed, S->damage);
+        shot_fire(pl, from, aim, S->shot_speed, S->damage, m->type);
     }
     play_at(m->pos, "ecast", 90);
 }

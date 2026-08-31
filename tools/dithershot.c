@@ -302,6 +302,23 @@ int main(int argc, char **argv) {
     rd_mvp(vp);
     rd_eye(eye_pos);
 
+    /* NO DYNAMIC LIGHTS, EXPLICITLY, and that is what the game looks like
+       between shots. A level's lamps light nothing -- see scene.c's note above
+       ::MoveLight -- so what is left is the shader's ambient, its key, and
+       whatever sun the bake put in the vertices. This tool exists so the look
+       can be judged, and the look at rest is exactly this. Set rather than
+       assumed: the uniform holds whatever the last caller left in it, and a
+       shot lit by a leftover is a shot of a frame the game never draws.
+       *동적 광원 없음을 명시하며*, 그것이 사격과 사격 사이 게임의 모습입니다. 레벨의 등은
+       아무것도 밝히지 않으므로(scene.c의 ::MoveLight 위 설명을 참조하십시오) 남는 것은
+       셰이더의 주변광과 주광, 그리고 베이크가 정점에 넣어 둔 태양입니다. 이 도구는 룩을
+       판단하려고 존재하고, 휴지 상태의 룩이 정확히 이것입니다. 가정하지 않고 설정하는 이유는
+       유니폼이 마지막 호출자가 남긴 것을 담고 있기 때문이며, 남은 값으로 조명된 촬영은 게임이
+       결코 그리지 않는 프레임의 사진입니다. */
+    rd_lights(0, 0, 0);
+    printf("  %d lamp(s) declared, none of which lights anything\n",
+           lv.n_lights);
+
     /* `-time <seconds>` advances the clock animated materials run against, so
        the lava's flow can be captured at a chosen moment. Without this every
        shot is taken at t=0 and the animation is untestable -- a still frame of
@@ -375,7 +392,40 @@ int main(int argc, char **argv) {
             proj_boom_fx(&g_pools, at, v3f(0.0f, 1.0f, 0.0f),
                          AXE_SLAM_RADIUS, BLAST_TINT_SLAM);
         else
-            fx_spawn(&g_pools, argv[2], at, v3f(0.0f, 1.0f, 0.0f));
+            /* A COMMA-SEPARATED LIST, not one name, because "one effect cannot be
+               an explosion" -- effects.txt says so at the head of its own blast
+               section, and a tool that can only photograph one layer at a time can
+               therefore never photograph an explosion. It can only photograph the
+               nine things an explosion is made of, one at a time, which is the one
+               question nobody is asking: the layers are each fine on their own and
+               the whole point of the argument is what they do to each other.
+               SATURATION IS THE FAILURE THIS CATCHES. Additive quads composite to
+               white almost immediately -- two at 90% alpha reach 99.7% -- so the
+               risk of stacking layers is not that one is wrong, it is that six
+               right ones add up to a hole burnt in the frame. That cannot be seen
+               in six separate pictures.
+               이름 하나가 아니라 *쉼표로 구분된 목록*입니다. "하나의 이펙트는 폭발이 될 수
+               없다"고 effects.txt가 자기 폭발 절의 머리에서 말하고 있으며, 따라서 한 번에 한
+               겹만 촬영할 수 있는 도구는 폭발을 결코 촬영할 수 없습니다. 폭발을 이루는 아홉
+               가지를 하나씩 찍을 수 있을 뿐인데, 그것은 아무도 묻지 않는 질문입니다. 겹들은
+               각자 놓고 보면 다 괜찮고, 논의의 요점 전부는 그것들이 서로에게 하는 일입니다.
+               *이것이 잡아내는 실패는 포화입니다.* 가산 사각형은 거의 즉시 흰색으로 합성됩니다.
+               알파 90% 두 장이 99.7%에 이릅니다. 그러므로 겹을 쌓는 위험은 하나가 틀렸다는 것이
+               아니라, 옳은 여섯이 더해져 화면에 뚫린 구멍이 된다는 것입니다. 그것은 따로 찍은
+               사진 여섯 장에서는 볼 수 없습니다. */
+        {
+            char one[FX_NAME_LEN];
+            const char *s = argv[2];
+            int spawned = 0;
+            while (*s) {
+                int k = 0;
+                while (*s && *s != ',' && k < FX_NAME_LEN - 1) one[k++] = *s++;
+                one[k] = 0;
+                while (*s == ',') s++;
+                if (k) { fx_spawn(&g_pools, one, at, v3f(0.0f, 1.0f, 0.0f)); spawned++; }
+            }
+            printf("  %d layer(s) requested\n", spawned);
+        }
 
         for (int i = 0; i < at_frame; i++) fx_update(&g_pools, 1.0f / 60.0f);
 
@@ -404,7 +454,18 @@ int main(int argc, char **argv) {
     {
         DWORD n = GetModuleFileNameA(0, path, MAX_PATH);
         while (n > 0 && path[n - 1] != '\\') n--;
-        if (has_fx)            wsprintfA(path + n, "fx_%s.png", argv[2]);
+        if (has_fx) {
+            /* Commas are legal in a Windows filename and unreadable in a
+               directory listing beside eight other captures, so the list is
+               flattened to underscores on the way out.
+               쉼표는 Windows 파일 이름에 허용되지만, 다른 캡처 여덟 장과 나란히 놓인
+               목록에서는 읽을 수 없습니다. 그래서 나가는 길에 밑줄로 폅니다. */
+            char tag[128]; int k = 0;
+            for (const char *s = argv[2]; *s && k < (int)sizeof(tag) - 1; s++)
+                tag[k++] = (*s == ',') ? '_' : *s;
+            tag[k] = 0;
+            wsprintfA(path + n, "fx_%s.png", tag);
+        }
         else if (door_t > 0.0f) wsprintfA(path + n, "door_%s_%03d.png",
                                           level_name, (int)(door_t * 100.0f + 0.5f));
         else                    wsprintfA(path + n, "dither_duotone_%03d.png", d100);

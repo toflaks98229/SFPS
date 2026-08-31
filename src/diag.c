@@ -123,7 +123,6 @@ static const char *const DIAG_NAMES[DIAG_COUNT] = {
     "enemy",    /* DIAG_ENEMY_CAP    */
     "pickup",   /* DIAG_PICKUP_CAP   */
     "shot",     /* DIAG_SHOT_CAP     */
-    "blast",    /* DIAG_BLAST_CAP    */
     "sound",    /* DIAG_SOUND_CAP    */
     "door",     /* DIAG_DOOR_CAP     */
     "inflate",  /* DIAG_ASSET_INFLATE */

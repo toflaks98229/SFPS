@@ -64,6 +64,7 @@
 #include "scene.h"    /* scene_frame -- the order under test */
 #include "world.h"
 #include "proj.h"   /* proj_fire: putting a light in the air for the check below */
+#include "enemy.h"  /* Shot and MonTypeID: the bolt colour check places one by hand */
 #include "weapon.h"   /* the weapon's rules; scene_init takes one, so WinMain
                          does it separately from world_init and so does this */
 #include "font.h"
@@ -71,13 +72,29 @@
 #include "menu.h"
 #include "diag.h"
 
-/* Small on purpose. Every check reads the whole framebuffer back, and the
-   comparisons are between frames rather than against a reference, so
-   resolution buys nothing but readback time.
-   의도적으로 작습니다. 모든 검사가 프레임버퍼 전체를 읽어 오고, 비교는 기준 이미지가
-   아니라 프레임끼리이므로, 해상도는 읽기 시간 외에 아무것도 사지 않습니다. */
-#define VW 320
-#define VH 180
+/* Small on purpose, but NOT AS SMALL AS IT WAS. Every check reads the whole
+   framebuffer back, and the comparisons are between frames rather than against
+   a reference, so resolution buys nothing but readback time -- for every check
+   whose subject is somewhere near the middle of the frame.
+   THE MENU HEADERS ARE NOT. menu.c centres the row block and then measures the
+   header UPWARDS from it: menu_title_y is block_top(vh) - TITLE_GAP_FRONT, and
+   at 320x180 that lands at y = -155, above the top edge. The title screen drew
+   its name into nothing, so the check below -- the one that says settings must
+   not have that name over it -- passed at that size no matter what scene.c
+   did. 540 is the smallest 16:9 height that puts BOTH headers on screen: the
+   title's at y = 25, the settings page's (ten rows, so a taller block) at
+   y = 10.
+   의도적으로 작지만 *예전만큼 작지는 않습니다.* 모든 검사가 프레임버퍼 전체를 읽어 오고,
+   비교는 기준 이미지가 아니라 프레임끼리이므로 해상도는 읽기 시간 외에 아무것도 사지
+   않습니다. 대상이 프레임 한가운데 근처에 있는 검사에 대해서는 그렇습니다.
+   *메뉴 머리글은 그렇지 않습니다.* menu.c는 행 블록을 가운데에 두고 머리글을 거기서 *위로*
+   잽니다. menu_title_y는 block_top(vh) - TITLE_GAP_FRONT이며, 320x180에서 그것은 위쪽
+   가장자리 바깥인 y = -155에 놓입니다. 타이틀 화면은 자기 이름을 허공에 그렸고, 그래서 아래의
+   검사(설정 화면에 그 이름이 없어야 한다는 검사)는 scene.c가 무엇을 하든 그 크기에서
+   통과했습니다. 540은 머리글 *둘 다*를 화면 안에 넣는 가장 작은 16:9 높이입니다. 타이틀의
+   것은 y = 25, 설정 화면의 것은(행이 열이라 블록이 더 큽니다) y = 10입니다. */
+#define VW 960
+#define VH 540
 
 static int fails;
 
@@ -490,55 +507,159 @@ int main(void) {
     ok(frame_hash(&w, &scene, 1) == title_bare,
        "closing the title menu puts the frame back, so nothing leaked out of it");
 
-    /* --- 6. a level's lamps are baked, not uploaded ----------------------
-       The shader's light slots are for light that MOVES. A level's own lamps
-       are compiled into its vertices when it loads, so putting them in the
-       slots as well applies each lamp twice -- once smoothly and shadowed from
-       the bake, once per-pixel and unshadowed from the loop. That is what the
-       code did until this check existed, and it is invisible: a room lit twice
-       does not look broken, it looks bright.
+    /* --- a screen reached FROM the title has no title over it ------------
+     *
+     * `title` STAYS SET while settings and credits are up. They are opened
+     * from the title screen and the run has still not begun, so the name was
+     * drawn on them too -- over the header scene_draw_menu puts at the very
+     * same menu_title_y. Two headers, one printed on top of the other, and
+     * the only thing that said so was looking at it.
+     *
+     * ASKED THROUGH THE FADE CLOCK rather than by comparing two screens. The
+     * name arrives on title_time, so a frame that draws it CANNOT look the
+     * same at t = 0 and t = 2, and a frame that does not draw it cannot look
+     * different. That is the name's presence asked directly, and it needs
+     * nothing else about the two screens to be equal -- which is what a
+     * comparison against a settings page reached from a run would have needed,
+     * and that page has a HUD behind it.
+     *
+     * *타이틀에서 들어간 화면 위에는 타이틀이 없습니다.*
+     *
+     * 설정과 크레딧이 떠 있는 동안에도 `title`은 그대로 서 있습니다. 타이틀 화면에서 열리며
+     * 플레이는 여전히 시작되지 않았으므로, 이름이 그 위에도 그려졌습니다. scene_draw_menu가
+     * 정확히 같은 menu_title_y에 두는 머리글 위에 말입니다. 머리글 둘이 서로 겹쳐 찍혔고, 그것을
+     * 말해 주는 것은 눈으로 보는 것뿐이었습니다.
+     *
+     * *두 화면을 비교하지 않고 페이드 시계로 묻습니다.* 이름은 title_time에 따라 도착하므로,
+     * 그것을 그리는 프레임은 t = 0과 t = 2에서 같아 *보일 수 없고*, 그리지 않는 프레임은 달라
+     * 보일 수 없습니다. 이름의 존재를 직접 묻는 것이며, 두 화면에 관한 다른 무엇도 같을 것을
+     * 요구하지 않습니다. 플레이에서 들어간 설정 화면과 비교했다면 그것이 필요했을 텐데, 그
+     * 화면 뒤에는 HUD가 있습니다. */
+    printf("\n  --- settings and credits opened from the title ---\n");
 
-       arena is loaded above and has four lamps, so a world pass that uploads
-       any dynamic light at all is uploading those.
+    menu_open_title();
+    w.run.title_time = 0.0f;
+    unsigned title_t0 = frame_hash(&w, &scene, 1);
+    w.run.title_time = 2.0f;
+    ok(frame_hash(&w, &scene, 1) != title_t0,
+       "the name fades in on the title screen, so its clock shows there");
 
-       셰이더의 광원 슬롯은 *움직이는* 빛을 위한 것입니다. 레벨 자신의 등은 로드될 때 정점에
-       구워지므로, 그것을 슬롯에도 넣으면 각 등이 두 번 적용됩니다. 한 번은 베이크에서
-       부드럽고 그림자가 진 채로, 한 번은 반복문에서 픽셀 단위로 그림자 없이. 이 검사가 생기기
-       전까지 코드가 하던 일이며, 보이지 않습니다. 두 번 밝혀진 방은 고장 나 보이지 않고
-       *밝아* 보입니다.
+    /* STORY -> ENDLESS -> SETTINGS. The locked row is landed on rather than
+       skipped, which is why this is two steps and not one.
+       STORY -> ENDLESS -> SETTINGS입니다. 잠긴 행은 건너뛰어지지 않고 그 위에 놓이므로, 한
+       걸음이 아니라 두 걸음입니다. */
+    menu_move(2);
+    menu_activate();
+    ok(menu_screen() == MENU_SETTINGS, "SETTINGS opened from the title");
 
-       위에서 로드한 arena에는 등이 넷 있으므로, 동적 광원을 하나라도 업로드하는 월드
-       패스는 곧 그 등들을 업로드하고 있는 것입니다. */
-    printf("\n  --- the level's lamps are baked, not uploaded ---\n");
+    unsigned settings_t2 = frame_hash(&w, &scene, 1);
+    w.run.title_time = 0.0f;
+    ok(frame_hash(&w, &scene, 1) == settings_t2,
+       "and no name is drawn over it, whatever the name's clock says");
+
+    w.run.title_time = 2.0f;
+    menu_escape();
+    ok(menu_screen() == MENU_TITLE, "ESC steps back to the title");
+    ok(frame_hash(&w, &scene, 1) != settings_t2,
+       "and the name comes back with the screen it belongs to");
+
+    menu_move(3);
+    menu_activate();
+    ok(menu_screen() == MENU_CREDITS, "CREDITS opened from the title");
+
+    unsigned credits_t2 = frame_hash(&w, &scene, 1);
+    w.run.title_time = 0.0f;
+    ok(frame_hash(&w, &scene, 1) == credits_t2,
+       "and the licence screen carries no title over its own header either");
+
+    w.run.title_time = 2.0f;
+    menu_close();
+
+    /* --- 6. a lamp put into a level lights nothing -----------------------
+       THIS CHECK HAS POINTED BOTH WAYS AND THEN LOST ITS SUBJECT, and the
+       history is why the shape it ends up in is what it is. It began as "the
+       lamps occupy no dynamic slot", because they were baked into the vertices
+       and being in both places applies each one twice. It became "the lamps
+       occupy their slots", because the bake sampled them at the corners of
+       faces metres across and they had moved to the shader's loop. Then they
+       were switched off in the loop as well -- and then deleted from the level
+       files, so no shipped map declares one at all.
+
+       A CHECK THAT ONLY READS THE SHIPPED LEVELS WOULD NOW PASS FOR THE WRONG
+       REASON. Zero lamps in, zero slots out, and it would go on passing if
+       somebody wired ::Level::lights straight back into ::scene_lights. So
+       this puts the lamps in itself. Eight of them, on top of the camera,
+       reaching twenty metres -- placed where they would take every slot and
+       light every wall in sight if anything read them at all -- and requires
+       the count to stay put and the frame not to change by a single pixel.
+
+       The other half of the same fact -- that they do not reach a VERTEX
+       either -- is leveltest's and tracetest's, because this file has no
+       vertices to look at. Neither half announces itself: a room lit twice
+       looks bright, a room lit once looks fine, and only the pair says which
+       arrangement is in force.
+
+       *이 검사는 양쪽을 모두 가리켜 보았고 그다음 대상을 잃었으며*, 그 이력이 최종적인 형태의
+       이유입니다. 처음에는 "등은 동적 슬롯을 차지하지 않는다"였습니다. 등이 정점에 구워져
+       있었고 양쪽에 있으면 각각 두 번 적용되기 때문입니다. 다음에는 "등은 자기 슬롯을
+       차지한다"가 되었습니다. 베이크가 몇 미터짜리 면의 모서리에서 표본추출했고 등은 셰이더의
+       반복문으로 옮겨 갔기 때문입니다. 그 뒤 반복문에서도 꺼졌고, 이어서 레벨 파일에서
+       삭제되어 이제 어떤 출하 맵도 등을 선언하지 않습니다.
+
+       *출하 레벨만 읽는 검사는 이제 엉뚱한 이유로 통과합니다.* 등 0개가 들어가고 슬롯 0개가
+       나오며, 누군가 ::Level::lights를 ::scene_lights에 그대로 다시 연결해도 계속 통과할
+       것입니다. 그래서 이 검사는 등을 스스로 넣습니다. 카메라 위에 여덟 개, 20미터를 미치도록.
+       무엇이든 그것을 읽기만 한다면 모든 슬롯을 차지하고 보이는 모든 벽을 밝힐 자리에
+       놓고서, 개수가 그대로일 것과 프레임이 단 한 픽셀도 바뀌지 않을 것을 요구합니다.
+
+       같은 사실의 나머지 절반, 곧 등이 *정점*에도 도달하지 않는다는 것은 leveltest와
+       tracetest의 몫입니다. 이 파일에는 볼 정점이 없기 때문입니다. 어느 절반도 스스로를
+       드러내지 않습니다. 두 번 밝혀진 방은 밝아 보이고 한 번 밝혀진 방은 멀쩡해 보이며, 어느
+       배치가 적용되고 있는지는 그 쌍만이 말합니다. */
+    printf("\n  --- a lamp put into a level lights nothing ---\n");
 
     clear_state(&w);
-    frame_hash(&w, &scene, 0);
+    unsigned bare = frame_hash(&w, &scene, 0);
     printf("      the level declares %d lamps; the shader was given %d\n",
            w.level.n_lights, rd_light_count());
-    ok(w.level.n_lights > 0, "the level under test actually has lamps");
-    ok(rd_light_count() == 0,
-       "and none of them occupy a dynamic light slot");
+    ok(w.level.n_lights == 0, "no shipped level declares a lamp any more");
+    ok(rd_light_count() == 0, "and nothing occupies a light slot");
 
-    /* --- and the slots are not merely unused -----------------------------
-       The check above passes just as well when nothing can ever fill a slot,
-       which is exactly the state this code was in: rd_lights(0,0,0) sat at the
-       end of the world pass and emptied the array every frame, so "no lamp
-       occupies a slot" was true because NOTHING did. That is a weaker fact
-       than it reads as, and it held for as long as the feature was missing.
+    int saved = w.level.n_lights;
+    for (int i = 0; i < RD_MAX_LIGHTS && w.level.n_lights < LVL_MAX_LIGHTS; i++) {
+        Light *L = &w.level.lights[w.level.n_lights++];
+        L->x = (short)(w.player.pos.x * 100.0f);
+        L->y = (short)(w.player.pos.y * 100.0f);
+        L->z = (short)(w.player.pos.z * 100.0f);
+        L->radius = 2000;              /* twenty metres: would light plenty */
+        L->r = L->g = L->b = 255;
+        L->power = 100;
+    }
+    unsigned lamped = frame_hash(&w, &scene, 0);
+    printf("      %d lamps placed on the camera; the shader was given %d\n",
+           w.level.n_lights, rd_light_count());
+    ok(rd_light_count() == 0, "lamps on top of the camera still take no slot");
+    ok(lamped == bare, "and change no pixel of the frame");
 
-       Putting a grenade in the air separates the two. If the count is still
-       zero with one live projectile, the moving-light feed is gone again and
-       the assertion above has quietly gone back to proving nothing.
+    w.level.n_lights = saved;
 
-       그리고 슬롯이 단지 *쓰이지 않는* 것이 아님을 확인합니다.
-       위의 검사는 슬롯을 채울 수 있는 것이 아예 없을 때에도 똑같이 통과하며, 이 코드가 바로 그
-       상태에 있었습니다. rd_lights(0,0,0)이 월드 패스 끝에 앉아 매 프레임 배열을 비웠으므로,
-       "어떤 등도 슬롯을 차지하지 않는다"는 *아무것도* 차지하지 않았기 때문에 참이었습니다.
-       읽히는 것보다 약한 사실이며, 기능이 없는 동안 내내 유지되었습니다.
+    /* --- and the slots are not merely unusable ---------------------------
+       Every check above passes just as well when nothing can ever fill a slot,
+       which is a state this code has been in before: rd_lights(0,0,0) once sat
+       at the end of the world pass and emptied the array every frame, so "no
+       lamp occupies a slot" was true because NOTHING did. That is a weaker
+       fact than it reads as, and it held for as long as the feature was
+       missing.
 
-       유탄을 공중에 띄우면 둘이 갈라집니다. 살아 있는 발사체가 하나 있는데도 개수가 여전히
-       0이라면 움직이는 광원 공급이 다시 사라진 것이고, 위의 단언은 조용히 아무것도 증명하지
-       않는 상태로 되돌아간 것입니다. */
+       Putting a grenade in the air separates the two.
+
+       그리고 슬롯이 단지 *채울 수 없는* 것이 아님을 확인합니다. 위의 모든 검사는 슬롯을 채울
+       수 있는 것이 아예 없을 때에도 똑같이 통과하며, 이 코드는 전에 그 상태에 있었습니다.
+       rd_lights(0,0,0)이 월드 패스 끝에 앉아 매 프레임 배열을 비웠으므로, "어떤 등도 슬롯을
+       차지하지 않는다"는 *아무것도* 차지하지 않았기 때문에 참이었습니다. 읽히는 것보다 약한
+       사실이며, 기능이 없는 동안 내내 유지되었습니다.
+
+       유탄을 공중에 띄우면 둘이 갈라집니다. */
     clear_state(&w);
     proj_fire(&w.pools, w.player.pos, v3f(0.0f, 0.0f, -1.0f),
               12.0f,   /* speed   */
@@ -549,8 +670,7 @@ int main(void) {
     frame_hash(&w, &scene, 0);
     printf("      with one projectile in the air the shader was given %d\n",
            rd_light_count());
-    ok(rd_light_count() > 0,
-       "a projectile in flight does occupy one");
+    ok(rd_light_count() == 1, "a projectile in flight does occupy one");
 
     /* Back to rest, so the passes after this one are not lit by a leftover.
        proj_reset AS WELL AS clear_state, because they clear different things:
@@ -568,6 +688,114 @@ int main(void) {
     proj_reset(&w.pools);
     frame_hash(&w, &scene, 0);
     ok(rd_light_count() == 0, "and the set empties again once it is gone");
+
+    /* --- 6a2. and the explosion lights what the projectile stopped lighting
+       THE CHECK ABOVE IS EXACTLY THE FAULT THIS ONE IS ABOUT. It puts a
+       grenade in the air, sees one slot filled, takes the grenade away and
+       sees the slot empty -- and for one release that WAS the whole story:
+       ::detonate cleared `active`, the light went with it, and the frame in
+       which the room should have been at its brightest was the frame in which
+       it went back to ambient. The pair of checks above passed the entire time,
+       because "the set empties once the round is gone" is true either way.
+
+       Placed by hand rather than by detonating something, and the reason is
+       what this file is: ::scene_frame is under test here, not ::proj_update.
+       tools\weapontest.c is where a grenade is made to go off and the record it
+       leaves is inspected; this asks the one question that needs a context --
+       whether ::scene_lights hands that record to the shader.
+
+       위의 검사가 바로 이 검사가 다루는 결함 자체입니다. 유탄을 공중에 띄우고 슬롯 하나가
+       차는 것을 보고, 유탄을 치우고 슬롯이 비는 것을 봅니다. 그리고 한 판 동안 그것이 이야기의
+       전부였습니다. ::detonate가 `active`를 지웠고 빛도 함께 사라졌으며, 방이 가장 밝아야 할
+       프레임이 방이 주변광으로 돌아가는 프레임이었습니다. 위의 두 검사는 그동안 내내
+       통과했습니다. "탄이 사라지면 집합도 빈다"는 어느 쪽이든 참이기 때문입니다.
+
+       무언가를 터뜨리는 대신 손으로 놓는 이유는 이 파일이 무엇인지에 있습니다. 이곳에서
+       시험되는 것은 ::proj_update가 아니라 ::scene_frame입니다. 유탄을 실제로 터뜨리고 그것이
+       남긴 기록을 살피는 곳은 tools\weapontest.c이며, 이곳은 컨텍스트가 필요한 하나의 질문만
+       묻습니다. ::scene_lights가 그 기록을 셰이더에 건네는가. */
+    clear_state(&w);
+    proj_reset(&w.pools);
+    proj_flash(&w.pools, w.player.pos, PROJ_BLAST_RADIUS, 1.0f, FLASH_BLAST, -1);
+    frame_hash(&w, &scene, 0);
+    printf("      with one detonation and no projectile the shader was given %d\n",
+           rd_light_count());
+    ok(rd_light_count() == 1,
+       "a blast lights the frame after the round that made it is gone");
+
+    /* Twice its own life, so nothing is left to argue about. ::proj_reset
+       would clear the pool too, but ageing it out is what proves the slot is
+       released by the flash ENDING rather than by the pool being emptied.
+       자기 수명의 두 배만큼 진행시키므로 논쟁의 여지가 없습니다. ::proj_reset으로도 풀을
+       비울 수 있지만, 나이를 먹여 없애는 것이야말로 슬롯이 풀이 비워져서가 아니라 섬광이
+       *끝나서* 반납된다는 것을 증명합니다. */
+    proj_flash_update(&w.pools, PROJ_FLASH_TIME * 2.0f);
+    frame_hash(&w, &scene, 0);
+    ok(rd_light_count() == 0, "and the room is dark again once it is over");
+
+    /* --- 6b. a bolt is coloured by whoever cast it ------------------------
+       ONE FIELD, TWO READERS, AND NEITHER OF THEM IS OBLIGED TO AGREE.
+       ::Shot::type picks a row of LIGHT_COL_SHOT twice over: ::scene_lights
+       uses it for the light the bolt throws on the wall, ::scene_draw_shots
+       for the glow the bolt itself is drawn as. They are separate functions
+       reading the same table, which is exactly the arrangement that drifts --
+       and the failure it drifts into is the one that table's own note names,
+       a wall lit violet with a blue bolt in front of it.
+
+       So this changes the type and NOTHING else. Same position, same life,
+       same damage, same frame -- so a difference in the picture can only have
+       come through the colour lookup. Caster against maw because those two
+       rows are the furthest apart in the table, cold blue against warm
+       crimson: a comparison between neighbouring hues could come out equal
+       after the resolve pass quantises, and prove nothing.
+
+       *필드 하나, 읽는 곳 둘, 그리고 그 둘은 일치할 의무가 없습니다.* ::Shot::type은
+       LIGHT_COL_SHOT의 행을 두 번 고릅니다. ::scene_lights는 볼트가 벽에 던지는 빛을 위해,
+       ::scene_draw_shots는 볼트 자신이 그려지는 발광을 위해 씁니다. 같은 표를 읽는 별개의
+       함수이며, 바로 그런 배치가 어긋납니다. 어긋나서 도달하는 실패가 그 표 자신의 설명이
+       지목하는 것입니다. 보라색으로 밝혀진 벽 앞의 파란 볼트.
+
+       그래서 이 검사는 종류만 바꾸고 나머지는 아무것도 바꾸지 않습니다. 같은 위치, 같은 수명,
+       같은 피해량, 같은 프레임이므로, 그림의 차이는 색 조회를 통해서만 올 수 있습니다.
+       캐스터와 아귀인 이유는 표에서 그 둘의 행이 가장 멀기 때문입니다. 차가운 파랑과 따뜻한
+       진홍입니다. 이웃한 색조끼리의 비교는 해상 패스가 양자화한 뒤 같아질 수 있고, 그러면
+       아무것도 증명하지 못합니다. */
+    printf("\n  --- a bolt is coloured by whoever cast it ---\n");
+
+    clear_state(&w);
+    {
+        /* Placed by hand rather than fired: shot_fire is static to enemy.c and
+           reaching it would mean standing a caster up, walking it into range
+           and waiting out a wind-up -- three things that can fail for reasons
+           that are enemytest's, not this file's.
+           발사하지 않고 손으로 놓습니다. shot_fire는 enemy.c에 static이고 그것에 닿으려면
+           캐스터를 세우고 사거리 안으로 걸어 들어오게 한 뒤 예비 동작을 기다려야 하는데, 그
+           셋은 이 파일이 아니라 enemytest의 몫인 이유로 실패할 수 있습니다. */
+        float cy = cosf(w.yaw), sy = sinf(w.yaw);
+        v3 fwd = v3f(-sy, 0.0f, -cy);
+
+        Shot *sh = &w.pools.enemy.shots[0];
+        sh->pos    = v3add(w.player.pos, v3scale(fwd, 3.0f));
+        sh->vel    = v3f(0.0f, 0.0f, 0.0f);
+        sh->life   = 3.0f;
+        sh->damage = 10;
+        sh->active = 1;
+
+        sh->type = MON_CASTER;
+        unsigned as_caster = frame_hash(&w, &scene, 0);
+        ok(rd_light_count() == 1, "the hand-placed bolt lights the frame");
+
+        sh->type = MON_MAW;
+        unsigned as_maw = frame_hash(&w, &scene, 0);
+
+        ok(as_caster != as_maw,
+           "and the same bolt from a different caster is a different frame");
+
+        sh->active = 0;
+        sh->life   = 0.0f;
+    }
+    frame_hash(&w, &scene, 0);
+    ok(rd_light_count() == 0, "the bolt is gone again");
 
     /* --- 7. what the boundary counted -----------------------------------
        Last, so it covers every frame above. A non-zero delta means one of

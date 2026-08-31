@@ -159,39 +159,265 @@
  */
 #define BLAST_TINT_SLAM    ((FxTint){ 255, 196, 172 })
 
-/**
- * @brief Explosions one frame may hand over before the extras are dropped.
- *
- * ENGLISH
- * -------
- * A frame with nine detonations in it is a frame with a grenade volley landing
- * on the same tile, and the tenth would be raising a shake that the first nine
- * have already raised louder. Eight is chosen against what a frame can
- * plausibly hold rather than against ::PROJ_MAX, which counts what is in the
- * AIR: they go off one at a time, on their own fuses.
- *
- * The overflow is reported through ::DIAG_BLAST_CAP rather than silently
- * dropped -- the same rule ::proj_fire follows when the pool turns a shot away.
- *
- * 한국어
- * ------
- * @brief 한 프레임이 넘겨줄 수 있는 폭발의 수. 초과분은 버려집니다.
- *
- * 한 프레임에 폭발이 아홉이라는 것은 유탄 일제 사격이 같은 칸에 떨어졌다는 뜻이며, 열 번째는
- * 앞의 아홉이 이미 더 크게 올려 둔 흔들림을 다시 올릴 뿐입니다. 8은 ::PROJ_MAX가 아니라 한
- * 프레임이 실제로 담을 수 있는 양을 기준으로 골랐습니다. ::PROJ_MAX가 세는 것은 *공중에* 있는
- * 것이고, 그것들은 각자의 도화선에 따라 하나씩 터집니다.
- *
- * 초과는 조용히 버리지 않고 ::DIAG_BLAST_CAP으로 보고합니다. 풀이 사격을 거절할 때
- * ::proj_fire가 따르는 것과 같은 규칙입니다.
- */
-#define PROJ_BLAST_LOG 8
-
 /** @brief Speed kept after bouncing off a surface. / 표면에 튕긴 뒤 유지되는 속도의 비율. */
 #define PROJ_BOUNCE 0.42f
 
 /** @brief Radius used against walls and monsters, metres. / 벽과 몬스터에 대한 판정 반경 (미터). */
 #define PROJ_RADIUS 0.18f
+
+/* --- the flash a detonation leaves ----------------------------------------
+ *
+ * ENGLISH
+ * -------
+ * A GRENADE LIT THE ROOM RIGHT UP TO THE MOMENT IT WENT OFF, AND NOT AFTER.
+ * scene.c offers every round in flight to the shader as a point light --
+ * ::LIGHT_PROJ_POWER, steady for the whole flight -- and ::detonate clears
+ * `active`. So the brightest event in this game was the one frame in which the
+ * room got DARKER: the fireball is six layers of additive particle drawn in
+ * front of geometry that fell back to ambient, because the only thing that had
+ * been lighting it was the round that had just stopped existing.
+ *
+ * A ::Flash is that missing half. It is neither a particle nor a projectile:
+ * it is a record that something went off HERE, THIS BIG, THIS RECENTLY, kept
+ * because three separate readers each ask it a different question.
+ *
+ *   how bright is the room   ::scene_lights, which hands it to the shader
+ *   how hard is the camera   ::world_step, which shakes by distance from it
+ *   how long ago was it      both, through ::proj_flash_fade -- ONE curve, so
+ *                            the light and the jolt cannot come to different
+ *                            conclusions about when the explosion was over
+ *
+ * WHY IT IS NOT A PARTICLE. fx.c would hold it happily and could answer none
+ * of the three. A particle is written to be drawn and nothing may ask where it
+ * is; the pool evicts the oldest without asking whether something is still
+ * reading it; and a light has to last exactly as long as it is bright, where a
+ * burst is authored to last as long as it is still expanding. The blast smoke
+ * lives 900ms and the light that made it is over in a third of that.
+ *
+ * WHY IT IS IN THIS FILE. ::detonate is what makes one, and a detonation is
+ * this module's event -- the same reason ::proj_blast is here rather than in
+ * enemy.c even though every monster it damages belongs to that one. The light
+ * an explosion throws is the same fact seen from the renderer's side.
+ *
+ * 한국어
+ * ------
+ * *유탄은 터지기 직전까지 방을 밝혔고, 터진 뒤에는 밝히지 않았습니다.* scene.c는 비행 중인
+ * 모든 탄을 점광원으로 셰이더에 제안하며(::LIGHT_PROJ_POWER, 비행 내내 일정) ::detonate는
+ * `active`를 지웁니다. 그래서 이 게임에서 가장 밝은 사건이, 방이 오히려 *어두워지는* 한
+ * 프레임이었습니다. 화구는 가산 입자 여섯 겹으로 그려지는데 그 뒤의 지오메트리는 주변광으로
+ * 되돌아갑니다. 그것을 밝히던 유일한 것이 방금 존재하기를 그만둔 그 탄이었기 때문입니다.
+ *
+ * ::Flash가 그 빠진 절반입니다. 입자도 발사체도 아닙니다. *여기서, 이만큼 크게, 이만큼
+ * 최근에* 무언가가 터졌다는 기록이며, 세 명의 서로 다른 독자가 각각 다른 질문을 던지기
+ * 때문에 존재합니다.
+ *
+ *   방이 얼마나 밝은가   ::scene_lights. 이것을 셰이더에 건넵니다
+ *   카메라가 얼마나 흔들리는가   ::world_step. 이것으로부터의 거리로 흔듭니다
+ *   얼마나 지났는가   양쪽 모두. ::proj_flash_fade를 통해 *하나의* 곡선을 쓰므로, 빛과
+ *                     충격이 폭발이 언제 끝났는지에 대해 서로 다른 결론에 이를 수 없습니다
+ *
+ * *왜 입자가 아닌가.* fx.c는 이것을 기꺼이 담겠지만 셋 중 어느 것에도 답하지 못합니다.
+ * 입자는 그려지기 위해 쓰이며 그 위치를 물을 수 있는 것이 없고, 풀은 누군가 아직 읽고
+ * 있는지 묻지 않고 가장 오래된 것을 밀어내며, 빛은 밝은 동안만 지속되어야 하는데 폭발은
+ * 아직 퍼지는 동안 지속되도록 작성됩니다. 폭발 연기는 900ms를 살고 그것을 만든 빛은 그
+ * 3분의 1 만에 끝납니다.
+ *
+ * *왜 이 파일인가.* ::detonate가 이것을 만들고, 폭발은 이 모듈의 사건입니다. ::proj_blast가
+ * 피해를 주는 몬스터가 전부 enemy.c의 것인데도 이 파일에 있는 것과 같은 이유입니다. 폭발이
+ * 던지는 빛은 같은 사실을 렌더러 쪽에서 본 것입니다. */
+
+/**
+ * @brief Detonations whose light is still up at once.
+ *
+ * ENGLISH: The ring overwrites the oldest. Six was right while a flash meant a
+ * DETONATION and nothing else: one lasts ::PROJ_FLASH_TIME and the launcher's
+ * cooldown is 0.85s, nearly three times that, so only a volley thrown ahead
+ * and arriving together could fill it.
+ *
+ * RAISED TO SIXTEEN BECAUSE A HIT IS NOW A FLASH TOO. The rapid fires every
+ * 85ms and every bolt that lands leaves one, so four of the player's own are
+ * alive at any moment before a single monster has fired back -- and at six
+ * slots the fifth plasma ping would evict the grenade that went off half a
+ * second ago, which is the one light in the room worth having. The cost of
+ * being wrong here is silent and specific: the biggest event on screen is the
+ * one that stops lighting anything.
+ *
+ * 한국어: @brief 빛이 아직 남아 있는 사건의 동시 개수.
+ * 링이 가장 오래된 것을 덮어씁니다. 섬광이 *폭발*만을 뜻하던 동안에는 여섯이 옳았습니다.
+ * 하나가 ::PROJ_FLASH_TIME 동안 지속되고 발사기 쿨다운은 그 세 배에 가까운 0.85초이므로,
+ * 미리 던져 두어 한꺼번에 도착하는 일제 사격만이 그것을 채울 수 있었습니다.
+ *
+ * *피탄도 이제 섬광이므로 열여섯으로 올렸습니다.* 연사는 85ms마다 쏘고 명중한 탄마다 하나를
+ * 남기므로, 몬스터가 한 발도 되쏘기 전에 플레이어 자신의 것 넷이 언제나 살아 있습니다. 슬롯이
+ * 여섯이면 다섯 번째 플라즈마 피탄이 0.5초 전에 터진 유탄을 밀어내는데, 그것이야말로 방에서
+ * 가질 값어치가 있는 유일한 빛입니다. 이곳에서 틀렸을 때의 대가는 조용하고 구체적입니다.
+ * 화면에서 가장 큰 사건이 아무것도 밝히지 않게 됩니다.
+ */
+#define PROJ_MAX_FLASHES 16
+
+/**
+ * @brief What made a ::Flash, so the renderer can pick its colour.
+ *
+ * ENGLISH
+ * -------
+ * A KIND AND NOT A COLOUR, because colour is scene.c's and always has been --
+ * every hue in this game is in one table there, under a note that says warm is
+ * yours and cold is theirs. A `float col[3]` on this record would be the
+ * second place a light's colour can be decided, and the two would drift the
+ * first time somebody retuned one of them.
+ *
+ * It stopped being optional when a hit became a flash. A detonation could get
+ * away with no kind at all -- there was only one blast colour, and scene.c
+ * simply named it -- but a plasma bolt striking a wall has to light it in the
+ * bolt's own green, and a monster's has to light it in that creature's row of
+ * ::LIGHT_COL_SHOT, or the wall goes one colour while the burst on it goes
+ * another. That is the failure ::LIGHT_COL_SHOT's own note warns about, and
+ * this enum is the half of the fix that lives on this side of the line.
+ *
+ * 한국어
+ * ------
+ * @brief ::Flash를 만든 것이 무엇인지. 렌더러가 색을 고를 수 있게 합니다.
+ *
+ * *색이 아니라 종류입니다.* 색은 언제나 scene.c의 것이었기 때문입니다. 이 게임의 모든 색조는
+ * 그곳의 한 표에 있고, 따뜻한 것은 당신 것이고 차가운 것은 그들 것이라는 설명이 붙어
+ * 있습니다. 이 기록에 `float col[3]`을 두면 광원의 색을 정할 수 있는 곳이 둘이 되고, 둘 중
+ * 하나를 다시 조정하는 순간 어긋나기 시작합니다.
+ *
+ * 피탄이 섬광이 되면서 이것은 선택 사항이기를 그만두었습니다. 폭발은 종류가 아예 없어도
+ * 괜찮았습니다. 폭발 색은 하나뿐이었고 scene.c가 그냥 이름을 댔습니다. 그러나 벽을 때린
+ * 플라즈마 볼트는 그 볼트 자신의 녹색으로 벽을 밝혀야 하고, 몬스터의 것은 그 생물의
+ * ::LIGHT_COL_SHOT 행으로 밝혀야 합니다. 그러지 않으면 벽은 한 색이고 그 위의 폭발은 다른
+ * 색입니다. ::LIGHT_COL_SHOT 자신의 설명이 경고하는 실패가 그것이며, 이 열거형은 그 수정의
+ * 이쪽 절반입니다.
+ */
+enum {
+    FLASH_BLAST = 0, /**< A charge going off. White at the instant, its own orange leaving. / 장약이 터짐. 순간에는 흰색, 사그라들며 자기 주황. */
+    FLASH_BOLT,      /**< The player's plasma bolt landing. / 플레이어의 플라즈마 볼트가 닿음. */
+    FLASH_SHOT       /**< A monster's bolt landing; ::Flash::type says whose. / 몬스터의 볼트가 닿음. 누구의 것인지는 ::Flash::type. */
+};
+
+/**
+ * @brief Seconds a detonation's light lasts.
+ *
+ * ENGLISH: Shorter than any layer of the burst it belongs to -- the core is
+ * 170ms and the smoke 900 -- because this is the FIREBALL and not the fire.
+ * A light held for as long as the smoke would say the room is still burning
+ * while what is left of the explosion is a grey cloud drifting upward.
+ *
+ * 한국어: @brief 폭발의 빛이 지속되는 시간(초).
+ * 자신이 속한 폭발의 어느 겹보다도 짧습니다. 코어가 170ms, 연기가 900ms입니다. 이것은
+ * *화구*이지 불이 아니기 때문입니다. 연기만큼 오래 유지되는 빛은, 폭발에서 남은 것이
+ * 떠오르는 회색 구름뿐인데도 방이 아직 타고 있다고 말하게 됩니다.
+ */
+#define PROJ_FLASH_TIME 0.30f
+
+/**
+ * @brief Metres the ground wave is lifted off the surface it runs across.
+ *
+ * ENGLISH
+ * -------
+ * `blastwave` is `face normal`, which means its quads lie IN the plane of the
+ * surface -- and a quad in the same plane as the floor it is drawn on has no
+ * answer to the depth test. It flickers, per fragment, differently every frame
+ * as the camera moves, which reads as the floor being broken rather than as
+ * anything having gone off on it.
+ *
+ * The same nudge ::decal_hit makes for the same reason, and larger than its
+ * 0.012 because these quads are up to half a metre across where a bullet hole
+ * is 8.5cm: a big flat quad at a glancing angle needs more clearance than a
+ * small one before the near edge dips back under.
+ *
+ * @note Applied by the CALLERS rather than inside the effect, because the
+ *       effect file has no way to express it -- `spawn` is a radius in every
+ *       direction, not an offset along one -- and because both callers already
+ *       hold the normal they would have to be handed.
+ *
+ * 한국어
+ * ------
+ * @brief 지면 파동이 자신이 가로지르는 표면에서 들어 올려지는 거리 (미터).
+ *
+ * `blastwave`는 `face normal`이며, 그 사각형들이 표면과 *같은 평면에* 눕는다는 뜻입니다.
+ * 그리고 자신이 그려지는 바닥과 같은 평면에 있는 사각형은 깊이 테스트에 답할 것이 없습니다.
+ * 프래그먼트 단위로, 카메라가 움직일 때마다 다르게 깜박이며, 그것은 바닥에서 무슨 일이
+ * 일어났다는 것이 아니라 바닥이 고장 났다는 뜻으로 읽힙니다.
+ *
+ * ::decal_hit이 같은 이유로 하는 것과 같은 밀어내기이며, 그쪽의 0.012보다 큽니다. 탄흔은
+ * 8.5cm인데 이 사각형들은 최대 0.5미터에 이르기 때문입니다. 비스듬히 놓인 큰 평면 사각형은
+ * 가까운 쪽 모서리가 다시 아래로 잠기기 전까지 작은 것보다 더 많은 여유를 필요로 합니다.
+ *
+ * @note 이펙트 안이 아니라 *호출자*가 적용합니다. 이펙트 파일에는 이것을 표현할 방법이 없고
+ *       (`spawn`은 한 방향의 오프셋이 아니라 모든 방향의 반경입니다), 두 호출자 모두 자기에게
+ *       건네져야 할 법선을 이미 들고 있기 때문입니다.
+ */
+#define PROJ_WAVE_LIFT 0.05f
+
+/**
+ * @brief Metres a landing bolt's light claims, and how big an event it is.
+ *
+ * ENGLISH
+ * -------
+ * A BOLT HAS NO DAMAGE RADIUS, so unlike every other ::proj_flash caller this
+ * one cannot read its number off the thing that happened -- there is nothing
+ * to read. It is a look, and the reason it is a number here rather than in
+ * scene.c is that scene.c multiplies whatever it is given by a reach of its
+ * own: what this says is how big the event was in the world, and what that
+ * says is how far a light of that size carries. The two are different
+ * questions and a hit that lit a room like a grenade would be answering the
+ * wrong one.
+ *
+ * Small on purpose, and dim. Quake II gives its blaster impact a light of 150
+ * against a rocket's 350, and Xonotic's `electro_impact` a lightradius of 250
+ * that fades over the same distance; both are pings rather than events. The
+ * rapid puts one of these on a wall every 85ms, and a ping that lit the room
+ * properly would strobe it.
+ *
+ * 한국어
+ * ------
+ * @brief 착탄한 볼트의 빛이 주장하는 거리(미터)와, 그것이 얼마나 큰 사건인가.
+ *
+ * *볼트에는 피해 반경이 없으므로*, 다른 모든 ::proj_flash 호출자와 달리 이쪽은 일어난 일에서
+ * 수를 읽어 낼 수 없습니다. 읽을 것이 없습니다. 이것은 겉모습이며, scene.c가 아니라 이곳의
+ * 수인 이유는 scene.c가 건네받은 것에 자기 몫의 도달 거리를 곱하기 때문입니다. 이것이 말하는
+ * 것은 사건이 세계에서 얼마나 컸는가이고, 그쪽이 말하는 것은 그 크기의 빛이 얼마나 멀리
+ * 가는가입니다. 둘은 다른 질문이며, 유탄처럼 방을 밝히는 피탄은 틀린 쪽에 답하는 것입니다.
+ *
+ * 의도적으로 작고 어둡습니다. Quake II는 블래스터 피탄에 로켓의 350에 대해 150의 빛을 주고,
+ * Xonotic의 `electro_impact`는 같은 거리에 걸쳐 사그라드는 250의 lightradius를 줍니다. 둘 다
+ * 사건이 아니라 신호입니다. 연사는 85ms마다 이것을 벽에 하나씩 놓으며, 방을 제대로 밝히는
+ * 신호는 방을 점멸시킵니다.
+ */
+#define PROJ_HIT_RADIUS 1.20f   ///< @brief Metres. / 미터.
+#define PROJ_HIT_POWER  0.55f   ///< @brief 0..1, against a charge's 1. / 0..1. 장약의 1에 대하여.
+
+/**
+ * @brief Seconds between the puffs a projectile lays down behind it.
+ *
+ * ENGLISH
+ * -------
+ * A FIXED INTERVAL AND NOT ONCE PER FRAME, which is the same rule and the same
+ * reasoning as ::SHOT_TRAIL_INTERVAL on the monsters' side. Emitting per frame
+ * makes the trail's density a property of the machine -- visibly thicker at
+ * 144fps than at 60 -- and lets one grenade in the air fill the shared
+ * particle pool by itself, at which point every other effect in the level
+ * starts being dropped to make room for it.
+ *
+ * A little slower than the bolt's 30ms, because a grenade is a little slower:
+ * spacing along the path is speed x interval, and matching the intervals would
+ * have made the arc that travels less far the one drawn with more puffs.
+ *
+ * 한국어
+ * ------
+ * @brief 발사체가 뒤에 남기는 퍼프 사이의 간격(초).
+ *
+ * *프레임마다가 아니라 고정 간격입니다.* 몬스터 쪽의 ::SHOT_TRAIL_INTERVAL과 같은 규칙이며
+ * 같은 논거입니다. 프레임 단위 방출은 궤적의 밀도를 기기의 성질로 만들고(144fps에서 60fps보다
+ * 눈에 띄게 두꺼워집니다), 공중의 유탄 하나가 공유 입자 풀을 혼자 채우게 하며, 그 시점부터
+ * 레벨의 다른 모든 이펙트가 자리를 내주느라 버려지기 시작합니다.
+ *
+ * 볼트의 30ms보다 조금 느린 이유는 유탄이 조금 느리기 때문입니다. 경로상의 간격은 속력 x
+ * 간격이므로, 간격을 맞추면 덜 멀리 가는 포물선이 더 많은 퍼프로 그려졌을 것입니다.
+ */
+#define PROJ_TRAIL_INTERVAL 0.035f
 
 /* --- Types / 타입 --- */
 
@@ -218,6 +444,19 @@ typedef struct {
     float blast;      /**< Blast radius in metres; 0 means it damages one target. / 폭발 반경(미터). 0이면 하나의 대상에만 피해를 줍니다. */
     int   damage;     /**< Damage at the centre. / 중심에서의 피해량. */
     float spin;       /**< Free-running clock, so a grenade tumbles. / 자유 진행 시계. 유탄이 구르게 합니다. */
+    /**
+     * @brief Seconds until the next puff of trail. See ::PROJ_TRAIL_INTERVAL.
+     *
+     * Beside ::spin rather than derived from it, even though both are clocks
+     * on the same object: ::spin free-runs and is only ever read modulo a turn,
+     * where this one has to be reset at a rate the tumble knows nothing about.
+     * A trail paced off the spin would change with the spin, and the spin is a
+     * look.
+     * / 둘 다 같은 대상의 시계이지만 ::spin에서 유도하지 않고 그 곁에 둡니다. ::spin은 자유
+     * 진행하며 한 바퀴에 대한 나머지로만 읽히는 데 반해, 이쪽은 회전이 알지 못하는 비율로
+     * 초기화되어야 합니다. 회전에 맞춘 궤적은 회전과 함께 변하는데, 회전은 겉모습입니다.
+     */
+    float trail_t;
     int   active;     /**< 0 when the slot is free. / 0이면 빈 슬롯입니다. */
 } Proj;
 
@@ -235,63 +474,83 @@ typedef struct {
  * `static Proj g_proj[PROJ_MAX]`였고, 그래서 tools\steptest.c가 픽스처 사이에 ::proj_reset을
  * 손으로 불러야 했습니다. 이전 사례의 유탄이 아직 공중에 있었기 때문입니다.
  */
+typedef struct {
+    Proj p[PROJ_MAX];   /**< Slots. `active` says which are in use. / 슬롯. `active`가 사용 중인 것을 말합니다. */
+} ProjPool;
+
 /**
- * @struct Blast
- * @brief One explosion that happened, kept until somebody with a LISTENER asks.
+ * @struct Flash
+ * @brief One detonation, for as long as anything is still lighting or shaking from it.
  *
  * ENGLISH
  * -------
- * WHY THE EXPLOSION IS RECORDED INSTEAD OF ACTING. Everything a blast does to
- * the world it does here: it damages monsters, it throws particles, it makes a
- * sound. The one thing it cannot do is shake the camera, because how hard a
- * blast shakes depends on where the PLAYER is standing and this module has
- * never been told -- ::proj_update takes a ::Pools and a ::Level, and giving it
- * the player as well would put the camera behind every projectile in the game.
- *
- * So the blast states what it was and where, and ::world_step -- which owns the
- * player, and is the only thing that does -- decides what that is worth from
- * where the player happens to be. It is the shape ::enemy_take_kills already
- * has: the pool counts what it has not yet handed over, and the run does the
- * arithmetic that needs to know about the run.
+ * @note `radius` is the DAMAGE radius, unmultiplied. Every reader scales it by
+ *       its own factor, and they are deliberately different numbers: the light
+ *       reaches past where the damage stops because light does, and the shake
+ *       reaches further still because a blast you cannot be hurt by is still a
+ *       blast you heard. Storing a pre-scaled radius would pick one of those
+ *       for all three and make the other two wrong.
+ * @note `power` is HOW BIG AN EVENT rather than how bright, which is why it is
+ *       separate from `radius` when the radius already says something about
+ *       size. The axe's slam has the larger radius of the two -- 5.5m against
+ *       the grenade's 4.2 -- and is a mass of metal hitting a floor rather
+ *       than a charge going off, so a reader that took brightness from radius
+ *       would light the room harder for the one with no fire in it.
  *
  * 한국어
  * ------
- * @brief 일어난 폭발 하나. *듣는 이*를 가진 쪽이 물어볼 때까지 보관됩니다.
- *
- * *왜 폭발이 행동하지 않고 기록되는가.* 폭발이 월드에 하는 일은 전부 이곳에서 일어납니다.
- * 몬스터에 피해를 주고, 입자를 던지고, 소리를 냅니다. 유일하게 할 수 없는 일이 카메라를 흔드는
- * 것인데, 폭발이 얼마나 세게 흔드는가는 *플레이어*가 어디에 서 있는지에 달렸고 이 모듈은 그것을
- * 들은 적이 없기 때문입니다. ::proj_update는 ::Pools와 ::Level을 받으며, 여기에 플레이어까지
- * 주면 게임의 모든 발사체 뒤에 카메라가 따라붙게 됩니다.
- *
- * 그래서 폭발은 자신이 무엇이었고 어디였는지를 진술하고, 플레이어를 소유한 유일한 것인
- * ::world_step이 플레이어가 선 자리에서 그것이 얼마짜리인지 판단합니다. ::enemy_take_kills가
- * 이미 가진 형태입니다. 풀은 아직 넘기지 않은 것을 세고, 플레이는 플레이를 알아야 하는 계산을
- * 합니다.
+ * @brief 폭발 하나. 그것으로부터 아직 밝히거나 흔들리는 것이 있는 동안 존재합니다.
+ * @note `radius`는 배율이 적용되지 않은 *피해* 반경입니다. 모든 독자가 자기 배율을 곱하며,
+ *       그 배율들은 의도적으로 서로 다릅니다. 빛은 피해가 멈추는 곳 너머까지 닿습니다. 빛이
+ *       원래 그렇기 때문입니다. 흔들림은 그보다 더 멀리 닿습니다. 다칠 수 없는 거리의 폭발도
+ *       들리는 폭발이기 때문입니다. 미리 배율을 곱한 반경을 저장하면 셋 중 하나를 골라 셋
+ *       모두에 적용하는 것이고 나머지 둘이 틀리게 됩니다.
+ * @note `power`는 얼마나 밝은가가 아니라 *얼마나 큰 사건인가*이며, 반경이 이미 크기에 대해
+ *       무언가를 말하고 있는데도 따로 두는 이유가 그것입니다. 도끼의 내려찍기는 둘 중 반경이
+ *       더 큽니다(유탄의 4.2m에 대해 5.5m). 그러나 그것은 장약이 터지는 것이 아니라 금속
+ *       덩어리가 바닥을 치는 것입니다. 밝기를 반경에서 가져오는 독자는 불이 없는 쪽을 위해
+ *       방을 더 세게 밝히게 됩니다.
  */
 typedef struct {
-    v3    at;      /**< Where it went off, world units. / 터진 지점 (월드 단위). */
-    float radius;  /**< The radius its DAMAGE reached, metres. / 그 *피해*가 닿은 반경 (미터). */
-} Blast;
-
-typedef struct {
-    Proj p[PROJ_MAX];   /**< Slots. `active` says which are in use. / 슬롯. `active`가 사용 중인 것을 말합니다. */
-
+    v3    pos;      /**< Where it went off. / 터진 자리. */
+    float radius;   /**< The damage radius it had, metres. / 그것이 가졌던 피해 반경 (미터). */
+    float power;    /**< 0..1: how big an event it was. / 0..1. 얼마나 큰 사건이었는가. */
+    float life;     /**< Seconds left. 0 means the slot is free. / 남은 시간(초). 0이면 빈 슬롯. */
+    short kind;     /**< FLASH_*: what made it, so the renderer can colour it. / FLASH_*. 무엇이 만들었는지. 렌더러가 색을 고르는 데 씁니다. */
     /**
-     * @brief Explosions since the last ::proj_take_blasts, and how many.
+     * @brief For ::FLASH_SHOT, which monster cast it; -1 otherwise.
      *
-     * ENGLISH: A DEBT, not a history. Nothing here is meant to survive the
-     * frame it was made in -- a shake owed to a blast the player was three
-     * rooms away from when it happened is a shake that arrives as a bug -- so
-     * ::world_step drains this every frame whether or not anything is in it.
-     *
-     * 한국어: 기록이 아니라 *빚*입니다. 이곳의 무엇도 만들어진 프레임보다 오래 살 이유가
-     * 없습니다. 터질 당시 플레이어가 세 방 건너에 있던 폭발에 진 흔들림은 버그로 도착하는
-     * 흔들림입니다. 그래서 ::world_step이 내용물이 있든 없든 매 프레임 이것을 비웁니다.
+     * A ::MonTypeID, held as a plain short rather than as the enum: enemy.h is
+     * not included here and must not be. proj.h is included BY pools.h, which
+     * enemy.h also travels through, and a projectile that needed to know what
+     * a monster is would close that loop. The renderer already owns the table
+     * this indexes and already bounds-checks it, which is where a stale type
+     * would be caught anyway.
+     * / ::FLASH_SHOT일 때 어느 몬스터가 시전했는지이며, 그 외에는 -1입니다. ::MonTypeID이지만
+     * 열거형이 아니라 평범한 short로 들고 있습니다. 이곳에 enemy.h가 포함되어 있지 않고
+     * 포함되어서도 안 되기 때문입니다. proj.h는 pools.h가 포함하는데 enemy.h도 그곳을
+     * 지나가므로, 몬스터가 무엇인지 알아야 하는 발사체는 그 고리를 닫아 버립니다. 이것이
+     * 색인하는 표는 이미 렌더러의 것이고 이미 범위를 검사하므로, 낡은 type은 어차피 그곳에서
+     * 걸립니다.
      */
-    Blast blast[PROJ_BLAST_LOG];
-    int   n_blast;
-} ProjPool;
+    short type;
+} Flash;
+
+/**
+ * @struct FlashPool
+ * @brief The detonations a run still has light out from, owned by the caller.
+ *
+ * The same shape as ::ProjPool and for the same reason -- a ::World holds its
+ * own, so a headless fixture does not inherit the previous one's explosions.
+ *
+ * 호출자가 소유하는, 아직 빛이 남아 있는 폭발들입니다. ::ProjPool과 같은 형태이며 이유도
+ * 같습니다. ::World가 자기 것을 가지므로, 헤드리스 픽스처가 이전 사례의 폭발을 물려받지
+ * 않습니다.
+ */
+typedef struct {
+    Flash f[PROJ_MAX_FLASHES];  /**< Slots; `life` 0 means free. / 슬롯. `life`가 0이면 비어 있습니다. */
+    int   next;                 /**< Ring cursor: the oldest is overwritten. / 링 커서. 가장 오래된 것을 덮어씁니다. */
+} FlashPool;
 
 /* The bundle that holds this pool and its neighbours, by name only: the calls
    below take it because a projectile's detonation reaches monsters and
@@ -304,7 +563,21 @@ typedef struct Pools Pools;
 
 /* --- Lifecycle / 수명 주기 --- */
 
-/** @brief Clears every projectile. Called on a level load. / 모든 발사체를 제거합니다. */
+/**
+ * @brief Clears every projectile and every flash. Called on a level load.
+ *
+ * ENGLISH: The flashes as well, and a level load is the one moment the two
+ * pools would otherwise disagree. A grenade in the air is gone with the level
+ * it was thrown in; a light left over from it arrives in the new room with
+ * nothing in that room to have made it, and it arrives at full strength,
+ * because a flash that has not been aged has not faded.
+ *
+ * 한국어: @brief 모든 발사체와 모든 섬광을 제거합니다. 레벨 로드 시 호출됩니다.
+ * 섬광도 함께이며, 레벨 로드가 두 풀이 어긋날 수 있는 유일한 순간입니다. 공중의 유탄은
+ * 그것이 던져진 레벨과 함께 사라집니다. 거기서 남은 빛은 그것을 만든 무엇도 없는 새 방에
+ * 도착하며, 게다가 최대 세기로 도착합니다. 나이를 먹지 않은 섬광은 사그라들지도 않았기
+ * 때문입니다.
+ */
 void proj_reset(Pools *pl);
 
 /**
@@ -406,33 +679,105 @@ int proj_blast(Pools *pl, v3 at, float radius, int damage);
  */
 void proj_boom_fx(Pools *pl, v3 at, v3 normal, float radius, FxTint tint);
 
+/* --- the flash / 섬광 --- */
+
 /**
- * @brief Hands over the explosions since the last call, and forgets them.
+ * @brief Records that something went off, so the room can be lit and shaken by it.
  *
  * ENGLISH
  * -------
- * @param[out] out How many blasts fit; may be NULL when `max` is 0.
- * @param[in]  max Room in `out`. ::PROJ_BLAST_LOG takes everything.
- * @return How many were written.
+ * @param[in] at     Where it happened, world units.
+ * @param[in] radius The DAMAGE radius, metres. Readers scale it themselves --
+ *                   see ::Flash.
+ * @param[in] power  0..1, how big an event this was. A charge going off is 1;
+ *                   anything that merely hits hard is less.
  *
- * @note DRAINS EVEN WHEN `max` IS 0, so a caller that does not care still
- *       clears the debt. A log that is only emptied by whoever reads it is a
- *       log that grows in the one build nobody reads it in.
- * @note Both blast sources reach here: a grenade detonating inside
- *       ::proj_update, and the axe's slam, which happens earlier in the same
- *       frame. One drain after both collects both -- the argument
- *       ::enemy_take_kills makes about the three places a monster can die.
+ * @note Public rather than private to ::detonate because the axe's landing
+ *       slam is the same event without the fire, and it is already reaching in
+ *       here for ::proj_blast. Two places that make a crater should not be two
+ *       places that disagree about whether a crater lights anything.
+ * @note Takes the ring's next slot unconditionally, the way ::decal_hit does.
+ *       There is no "is there room" question: six is more than a player can
+ *       fill and the oldest is the one that gives way.
+ * @note Touches no GL and reads no ::Level. Safe from simulation code and from
+ *       headless tools, which is what lets tools\weapontest.c assert that a
+ *       grenade going off leaves one.
  *
  * 한국어
  * ------
- * @brief 지난 호출 이후의 폭발들을 넘겨주고 잊습니다.
- * @return 기록된 개수.
- * @note `max`가 0이어도 *비웁니다*. 관심 없는 호출자도 빚은 청산하게 하려는 것입니다. 읽는
- *       쪽만이 비우는 로그는, 아무도 읽지 않는 바로 그 빌드에서 자라나는 로그입니다.
- * @note 두 폭발 원천이 모두 이곳에 도달합니다. ::proj_update 안에서 터지는 유탄과, 같은 프레임
- *       더 앞에서 일어나는 도끼의 내려찍기입니다. 둘 뒤의 한 번의 배수가 둘을 모두 거둡니다.
- *       몬스터가 죽을 수 있는 세 자리에 대해 ::enemy_take_kills가 펴는 것과 같은 논거입니다.
+ * @brief 무언가가 터졌음을 기록하여, 방이 그것으로 밝아지고 흔들릴 수 있게 합니다.
+ * @param[in] radius *피해* 반경 (미터). 배율은 독자들이 각자 곱합니다. ::Flash를 참조하십시오.
+ * @param[in] power  0..1. 얼마나 큰 사건이었는가. 장약이 터지면 1이고, 단지 세게 부딪히는
+ *                   것은 그보다 작습니다.
+ * @note ::detonate의 내부 함수가 아니라 공개인 이유는, 도끼의 착지 내려찍기가 불이 빠진 같은
+ *       사건이고 이미 ::proj_blast를 위해 이곳에 손을 뻗고 있기 때문입니다. 구덩이를 만드는
+ *       두 곳이, 구덩이가 무언가를 밝히는지에 대해 서로 다른 말을 하는 두 곳이 되어서는 안
+ *       됩니다.
+ * @note ::decal_hit처럼 링의 다음 슬롯을 무조건 가져옵니다. "자리가 있는가"라는 질문은
+ *       없습니다. 여섯은 플레이어가 채울 수 있는 것보다 많고, 가장 오래된 것이 자리를
+ *       내어줍니다.
+ * @note GL을 건드리지 않고 ::Level도 읽지 않습니다.
  */
-int proj_take_blasts(Pools *pl, Blast *out, int max);
+void proj_flash(Pools *pl, v3 at, float radius, float power, int kind, int type);
+
+/**
+ * @brief Ages every flash and retires the dead ones.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] dt Timestep in seconds.
+ * @note SEPARATE FROM ::proj_update, and called beside ::fx_update rather than
+ *       beside it. ::proj_update is frozen with the world -- a grenade hanging
+ *       in mid-air behind a pause menu says the game is still running -- and a
+ *       light must not be, because the particles it lit are not either. Pause
+ *       on the frame a grenade goes off and a frozen flash leaves the room lit
+ *       white behind the menu, under a smoke cloud that is still expanding.
+ *
+ * 한국어
+ * ------
+ * @brief 모든 섬광을 나이 먹이고 죽은 것을 회수합니다.
+ * @note *::proj_update와 분리되어 있으며*, 그 옆이 아니라 ::fx_update 옆에서 호출됩니다.
+ *       ::proj_update는 월드와 함께 멈춥니다. 일시정지 메뉴 뒤에 공중에 떠 있는 유탄은 게임이
+ *       아직 돌아간다고 말하기 때문입니다. 그러나 빛은 멈추어서는 안 됩니다. 그것이 밝힌
+ *       입자들도 멈추지 않기 때문입니다. 유탄이 터지는 프레임에 일시정지하면, 멈춘 섬광이
+ *       메뉴 뒤의 방을 하얗게 밝힌 채로 두고 그 아래에서는 연기가 계속 퍼집니다.
+ */
+void proj_flash_update(Pools *pl, float dt);
+
+/** @brief How many slots exist; walk them and skip the dead. / 슬롯의 개수. 순회하며 죽은 것은 건너뛰십시오. */
+int proj_flash_count(const Pools *pl);
+
+/** @brief Borrowed pointer to slot `i`, or NULL. / 슬롯 `i`에 대한 참조 포인터. 없으면 NULL. */
+const Flash *proj_flash_at(const Pools *pl, int i);
+
+/** @brief How many are still lighting anything. For tests. / 아직 무언가를 밝히고 있는 개수. 테스트용입니다. */
+int proj_flash_live(const Pools *pl);
+
+/**
+ * @brief How much of a flash is left, 0..1, on the curve both readers use.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] f A slot from ::proj_flash_at. A dead or null one returns 0.
+ * @note SQUARED, not linear. An explosion is a spike: it arrives at full and
+ *       is most of the way gone before the eye has finished registering it,
+ *       and a light that walks evenly down to nothing over three tenths of a
+ *       second reads as a lamp being dimmed rather than as a detonation.
+ * @note ONE function, called by both readers, for the reason ::WORLD_SHAKE_DECAY
+ *       is public: a second copy of this curve on the drawing side is a number
+ *       that can disagree with the one that ends the shake, and the failure it
+ *       produces is a room that is still white after the camera has settled.
+ *
+ * 한국어
+ * ------
+ * @brief 섬광이 얼마나 남았는지, 0..1. 두 독자가 함께 쓰는 곡선입니다.
+ * @note 선형이 아니라 *제곱*입니다. 폭발은 스파이크입니다. 최대치로 도착해서, 눈이 그것을
+ *       인지하기를 마치기도 전에 거의 사라집니다. 0.3초에 걸쳐 고르게 0까지 걸어 내려가는
+ *       빛은 폭발이 아니라 조명이 어두워지는 것으로 읽힙니다.
+ * @note ::WORLD_SHAKE_DECAY가 공개인 것과 같은 이유로 *하나의* 함수를 두 독자가 부릅니다.
+ *       그리는 쪽에 있는 이 곡선의 두 번째 사본은 흔들림을 끝내는 값과 어긋날 수 있는
+ *       숫자이며, 그것이 만드는 실패는 카메라가 가라앉은 뒤에도 여전히 하얀 방입니다.
+ */
+float proj_flash_fade(const Flash *f);
 
 #endif

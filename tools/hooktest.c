@@ -54,6 +54,17 @@ static void okf(int cond, const char *what, float got, float want) {
     if (!cond) fails++;
 }
 
+/* Names an entity, because three fixtures here need the same monster and a
+   kind written out character by character is a kind that goes stale silently
+   when the bestiary loses a row. `imp` was three assignments in three places.
+   엔티티에 이름을 붙입니다. 이곳의 픽스처 셋이 같은 몬스터를 필요로 하는데, 한 글자씩 적어 둔
+   종류 이름은 도감이 행을 잃을 때 조용히 낡습니다. `imp`는 세 곳에서 세 번의 대입이었습니다. */
+static void put_kind(Entity *e, const char *kind) {
+    int i = 0;
+    while (kind[i] && i < LVL_KIND - 1) { e->kind[i] = kind[i]; i++; }
+    e->kind[i] = 0;
+}
+
 static void box(Level *l, short x0, short z0, short x1, short z1,
                short floor, short ceil) {
     Sector *s = &l->sectors[l->n_sectors++];
@@ -343,15 +354,16 @@ int main(void) {
        correctly but deals no damage looks completely normal in motion -- the
        only way to see it is to check the target's health. */
 
-    /* Put an imp between the player and the north wall. Entity coordinates
-       are centimetres, and "imp" is the kind name mon_type_for recognises. */
+    /* Put a monster between the player and the north wall. Entity coordinates
+       are centimetres, and "water_spirit" is the kind name mon_type_for
+       recognises -- the baseline, and one that stands on the floor, which is
+       what a claw fired level at 1.7m expects to find. */
     {
         Level M = {0};
         box(&M, -2000, -2000, 2000, 2000, 0, 3000);
         M.start[0] = 0; M.start[1] = 0; M.start[2] = 0;
         M.n_ents = 1;
-        M.ents[0].kind[0] = 'i'; M.ents[0].kind[1] = 'm';
-        M.ents[0].kind[2] = 'p'; M.ents[0].kind[3] = 0;
+        put_kind(&M.ents[0], "water_spirit");
         M.ents[0].x = 0; M.ents[0].z = -1000;      /* 10 m ahead */
 
         enemy_reset(&g_pools);
@@ -363,7 +375,7 @@ int main(void) {
         ok(hp_before > 0, "and it starts alive");
 
         Weapon w = {0};
-        /* Aim at the imp's centre of mass, not its feet. */
+        /* Aim at the monster's centre of mass, not its feet. */
         v3 pos = v3f(0.0f, 1.7f, 0.0f), vel = v3f(0,0,0);
         wp_hook_fire(&w, pos, 0.0f, 0.0f);
 
@@ -415,8 +427,7 @@ int main(void) {
         Level M = {0};
         box(&M, -2000, -2000, 2000, 2000, 0, 3000);
         M.n_ents = 1;
-        M.ents[0].kind[0] = 'i'; M.ents[0].kind[1] = 'm';
-        M.ents[0].kind[2] = 'p'; M.ents[0].kind[3] = 0;
+        put_kind(&M.ents[0], "water_spirit");
         M.ents[0].x = 0; M.ents[0].z = -1500;
 
         enemy_reset(&g_pools);
@@ -605,8 +616,7 @@ int main(void) {
         Level M = {0};
         box(&M, -2000, -2000, 2000, 2000, 0, 3000);
         M.n_ents = 1;
-        M.ents[0].kind[0] = 'i'; M.ents[0].kind[1] = 'm';
-        M.ents[0].kind[2] = 'p'; M.ents[0].kind[3] = 0;
+        put_kind(&M.ents[0], "water_spirit");
         M.ents[0].x = 0; M.ents[0].z = -1000;
 
         enemy_reset(&g_pools);

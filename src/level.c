@@ -90,22 +90,25 @@
    shader had to be able to evaluate every light a level could declare, because
    evaluating them was the only way they were applied.
 
-   That is no longer what happens. A level's lights are baked into the vertices
-   when it loads, so the shader never sees them, and the number of them a level
-   may declare has nothing to do with how many uniform slots exist. The two are
-   now independent on purpose -- ::LVL_MAX_LIGHTS is a .bss and load-time cost,
-   ::RD_MAX_LIGHTS is a per-fragment one -- and an assert tying them would be
-   the thing standing between a level and its sixty-fourth lamp.
+   That is no longer what happens, and by now it is not even close. A lamp is
+   applied nowhere -- not in the vertices, not in the shader's loop; scene.c's
+   note above ::MoveLight has the two attempts and why neither stayed. So the
+   caps answer questions with nothing in common: ::LVL_MAX_LIGHTS is how many
+   an author may write down before the array fills, ::RD_MAX_LIGHTS is how many
+   MOVING lights one frame may carry and costs per fragment. Tying them would
+   make the size of a level's unused array a per-pixel cost.
 
    두 상한은 한때 서로 묶여 있었고 이 파일이 그것을 단언했습니다. 셰이더가 레벨이 선언할 수
    있는 모든 광원을 평가할 수 있어야 했는데, 평가가 그것을 적용하는 유일한 방법이었기
    때문입니다.
 
-   이제는 그렇지 않습니다. 레벨의 광원은 로드될 때 정점에 구워지므로 셰이더는 그것을 결코
-   보지 않으며, 레벨이 선언할 수 있는 개수는 유니폼 슬롯이 몇 개인지와 아무 관계가 없습니다.
-   이제 둘은 의도적으로 독립입니다. ::LVL_MAX_LIGHTS는 .bss와 로드 시점의 비용이고
-   ::RD_MAX_LIGHTS는 프래그먼트마다의 비용입니다. 둘을 묶는 단언은 레벨과 그 64번째 등
-   사이를 가로막는 것이 됩니다. */
+   이제는 그렇지 않으며, 이쯤 되면 비슷하지도 않습니다. 등은 어디에서도 적용되지 않습니다.
+   정점에서도, 셰이더의 반복문에서도. 두 번의 시도와 어느 쪽도 남지 않은 이유는 scene.c의
+   ::MoveLight 위 설명에 있습니다. 따라서 두 상한은 공통점이 없는 질문에 답합니다.
+   ::LVL_MAX_LIGHTS는 배열이 차기 전까지 제작자가 몇 개를 적어 둘 수 있는가이고,
+   ::RD_MAX_LIGHTS는 한 프레임이 *움직이는* 광원을 몇 개까지 나를 수 있는가이며 프래그먼트마다
+   비용이 듭니다. 둘을 묶는 것은 레벨의 쓰이지 않는 배열 크기를 픽셀당 비용으로 만드는
+   일입니다. */
 
 /* ----------------------------------------------------------------- parser */
 
@@ -1158,7 +1161,12 @@ static void brush_start_of(Level *out, const BrushMap *bm) {
  * sun), `_sun_mangle` (which way it shines) and `_sunlight2` (a dome of sky
  * light). None of the three is a point light, so ::brush_lights_of never saw
  * them and an imported outdoor map arrived with only its accent lamps -- which
- * on `lqdm1` is 0.5% of the light the author placed.
+ * on `lqdm1` was 0.5% of the light the author placed.
+ *
+ * NOTHING DECLARES THESE ANY MORE. `lqdm1`'s worldspawn carried all three and
+ * does not now; this reads keys no shipped map writes. Kept because the keys
+ * are still what an author would put in a .map, and a parser that stopped
+ * reading them would turn a working `_sunlight` into a silent nothing.
  *
  * MANGLE IS YAW, PITCH, ROLL, IN DEGREES, and it names the direction the light
  * TRAVELS: ericw's default is "0 -90 0", straight down. ::Level::sun wants the
@@ -1535,8 +1543,8 @@ static void brush_doors_of(Level *out, const BrushMap *bm, TagPool *tp) {
  *
  * ENGLISH
  * -------
- * A PREFIX IS STRIPPED AND NOTHING ELSE IS TRANSLATED. `monster_imp` becomes
- * the kind `imp`, `item_health` becomes `health`, and level.c never learns what
+ * A PREFIX IS STRIPPED AND NOTHING ELSE IS TRANSLATED. `monster_caster` becomes
+ * the kind `caster`, `item_health` becomes `health`, and level.c never learns what
  * either of them is -- ::Entity's own note says the kind is interpreted by
  * whichever module owns it, and that stays true. Adding a monster is a row in
  * enemy.c's table and a line in the FGD; this function does not change.
@@ -1555,7 +1563,7 @@ static void brush_doors_of(Level *out, const BrushMap *bm, TagPool *tp) {
  * ------
  * 지점 엔티티를 pickup.c와 enemy.c가 이미 차지한 표식으로 바꿉니다.
  *
- * 접두사를 떼어 낼 뿐 그 밖의 무엇도 번역하지 않습니다. `monster_imp`는 종류 `imp`가 되고
+ * 접두사를 떼어 낼 뿐 그 밖의 무엇도 번역하지 않습니다. `monster_caster`는 종류 `caster`가 되고
  * `item_health`는 `health`가 되며, level.c는 둘 중 무엇이 무엇인지 끝내 배우지 않습니다.
  * ::Entity 자신의 설명이 종류는 그것을 소유한 모듈이 해석한다고 말하며, 그것은 계속
  * 참입니다. 몬스터를 추가하는 일은 enemy.c 표의 행 하나와 FGD의 줄 하나이고, 이 함수는 바뀌지
@@ -1847,10 +1855,10 @@ int level_load(const char *name, Level *out) { return level_load_in(0, name, out
 
 int level_load_in(BrushStore *bs, const char *name, Level *out) {
     /* The baked light belongs to the level it was traced against, and a new
-       level puts different walls between the same coordinates and a lamp.
+       level puts different walls between the same coordinates and the sky.
        Dropped here rather than by the caller because this is the one place a
        level can become a different one.
-       구워진 빛은 그것이 판정된 레벨에 속하며, 새 레벨은 같은 좌표와 등 사이에 다른 벽을
+       구워진 빛은 그것이 판정된 레벨에 속하며, 새 레벨은 같은 좌표와 하늘 사이에 다른 벽을
        놓습니다. 호출자가 아니라 이곳에서 비우는 이유는 레벨이 다른 레벨이 될 수 있는 곳이
        이곳뿐이기 때문입니다. */
     level_light_cache_reset();
@@ -2626,41 +2634,52 @@ int level_edge_spans(const Level *l, int si, int e, EdgeSpan *out, int max) {
     return n;
 }
 
-/* Bakes every level light into the vertices, once, at build time.
+/* Bakes a level's DIRECTIONAL light into the vertices, once, at build time.
  *
  * ENGLISH
  * -------
- * This is Quake's static lighting in the shape this engine can hold. The
- * fragment shader carries eight point lights, which is enough for muzzle
- * flashes and explosions and nowhere near enough to light a room: a level with
- * a ninth lamp simply does not have it, and everything outside the eight radii
- * is not dark but UNLIT.
+ * This is Quake's static lighting in the shape this engine can hold, and what
+ * is left of it after the point lamps moved to the shader -- the sun and the
+ * sky dome, which have no radius to fall off with and so could not move.
  *
- * Baked at the VERTEX rather than into a lightmap because the geometry here is
- * sectors -- few faces, each large -- and a lightmap would need a second
- * texture, a second set of UVs, and a packer to fit them. The cost of this is
- * that light varies smoothly across a wall instead of casting a shaped pool on
- * it, which is the trade Quake made in the other direction because its walls
- * were subdivided into 16-unit patches and ours are not.
+ * THE COST OF A VERTEX BAKE IS WHY THE LAMPS LEFT, and it is the same cost the
+ * paragraph below always described: light varies smoothly across a wall
+ * instead of casting a shaped pool on it, because the sample points are the
+ * corners. Quake made the trade in the other direction by subdividing its
+ * walls into 16-unit patches; ours are not subdivided, and a brush level's
+ * faces are metres across. For a lamp that is fatal -- see scene.c's note
+ * above ::MoveLight, which also records where they went next and that they
+ * were switched off there too. For the sun it is not, because a directional
+ * term has no pool to shape: what it varies with is SHADOW, which changes at
+ * the edges of geometry rather than smoothly across a face, and vertices are
+ * where the geometry is.
  *
- * SHADOWED WITH THE SAME TRACE THE MONSTERS SEE WITH, so a lamp behind a wall
- * does not light the room in front of it. That trace is the expensive part and
- * it runs once per vertex per light at load, not per frame.
+ * Baked at the VERTEX rather than into a lightmap because a lightmap would
+ * need a second texture, a second set of UVs, and a packer to fit them.
+ *
+ * SHADOWED WITH THE SAME TRACE THE MONSTERS SEE WITH, so a vertex under a roof
+ * is not lit by the sun above it. That trace is the expensive part and it runs
+ * once per vertex at load, not per frame.
  *
  * 한국어
  * ------
- * 이 엔진이 담을 수 있는 모양으로 옮긴 Quake의 정적 조명입니다. 프래그먼트 셰이더는 점광원
- * 여덟 개를 담으며, 총구 섬광과 폭발에는 충분하고 방을 밝히기에는 턱없이 부족합니다. 아홉
- * 번째 등이 있는 레벨은 그것을 그냥 갖지 못하고, 여덟 반경 밖은 어두운 것이 아니라 조명이
- * *없습니다*.
+ * 이 엔진이 담을 수 있는 모양으로 옮긴 Quake의 정적 조명이며, 점광원이 셰이더로 옮겨 간 뒤
+ * 남은 부분입니다. 태양과 하늘 돔이며, 감쇠할 반경이 없어서 옮겨 갈 수 없었던 것들입니다.
  *
- * 라이트맵이 아니라 *정점*에 굽는 이유는 이곳의 지오메트리가 섹터, 즉 크고 적은 면이기
- * 때문입니다. 라이트맵은 두 번째 텍스처와 두 번째 UV, 그리고 그것을 채울 패커를 요구합니다.
- * 대가는 빛이 벽에 모양 있는 웅덩이를 드리우지 않고 매끄럽게 변한다는 것입니다. Quake는
- * 벽을 16단위 조각으로 나누었기에 반대 방향으로 거래했고, 우리 벽은 나뉘어 있지 않습니다.
+ * *정점 베이크의 대가가 곧 등이 떠난 이유*이며, 그것은 아래 문단이 언제나 설명하던 바로 그
+ * 대가입니다. 표본 지점이 모서리이므로 빛이 벽에 모양 있는 웅덩이를 드리우지 않고 매끄럽게
+ * 변합니다. Quake는 벽을 16단위 조각으로 나누어 반대 방향으로 거래했지만 우리 벽은 나뉘어
+ * 있지 않고, 브러시 레벨의 면은 몇 미터짜리입니다. 등에게 그것은 치명적입니다. scene.c의
+ * ::MoveLight 위 설명을 참조하십시오. 그곳에 등이 그다음 어디로 갔는지, 그리고 그곳에서도
+ * 꺼졌다는 사실이 함께 기록되어 있습니다. 태양에게는 아닙니다. 방향성 항에는 모양 잡을 웅덩이가
+ * 없기 때문입니다. 그것이 변하는 대상은 *그림자*이고, 그림자는 면을 가로질러 매끄럽게가
+ * 아니라 지오메트리의 모서리에서 바뀌며, 정점이 바로 지오메트리가 있는 곳입니다.
  *
- * 몬스터가 보는 것과 *같은* 판정으로 그림자를 처리하므로, 벽 뒤의 등이 앞의 방을 밝히지
- * 않습니다. 그 판정이 비싼 부분이며 프레임마다가 아니라 로드 시 정점당 광원당 한 번
+ * 라이트맵이 아니라 *정점*에 굽는 이유는, 라이트맵이 두 번째 텍스처와 두 번째 UV, 그리고
+ * 그것을 채울 패커를 요구하기 때문입니다.
+ *
+ * 몬스터가 보는 것과 *같은* 판정으로 그림자를 처리하므로, 지붕 아래의 정점은 그 위의 태양이
+ * 밝히지 않습니다. 그 판정이 비싼 부분이며 프레임마다가 아니라 로드 시 정점당 한 번
  * 돌아갑니다. */
 /* ------------------------------------------------ the baked-light cache
  *
@@ -3016,17 +3035,74 @@ int level_sun_reaches(const Level *l, v3 from) {
     return !light_blocked(l, from, sd, LVL_SUN_REACH);
 }
 
+/* --- what is baked, and what is not ----------------------------------------
+ *
+ * ENGLISH
+ * -------
+ * THE SUN AND THE SKY, AND SINCE THE LAMPS LEFT, ONLY THOSE. Point lamps used
+ * to be summed here too, and they were the reason the bake existed. They left
+ * because a per-VERTEX light on a brush level is sampled at the corners of
+ * faces metres across and interpolated over everything between -- which reads
+ * as light bleeding along one side of a wall and stopping dead at a seam. They
+ * went to the shader's point-light loop and were switched off there as well;
+ * scene.c's note above ::MoveLight carries the whole argument and both
+ * measurements.
+ *
+ * WHY THE SUN DID NOT GO WITH THEM. The shader's loop is a POINT loop: it
+ * takes a position, a radius and a falloff, and a sun has none of the three.
+ * What makes a directional light read as shaped is the ray that says whether
+ * a vertex can see the sky at all, and that ray is a trace -- the one thing a
+ * fragment shader here cannot do. The lamps could leave because their falloff
+ * already ends; the sun cannot, because the shadow IS the light.
+ *
+ * @note So this is a SUN bake, the guard below says so, and NO SHIPPED LEVEL
+ *       GETS PAST IT. `lqdm1` was the only map that ever declared a sun and
+ *       its worldspawn no longer carries one, so every level this game loads
+ *       returns on the first line and is lit entirely from the shader. The
+ *       function is kept because it is what a `_sunlight` key still means:
+ *       delete it and the importer would be reading three worldspawn keys into
+ *       fields nothing could ever use.
+ *
+ * 한국어
+ * ------
+ * *태양과 하늘이며, 등들이 떠난 이후로는 그 둘뿐입니다.* 점광원도 이곳에서 합해졌고, 그것이
+ * 베이크가 존재하던 이유였습니다. 등이 떠난 이유는, 브러시 레벨에서 *정점당* 광원이 몇
+ * 미터짜리 면의 모서리에서 표본추출되어 그 사이 전부로 보간되고, 그것이 벽의 한쪽을 따라
+ * 번지다 이음매에서 뚝 끊기는 빛으로 읽히기 때문입니다. 등은 셰이더의 점광원 반복문으로
+ * 갔다가 그곳에서도 꺼졌습니다. 논거 전체와 두 번의 측정은 scene.c의 ::MoveLight 위 설명이
+ * 담고 있습니다.
+ *
+ * *태양은 왜 함께 가지 않았는가.* 셰이더의 반복문은 *점광원* 반복문입니다. 위치와 반경과
+ * 감쇠를 받는데 태양에는 그 셋 중 어느 것도 없습니다. 방향성 광원이 모양 있게 읽히게 하는
+ * 것은 이 정점이 애초에 하늘을 볼 수 있는지 말해 주는 광선이고, 그 광선은 판정입니다.
+ * 이곳의 프래그먼트 셰이더가 할 수 없는 유일한 일입니다. 등은 감쇠가 이미 끝나기 때문에
+ * 떠날 수 있었고, 태양은 그림자가 곧 빛이므로 떠날 수 없습니다.
+ *
+ * @note 따라서 이것은 *태양* 베이크이며, 아래의 가드가 그렇게 말하고, *출하되는 어떤
+ *       레벨도 그것을 지나가지 못합니다.* 태양을 선언한 적이 있는 유일한 맵은 `lqdm1`이었고
+ *       그 worldspawn은 더 이상 태양을 지니지 않으므로, 이 게임이 로드하는 모든 레벨은 첫
+ *       줄에서 반환되며 전적으로 셰이더가 조명합니다. 이 함수를 남겨 두는 이유는 그것이
+ *       `_sunlight` 키가 여전히 뜻하는 바이기 때문입니다. 이것을 지우면 임포터는 아무도 쓸 수
+ *       없는 필드로 worldspawn 키 셋을 읽어 들이게 됩니다. */
 static void bake_light(MeshBuf *b, const Level *l, int first) {
-    /* A level with no lamps bakes nothing, so there is nothing to look up and
-       nothing worth remembering. Without this the cache charges such a level
-       a hash and a probe per vertex to be told what it already knew -- which
-       is most of the imported Freedoom map, and measurable: levelbench put it
-       at 0.08ms of a 3.8ms build, spent entirely on filing away zeroes.
-       등이 없는 레벨은 아무것도 굽지 않으므로 찾아볼 것도, 기억할 가치가 있는 것도 없습니다.
-       이것이 없으면 캐시는 그런 레벨에 이미 알고 있던 사실을 듣기 위해 정점마다 해시와 탐사
-       비용을 물립니다. 임포트한 Freedoom 맵 대부분이 그러하며 측정도 됩니다. levelbench는
-       3.8ms 생성 중 0.08ms로 쟀고, 전부 0을 정리해 넣는 데 쓰입니다. */
-    if (l->n_lights < 1) return;
+    /* A level with no sun and no sky bakes nothing, so there is nothing to
+       look up and nothing worth remembering. Without this the cache charges
+       such a level a hash and a probe per vertex to be told what it already
+       knew -- which is most of the imported Freedoom map, and measurable:
+       levelbench put it at 0.08ms of a 3.8ms build, spent entirely on filing
+       away zeroes.
+       태양도 하늘도 없는 레벨은 아무것도 굽지 않으므로 찾아볼 것도, 기억할 가치가 있는 것도
+       없습니다. 이것이 없으면 캐시는 그런 레벨에 이미 알고 있던 사실을 듣기 위해 정점마다
+       해시와 탐사 비용을 물립니다. 임포트한 Freedoom 맵 대부분이 그러하며 측정도 됩니다.
+       levelbench는 3.8ms 생성 중 0.08ms로 쟀고, 전부 0을 정리해 넣는 데 쓰입니다.
+
+       THE TEST USED TO BE `n_lights < 1`, and it moved when the lamps did.
+       Left as it was, every hand-authored level -- lamps, no sun -- would
+       have gone on paying the cache for a bake with nothing left to sum.
+       이 검사는 `n_lights < 1`이었고 등들과 함께 옮겨갔습니다. 그대로 두었다면 손으로
+       만든 모든 레벨(등은 있고 태양은 없는)이 이제 합할 것이 없는 베이크를 위해 캐시
+       비용을 계속 물었을 것입니다. */
+    if (l->sun_power <= 0 && l->sky_power <= 0) return;
 
     for (int vi = first; vi < b->count; vi++) {
         Vtx *v = &b->v[vi];
@@ -3082,13 +3158,13 @@ static void bake_light(MeshBuf *b, const Level *l, int first) {
 
         /* --- the sun, and the sky it hangs in ---------------------------
          *
-         * TRACED LIKE A LAMP, WHICH IS THE WHOLE POINT. A directional term with
-         * no trace is `dot(n, dir)` and nothing else -- constant across a face,
-         * which is what the shader's fixed key already gives and what makes
-         * every wall one flat tone. What makes light read as SHAPED is that
-         * some of the wall is in shadow and some is not, and the only thing
-         * that can say which is the same ray ::level_blocked already casts for
-         * the lamps.
+         * TRACED, WHICH IS THE WHOLE POINT AND THE WHOLE REASON THIS TERM STAYED
+         * HERE. A directional term with no trace is `dot(n, dir)` and nothing
+         * else -- constant across a face, which is what the shader's fixed key
+         * already gives and what makes every wall one flat tone. What makes
+         * light read as SHAPED is that some of the wall is in shadow and some
+         * is not, and the only thing that can say which is the ray
+         * ::level_blocked casts. The shader cannot cast it.
          *
          * The ray runs a level's width rather than to a point, because a
          * directional light has no position: what matters is whether anything
@@ -3101,11 +3177,11 @@ static void bake_light(MeshBuf *b, const Level *l, int first) {
          * the `0.5 + 0.5 * n.y` weight is the hemisphere the surface can see:
          * a floor gets all of it, a wall half, a ceiling none.
          *
-         * *램프처럼 판정하며, 그것이 요점 전부입니다.* 판정 없는 방향성 항은 `dot(n, dir)`
-         * 뿐이고 면 안에서 상수입니다. 셰이더의 고정 주광이 이미 주는 것이며 모든 벽을 하나의
-         * 평평한 톤으로 만드는 것입니다. 빛이 *모양 있게* 읽히게 하는 것은 벽의 일부가
-         * 그늘이고 일부가 아니라는 사실이며, 어느 쪽인지 말할 수 있는 것은 ::level_blocked가
-         * 램프를 위해 이미 쏘는 그 광선뿐입니다.
+         * *판정하며, 그것이 요점 전부이자 이 항이 이곳에 남은 이유 전부입니다.* 판정 없는
+         * 방향성 항은 `dot(n, dir)` 뿐이고 면 안에서 상수입니다. 셰이더의 고정 주광이 이미
+         * 주는 것이며 모든 벽을 하나의 평평한 톤으로 만드는 것입니다. 빛이 *모양 있게*
+         * 읽히게 하는 것은 벽의 일부가 그늘이고 일부가 아니라는 사실이며, 어느 쪽인지 말할
+         * 수 있는 것은 ::level_blocked가 쏘는 광선뿐입니다. 셰이더는 그것을 쏠 수 없습니다.
          *
          * *하늘은 별개의 항이고 더 거친 항입니다.* `_sunlight2`는 방향이 아니라 돔이고, 돔을
          * 정점마다 표본추출하는 것은 이 프로젝트가 감당할 수 없는 베이크입니다. 수직 위로 쏘는
@@ -3129,36 +3205,16 @@ static void bake_light(MeshBuf *b, const Level *l, int first) {
             }
         }
 
-        for (int li = 0; li < l->n_lights; li++) {
-            const Light *lt = &l->lights[li];
-            v3 lp = v3f(lt->x * U, lt->y * U, lt->z * U);
-            v3 d  = v3sub(lp, from);
-            float dist = v3len(d);
-            float rad  = lt->radius * U;
-            if (rad <= 0.0f || dist > rad) continue;
+        /* ::Level::lights IS NOT READ HERE, and it is not read in scene.c
+           either. A lamp lights nothing from either place -- see the note
+           above this function, and scene.c's above ::MoveLight.
+           ::Level::lights를 이곳에서 읽지 않으며, scene.c에서도 읽지 않습니다. 등은 어느
+           자리에서도 아무것도 밝히지 않습니다. 이 함수 위의 설명과 scene.c의 ::MoveLight
+           위 설명을 참조하십시오. */
 
-            /* Facing away is unlit before anything is traced, which is also
-               the cheap test that skips most of the tracing.
-               등지고 있으면 판정 이전에 이미 어둡습니다. 대부분의 판정을 건너뛰는 값싼
-               검사이기도 합니다. */
-            v3 dir = v3scale(d, 1.0f / (dist > 0.001f ? dist : 0.001f));
-            float lam = v3dot(n, dir);
-            if (lam <= 0.0f) continue;
-
-            if (level_blocked(l, from, dir, dist)) continue;
-
-            float att = 1.0f - dist / rad;
-            att *= att;
-            float e = att * lam * (lt->power * 0.01f);
-
-            v->lr += e * (lt->r * (1.0f / 255.0f));
-            v->lg += e * (lt->g * (1.0f / 255.0f));
-            v->lb += e * (lt->b * (1.0f / 255.0f));
-        }
-
-        /* Kept, so the next rebuild finds it. Written after every light has
-           been summed rather than per light, because what a later frame wants
-           back is the answer, not the working.
+        /* Kept, so the next rebuild finds it. Written after the sun and the
+           sky have both been summed rather than per term, because what a later
+           frame wants back is the answer, not the working.
 
            A vertex traced while a door happened to be open keeps that reading
            for as long as the level is loaded. That is the same rule the ones
@@ -3167,8 +3223,8 @@ static void bake_light(MeshBuf *b, const Level *l, int first) {
            picture depend on the level rather than on how many times something
            has been rebuilt since.
 
-           다음 재생성이 찾을 수 있도록 보관합니다. 광원마다가 아니라 모든 광원을 합한 뒤에
-           쓰는 이유는, 나중 프레임이 돌려받고 싶은 것이 풀이 과정이 아니라 답이기
+           다음 재생성이 찾을 수 있도록 보관합니다. 항마다가 아니라 태양과 하늘을 모두 합한
+           뒤에 쓰는 이유는, 나중 프레임이 돌려받고 싶은 것이 풀이 과정이 아니라 답이기
            때문입니다.
 
            마침 문이 열려 있을 때 판정된 정점은 레벨이 로드되어 있는 동안 그 값을 유지합니다.
@@ -3295,17 +3351,16 @@ int level_geometry(MeshBuf *b, const Level *l, MdlRange *ranges, int max_ranges)
        below: a brush face is convex by construction, so there is no ear-clip,
        no wall extrusion and no edge-span cutting.
        THE BAKE IS SHARED, though, and that is the point of doing it here rather
-       than inside brush_geometry. ::bake_light reads ::Level::lights and traces
+       than inside brush_geometry. ::bake_light reads ::Level::sun and traces
        with ::level_blocked, and both of those already answer for either model
-       -- so the lamps a .map placed are shadowed against the brushes it placed
-       them among, through the same function and the same cache the sector path
-       uses. A second bake would be a second set of rules about what a shadow
-       is.
+       -- so the sun a .map declared is shadowed against the brushes under it,
+       through the same function and the same cache the sector path uses. A
+       second bake would be a second set of rules about what a shadow is.
        브러시는 자기 생성기를 가지고 오며, 그것에는 아래의 장치가 하나도 필요 없습니다. 브러시
        면은 구성상 볼록하므로 ear-clip도, 벽 압출도, 모서리 구간 절단도 없습니다.
        다만 *베이크는 공유합니다*. 그것이 brush_geometry 안이 아니라 이곳에서 하는 이유입니다.
-       ::bake_light는 ::Level::lights를 읽고 ::level_blocked로 판정하는데, 그 둘은 이미 어느
-       모델에 대해서든 답합니다. 따라서 .map이 놓은 등은 그것이 놓인 브러시들에 대해, 섹터
+       ::bake_light는 ::Level::sun을 읽고 ::level_blocked로 판정하는데, 그 둘은 이미 어느
+       모델에 대해서든 답합니다. 따라서 .map이 선언한 태양은 그 아래의 브러시들에 대해, 섹터
        경로가 쓰는 것과 같은 함수와 같은 캐시를 통해 그림자가 집니다. 두 번째 베이크는 그림자가
        무엇인가에 대한 두 번째 규칙 집합이 됩니다. */
     if (l->brushes) {

@@ -16,10 +16,25 @@
 #   next <name>           level the `exit` entity leads to
 #   e <kind> <x> <z>      an entity
 #
-# Entity kinds: imp/brute/hound spawn monsters (legacy "spawn" = imp),
-# ammo/health are pickups, and `exit` ends the level -- walk onto it and the
-# game loads `next`, carrying your health and ammo across. A level with no
-# `next` is the end of the game: its exit shows the win screen instead.
+# Entity kinds: water_spirit/brute/caster spawn monsters -- the retired names
+# "spawn", "imp" and "hound" still resolve, so a level written before those rows
+# left enemy.c still fills. ammo/health are pickups, and `exit` ends the level --
+# walk onto it and the game loads `next`, carrying your health and ammo across.
+# A level with no `next` is the end of the game: its exit shows the win screen
+# instead.
+#
+# A FLYER PLACED HERE STANDS ON THE FLOOR. `e` carries x and z and no height --
+# a sector level has one floor per point on the plan, so Entity::y is 0 and
+# make_monster only keeps a spawn height that is ABOVE the floor it found. The
+# caster carries MON_FLIES and is the one kind that notices: place one in a
+# sector level and you get a caster that hovers at ankle height. Levels that
+# want the air are .map files, where the marker's origin carries its Z.
+#
+# 이곳에 놓인 비행체는 바닥에 섭니다. `e`는 x와 z를 나르고 높이는 나르지 않습니다. 섹터
+# 레벨은 평면상의 한 점에 바닥이 하나이므로 Entity::y는 0이고, make_monster는 찾아낸 바닥보다
+# *위*인 생성 높이만 유지합니다. 캐스터가 MON_FLIES를 지니며 이를 알아채는 유일한 종류입니다.
+# 섹터 레벨에 하나 놓으면 발목 높이에서 정지 비행하는 캐스터를 얻습니다. 공중을 원하는 레벨은
+# .map 파일이며, 그곳에서는 표식의 원점이 자기 Z를 나릅니다.
 #
 # `hurt` is charged only while GROUNDED, so a lava channel is something to jump
 # or grapple across rather than a wall. It is independent of the floor material
@@ -160,14 +175,54 @@ e exit 0 -1200
 
 # Point lights: light <x> <y> <z> <radius> <r> <g> <b> <power>
 #
-# The illumination is quantised into bands before the material is applied, so
-# a light does not smear into a gradient -- it lays down a pool with an edge.
-# That is deliberate: the resolve pass dithers to four levels, and smooth
-# falloff at that budget reads as noise rather than as light.
-light     0  380 -1100  900  255 190 110  115   # warm lamp over the exit
-light  -1500 300   200  800  120 170 255   90   # cold fill in the west corner
-light   1400 300   900  750  120 170 255   85   # and its counterpart east
-light      0 300  -400  600  255 140  70   70   # low ember at the caster's post
+# NO LEVEL DECLARES ONE ANY MORE, and the four that used to sit here are why
+# the line is still documented. The parser reads `light`, ::Level keeps room
+# for sixty-four of them, and nothing lights anything with them -- so a lamp
+# written here is eight numbers that load and then sit still.
+#
+# WHAT HAPPENED TO THEM. A lamp was applied two ways and neither one looked
+# right on the maps this game ships:
+#
+#   - COMPILED INTO THE VERTICES, it was sampled at the corners of each face
+#     and smeared across everything between them. On a brush level whose walls
+#     are single faces metres across, that is a gradient down one side of a
+#     room, not a pool of light.
+#   - HANDED TO THE SHADER EVERY FRAME, the pools came out round, but only the
+#     eight nearest fit -- so a big room re-lit itself as you walked through
+#     it, and nothing cast a shadow.
+#
+# So the rooms are lit by the engine's own ambient level plus the things you
+# and the monsters put in the air: muzzle flashes, grenades, plasma, bolts.
+# Bright ROOMS are a shader constant (AMBIENT in src/render.c); bright MOMENTS
+# are what gets fired. src/scene.c's note above MoveLight is the whole account.
+#
+# The syntax stays documented rather than deleted because the parser still
+# accepts it and a format that silently drops a word it can read is worse than
+# one that reads a word nothing uses. If lamps ever come back, this is the line
+# they come back as.
+#
+# *이제 어떤 레벨도 이것을 선언하지 않으며*, 이곳에 있던 네 개가 이 줄이 여전히 문서화되어
+# 있는 이유입니다. 파서는 `light`를 읽고 ::Level은 예순넷을 담을 자리를 두지만, 그것으로
+# 무엇을 밝히는 것은 없습니다. 그러므로 이곳에 적은 등은 로드된 뒤 가만히 있는 숫자 여덟
+# 개입니다.
+#
+# *그것들에게 무슨 일이 있었는가.* 등은 두 가지 방식으로 적용되었고 이 게임이 출하하는
+# 맵에서는 어느 쪽도 옳아 보이지 않았습니다.
+#
+#   - *정점에 구워지면* 각 면의 모서리에서 표본추출되어 그 사이 전부로 번졌습니다. 벽 하나가
+#     몇 미터짜리 단일 면인 브러시 레벨에서 그것은 빛 웅덩이가 아니라 방 한쪽을 따라 흐르는
+#     그러데이션입니다.
+#   - *매 프레임 셰이더에 건네지면* 웅덩이는 둥글게 나왔지만 가장 가까운 여덟 개만 들어갔고,
+#     그래서 큰 방은 걸어 다니는 동안 스스로를 다시 밝혔으며 아무것도 그림자를 드리우지
+#     않았습니다.
+#
+# 그래서 방은 엔진 자신의 주변광에, 당신과 몬스터가 공중에 띄우는 것들(총구 섬광, 유탄,
+# 플라즈마, 볼트)이 더해져 밝혀집니다. 밝은 *방*은 셰이더 상수(src/render.c의 AMBIENT)이고,
+# 밝은 *순간*은 발사되는 것입니다. 전체 경위는 src/scene.c의 MoveLight 위 설명에 있습니다.
+#
+# 문법을 지우지 않고 문서로 남기는 이유는 파서가 여전히 이것을 받아들이기 때문이며, 읽을 수
+# 있는 단어를 조용히 버리는 형식은 아무도 쓰지 않는 단어를 읽는 형식보다 나쁩니다. 등이 언젠가
+# 돌아온다면, 돌아올 자리가 이 줄입니다.
 
 l vault
 start 0 700 0
@@ -212,7 +267,7 @@ p
    -300 -300   300 -300   300 300   -300 300
 
 e brute 0 -200
-e hound 500 400
+e water_spirit 500 400
 e caster -600 -600       # shooting from the far corner while the brute closes
 e ammo -600 0
 e health 600 -600

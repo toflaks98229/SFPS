@@ -109,22 +109,25 @@
  * -------
  * The numbers are tuned against the bestiary rather than against each other,
  * because "is this weapon good" is not a question that has an answer on its
- * own. An imp has 40hp, a brute 120, a hound 18:
+ * own. A water spirit has 40hp, a brute 120, a caster 26:
  *
- *   shotgun  6 x 7 = 42 point blank, so one blast kills an imp and three are
- *            needed for a brute. Unchanged from before this table existed.
- *   grenade  55 in a radius, so it kills a clustered pair of imps outright and
- *            takes a brute to half. Travel time is what it pays for that.
+ *   shotgun  6 x 7 = 42 point blank, so one blast kills a water spirit and
+ *            three are needed for a brute. Unchanged from before this table
+ *            existed.
+ *   grenade  55 in a radius, so it kills a clustered pair of water spirits
+ *            outright and takes a brute to half. Travel time is what it pays
+ *            for that.
  *   rapid    9 a shot at 12/sec = 108 dps sustained, the highest here, against
  *            a magazine that empties in under four seconds of holding fire.
- *   axe      45 a swing kills an imp in one and a hound without thinking, and
- *            asks you to be within 2.2m of something trying to hit you.
+ *   axe      45 a swing kills a water spirit in one and asks you to be within
+ *            2.2m of something trying to hit you -- which the caster never
+ *            lets you be, because it is the one kind that is not on the floor.
  *
  * 한국어
  * ------
  * 수치는 서로가 아니라 몬스터 도감을 기준으로 조정했습니다. "이 무기가 좋은가"는 그
- * 자체로는 답이 있는 질문이 아니기 때문입니다. 임프는 체력 40, 브루트는 120, 하운드는
- * 18입니다.
+ * 자체로는 답이 있는 질문이 아니기 때문입니다. 물의 정령은 체력 40, 브루트는 120, 캐스터는
+ * 26입니다.
  */
 static const WeaponType WEAPONS[WP_TYPES] = {
     /* EVERY ROW USED TO SAY "shot". The shotgun was the only weapon when this
@@ -1188,6 +1191,14 @@ int wp_axe_land(Weapon *w, Pools *pl, v3 feet, int grounded, float dt) {
        없었습니다. ::proj_boom_fx가 둘 다 해결합니다. 곧 무언가를 상하게 할 그 반경으로 크기가
        정해지고 그것을 던진 것의 색으로 칠해진, 같은 여섯 겹이기 때문입니다. */
     proj_boom_fx(pl, feet, v3f(0, 1, 0), AXE_SLAM_RADIUS, BLAST_TINT_SLAM);
+
+    /* And the light and the jolt, off the same record a grenade leaves, at a
+       third of its strength. ::AXE_SLAM_FLASH says why a third rather than the
+       whole thing, and why the number cannot simply be read off the radius.
+       그리고 유탄이 남기는 것과 같은 기록에서 나오는 빛과 충격이며, 세기는 그 3분의 1입니다.
+       왜 전부가 아니라 3분의 1인지, 그리고 왜 그 수를 반경에서 그냥 읽어 낼 수 없는지는
+       ::AXE_SLAM_FLASH에 있습니다. */
+    proj_flash(pl, feet, AXE_SLAM_RADIUS, AXE_SLAM_FLASH, FLASH_BLAST, -1);
 
     /* Still `impact` and not `blast`. The picture is a detonation and the sound
        is a landing, because that is what happened: a body came down on a floor.

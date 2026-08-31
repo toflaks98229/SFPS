@@ -390,9 +390,10 @@ void scene_frame(const World *w, Scene *sc, int vw, int vh, int frozen);
  * @param[in] vp  Combined view-projection matrix.
  * @param[in] eye Camera position, for lighting and fog.
  * @note The level is no longer a parameter. It was here to supply the point
- *       lights, and a level's lights are baked into the geometry this draws
- *       rather than uploaded per frame -- so the only thing this needs from a
- *       Level is the mesh built from it, which the Scene already holds.
+ *       lights, and ::scene_lights uploads every light ONCE for the whole
+ *       frame before any pass runs, so by the time this is called they are
+ *       already in the shader. The only thing this needs from a Level is the
+ *       mesh built from it, which the Scene already holds.
  *
  * 한국어
  * ------
@@ -400,12 +401,13 @@ void scene_frame(const World *w, Scene *sc, int vw, int vh, int frozen);
  * @param[in] s   생성된 레벨을 보유한 장면.
  * @param[in] vp  뷰-투영 결합 행렬.
  * @param[in] eye 조명과 안개 계산에 사용되는 카메라 위치.
- * @note 레벨은 더 이상 인자가 아닙니다. 점광원을 제공하기 위해 있었는데, 레벨의 광원은
- *       프레임마다 업로드되는 것이 아니라 이 함수가 그리는 지오메트리에 구워져 있습니다.
- *       따라서 이 함수가 Level로부터 필요로 하는 유일한 것은 그것으로 만들어진 메시이며,
- *       그것은 Scene이 이미 보유하고 있습니다.
+ * @note 레벨은 더 이상 인자가 아닙니다. 점광원을 제공하기 위해 있었는데, ::scene_lights가
+ *       어떤 패스가 돌기도 전에 프레임 전체에 대해 모든 광원을 *한 번* 업로드하므로 이
+ *       함수가 호출될 시점에는 이미 셰이더 안에 들어 있습니다. 이 함수가 Level로부터 필요로
+ *       하는 유일한 것은 그것으로 만들어진 메시이며, 그것은 Scene이 이미 보유하고 있습니다.
  */
 void scene_draw_level(const Scene *s, mat4 vp, v3 eye);
+
 
 /* --- World passes: before post_end / 월드 패스: post_end 이전 --- */
 
@@ -714,12 +716,21 @@ void scene_draw_death(Scene *s, int vw, int vh, float since, int ready,
  * title -- a playback, or a ::World a tool is driving -- this pass draws the dim
  * itself.
  *
- * @note CALLED FOR EVERY TITLE FRAME, not only the ones with a menu over them,
- *       and that is load-bearing rather than tidy. ::scene_frame's other UI
- *       passes are all skipped while `title` is set, so this is the only one
- *       left -- and ::ui_end is what restores the depth test and the culling
- *       the NEXT frame's world pass expects. A title frame that drew no UI pass
- *       would corrupt the frame after it.
+ * @note CALLED FOR EVERY TITLE FRAME THE TITLE IS THE SCREEN OF, which is not
+ *       only the ones with a menu over them, and that is load-bearing rather
+ *       than tidy. ::scene_frame's other UI passes are all skipped while
+ *       `title` is set, so on a title frame with no menu -- a playback, or a
+ *       ::World a tool is driving -- this is the only one left, and ::ui_end is
+ *       what restores the depth test and the culling the NEXT frame's world
+ *       pass expects. A title frame that drew no UI pass would corrupt the
+ *       frame after it.
+ *
+ * @note NOT CALLED FOR SETTINGS OR CREDITS, though `title` is still set while
+ *       either is up: they are reached FROM the title and the menu's own header
+ *       takes this block's place -- ::menu_title_y places both -- so the name
+ *       drawn as well would be a second header printed over the first. The caller makes that
+ *       call, because the caller is what knows both facts. Those frames keep
+ *       their UI pass from ::scene_draw_menu, which is what draws them.
  *
  * @note WHERE IT SITS COMES FROM menu.c. ::menu_title_y is where the header of
  *       the current screen goes, and the title screen widens that gap for
@@ -746,11 +757,18 @@ void scene_draw_death(Scene *s, int vw, int vh, float since, int ready,
  * 아트입니다. 먼저 그리면 제목이 자기가 머리글로 있는 메뉴에 의해 어두워집니다. 타이틀 앞에
  * 메뉴가 없을 때(재생이거나 도구가 구동하는 ::World일 때)는 이 패스가 직접 어둡게 합니다.
  *
- * @note *모든 타이틀 프레임에 대해 호출되며*, 메뉴가 위에 있는 프레임에만이 아닙니다. 이것은
- *       단정함이 아니라 구조적으로 중요합니다. ::scene_frame의 다른 UI 패스는 `title`이 서 있는
- *       동안 전부 건너뛰어지므로 남는 것이 이것뿐이며, 다음 프레임의 월드 패스가 기대하는 깊이
+ * @note *타이틀이 그 화면인 모든 프레임에 대해 호출되며*, 메뉴가 위에 있는 프레임에만이
+ *       아닙니다. 이것은 단정함이 아니라 구조적으로 중요합니다. ::scene_frame의 다른 UI 패스는
+ *       `title`이 서 있는 동안 전부 건너뛰어지므로, 메뉴가 없는 타이틀 프레임(재생이거나 도구가
+ *       구동하는 ::World)에서는 남는 것이 이것뿐이며, 다음 프레임의 월드 패스가 기대하는 깊이
  *       검사와 컬링을 복원하는 것이 ::ui_end입니다. UI 패스를 하나도 그리지 않는 타이틀 프레임은
  *       그 다음 프레임을 망칩니다.
+ *
+ * @note *설정과 크레딧에서는 호출되지 않습니다.* 둘 중 하나가 떠 있는 동안에도 `title`은 여전히
+ *       서 있지만, 그 둘은 타이틀에서 들어가는 곳이고 메뉴 자신의 머리글이 이 블록의 자리를
+ *       차지합니다. 둘 다 ::menu_title_y가 놓습니다. 그러므로 이름까지 그리면 첫 머리글 위에
+ *       두 번째 머리글을 찍는 셈이 됩니다. 그 판단은 호출자가 합니다. 두 사실을 모두 아는 것이 호출자이기
+ *       때문입니다. 그 프레임들은 자신을 그리는 ::scene_draw_menu에서 UI 패스를 받습니다.
  *
  * @note *어디에 놓이는지는 menu.c에서 옵니다.* ::menu_title_y는 현재 화면의 머리글이 가는
  *       자리이며, 타이틀 화면은 정확히 이 블록을 위해 그 간격을 넓힙니다. 이곳의 상수로

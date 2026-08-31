@@ -28,7 +28,29 @@
 #                       oriented squares line their edges up and read as one
 #                       shape being scaled
 #   gravity <a>         downward acceleration, cm/s^2. 0 floats, 900 falls
+#   stretch <ms>        draw the quad over this many milliseconds of the
+#                       particle's OWN travel, along its velocity. A streak
+#                       instead of a square, and one that SHORTENS as `drag`
+#                       takes the speed away, which is what reads as a spark
+#                       landing rather than merely fading. 0 is the square.
+#                       Ignored by `face normal` -- a decal has no velocity
+#                       worth pointing at
+#   trail <name>        the effect this particle leaves BEHIND it as it flies,
+#                       every `trailms` milliseconds. What makes a thrown ember
+#                       read as thrown: a bright dot arcing across a dark room
+#                       is a dot moving, and the same dot with a metre of smoke
+#                       behind it is something the blast HURLED. The chain is
+#                       one deep -- a wake never has a wake -- so a definition
+#                       may safely name one that names it back
+#   trailms <ms>        how often, in milliseconds. What is alive at once is
+#                       `life` of the wake divided by this, per particle, and
+#                       THAT is the number to budget against the shared pool
 #   blend add|alpha     `add` glows and never darkens; `alpha` can be dark
+#                       ONE WORD, NOT A NUMBER. `blend 1` parses -- unknown
+#                       tokens are skipped rather than rejected, and `1` is
+#                       simply not `add` -- and lands on `alpha`, which is the
+#                       opposite of what anyone writing it meant. Three
+#                       definitions in this file had it for a long time
 #   face camera|normal   `camera` always faces you; `normal` lies flat on the
 #                       surface it was spawned against -- that is a decal
 #   dome 1              every particle at ONE speed over the hemisphere around
@@ -66,6 +88,10 @@ e spark
   drag 150               # sparks lose speed fast; they are small and light
   spin 540
   gravity 420
+  stretch 22             # a spark off stone leaves at 3.4 m/s and a square
+                         # says it is sitting still. `drag 150` bleeds that off
+                         # inside the life, so the streak is a streak at the
+                         # start and a dot by the end, without a second layer
   blend add
   face camera
 
@@ -101,6 +127,128 @@ e bullethole
   blend alpha
   face normal
 
+# The mark a BOLT leaves, which is not the mark a bullet leaves. ioquake3 draws
+# this distinction at the line where it picks its shader -- energyMarkShader
+# for the plasma and the BFG, bulletMarkShader for the machinegun -- and the
+# reason is the obvious one: a pellet takes a chip out of the stone and a bolt
+# burns it. `bullethole` is nearly black and 9cm; this is wider, browner at the
+# edge, and it does not have a hole in the middle of it.
+#
+# SHARED BY BOTH SIDES OF THE FIGHT, and that is a deliberate exception to the
+# rule the rest of this file follows. `blastburst` and `boltburst` are two
+# definitions because they are the same shape in opposite colours, and warm is
+# yours while cold is theirs -- but that doctrine is about LIGHT. A scorch is
+# the absence of light: it is what is left when a surface has stopped
+# reflecting, and a burn tinted green so the player can tell whose bolt made it
+# would be a claim the surface cannot carry. One definition, and the two call
+# sites in proj.c and enemy.c name it together.
+#
+# *볼트*가 남기는 자국이며, 탄환이 남기는 자국이 아닙니다. ioquake3은 셰이더를 고르는 줄에서
+# 이 구분을 긋습니다. 플라즈마와 BFG에는 energyMarkShader를, 기관총에는 bulletMarkShader를
+# 씁니다. 이유는 뻔한 것입니다. 산탄은 돌을 쪼아 내고 볼트는 태웁니다. `bullethole`은 거의
+# 검고 9cm입니다. 이것은 더 넓고 가장자리가 더 갈색이며, 가운데에 구멍이 없습니다.
+#
+# *싸움의 양쪽이 함께 씁니다.* 이 파일의 나머지가 따르는 규칙에 대한 의도적인 예외입니다.
+# `blastburst`와 `boltburst`가 두 정의인 이유는 반대되는 색의 같은 형태이고, 따뜻한 것은 당신
+# 것이며 차가운 것은 그들 것이기 때문입니다. 그러나 그 원칙은 *빛*에 대한 것입니다. 그을음은
+# 빛의 부재입니다. 표면이 반사하기를 그만두었을 때 남는 것이며, 누구의 볼트가 만들었는지
+# 플레이어가 알 수 있도록 녹색으로 물들인 화상은 그 표면이 감당할 수 없는 주장입니다. 정의
+# 하나이고, proj.c와 enemy.c의 두 호출 지점이 함께 그 이름을 댑니다.
+e scorch
+  count 1
+  life 4500
+  size 15 15
+  rgb 22 18 15           # burnt, not black: `bullethole` is the black one and
+  rgb2 12 10 9           # two marks the same colour are one mark twice
+  alpha 74 0
+  speed 0 0
+  gravity 0
+  blend alpha
+  face normal
+
+# --- the player's bolt, landing ---------------------------------------------
+#
+# The rapid's impact was ONE LINE and the line was `spark` -- the shotgun's,
+# authored warm for a lead pellet on stone. Every other thing this weapon puts
+# on screen is green: the bolt is drawn in LIGHT_COL_BOLT, the wall it flies
+# past is lit in it, and then it landed in orange. The palette's own rule in
+# scene.c is that warm is yours and cold is theirs, and the bolt was managing
+# to break it in the third direction.
+#
+# Two layers, because a hit has an instant and an aftermath. Xonotic splits the
+# same event the same way -- `electro_impact` carries the core and the smoke,
+# `electro_ballexplode` the sparks -- and Quake II's TE_BLASTER is
+# CL_BlasterParticles with a light on top of it. The third and fourth layers
+# are not here because they already exist: the scorch above, and `smokepuff`,
+# which the shotgun wrote and a bolt has no reason to write again.
+#
+# 연사의 피탄은 *한 줄*이었고 그 줄은 `spark`, 즉 샷건의 것이었습니다. 납 산탄이 돌에 맞는
+# 것을 위해 따뜻하게 작성된 것입니다. 이 무기가 화면에 내놓는 다른 모든 것은 녹색입니다.
+# 볼트는 LIGHT_COL_BOLT로 그려지고 그것이 지나가는 벽도 그 색으로 밝혀지는데, 그러고 나서
+# 주황색으로 착탄했습니다. scene.c에 있는 팔레트 자신의 규칙은 따뜻한 것이 당신 것이고 차가운
+# 것이 그들 것이라는 건데, 이 볼트는 세 번째 방향으로 그것을 어기고 있었습니다.
+#
+# 두 겹인 이유는 피탄에 순간과 여파가 있기 때문입니다. Xonotic은 같은 사건을 같은 방식으로
+# 나눕니다. `electro_impact`가 코어와 연기를 지니고 `electro_ballexplode`가 불꽃을 지닙니다.
+# Quake II의 TE_BLASTER는 CL_BlasterParticles에 빛을 얹은 것입니다. 셋째와 넷째 겹이 이곳에
+# 없는 이유는 이미 존재하기 때문입니다. 위의 그을음과, 샷건이 작성했으며 볼트가 다시 쓸 이유가
+# 없는 `smokepuff`입니다.
+
+# The instant. White with the green already in it rather than green going
+# white: a core that opened in the bolt's own hue would be a small bolt sitting
+# on the wall, where what happened is that one stopped existing. `blastflash`
+# makes the same argument at ten times the size, and the small `spawn` is the
+# same trick for the same reason -- these are MEANT to overlap and saturate.
+# *순간*입니다. 녹색이 희어지는 것이 아니라 이미 녹색이 든 흰색입니다. 볼트 자신의 색조로
+# 열리는 코어는 벽에 앉은 작은 볼트일 뿐이지만, 실제로 일어난 일은 그것이 존재하기를
+# 그만두었다는 것입니다. `blastflash`가 열 배 크기로 같은 논지를 펴며, 작은 `spawn`도 같은
+# 이유의 같은 수법입니다. 이들은 겹쳐서 포화하도록 *의도된* 것입니다.
+e zapflash
+  count 2
+  life 80                # SHORTER AND SMALLER THAN IT LOOKS LIKE IT SHOULD BE.
+  size 16 30             # `blastflash` is 132cm across and gets away with it
+                         # because a grenade goes off once. This lands eleven
+                         # times a second, and a half-metre white blob at that
+                         # rate is not a series of hits, it is a strobe. Scale
+                         # here is set by the FIRE RATE, not by the event
+  rgb 236 255 232
+  rgb2 96 255 128        # resolving INTO the bolt's green as it leaves
+  alpha 96 0
+  speed 25 18
+  spawn 4                # small: they are MEANT to overlap
+  drag 280               # collapses in place rather than travelling
+  spin 220
+  blend add
+  face camera
+
+# The aftermath: what came off the wall. Cools from near-white into
+# LIGHT_COL_BOLT's acid green exactly the way `boltburst` cools into the
+# monsters' blue -- the two are mirrored on purpose, which is the whole of why
+# the rapid needed its own rather than borrowing that one.
+# `gravity 120` is small and not zero. Plasma spatter is not debris and should
+# not fall like it, but sparks that hang in a flat plane read as a decal that
+# forgot to be one.
+# *여파*이며, 벽에서 떨어져 나온 것입니다. `boltburst`가 몬스터의 파랑으로 식는 것과 똑같이
+# 흰색에 가까운 데서 LIGHT_COL_BOLT의 강한 녹색으로 식습니다. 둘은 의도적으로 거울상이며,
+# 연사가 그것을 빌리지 않고 자기 것을 필요로 한 이유 전부가 그것입니다.
+# `gravity 120`은 작지만 0이 아닙니다. 플라즈마 비산물은 파편이 아니므로 그렇게 떨어져서는 안
+# 되지만, 평평한 평면에 걸린 불꽃은 데칼이 되기를 잊은 데칼로 읽힙니다.
+e zapburst
+  count 10
+  life 260
+  size 9 2
+  rgb 198 255 208
+  rgb2 44 158 66
+  alpha 88 0
+  speed 380 320
+  spawn 8
+  drag 150
+  spin 420
+  gravity 120
+  stretch 24
+  blend add
+  face camera
+
 # --- monsters ---------------------------------------------------------------
 
 # A hooked or shot monster dying. Dark, slow, drifting upward -- the rising
@@ -134,6 +282,8 @@ e boltburst
   drag 140
   spin 480
   gravity 0
+  stretch 20             # the burst leaves at 4 m/s: streaks off the surface,
+                         # not a ring of dots hanging in front of it
   blend add
   face camera
 
@@ -160,6 +310,42 @@ e bolttrail
   blend add
   face camera
 
+# And the RIBBON, which is the half of a trail the layer above cannot be. That
+# one is additive and 280ms: it is the bolt's heat, it sits where the bolt was
+# and it is gone before the bolt has crossed the room. What a projectile
+# actually leaves behind is longer than its own flight and WIDENS away from the
+# head -- the wake is a cone, not a tube -- and it has to be able to be darker
+# than the wall behind it, which nothing additive can ever be.
+#
+# Faint on purpose (28%). Thickness comes from many thin layers overlapping,
+# the same argument `lavasmoke` makes: one puff every 30ms for a two-second
+# flight is sixty of these, and at any opacity worth noticing that is a solid
+# tube painted across the room.
+#
+# 그리고 *리본*이며, 위의 겹이 될 수 없는 궤적의 나머지 절반입니다. 그쪽은 가산이고
+# 280ms입니다. 볼트의 열이고, 볼트가 있던 자리에 놓이며, 볼트가 방을 가로지르기 전에
+# 사라집니다. 발사체가 실제로 뒤에 남기는 것은 자기 비행보다 오래가고 머리에서 멀어질수록
+# *넓어집니다*(자취는 관이 아니라 원뿔입니다). 그리고 뒤의 벽보다 어두울 수 있어야 하는데,
+# 가산인 것은 결코 그럴 수 없습니다.
+#
+# 의도적으로 흐립니다(28%). 두께는 얇은 겹이 여럿 겹쳐서 나오며, `lavasmoke`가 펴는 것과
+# 같은 논지입니다. 2초 비행에 30ms마다 하나면 예순 장이고, 눈에 띌 만한 불투명도라면
+# 그것은 방을 가로질러 칠한 단단한 관입니다.
+e boltwake
+  count 1
+  life 620
+  size 5 30              # 5cm at the head, 30cm where it has fallen behind
+  rgb 122 152 205
+  rgb2 40 48 70
+  alpha 28 0
+  speed 8 6
+  spawn 2
+  drag 140
+  spin 30
+  gravity -15            # drifts up as it dies, so the wake does not sag
+  blend alpha
+  face camera
+
 # --- the grapple ------------------------------------------------------------
 
 # The claw biting STONE. Small, brief and bright: an acknowledgement, not a
@@ -177,6 +363,8 @@ e hookbite
   drag 160
   spin 600
   gravity 220
+  stretch 20             # the claw is a thrown thing too, and what comes off
+                         # stone when it bites comes off at 2.8 m/s
   blend add
   face camera
 
@@ -214,6 +402,8 @@ e hookland
   drag 130               # burst out hard, then settle
   spin 420
   gravity 320
+  stretch 24             # the hardest impact the claw makes, and the fastest
+                         # burst: 4.6 m/s wants a streak more than any of these
   blend add
   face camera
 
@@ -296,6 +486,68 @@ e lavasmoke
   blend alpha            # must be able to be darker than the lava behind it
   face camera
 
+# --- the grenade, before it goes off -----------------------------------------
+#
+# A grenade left the muzzle and arrived at the wall with NOTHING BETWEEN THOSE
+# TWO EVENTS. It was drawn, and it carried a light, and that was the whole of
+# it -- a lit dot moving across the room. The reason that reads as weightless
+# is that a thrown charge is legible from its PATH: you learn where a grenade
+# is going by seeing where it has been, and a dot has been nowhere.
+#
+# Two layers, because a fuse and a wake are different facts. `fusespark` is the
+# charge burning, additive and short, and it streaks along the throw. The
+# ribbon is `fusetrail`, and it is the one that lasts: it is still hanging in
+# the air after the grenade has bounced, which is what lets a player read the
+# arc backwards to where it was thrown from.
+#
+# proj.c emits both on one timer -- see PROJ_TRAIL_INTERVAL, and the note there
+# on why the rate is in seconds rather than per frame.
+#
+# 유탄은 총구를 떠나 벽에 도착했고, *그 두 사건 사이에는 아무것도 없었습니다*. 그려졌고,
+# 빛을 지녔고, 그것이 전부였습니다. 방을 가로지르는 밝은 점 하나입니다. 그것이 무게 없이
+# 읽히는 이유는, 던져진 장약이 자신의 *경로*에서 읽히기 때문입니다. 유탄이 어디로 가는지는
+# 그것이 어디에 있었는지를 보고 배우는데, 점은 어디에도 있었던 적이 없습니다.
+#
+# 두 겹인 이유는 도화선과 자취가 서로 다른 사실이기 때문입니다. `fusespark`는 타오르는
+# 장약이며 가산이고 짧고, 던져진 방향으로 늘어납니다. 리본은 `fusetrail`이고 이쪽이
+# 오래갑니다. 유탄이 튕긴 뒤에도 공중에 남아 있으며, 그것이 플레이어가 포물선을 거슬러
+# 어디서 던져졌는지 읽게 해 줍니다.
+#
+# proj.c가 둘을 하나의 타이머로 방출합니다. PROJ_TRAIL_INTERVAL과, 그 비율이 프레임마다가
+# 아니라 초 단위인 이유에 대한 그곳의 설명을 참조하십시오.
+
+e fusespark
+  count 1
+  life 240
+  size 6 1
+  rgb 255 214 140
+  rgb2 220 80 20         # the fuse cools the way every ember here cools
+  alpha 78 0
+  speed 24 30
+  spawn 2
+  drag 90
+  spin 220
+  gravity 90
+  stretch 26
+  blend add
+  face camera
+
+e fusetrail
+  count 1
+  life 900               # OUTLIVES THE THROW. A trail that dies with the
+                         # grenade is a trail nobody has time to read
+  size 7 34
+  rgb 152 142 132
+  rgb2 60 58 58
+  alpha 38 0
+  speed 12 9
+  spawn 3
+  drag 130
+  spin 35
+  gravity -25
+  blend alpha            # smoke occludes; the wall behind it goes DARKER
+  face camera
+
 # --- the blast, in layers ---------------------------------------------------
 #
 # One effect cannot be an explosion. DarkPlaces builds TE_EXPLOSION out of six
@@ -325,7 +577,20 @@ rgb2 190 60 20
 alpha 85 0
 speed 333 0
 dome 1
-blend 1
+# `blend add`, NOT `blend 1`. It read `1` for a long time, and `1` is not the
+# word `add`, so the parser fell through to its default and the brightest shell
+# in the game was drawn ALPHA -- forty-four orange squares that occluded the
+# room instead of lighting it. `sawgrind` and `blastcore` had the same line and
+# the same fault. Nothing reported it: an unknown token is skipped by design,
+# which is what lets an old build read a new file, and the cost of that is that
+# a mistyped value is indistinguishable from one that was never written.
+# `blend 1`이 아니라 `blend add`입니다. 오랫동안 `1`이라고 적혀 있었고, `1`은 `add`라는
+# 단어가 아니므로 파서는 기본값으로 떨어졌습니다. 게임에서 가장 밝은 껍질이 *알파*로
+# 그려졌다는 뜻입니다. 방을 밝히는 대신 가리는 주황색 사각형 마흔넷입니다. `sawgrind`와
+# `blastcore`도 같은 줄에 같은 결함이 있었습니다. 아무것도 보고하지 않았습니다. 미지의
+# 토큰을 건너뛰는 것은 설계이며(그것이 옛 빌드가 새 파일을 읽게 해 줍니다) 그 대가가
+# 오타 난 값과 애초에 쓰이지 않은 값을 구분할 수 없다는 것입니다.
+blend add
 
 # The core: short, bright, and it does not travel. Without it the dome reads as
 # a ring of sparks with a hole in the middle.
@@ -340,7 +605,66 @@ rgb2 255 110 30
 alpha 95 0
 speed 40 30
 spawn 18
-blend 1
+blend add              # see the note on blastdome's own blend line
+
+# THE FIREBALL, and it is the only layer here that can get DARKER. Everything
+# above it is additive: the dome, the core and the flash are light, and light
+# added to a frame can only ever brighten it. So the blast had two states and
+# nothing between them -- white-hot, and then grey smoke climbing out of an
+# empty floor. What was missing is the second a real one spends as a cloud that
+# is still burning: rolling, opaque, lit along its own edges and going brown
+# from the inside out while it does.
+#
+# That is what `alpha` buys and why this layer is worth its slots. The colour
+# ramp does the work on its own -- born hot orange, dead the colour of soot --
+# so the same particle that reads as flame at 100ms reads as the smoke it
+# turned into at 800, without a second definition and without a handover
+# anybody has to time.
+#
+# `drag 210` IS THE SHAPE. A cloud is thrown outward and then stops being
+# thrown; it does not fly. High drag with a modest speed puts the puffs where
+# they belong in the first 200ms and leaves them there to boil, which is what
+# separates a fireball from a burst of debris.
+#
+# *화구*이며, 이곳에서 유일하게 *어두워질 수 있는* 겹입니다. 그 위의 모든 것은 가산입니다.
+# 돔과 코어와 섬광은 빛이고, 프레임에 더해진 빛은 밝게 만드는 일밖에 할 수 없습니다.
+# 그래서 폭발에는 두 가지 상태만 있고 그 사이에는 아무것도 없었습니다. 새하얗게 뜨겁거나,
+# 텅 빈 바닥에서 회색 연기가 피어오르거나. 빠져 있던 것은 실제 폭발이 *아직 타고 있는
+# 구름*으로 보내는 그 1초입니다. 구르고, 불투명하고, 자기 가장자리를 따라 빛나며, 그러는
+# 동안 안쪽부터 갈색이 되어 갑니다.
+#
+# 그것이 `alpha`가 사 주는 것이고 이 겹이 슬롯 값을 하는 이유입니다. 색 램프가 혼자
+# 일합니다. 태어날 때는 뜨거운 주황이고 죽을 때는 그을음 색이므로, 100ms에 불꽃으로 읽히던
+# 바로 그 입자가 800ms에는 그것이 변해서 된 연기로 읽힙니다. 두 번째 정의도, 누군가 타이밍을
+# 맞춰야 하는 인계도 없이 말입니다.
+#
+# *`drag 210`이 형태입니다.* 구름은 밖으로 던져진 뒤 던져지기를 멈춥니다. 날아가지 않습니다.
+# 적당한 속력에 높은 저항은 처음 200ms에 퍼프를 있어야 할 자리에 놓고 그곳에서 끓게 두는데,
+# 그것이 화구와 파편 폭발을 가릅니다.
+e blastfire
+count 16
+life 800
+size 20 64             # small and separate, then large and merging: that
+                       # order is the cloud coalescing rather than inflating
+rgb 255 170 56         # hot orange. The WHITE is blastcore's job, additively,
+                       # on top of this -- one ramp cannot be both
+rgb2 40 27 22          # to soot, in place, without going anywhere
+alpha 66 0             # NOT 92. Sixteen alpha quads at 92% overlapping is one
+                       # opaque lump with a convex outline -- the exact failure
+                       # the header's note about saturation describes, in the
+                       # alpha pass instead of the additive one. At 66 the
+                       # overlaps read as depth in the cloud
+speed 175 135
+spawn 42               # WIDER THAN THE PUFFS ARE, at birth. This is the number
+                       # that decides whether this layer is a fireball or a
+                       # blob: scattered further than their own size, sixteen
+                       # squares are sixteen things, and they merge into one
+                       # mass only as they grow into each other
+drag 220               # thrown, then done being thrown
+spin 55                # each at its own angle, so the edges never line up
+gravity -50            # it climbs, slowly. Fire rises; debris does not
+blend alpha
+face camera
 
 # Smoke, and it RISES -- DarkPlaces gives its plume a negative gravity for the
 # same reason. Smoke that falls with the debris reads as dust, not as burning.
@@ -373,6 +697,227 @@ speed 420 320
 spawn 12
 gravity 900
 drag 1
+
+# The instant. THE ONE EFFECT IN THIS FILE THAT WANTS THE SATURATION `spawn`
+# EXISTS TO PREVENT: five quads over a metre across, overlapping, additive, at
+# full alpha, so they composite to flat white and read as one hole burnt in the
+# frame rather than as five sprites. Everywhere else that is the failure the
+# header warns about. Here it is the shape of the thing -- an explosion has an
+# over-exposed first two frames and nothing about it is countable.
+#
+# 110ms, which is under seven frames at 60 and under four at 30. It has to be
+# gone before the eye resolves what it was -- a white ball still there when the
+# smoke arrives is not a detonation, it is a lamp -- but 80ms was the first
+# attempt and it is under three frames on a machine that drops one, which makes
+# the flash something a player learns not to rely on. `blastcore` is the layer
+# that stays (170ms, and not white); this goes in front of it and leaves.
+#
+# WHY NOT JUST BRIGHTEN blastcore. Because a core that opens white and lasts
+# 170ms is white for 170ms: one definition has one colour ramp, and the ramp
+# that is right for the flash is not the one that is right for the fireball
+# under it. Two layers is how this file has always answered that -- see the
+# note at the top of this section on why one effect cannot be an explosion.
+#
+# *순간*입니다. 이 파일에서 유일하게, `spawn`이 막기 위해 존재하는 *포화*를 원하는
+# 이펙트입니다. 1미터가 넘는 사각형 다섯 개가 겹쳐서, 가산으로, 최대 알파로 합성되어 평평한
+# 흰색이 되며, 스프라이트 다섯 개가 아니라 화면에 뚫린 구멍 하나로 읽힙니다. 다른 모든 곳에서
+# 그것은 헤더가 경고하는 실패입니다. 이곳에서는 그것이 사물의 형태입니다. 폭발에는 과다 노출된
+# 첫 두 프레임이 있고 그것에 대해 셀 수 있는 것은 아무것도 없습니다.
+#
+# 110ms이며 60fps에서 일곱 프레임이 안 되고 30fps에서 네 프레임이 안 됩니다. 눈이 그것이
+# 무엇인지 판별하기 전에 사라져야 하지만(연기가 도착할 때까지 남아 있는 흰 공은 폭발이 아니라
+# 조명입니다), 첫 시도였던 80ms는 한 프레임을 흘리는 기기에서 세 프레임이 채 되지 않아
+# 플레이어가 섬광을 신뢰하지 않는 법을 배우게 만듭니다. 남는 겹은 `blastcore`이며(170ms이고
+# 희지 않습니다) 이것은 그 앞에 놓였다가 떠납니다.
+#
+# *왜 blastcore를 그냥 더 밝히지 않는가.* 흰색으로 열려 170ms를 사는 코어는 170ms 동안 흽니다.
+# 정의 하나에는 색 램프 하나가 있고, 섬광에 맞는 램프는 그 아래 화구에 맞는 램프가 아닙니다.
+# 겹을 둘로 두는 것이 이 파일이 언제나 그것에 답해 온 방식입니다.
+e blastflash
+count 5
+life 110
+size 132 40
+rgb 255 252 246
+rgb2 255 206 118
+alpha 100 0
+speed 30 20
+spawn 10               # small: they are MEANT to overlap
+drag 300               # collapses in place rather than travelling
+spin 260
+blend add
+face camera
+
+# The wave, along the ground. The dome answers HOW FAR in the air and this
+# answers it on the surface, which is where the answer is actually used: the
+# player's feet are on that floor, and a distance read off a hemisphere hanging
+# in space is a distance nobody can pace out.
+#
+# speed x life = 100cm, the same arithmetic blastdome and altarring use, so
+# fx_spawn_scaled multiplies it by the real radius and the rim stops where the
+# damage does. `disc 1` with `face normal` is the idiom: the ring is thrown
+# around the equator and the quads lie in that same plane, so it runs out
+# across the floor instead of standing up out of it.
+#
+# DUST, NOT FIRE, and that is what lets the axe's slam borrow this one layer
+# without borrowing the fireball. `blend alpha` because dust occludes what is
+# behind it -- an additive ring is light, and light passing over a floor is not
+# what a shockwave does to one.
+#
+# 파동이며, 지면을 따라갑니다. 돔은 *공중에서* 얼마나 먼가에 답하고 이것은 표면에서 답하는데,
+# 그 답이 실제로 쓰이는 곳이 표면입니다. 플레이어의 발이 그 바닥에 있으며, 허공에 걸린 반구에서
+# 읽어 낸 거리는 아무도 걸음으로 재어 볼 수 없는 거리입니다.
+#
+# speed x life = 100cm로, blastdome과 altarring이 쓰는 것과 같은 산술입니다. 그래서
+# fx_spawn_scaled가 실제 반경을 곱하면 테두리가 피해가 멈추는 곳에서 멈춥니다. `face normal`과
+# 함께 쓴 `disc 1`이 그 기법입니다. 고리는 적도를 따라 던져지고 사각형들은 같은 평면에 누우므로,
+# 바닥에서 일어서지 않고 바닥을 가로질러 퍼집니다.
+#
+# *불이 아니라 먼지이며*, 그 덕분에 도끼의 내려찍기가 화구를 빌리지 않고 이 한 겹만 빌릴 수
+# 있습니다. `blend alpha`인 이유는 먼지가 뒤를 가리기 때문입니다. 가산 고리는 빛이고, 바닥
+# 위를 지나가는 빛은 충격파가 바닥에 하는 일이 아닙니다.
+e blastwave
+count 26
+life 300
+size 22 60             # GROWS, and by nearly a factor of three -- `landdust`
+                       # widens the same way. It is not decoration: 26 quads on
+                       # the rim of a 4.2m ring are a metre apart by the time
+                       # they get there, so a front that did not spread would
+                       # arrive as a dotted line rather than as a wave
+rgb 168 154 134        # floor grit lifted, lit by the fire above it
+rgb2 88 82 76
+alpha 58 0             # under everything else: this frames the blast
+speed 333 0            # disc: no jitter, so the rim arrives as one edge
+disc 1
+spin 0
+gravity 0
+blend alpha
+face normal
+
+# THE SAME RING, LIT. `blastwave` is dust and is deliberately alpha-blended so
+# it can occlude the floor; that is the right answer for what a shockwave does
+# to grit and the wrong one for what it does to the eye, because dust alone is
+# a pale smudge and nobody reads a radius off a smudge in a dark room.
+#
+# So the rim gets a second pass that is nothing but light. Same `disc 1`, same
+# `face normal`, and speed x life = 100cm for the third time in this file, so
+# fx_spawn_scaled lands it on exactly the radius the damage has and the two
+# rings travel as one. A LITTLE LONGER THAN THE DUST (420 against 300): the
+# bright edge is what the player is actually timing the blast by, and an edge
+# that leaves first makes the dust look like the event rather than the trace
+# of one.
+#
+# *같은 고리를, 빛으로.* `blastwave`는 먼지이고 바닥을 가릴 수 있도록 의도적으로 알파
+# 블렌드입니다. 충격파가 모래에 하는 일에 대해서는 옳은 답이지만 *눈에* 하는 일에 대해서는
+# 틀린 답입니다. 먼지만으로는 창백한 얼룩이고, 어두운 방에서 얼룩으로 반경을 읽는 사람은
+# 없기 때문입니다.
+#
+# 그래서 테두리는 오직 빛뿐인 두 번째 패스를 받습니다. 같은 `disc 1`, 같은 `face normal`,
+# 그리고 이 파일에서 세 번째로 speed x life = 100cm이므로, fx_spawn_scaled가 이것을 피해가
+# 가진 바로 그 반경에 놓고 두 고리는 하나처럼 달립니다. *먼지보다 조금 더 오래갑니다*(300
+# 대 420). 플레이어가 실제로 폭발의 박자를 재는 것은 밝은 가장자리이며, 그것이 먼저 떠나면
+# 먼지가 사건의 흔적이 아니라 사건 자체로 보이게 됩니다.
+e blastring
+count 26
+life 420
+size 18 58             # widens as it goes, and by the same near-threefold
+                       # blastwave does, for its reason: 26 quads on the rim of
+                       # a 4.2m ring are a metre apart by the time they get
+                       # there, and a front that did not spread would arrive as
+                       # a dotted line. Matched to blastwave's count and growth
+                       # deliberately: a lit rim sparser than the dust under it
+                       # reads as beads sitting on a wave rather than as the
+                       # wave being lit. They stop on the same rim and they do
+                       # NOT get there together -- 300ms against 420 -- so the
+                       # pale edge runs out ahead and the bright one follows it
+                       # in and stays, which is the order the reference has
+rgb 255 206 120
+rgb2 208 66 16         # the rim cools from flame to a dull red as it stops
+alpha 88 0
+speed 238 0            # 238 x 0.42s = 100cm. disc: no jitter, one edge
+disc 1
+spin 0
+gravity 0
+blend add
+face normal
+
+# What is still burning a second later. Everything above is over inside 300ms
+# except the smoke, and smoke on its own says the fire went OUT -- the layer
+# that says it did not is a handful of embers arcing away and dying one at a
+# time. They also do the job the debris cannot: `blastdebris` is alpha-blended
+# rock and invisible in a dark room three metres out, where these are additive
+# and are the only part of the blast still findable by eye at 1.5 seconds.
+#
+# The long life is the whole point and it is why they are small (5cm) and few
+# (14). A bright particle that lasts is a particle that is still there when the
+# player has moved on to the next thing, and the pool it is spending a slot in
+# is shared with every other effect in the level.
+#
+# 1초 뒤에도 *아직 타고 있는 것*입니다. 위의 모든 것은 연기를 빼면 300ms 안에 끝나고, 연기만
+# 있으면 불이 *꺼졌다*고 말하게 됩니다. 그렇지 않다고 말하는 겹이, 포물선을 그리며 하나씩
+# 스러지는 한 줌의 불티입니다. 이들은 파편이 할 수 없는 일도 합니다. `blastdebris`는 알파
+# 블렌드된 돌이라 3미터 밖 어두운 방에서는 보이지 않지만, 이들은 가산이며 1.5초 시점에 눈으로
+# 여전히 찾을 수 있는 폭발의 유일한 부분입니다.
+#
+# 긴 수명이 요점 전부이며, 그래서 작고(5cm) 적습니다(14개). 오래 남는 밝은 입자는 플레이어가
+# 다음 것으로 넘어간 뒤에도 남아 있는 입자이고, 그것이 슬롯을 쓰는 풀은 레벨의 다른 모든
+# 이펙트와 공유됩니다.
+e blastember
+count 14
+life 1500
+size 5 1
+rgb 255 216 132
+rgb2 148 30 10        # cools to a dying coal, not to nothing
+alpha 100 0
+speed 340 300
+spawn 14
+drag 45               # keeps travelling: an ember is thrown, not puffed
+spin 240
+gravity 620           # arcs and falls, so the eye follows it down
+stretch 30            # 3.4 m/s at birth: a streak while it is being thrown,
+                      # a point by the time it lands. The taper is free
+# AND THE WAKE, which is what makes the arc a THROW. An ember on its own is a
+# bright dot moving through a dark room and the eye reads it as a moving dot;
+# the same dot with half a metre of smoke behind it was hurled out of something.
+# It is also the only layer of this blast that is still being CREATED a second
+# in, so the site keeps changing after everything else has stopped.
+# 70ms and a 420ms wake: six alive per ember, eighty-four across the fourteen,
+# and that -- not the several hundred spawned over the ember's whole life -- is
+# what this costs the shared pool. See `trailms` at the top of the file.
+# *그리고 자취*이며, 그것이 포물선을 *던져진 것*으로 만듭니다. 불티 하나만으로는 어두운 방을
+# 지나가는 밝은 점이고 눈도 움직이는 점으로 읽습니다. 같은 점에 반 미터의 연기가 딸리면
+# 무언가에서 내던져진 것입니다. 또한 이 폭발에서 1초 뒤에도 여전히 *생성되고 있는* 유일한
+# 겹이므로, 다른 모든 것이 멈춘 뒤에도 현장은 계속 변합니다.
+# 70ms 간격에 420ms 자취이면 불티당 여섯 개가 살아 있고 열넷을 합쳐 여든넷입니다. 불티의
+# 생애 전체에 걸쳐 생성되는 수백 개가 아니라 *그 수*가 공유 풀에서 치르는 값입니다. 파일
+# 맨 위의 `trailms`를 참조하십시오.
+trail emberwake
+trailms 70
+blend add
+face camera
+
+# The half-metre of smoke behind one ember, and nothing else. It exists to be
+# named by `blastember` above and is never spawned by code: one particle, no
+# speed of its own, and faint enough that six of them overlapping still read as
+# air. A wake never has a wake -- see fx.c -- so this line of the chain ends
+# here whatever it says.
+# 불티 하나 뒤의 반 미터짜리 연기이며, 그 외에는 아무것도 아닙니다. 위의 `blastember`가
+# 이름으로 대기 위해 존재하고 코드가 생성하는 일은 없습니다. 입자 하나, 자기 속력 없음,
+# 여섯 장이 겹쳐도 공기로 읽힐 만큼 흐림. 자취는 자취를 갖지 않으므로(fx.c 참조) 이 사슬은
+# 무엇이 적혀 있든 이곳에서 끝납니다.
+e emberwake
+count 1
+life 420
+size 4 16
+rgb 176 166 156
+rgb2 58 56 56
+alpha 30 0
+speed 6 5
+spawn 1
+drag 120
+spin 60
+gravity -20
+blend alpha
+face camera
 
 # --- the chainsaw -----------------------------------------------------------
 #
@@ -415,7 +960,9 @@ speed 620 420
 spawn 6
 gravity 1100
 drag 1
-blend 1
+stretch 18             # steel on stone throws streaks, and at 6.2 m/s these
+                       # are the fastest particles in the file
+blend add              # see the note on blastdome's own blend line
 
 # --- what a bullet leaves behind -------------------------------------------
 #
@@ -627,11 +1174,23 @@ e landdust
 e blastburst
   count 20
   life 260
-  size 18 3
+  size 8 2               # NARROWER THAN IT WAS (18). Width and length were the
+                         # same number while the quad was a square, and now
+                         # they are not: `stretch` sets the length, so 18cm of
+                         # width on a 36cm streak is a stubby wedge, and twenty
+                         # wedges leaving one point are a white lump. A ray is
+                         # thin. That is most of what makes it read as a ray
   rgb 255 236 190
   rgb2 235 96 24
   alpha 90 0
   speed 520 430
+  spawn 9                # and they start apart, so the twenty do not composite
+                         # into one shape for the first three frames -- the
+                         # saturation note at the top of this file, again
+  stretch 34             # THE SPIKES. At 5.2 m/s with no drag these are the
+                         # rays thrown out of the first two frames, and a ray
+                         # is a streak by definition -- a square at that speed
+                         # is a chip of light with no direction at all
   blend add
   face camera
 
@@ -646,6 +1205,8 @@ e blastshard
   spin 900
   gravity 780
   drag 12
+  stretch 16             # short: these are lumps of hot metal and a long
+                         # streak would make them read as sparks again
   blend alpha
   face camera
 
@@ -660,6 +1221,8 @@ e boltshard
   spin 820
   gravity 700
   drag 14
+  stretch 16             # the grenade's shards, in the bolt's colour and at
+                         # the bolt's length -- see blastshard
   blend alpha
   face camera
 

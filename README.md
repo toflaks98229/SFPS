@@ -1492,10 +1492,21 @@ game.
 
 ### The ranged type
 
-**`shot_speed` is the only thing that makes a monster ranged.** Above zero and
-it launches a bolt instead of swinging; there is no second "is ranged" flag
-that could drift out of agreement with the first, and `enemytest` asserts that
-the caster is the only type with one.
+**`MonType::behaviour` is what makes a monster ranged, and `shot_speed` is how
+fast its bolt goes.** Those were one fact for a long time — `shot_speed > 0`
+*meant* "is this a caster", in three separate places — and splitting them is
+what `MonBehaviour` exists for: an archetype is a column, a number is a number.
+`types_check` holds the two in agreement (`AI_CASTER` ⟺ `shot_speed > 0`) and
+raises `DIAG_MON_TABLE` if a row ever disagrees.
+
+Two rows are ranged, not one: the caster and the water spirit both throw bolts,
+and `enemytest` asserts both. What makes the caster the *only* one you cannot
+walk up to is `MON_FLIES`, which is a different column again.
+
+> One reading of `shot_speed`-as-archetype outlived that split, in
+> `check_attack`, and it is the first thing
+> [docs/MONSTER_PATTERN_PROPOSAL.md](docs/MONSTER_PATTERN_PROPOSAL.md) removes —
+> a melee type given a bolt to throw would slip straight through it.
 
 Everything else falls out of the same state machine the melee types use:
 
@@ -3855,7 +3866,13 @@ frames that pack, with the decoded atlas bit-identical to before.
 - [ ] `texedit` — edit recipe ops with a live preview
 - [ ] Music: a tracker over the same synth
 - [x] A ranged monster — the caster, with dodgeable projectiles that cover blocks
-- [ ] More monster types, eight-view sprites
+- [ ] **Monster patterns, not monster types** — a second attack per kind, a
+      readable telegraph, and attacks that move the thing making them. The
+      bestiary went five rows to three on the argument that a slower copy of
+      something is a stat block rather than a question, so what is left to add
+      is what a kind *chooses*, not another kind.
+      [docs/MONSTER_PATTERN_PROPOSAL.md](docs/MONSTER_PATTERN_PROPOSAL.md)
+- [ ] Eight-view sprites — a monster you can catch facing away from you
 - [x] An `exit` that ends the game rather than looping — a win screen
 - [x] Real player momentum (`Player.vel`), a grapple hook, and recoil jumping
 - [x] Doors, switches, trigger volumes and keycards

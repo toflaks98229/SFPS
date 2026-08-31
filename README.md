@@ -1470,7 +1470,7 @@ code path. The atlas is a grid, one row per type, one column per frame:
 
 | | role | reads as |
 |---|---|---|
-| **water_spirit** | the baseline — holds mid range and sprays a cone of bolts | a small pale drifting shape |
+| **water_spirit** | the baseline — holds mid range and hoses a stream of five to ten small bolts at where you *were* | a small pale drifting shape |
 | **brute** | a wall of health that hits like a truck, slow | broad grey-green hulk, tusks, back spikes |
 | **caster** | ranged, and *off the floor* — never closes, shoots across the room | violet robe, no legs, cold cyan eyes |
 

@@ -314,6 +314,7 @@ int main(void) {
         const MonType *spirit = mon_stats(MON_WATER_SPIRIT);
         const MonType *brute  = mon_stats(MON_BRUTE);
         const MonType *cast   = mon_stats(MON_CASTER);
+        const MonType *maw    = mon_stats(MON_MAW);
 
         ok(brute->hp > spirit->hp * 2,      "the brute is far tougher than the water spirit");
         ok(brute->damage > spirit->damage,  "and hits harder");
@@ -394,16 +395,40 @@ int main(void) {
            "and still sits well inside the caster's, which is what mid means");
 
         /* And it sprays. A volley is not a faster single shot: one aimed bolt
-           is answered by stepping aside and a cone is answered by leaving the
-           cone, which is a different move. Without this the water spirit would
-           be the caster at a shorter range.
+           is answered by stepping aside and a stream is answered by getting out
+           of where it is pointing, which is a different move. Without this the
+           water spirit would be the caster at a shorter range.
            그리고 난사합니다. 일제 사격은 더 빠른 단발이 아닙니다. 조준된 볼트 하나에는 옆으로
-           비켜서는 것으로 답하고 원뿔에는 그 원뿔에서 벗어나는 것으로 답합니다. 다른
-           동작입니다. 이것이 없으면 물의 정령은 사거리만 짧은 캐스터입니다. */
+           비켜서는 것으로 답하고, 줄기에는 그것이 겨누는 자리에서 벗어나는 것으로 답합니다.
+           다른 동작입니다. 이것이 없으면 물의 정령은 사거리만 짧은 캐스터입니다. */
         ok(spirit->burst > 1 && spirit->spread > 0.0f,
-           "it sprays a cone rather than firing one aimed bolt");
+           "it sprays rather than firing one aimed bolt");
         ok(cast->burst == 1 && brute->burst == 1,
            "while everything else still fires or swings once");
+
+        /* OVER TIME, AND THAT IS THE WHOLE CHANGE. A cone and a stream can have
+           the same burst count and the same spread and be different fights: the
+           cone either hits or does not, and the stream gives the player the
+           length of itself to be somewhere else in. The gap is what separates
+           them, so it is what is asserted -- `burst > 1` alone would still pass
+           on the shotgun this replaced.
+           *시간에 걸쳐 나가며, 그것이 변경의 전부입니다.* 원뿔과 줄기는 같은 발수와 같은 산포를
+           갖고도 서로 다른 싸움일 수 있습니다. 원뿔은 맞거나 맞지 않거나이고, 줄기는 자기
+           길이만큼의 시간을 플레이어에게 다른 곳에 있으라고 내어 줍니다. 둘을 가르는 것이
+           간격이므로 검사하는 것도 그것입니다. `burst > 1`만으로는 이것이 대체한 산탄도
+           통과합니다. */
+        ok(spirit->shot_gap > 0.0f,
+           "and it sprays over time rather than all at once");
+        ok(spirit->burst_min >= 5 && spirit->burst <= 10,
+           "a volley is five to ten bolts");
+
+        /* The maw keeps the cone, and a gap of zero is how it says so. The two
+           readings of `burst` live side by side in one table, which is the point
+           of `shot_gap` being a number rather than a flag.
+           아귀는 원뿔을 유지하며, 간격 0이 그것을 말하는 방식입니다. `burst`의 두 해석이 한 표
+           안에 나란히 살며, 그것이 `shot_gap`이 플래그가 아니라 수인 이유입니다. */
+        ok(maw->burst > 1 && maw->shot_gap == 0.0f,
+           "while the maw still throws its five together");
         ok(cast->hp < spirit->hp,    "but it is frailer than a water spirit");
         ok(cast->windup > spirit->windup,
            "and telegraphs longer, so the bolt can be avoided");

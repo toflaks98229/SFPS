@@ -48,11 +48,76 @@
 /** @brief Monsters one level may hold, corpses included. / 레벨 하나가 담는 몬스터 수. 시체를 포함합니다. */
 #define ENEMY_MAX       64
 
-/** @brief Monster projectiles that may be in the air at once. / 동시에 공중에 있을 수 있는 몬스터 발사체 수. */
-#define ENEMY_MAX_SHOTS  48
+/**
+ * @brief Monster projectiles that may be in the air at once.
+ *
+ * ENGLISH
+ * -------
+ * RAISED FROM 48 WHEN THE WATER SPIRIT STOPPED FIRING A SHOTGUN. Five bolts
+ * leaving together are five slots held for as long as one flight; up to ten
+ * leaving over half a second are ten slots held for a flight *plus* that half
+ * second, and the spirit is the monster the waves send in numbers. Four of them
+ * volleying at once is 40 against the old 48, which is not a cap that has been
+ * exceeded -- it is a cap with nothing left over for the caster standing behind
+ * them, and the ring drops the OLDEST, so what a full pool deletes is the bolt
+ * closest to arriving.
+ *
+ * @note A ring, not a refusal: ::DIAG_SHOT_CAP is where the overflow is
+ *       reported, and it is worth watching after a change to ::MonType::burst
+ *       rather than trusted.
+ * @note .bss, so the 48 added here cost the floppy nothing.
+ *
+ * 한국어
+ * ------
+ * @brief 동시에 공중에 있을 수 있는 몬스터 발사체 수.
+ *
+ * *물의 정령이 산탄을 그만두면서 48에서 올렸습니다.* 함께 떠나는 다섯 발은 비행 한 번 동안
+ * 다섯 칸을 붙듭니다. 0.5초에 걸쳐 떠나는 최대 열 발은 비행 시간 *더하기* 그 0.5초 동안 열
+ * 칸을 붙들며, 물의 정령은 웨이브가 수로 보내는 몬스터입니다. 넷이 동시에 퍼부으면 40이고
+ * 옛 48에 대해 그것은 초과된 상한이 아니라 *뒤에 선 캐스터에게 남길 것이 없는* 상한입니다.
+ * 그리고 링은 가장 *오래된* 것을 버리므로, 꽉 찬 풀이 지우는 것은 도착에 가장 가까운
+ * 볼트입니다.
+ *
+ * @note 거절이 아니라 링입니다. 초과는 ::DIAG_SHOT_CAP으로 보고되며, ::MonType::burst를
+ *       바꾼 뒤에는 믿을 것이 아니라 지켜볼 것입니다.
+ * @note .bss이므로 이곳에서 더한 48은 플로피에 아무 비용도 들지 않습니다.
+ */
+#define ENEMY_MAX_SHOTS  96
 
-/** @brief Collision radius of a projectile, in metres. / 발사체의 충돌 반경(미터). */
-#define SHOT_RADIUS      0.22f
+/**
+ * @brief Collision radius of a projectile, in metres.
+ *
+ * ENGLISH
+ * -------
+ * SMALLER BECAUSE THERE ARE MORE OF THEM. At 0.22 a bolt was a thrown rock and
+ * a water spirit threw five of them together; the answer was to leave the cone
+ * and the size of any one of them barely entered into it. A stream of up to ten
+ * asks the opposite question -- can I be between them -- and that question has
+ * no good answer while each bolt is nearly half a metre across. Against
+ * ::PLAYER_RADIUS the pair decide how wide the gap has to be, and this is the
+ * half of it that was making the gap impossible.
+ *
+ * @note DRAWN SIZE FOLLOWS THIS, and not automatically: scene.c's
+ *       `SHOT_CORE_SIZE`, `SHOT_HALO_SIZE` and `SHOT_GLOW_SIZE` are separate
+ *       numbers that have to be moved with it, or the bolt is shot at a size it
+ *       is not drawn at -- the fault ::MonType::radius records for monsters.
+ *
+ * 한국어
+ * ------
+ * @brief 발사체의 충돌 반경(미터).
+ *
+ * *수가 늘었으므로 작아졌습니다.* 0.22일 때 볼트는 던진 돌이었고 물의 정령은 그것을 다섯 개
+ * 한꺼번에 던졌습니다. 답은 원뿔에서 벗어나는 것이었고 개별 볼트의 크기는 거의 상관이
+ * 없었습니다. 최대 열 발의 줄기는 반대 질문을 합니다. *그 사이에 있을 수 있는가*이며, 볼트
+ * 하나가 반 미터에 가까운 동안 그 질문에는 좋은 답이 없습니다. ::PLAYER_RADIUS와 짝을 이루어
+ * 틈이 얼마나 넓어야 하는지를 정하며, 틈을 불가능하게 만들고 있던 절반이 이쪽이었습니다.
+ *
+ * @note *그려지는 크기가 이것을 따라가되 저절로는 아닙니다.* scene.c의 `SHOT_CORE_SIZE`,
+ *       `SHOT_HALO_SIZE`, `SHOT_GLOW_SIZE`는 함께 옮겨야 하는 별도의 수이며, 그러지 않으면
+ *       볼트는 그려지지 않는 크기로 맞히게 됩니다. ::MonType::radius가 몬스터에 대해 기록해 둔
+ *       바로 그 결함입니다.
+ */
+#define SHOT_RADIUS      0.13f
 
 /**
  * @brief How often a projectile drops a trail particle, in seconds.
@@ -744,25 +809,121 @@ typedef struct {
 
     float sight;        /**< How far away it can first notice the player, metres. / 플레이어를 처음 알아챌 수 있는 거리(미터). */
     float attack;       /**< Reach of a swing, or range of a shot, metres. Scale with ::height. / 근접 공격 거리 또는 사격 사거리(미터). ::height와 함께 조정합니다. */
-    int   damage;       /**< Damage one attack deals. / 공격 한 번의 피해량. */
+    int   damage;       /**< Damage ONE BOLT or one swing deals -- see ::burst. / 볼트 *하나* 또는 휘두르기 한 번의 피해량. ::burst를 참조하십시오. */
     float windup;       /**< Seconds of telegraph before the attack lands. / 공격이 닿기 전의 예비 동작 시간(초). */
-    float cooldown;     /**< Seconds after an attack before the next may start. / 공격 후 다음 공격까지의 대기 시간(초). */
+
+    /**
+     * @brief Seconds after the LAST bolt before the next attack may start.
+     *
+     * ENGLISH
+     * -------
+     * AFTER THE LAST, NOT AFTER THE FIRST, and the difference is the whole of
+     * what a volley costs. ::enemy_update starts this clock at
+     * `windup + (n - 1) * shot_gap`, so a monster is planted for the wind-up,
+     * then the firing, then this -- and a stream that began resting while still
+     * shooting would let its next volley overlap the one in the air.
+     *
+     * @note WHICH MEANS IT IS NOT THE SAME NUMBER IT WAS. A row that fired
+     *       everything in one frame spent nothing on the firing, so its rest
+     *       WAS its exposure. Giving that row a ::shot_gap without lowering
+     *       this leaves the monster standing still for the rest plus the whole
+     *       volley -- and a monster that became easier to shoot because its
+     *       attack got longer is a balance change nobody asked for. The water
+     *       spirit's came down from 0.85 to 0.50 when it stopped firing a
+     *       shotgun, which is roughly what the firing time added.
+     *
+     * 한국어
+     * ------
+     * @brief *마지막* 볼트 뒤부터 다음 공격이 시작될 수 있을 때까지의 초.
+     *
+     * *첫 발이 아니라 마지막 발 뒤이며*, 그 차이가 일제 사격이 치르는 값의 전부입니다.
+     * ::enemy_update는 이 시계를 `windup + (n - 1) * shot_gap`에서 시작하므로, 몬스터는 준비
+     * 동작 동안, 그다음 사격 동안, 그다음 이것 동안 붙박여 있습니다. 아직 쏘는 중에 휴식을
+     * 시작하는 줄기는 다음 일제 사격이 공중의 것과 겹치게 만듭니다.
+     *
+     * @note *따라서 이것은 예전과 같은 수가 아닙니다.* 한 프레임에 전부 쏘던 행은 사격에
+     *       아무것도 쓰지 않았으므로 그 행의 휴식이 곧 노출 시간이었습니다. 그런 행에
+     *       ::shot_gap을 주면서 이것을 낮추지 않으면, 몬스터는 휴식 *더하기* 일제 사격 전체
+     *       동안 서 있게 됩니다. 그리고 공격이 길어졌다는 이유로 쏘아 맞히기 쉬워진 몬스터는
+     *       아무도 요청하지 않은 밸런스 변경입니다. 물의 정령의 값은 산탄을 그만두면서 0.85에서
+     *       0.50으로 내려갔고, 그것은 사격 시간이 더한 양과 대략 같습니다.
+     */
+    float cooldown;
     float aspect;       /**< Sprite width over height. See the size block above. / 스프라이트의 가로 대 세로 비율. 위의 치수 블록을 참조하십시오. */
     float shot_speed;   /**< Projectile speed, m/s. Read only by ::AI_CASTER. / 발사체 속도(m/s). ::AI_CASTER만 읽습니다. */
 
     /**
-     * @brief Bolts one attack releases at once. 1 is a single aimed shot.
+     * @brief The MOST bolts one attack releases. 1 is a single aimed shot.
      *
-     * ENGLISH: A volley is not a faster single shot. One accurate bolt is
-     * answered by stepping aside; five across a cone is answered by leaving the
-     * cone, which is a different move at a different distance. Released
-     * together rather than over time, so no ::Enemy needs a shot counter.
+     * ENGLISH
+     * -------
+     * A volley is not a faster single shot. One accurate bolt is answered by
+     * stepping aside; a stream of them is answered by getting out of where it
+     * is pointing, which is a different move at a different distance.
      *
-     * 한국어: 일제 사격은 더 빠른 단발이 아닙니다. 정확한 볼트 하나에는 옆으로 비켜서면 되고,
-     * 원뿔로 다섯을 뿌리는 쪽에는 그 원뿔에서 벗어나야 합니다. 다른 동작이고 다른 거리입니다.
-     * 시간에 걸치지 않고 한꺼번에 내보내므로 ::Enemy에 발사 계수기가 필요 없습니다.
+     * RELEASED OVER TIME, ONE EVERY ::shot_gap, AND THAT IS A CHANGE. They used
+     * to leave together in a cone -- a shotgun, arriving as one event that
+     * either hit or did not. A stream is the opposite bargain: every bolt is a
+     * separate chance to be somewhere else by the time it arrives, which is
+     * what makes ::ENEMY_MAX_SHOTS worth spending and what pays for the smaller
+     * ::SHOT_RADIUS. The counter that made it possible is ::Enemy::swung, which
+     * was already there as a flag and is now a count.
+     *
+     * WITH ::burst_min, THIS IS A RANGE rather than a number -- see there for
+     * why a volley whose length you cannot predict is the point of one.
+     *
+     * 한국어
+     * ------
+     * @brief 한 번의 공격이 내보내는 볼트의 *최대* 수. 1이면 조준된 단발입니다.
+     *
+     * 일제 사격은 더 빠른 단발이 아닙니다. 정확한 볼트 하나에는 옆으로 비켜서면 되고, 줄기로
+     * 쏟아지는 쪽에는 그것이 겨누는 자리에서 벗어나야 합니다. 다른 동작이고 다른 거리입니다.
+     *
+     * *::shot_gap마다 하나씩, 시간에 걸쳐 나가며, 그것이 바뀐 점입니다.* 예전에는 원뿔로 함께
+     * 떠났습니다. 산탄이었고, 맞거나 맞지 않거나인 하나의 사건으로 도착했습니다. 줄기는 반대의
+     * 거래입니다. 볼트마다 도착할 즈음 다른 곳에 있을 기회가 따로 생기며, 그것이
+     * ::ENEMY_MAX_SHOTS를 쓸 값어치를 만들고 작아진 ::SHOT_RADIUS의 값을 치릅니다. 이것을
+     * 가능하게 한 계수기는 ::Enemy::swung이며, 이미 플래그로 있던 것이 이제 개수입니다.
+     *
+     * ::burst_min과 함께 이것은 수가 아니라 *범위*입니다. 길이를 예측할 수 없는 일제 사격이
+     * 왜 요점인지는 그곳을 참조하십시오.
      */
     short burst;
+
+    /**
+     * @brief The FEWEST bolts one attack releases. Equal to ::burst means fixed.
+     *
+     * ENGLISH
+     * -------
+     * WHAT A RANGE BUYS IS THAT THE VOLLEY CANNOT BE COUNTED. A stream of
+     * exactly eight is a rhythm, and a rhythm is learned once and then free:
+     * the player leans out on the ninth beat forever. Rolled fresh per volley,
+     * the only safe answer is to watch the monster rather than the metronome.
+     *
+     * NOT THE SAME KNOB AS ::spread. Spread says how wide the stream is, this
+     * says how long it lasts, and they are answered by different moves --
+     * sideways against patience.
+     *
+     * @note Must not exceed ::burst; ::types_check enforces it. A row with the
+     *       two the wrong way round would roll an empty volley, which is a
+     *       monster that winds up and does nothing.
+     *
+     * 한국어
+     * ------
+     * @brief 한 번의 공격이 내보내는 볼트의 *최소* 수. ::burst와 같으면 고정입니다.
+     *
+     * *범위가 사 주는 것은 일제 사격을 셀 수 없다는 것입니다.* 정확히 여덟 발의 줄기는
+     * 박자이고, 박자는 한 번 익히면 그 뒤로는 공짜입니다. 플레이어는 아홉 번째 박에 몸을
+     * 내밀면 되고 언제까지나 그렇습니다. 일제 사격마다 새로 굴리면, 안전한 답은 메트로놈이
+     * 아니라 몬스터를 보는 것뿐입니다.
+     *
+     * *::spread와 같은 손잡이가 아닙니다.* 산포는 줄기가 얼마나 *넓은가*를 말하고 이것은
+     * 얼마나 *오래*인가를 말하며, 답하는 동작이 다릅니다. 옆으로 비키는 것과 기다리는 것입니다.
+     *
+     * @note ::burst를 넘을 수 없으며 ::types_check가 강제합니다. 둘이 뒤바뀐 행은 빈 일제
+     *       사격을 굴리게 되고, 그것은 준비 동작만 하고 아무것도 하지 않는 몬스터입니다.
+     */
+    short burst_min;
 
     /**
      * @brief How wide the volley scatters, as a fraction of the distance.
@@ -779,6 +940,44 @@ typedef struct {
      * 몬스터입니다.
      */
     float spread;
+
+    /**
+     * @brief Seconds between one bolt of a volley and the next.
+     *
+     * ENGLISH
+     * -------
+     * THE CADENCE, AND IT IS WHAT MAKES A STREAM READABLE. Fast enough and the
+     * volley is a wall arriving at once, which is the shotgun this replaced;
+     * slow enough and it is a sequence of single shots with pauses to walk
+     * through. The number worth having is the one where the player can see the
+     * next bolt coming and still has to keep moving to be out of its way.
+     *
+     * @note Ignored when ::burst is 1 -- there is no second bolt to be apart
+     *       from. Rows that fire once leave it 0 rather than a plausible-
+     *       looking number nobody reads.
+     * @note MULTIPLIED BY THE VOLLEY LENGTH, this is most of how long the
+     *       monster is committed: ::MonType::windup opens the attack, then
+     *       `(n - 1) * shot_gap` of firing, then ::MonType::cooldown. A long
+     *       volley is a long time not turning, which is the counterplay --
+     *       see ::Enemy::volley_at.
+     *
+     * 한국어
+     * ------
+     * @brief 일제 사격의 한 볼트와 다음 볼트 사이의 간격(초).
+     *
+     * *박자이며, 줄기를 읽을 수 있게 만드는 것이 이것입니다.* 충분히 빠르면 일제 사격은 한꺼번에
+     * 도착하는 벽이 되는데 그것이 이 변경이 대체한 산탄입니다. 충분히 느리면 걸어서 지나갈 수
+     * 있는 단발의 나열이 됩니다. 가질 값어치가 있는 수는, 플레이어가 다음 볼트가 오는 것을 볼 수
+     * 있으면서도 비켜 있으려면 계속 움직여야 하는 그 값입니다.
+     *
+     * @note ::burst가 1이면 무시됩니다. 사이가 벌어질 두 번째 볼트가 없기 때문입니다. 단발인
+     *       행은 아무도 읽지 않는 그럴듯한 수 대신 0을 둡니다.
+     * @note *일제 사격의 길이와 곱해져*, 몬스터가 묶여 있는 시간의 대부분이 됩니다.
+     *       ::MonType::windup이 공격을 열고, `(n - 1) * shot_gap` 동안 쏘고, 그다음
+     *       ::MonType::cooldown입니다. 긴 일제 사격은 오래 돌지 못한다는 뜻이며 그것이
+     *       대응 수단입니다. ::Enemy::volley_at을 참조하십시오.
+     */
+    float shot_gap;
 
     /**
      * @brief How fast this monster can turn, in degrees per second.
@@ -852,7 +1051,75 @@ typedef struct {
     float  timer;       /**< Time within the current state, e.g. wind-up or rest. / 현재 상태 안에서의 시간. 예비 동작이나 휴식 등입니다. */
     float  anim;        /**< Free-running clock for the walk cycle. / 걷기 사이클을 위한 자유 진행 시계. */
     float  flash;       /**< White hit flash, decaying to 0. / 피격 시 흰 섬광. 0으로 감쇠합니다. */
-    int    swung;       /**< Whether the current attack has already dealt its damage. / 현재 공격이 이미 피해를 입혔는지 여부. */
+    /**
+     * @brief How many bolts of the current attack have gone out. 0 before any.
+     *
+     * ENGLISH: A COUNT, AND IT USED TO BE A FLAG -- "has this attack already
+     * dealt its damage". For a swing and for a single bolt the two readings are
+     * the same, because 1 is both "yes" and "one of one". A volley released over
+     * ::MonType::shot_gap needed to know *how many so far*, and this field was
+     * already sitting in ::E_ATTACK being set to 1 and back to 0.
+     *
+     * 한국어: *개수이며, 예전에는 플래그였습니다* — "이 공격이 이미 피해를 입혔는가". 휘두르기와
+     * 단발 볼트에 대해서는 두 해석이 같습니다. 1이 "그렇다"이면서 "하나 중 하나"이기 때문입니다.
+     * ::MonType::shot_gap에 걸쳐 나가는 일제 사격은 *지금까지 몇 발인가*를 알아야 했고, 이
+     * 필드는 이미 ::E_ATTACK에서 1이 되었다가 0으로 돌아가며 그 자리에 있었습니다.
+     */
+    int    swung;
+
+    /**
+     * @brief How many bolts this volley will fire, rolled when it starts.
+     *
+     * ENGLISH: Rolled once from ::MonType::burst_min..::MonType::burst rather
+     * than tested per bolt, because a length re-rolled every frame is not a
+     * length. Meaningless outside ::E_ATTACK.
+     *
+     * 한국어: ::MonType::burst_min..::MonType::burst에서 *한 번* 굴립니다. 볼트마다 검사하지
+     * 않는 이유는, 매 프레임 다시 굴려지는 길이는 길이가 아니기 때문입니다. ::E_ATTACK 바깥에서는
+     * 의미가 없습니다.
+     */
+    short  volley_n;
+
+    /**
+     * @brief Where this volley is aimed, fixed when it starts.
+     *
+     * ENGLISH
+     * -------
+     * THE MONSTER COMMITS, AND THAT IS THE COUNTERPLAY. Every bolt used to be
+     * aimed at wherever the player was standing at the instant it left, which
+     * for a shotgun meant nothing -- the five left together, so there was only
+     * one instant. Ask the same question ten times over half a second and the
+     * volley follows the player around the room: a stream that tracks is not
+     * dodged, it is out-run, and nothing in this game is faster than a bolt.
+     *
+     * So the aim is taken once and the rest of the volley goes THERE. Walking
+     * out of it works, which is what makes ::MonType::shot_gap a duration the
+     * player can spend rather than a rate they lose to.
+     *
+     * @note The monster still TURNS while it fires -- ::change_yaw runs before
+     *       the state machine and is not gated on ::E_ATTACK. What is fixed is
+     *       where the bolts go, not where the sprite looks, and the two coming
+     *       apart for half a second is the visible tell that it is committed.
+     *
+     * 한국어
+     * ------
+     * @brief 이 일제 사격이 겨눈 자리. 시작할 때 고정됩니다.
+     *
+     * *몬스터가 스스로를 묶으며, 그것이 대응 수단입니다.* 예전에는 모든 볼트가 떠나는 순간
+     * 플레이어가 서 있던 자리를 겨눴고, 산탄에게 그것은 아무 뜻도 없었습니다. 다섯이 함께
+     * 떠났으므로 순간이 하나뿐이었기 때문입니다. 같은 질문을 0.5초에 걸쳐 열 번 하면 일제
+     * 사격은 플레이어를 따라 방을 돕니다. 추적하는 줄기는 피하는 것이 아니라 *따돌려야* 하는
+     * 것이고, 이 게임에서 볼트보다 빠른 것은 없습니다.
+     *
+     * 그래서 조준은 한 번 취해지고 나머지 볼트는 *그곳으로* 갑니다. 걸어서 벗어나는 것이
+     * 통하며, 그것이 ::MonType::shot_gap을 플레이어가 잃는 비율이 아니라 쓸 수 있는 시간으로
+     * 만듭니다.
+     *
+     * @note 몬스터는 쏘는 동안에도 *돕니다.* ::change_yaw는 상태 기계보다 먼저 돌고 ::E_ATTACK에
+     *       걸려 있지 않습니다. 고정되는 것은 볼트가 가는 곳이지 스프라이트가 보는 곳이 아니며,
+     *       그 둘이 0.5초 동안 어긋나는 것이 스스로를 묶었다는 눈에 보이는 신호입니다.
+     */
+    v3     volley_at;
     int    active;      /**< Whether this slot is in use at all. / 이 슬롯이 사용 중인지 여부. */
 
     /**

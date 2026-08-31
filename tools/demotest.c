@@ -346,9 +346,10 @@ static void digest_print(const Digest *d) {
    and nothing else; none of them was chosen.
    `demotest -bless`가 채웁니다. 이곳의 모든 숫자는 아래의 실행이 만들어 낸 것이며 그 외에는
    없습니다. 어느 것도 사람이 고르지 않았습니다. */
-/* RE-BLESSED five times: for `landdust`, for thickening the lava smoke, for
+/* RE-BLESSED six times: for `landdust`, for thickening the lava smoke, for
    floor items giving off specks instead of carrying a halo, for the water
-   spirit taking the imp's slot, and for a bolt gaining a wake and a landing. Worth recording what moved and what did not,
+   spirit taking the imp's slot, for a bolt gaining a wake and a landing, and
+   for the water spirit trading its shotgun for a stream. Worth recording what moved and what did not,
    because the two answer different questions: `frng` changed and NOTHING ELSE
    did -- not the position, not the velocity, not the aim, not the health, not
    the monsters, not world_time. A hard landing now spawns a puff, so the
@@ -429,14 +430,45 @@ static void digest_print(const Digest *d) {
    이제 *그려진다*는 것뿐이므로 `frng`만 더 진행되었습니다.
    이것은 네 번째의 차이에서 시뮬레이션 절반을 덜어 낸 것입니다. 네 번째가 `health`와 `erng`를
    움직인 것은 *전투*가 바뀌었기 때문이고, 이번 것이 둘 다 움직이지 않은 것은 그 *그림*만
-   바뀌었기 때문입니다. 그 둘이 나란히 있다는 것이 이 골든을 지킬 값어치를 만듭니다. */
+   바뀌었기 때문입니다. 그 둘이 나란히 있다는 것이 이 골든을 지킬 값어치를 만듭니다.
+
+   THE SIXTH IS THE FOURTH AGAIN, and that it has the same shape twice is the
+   useful part. The water spirit stopped firing five bolts in one frame and
+   started firing five to ten over ::MonType::shot_gap, at a third less damage
+   each and no longer following the player while it fires. `health` moved 80 to
+   73 because the FIGHT changed -- a stream aimed where the player WAS lands
+   differently from a cone aimed where they ARE -- and `erng` moved because the
+   volley rolls its own length and scatters every bolt after the first, which is
+   a draw the shotgun never made. `frng` followed the bolts, as it always does.
+   What did NOT move is the list worth reading: `px`, `vx`, `yaw`, `pitch` and
+   `world_time` are bit-for-bit what they were, and so are `wrng` and `srng` --
+   the player threw nothing and the smoke is the same smoke. `enemies hp` is
+   still 40, which is the one to check on THIS change specifically: an earlier
+   cut of it left the monster planted 55% longer per volley and the demo's
+   recorded fire cut it to 5, and a monster that is easier to kill because its
+   attack takes longer is a balance decision nobody made. The cooldown came down
+   by what the firing time added, and the row went back to being untouched.
+   여섯 번째는 네 번째의 반복이며, 같은 모양이 두 번 나왔다는 것이 쓸모 있는 부분입니다. 물의
+   정령이 한 프레임에 다섯 발을 쏘던 것을 그만두고 ::MonType::shot_gap에 걸쳐 5~10발을,
+   발당 3분의 1 적은 피해로, 쏘는 동안 플레이어를 따라가지 않으면서 쏘기 시작했습니다.
+   `health`가 80에서 73이 된 것은 *전투*가 바뀌었기 때문입니다. 플레이어가 *있던* 곳을 겨눈
+   줄기는 *있는* 곳을 겨눈 원뿔과 다르게 도착합니다. `erng`가 움직인 것은 일제 사격이 자기
+   길이를 굴리고 첫 발 이후 모든 발을 흩뿌리기 때문이며, 그것은 산탄이 결코 하지 않던
+   굴림입니다. `frng`는 늘 그렇듯 볼트를 따라갔습니다.
+   *움직이지 않은 것*의 목록이 읽을 값어치가 있습니다. `px`, `vx`, `yaw`, `pitch`,
+   `world_time`이 비트 단위로 그대로이고 `wrng`와 `srng`도 그렇습니다. 플레이어는 아무것도
+   던지지 않았고 연기는 같은 연기입니다. `enemies hp`가 여전히 40인데, *이번* 변경에서
+   특별히 확인해야 할 것이 그것입니다. 앞선 판본은 몬스터를 일제 사격당 55% 더 오래 붙박아
+   두었고 데모의 기록된 사격이 그것을 5까지 깎았습니다. 공격이 오래 걸린다는 이유로 죽이기
+   쉬워진 몬스터는 아무도 내리지 않은 밸런스 결정입니다. 사격 시간이 더한 만큼 경직을
+   내렸고, 그 행은 다시 손대지 않은 상태로 돌아왔습니다. */
 static const Digest GOLDEN = {
     /* px py pz */ -12.2013168f, 2.84367466f, -14.8857975f,
     /* vx vy vz */ -0.312936455f, 1.9998908f, 0.38904506f,
     /* yaw pitch */ 0.382800102f, 0.534599602f,
-    /* health keys grounded */ 80, 0, 0,
+    /* health keys grounded */ 73, 0, 0,
     /* cur ammo */ 0, 0,
-    /* wrng srng erng frng */ 2972006077u, 522628529u, 1060800797u, 1894450831u,
+    /* wrng srng erng frng */ 2972006077u, 522628529u, 3081125676u, 1913620148u,
     /* enemies hp */ 1, 40,
     /* proj marks */ 0, 0,
     /* world_time */ 29.9002438f

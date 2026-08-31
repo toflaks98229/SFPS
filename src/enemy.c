@@ -183,14 +183,14 @@ static const struct { const char *was; int now; } MON_LEGACY[] = {
  * @note ::types_check는 behaviour와 shot_speed의 정합성, 그리고 플래그 비트만 봅니다. 치수는
  *       검사하지 *않습니다.* `eye`가 `hgt`보다 높아도 잡히지 않고 그대로 플레이됩니다.
  */
-/*    name,           behaviour,   hp,  spd,   rad,   hgt,   eye, sight,   atk, dmg,  wind,  cool, aspct,  shot, brst,  sprd,    yaw, pain, flags      */
+/*    name,           behaviour,   hp,  spd,   rad,   hgt,   eye, sight,   atk, dmg,  wind,  cool, aspct,  shot, brst, bmin,  sprd,   gap,    yaw, pain, flags      */
 static const MonType TYPES[MON_TYPES] = {
     /* the baseline: fast enough to matter, and one point-blank blast kills it
        기준선. 충분히 빠르고, 근접 샷건 한 방에 죽습니다. */
-    { "water_spirit", AI_CASTER,   40, 3.0f, 0.52f, 1.70f, 1.30f, 34.0f,  7.5f,   4, 0.30f, 0.85f, 0.70f,  9.0f,    5, 0.16f, 260.0f, 0.6f, 0         },
+    { "water_spirit", AI_CASTER,   40, 3.0f, 0.52f, 1.70f, 1.30f, 34.0f,  7.5f,   3, 0.30f, 0.50f, 0.70f,  9.0f,   10,  5, 0.13f, 0.07f, 260.0f, 0.6f, 0         },
     /* a wall with health -- closes slowly, hits hard, and cannot be stun-locked
        체력이 높은 벽. 느리게 다가와 강하게 때리며, 스턴 락에 걸리지 않습니다. */
-    { "brute",        AI_BRAWLER, 120, 1.9f, 0.806f, 2.35f, 1.80f, 34.0f,  2.3f,  24, 0.55f, 1.50f, 0.85f,  0.0f,    1,  0.0f, 130.0f, 2.2f, 0         },
+    { "brute",        AI_BRAWLER, 120, 1.9f, 0.806f, 2.35f, 1.80f, 34.0f,  2.3f,  24, 0.55f, 1.50f, 0.85f,  0.0f,    1,  1,  0.0f, 0.0f, 130.0f, 2.2f, 0         },
     /* holds its range instead of closing, and holds it in the AIR -- so cover
        and angles matter, and so does the ceiling. Nothing about the numbers
        changed when MON_FLIES arrived: this is the same creature, no longer
@@ -200,7 +200,7 @@ static const MonType TYPES[MON_TYPES] = {
        천장의 문제이기도 합니다. MON_FLIES가 붙을 때 수치는 하나도 바뀌지 않았습니다. 아무것도
        딛고 있지 않게 되었을 뿐 같은 생물입니다. 이것이 대신한 행("wraith")은 여기서 체력 4점과
        사거리 1미터를 뺀 것이었고, 그것은 별개의 몬스터가 아닙니다. */
-    { "caster",       AI_CASTER,   26, 2.4f, 0.546f, 1.90f, 1.45f, 40.0f, 13.0f,  12, 0.85f, 1.40f, 0.80f, 11.0f,    1,  0.0f, 180.0f, 0.9f, MON_FLIES },
+    { "caster",       AI_CASTER,   26, 2.4f, 0.546f, 1.90f, 1.45f, 40.0f, 13.0f,  12, 0.85f, 1.40f, 0.80f, 11.0f,    1,  1,  0.0f, 0.0f, 180.0f, 0.9f, MON_FLIES },
     /* the boss: a caster with the footwork taken away. Its hp is spent in
        BOSS_CYCLES equal thirds and must divide by it -- types_check says so.
        The pain lock is effectively infinite because a boss that flinches is a
@@ -218,14 +218,14 @@ static const MonType TYPES[MON_TYPES] = {
        한 뼘까지 닿는 보스는 큰 적이 아니라 모델링 오류로 읽히고, 탑 위에 걸린 결계핵은 있을
        자리가 없어집니다. 신장을 내리면서 반경, 시선, 사거리를 함께 내렸습니다. MonType의 치수
        블록이 이곳의 모든 행에 대해 진술하는 규칙입니다. */
-    { "maw",          AI_CASTER,  900, 0.0f, 1.20f, 3.60f, 2.00f, 60.0f, 40.0f,  14, 0.90f, 1.10f, 1.10f, 14.0f,    5, 0.22f,  90.0f,99.0f, MON_BOSS | MON_ANCHORED },
+    { "maw",          AI_CASTER,  900, 0.0f, 1.20f, 3.60f, 2.00f, 60.0f, 40.0f,  14, 0.90f, 1.10f, 1.10f, 14.0f,    5,  5, 0.22f, 0.0f,  90.0f,99.0f, MON_BOSS | MON_ANCHORED },
     /* what guards it: no sight, no reach, no damage, and the only monster in
        the game that never acts. Ninety health is three WARD_SUMMON_DMG chunks,
        so a ward pays out exactly three times on its way down whatever kills it.
        그것을 지키는 것. 시야도 사거리도 피해도 없으며, 이 게임에서 유일하게 결코 행동하지 않는
        몬스터입니다. 체력 90은 WARD_SUMMON_DMG 세 덩어리이므로, 결계핵은 무엇에 죽든 쓰러지는
        동안 정확히 세 번 지급합니다. */
-    { "ward",         AI_INERT,    90, 0.0f, 0.50f, 1.10f, 0.55f,  0.0f,  0.0f,   0,  0.0f,  0.0f, 1.00f,  0.0f,    1,  0.0f,   0.0f,99.0f, MON_GUARD | MON_ANCHORED },
+    { "ward",         AI_INERT,    90, 0.0f, 0.50f, 1.10f, 0.55f,  0.0f,  0.0f,   0,  0.0f,  0.0f, 1.00f,  0.0f,    1,  1,  0.0f, 0.0f,   0.0f,99.0f, MON_GUARD | MON_ANCHORED },
 };
 
 /* --- Static function prototypes / 정적 함수 프로토타입 --- */
@@ -264,6 +264,7 @@ static int check_attack(Pools *pl, const MonType *S, Enemy *m, float dist);
 static void chase_brawler(Pools *pl, const Level *l, const MonType *S, Enemy *m, v3 to, float dist, float dt);
 static void chase_caster(Pools *pl, const Level *l, const MonType *S, Enemy *m, v3 to, float dist, v3 player_eye, float dt);
 static int release_swing(const MonType *S, Enemy *m, float dist);
+static void begin_attack(Pools *pl, const MonType *S, Enemy *m);
 static void release_bolt(Pools *pl, const Level *l, const MonType *S, Enemy *m, v3 player_eye);
 
 /* --- Public function definitions / 공개 함수 정의 --- */
@@ -766,15 +767,47 @@ int enemy_update(Pools *pl, const Level *l, v3 player_eye, float dt)
 
         case E_ATTACK:
             m->timer += dt;
-            if (!m->swung && m->timer >= S->windup)
             {
-                m->swung = 1;
+                /* THE VOLLEY, ONE BOLT PER ::MonType::shot_gap. A `while` and
+                   not an `if`, because a gap shorter than a frame must not
+                   throttle the stream to one bolt per frame -- and a gap of ZERO
+                   is how the maw still fires all five of its at once, which is
+                   the behaviour every caster had before the water spirit stopped
+                   firing a shotgun. No branch says "together" anywhere; it falls
+                   out of the arithmetic.
+                   *일제 사격이며, ::MonType::shot_gap마다 한 발입니다.* `if`가 아니라
+                   `while`인 이유는, 프레임보다 짧은 간격이 줄기를 프레임당 한 발로 조여서는 안
+                   되기 때문입니다. 그리고 간격 *0*이 아귀가 여전히 다섯 발을 한꺼번에 쏘는
+                   방식이며, 그것은 물의 정령이 산탄을 그만두기 전까지 모든 캐스터가 하던
+                   행동입니다. "함께"라고 말하는 분기는 어디에도 없습니다. 산술에서 떨어져
+                   나옵니다. */
+                int shots = m->volley_n > 0 ? m->volley_n : 1;
+
                 if (S->behaviour == AI_CASTER)
-                    release_bolt(pl, l, S, m, player_eye);
-                else
+                {
+                    while (m->swung < shots &&
+                           m->timer >= S->windup + (float)m->swung * S->shot_gap)
+                    {
+                        release_bolt(pl, l, S, m, player_eye);
+                        m->swung++;
+                    }
+                }
+                else if (!m->swung && m->timer >= S->windup)
+                {
+                    m->swung = 1;
                     player_damage += release_swing(S, m, dist);
-            }
-            if (m->timer >= S->windup + S->cooldown)
+                }
+
+                /* The cooldown starts after the LAST bolt, not after the first.
+                   A stream that began its rest while still firing would let the
+                   next volley overlap this one, and two overlapping volleys from
+                   one monster is a wall of bolts nobody authored.
+                   경직은 첫 볼트가 아니라 *마지막* 볼트 뒤에 시작합니다. 아직 쏘는 중에 휴식을
+                   시작하는 줄기는 다음 일제 사격이 이번 것과 겹치게 만들고, 한 몬스터에게서
+                   겹쳐 나오는 두 일제 사격은 아무도 저작하지 않은 볼트의 벽입니다. */
+                float firing = (float)(shots - 1) * S->shot_gap;
+
+            if (m->timer >= S->windup + firing + S->cooldown)
             {
                 /* Quake's SUB_AttackFinished(2*random()): a RANDOM rest before
                    the next attack is even considered, on top of the animation's
@@ -796,6 +829,7 @@ int enemy_update(Pools *pl, const Level *l, v3 player_eye, float dt)
                 }
                 else
                     m->state = E_CHASE;
+            }
             }
             break;
 
@@ -1456,6 +1490,35 @@ static void types_check(void)
     {
         int caster = TYPES[i].behaviour == AI_CASTER;
         if (caster != (TYPES[i].shot_speed > 0.0f))
+            DIAG(DIAG_MON_TABLE);
+
+        /* THE VOLLEY BOUNDS, and the empty one is the reason. ::begin_attack
+           rolls in `burst_min..burst` and a row with them the wrong way round
+           rolls an empty range -- a monster that winds up, fires nothing and
+           rests, which looks like a monster that has decided not to attack you
+           and is very hard to tell from one that cannot see you.
+           A floor of 1 for the same reason: 0 is the same empty volley written
+           a different way.
+           *일제 사격의 경계이며, 빈 것이 그 이유입니다.* ::begin_attack은
+           `burst_min..burst`에서 굴리는데, 둘이 뒤바뀐 행은 빈 범위를 굴립니다. 준비 동작을
+           하고 아무것도 쏘지 않고 쉬는 몬스터이며, 그것은 당신을 공격하지 않기로 한 몬스터처럼
+           보이고 당신을 보지 못하는 몬스터와 구별하기가 매우 어렵습니다.
+           하한 1도 같은 이유입니다. 0은 같은 빈 일제 사격을 다르게 적은 것입니다. */
+        if (TYPES[i].burst < 1 || TYPES[i].burst_min < 1 ||
+            TYPES[i].burst_min > TYPES[i].burst)
+            DIAG(DIAG_MON_TABLE);
+
+        /* A GAP WITH NOTHING TO SEPARATE. A row that fires once and still names
+           a cadence is a number with no reader, and the next person to change
+           ::MonType::burst would inherit it as though it had been chosen.
+           Zero on a multi-bolt row is not an error -- it is "together", which is
+           what the maw still does.
+           *가를 것이 없는 간격입니다.* 단발이면서 박자를 적어 둔 행은 독자가 없는 수이고,
+           다음에 ::MonType::burst를 바꾸는 사람은 그것이 골라진 값인 양 물려받게 됩니다. 여러
+           발인 행의 0은 오류가 아니라 "함께"이며, 아귀가 여전히 하는 일입니다. */
+        if (TYPES[i].burst == 1 && TYPES[i].shot_gap != 0.0f)
+            DIAG(DIAG_MON_TABLE);
+        if (TYPES[i].shot_gap < 0.0f)
             DIAG(DIAG_MON_TABLE);
 
         /* A bit nobody defined is a row that was written against a different
@@ -3012,6 +3075,68 @@ static int check_attack(Pools *pl, const MonType *S, Enemy *m, float dist)
     return frand(&pl->enemy) < chance;
 }
 
+/**
+ * @brief Starts an attack, and decides how long it will be.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] pl Pools, for ::EnemyPool::rng.
+ * @param[in]     S  The monster's type, for the volley bounds.
+ * @param[in,out] m  The monster. State, timer, shot count and length change.
+ *
+ * ROLLED ONCE, HERE, because a volley whose length is re-decided every frame
+ * has no length. ::Enemy::volley_n is the roll and ::Enemy::swung counts against
+ * it; between them ::E_ATTACK knows both how far along the stream is and when it
+ * is finished.
+ *
+ * @note ONE FUNCTION FOR BOTH ARCHETYPES, and it is why this exists at all --
+ *       the three lines it replaces sat in ::chase_brawler and ::chase_caster
+ *       as two copies, and a fourth field to set at the start of an attack
+ *       would have had to be remembered in both. A brawler rolls a length of
+ *       one because ::MonType::burst_min and ::MonType::burst are both 1 on its
+ *       row, not because this function knows what a brawler is.
+ * @note The brawler's re-swing inside ::E_ATTACK deliberately does NOT come
+ *       through here. It resets the clock without re-rolling, which is correct
+ *       for a swing and unreachable for a caster -- a caster always returns to
+ *       ::E_CHASE and so always arrives back through this function.
+ *
+ * 한국어
+ * ------
+ * @brief 공격을 시작하며, 그것이 얼마나 길지를 정합니다.
+ *
+ * *이곳에서 한 번 굴립니다.* 매 프레임 길이를 다시 정하는 일제 사격에는 길이가 없기
+ * 때문입니다. ::Enemy::volley_n이 그 굴림이고 ::Enemy::swung이 그것에 대해 셉니다. 둘 사이에서
+ * ::E_ATTACK은 줄기가 얼마나 진행되었는지와 언제 끝나는지를 모두 압니다.
+ *
+ * @note *두 아키타입에 대해 하나의 함수이며*, 이것이 존재하는 이유가 바로 그것입니다. 이것이
+ *       대체하는 세 줄은 ::chase_brawler와 ::chase_caster에 사본 둘로 있었고, 공격 시작에
+ *       설정할 네 번째 필드는 양쪽 모두에서 기억되어야 했을 것입니다. 근접형이 길이 1을
+ *       굴리는 것은 자기 행의 ::MonType::burst_min과 ::MonType::burst가 둘 다 1이기
+ *       때문이지, 이 함수가 근접형이 무엇인지 알기 때문이 아닙니다.
+ * @note ::E_ATTACK 안의 근접형 재휘두르기는 의도적으로 이곳을 지나지 *않습니다.* 다시 굴리지
+ *       않고 시계만 되돌리며, 그것은 휘두르기에 대해 옳고 캐스터에게는 도달 불가능합니다.
+ *       캐스터는 언제나 ::E_CHASE로 돌아가므로 언제나 이 함수를 통해 되돌아옵니다.
+ */
+static void begin_attack(Pools *pl, const MonType *S, Enemy *m)
+{
+    int lo = S->burst_min > 0 ? S->burst_min : 1;
+    int hi = S->burst     > lo ? S->burst     : lo;
+
+    m->state    = E_ATTACK;
+    m->timer    = 0.0f;
+    m->swung    = 0;
+    m->volley_n = (short)(lo + (int)(frand(&pl->enemy) * (float)(hi - lo + 1)));
+
+    /* frand can return 1.0 on some inputs, and that would land one past the
+       top of the range -- a volley one bolt longer than any row asked for,
+       once in a very long while, which is exactly the kind of bug that is
+       never reproduced.
+       frand는 입력에 따라 1.0을 돌려줄 수 있고 그것은 범위의 꼭대기를 한 칸 넘어섭니다. 어떤
+       행도 요청하지 않은 길이의 일제 사격이 아주 가끔 나오는 것이며, 그것은 결코 재현되지 않는
+       종류의 버그입니다. */
+    if (m->volley_n > (short)hi) m->volley_n = (short)hi;
+}
+
 /* --- Archetypes / 아키타입 --- */
 /**
  * @brief A brawler chasing: close to arm's length, then swing or reposition.
@@ -3055,9 +3180,7 @@ static void chase_brawler(Pools *pl, const Level *l, const MonType *S, Enemy *m,
        바꿀 만큼 낮습니다. */
     if (check_attack(pl, S, m, dist))
     {
-        m->state = E_ATTACK;
-        m->timer = 0.0f;
-        m->swung = 0;
+        begin_attack(pl, S, m);
     }
     else
     {
@@ -3126,9 +3249,7 @@ static void chase_caster(Pools *pl, const Level *l, const MonType *S, Enemy *m,
        무언가로 바꿉니다. */
     if (check_attack(pl, S, m, dist))
     {
-        m->state = E_ATTACK;
-        m->timer = 0.0f;
-        m->swung = 0;
+        begin_attack(pl, S, m);
     }
     else
     {
@@ -3204,21 +3325,46 @@ static int release_swing(const MonType *S, Enemy *m, float dist)
  */
 static void release_bolt(Pools *pl, const Level *l, const MonType *S, Enemy *m, v3 player_eye)
 {
+    /* CHECKED PER BOLT, NOT PER VOLLEY, and a blocked one is spent rather than
+       postponed. ::Enemy::swung advances in ::enemy_update whether this fires
+       or not, so ducking behind a pillar mid-stream costs the monster the rest
+       of its volley instead of pausing it -- the reward for taking cover is the
+       bolts that never come, and a stream that waited for you would make cover
+       a way of storing them up.
+       *일제 사격당이 아니라 볼트당 검사하며*, 막힌 볼트는 미뤄지지 않고 소비됩니다.
+       ::Enemy::swung은 이것이 발사되든 아니든 ::enemy_update에서 진행하므로, 줄기 도중에 기둥
+       뒤로 숨는 것은 일제 사격을 멈추는 것이 아니라 그 나머지를 몬스터에게서 빼앗습니다.
+       엄폐의 보상은 오지 않은 볼트들이며, 기다려 주는 줄기는 엄폐를 볼트를 모아 두는 방법으로
+       만들었을 것입니다. */
     if (!can_see(l, m, player_eye))
         return;
 
     v3 from = v3f(m->pos.x, m->pos.y + S->eye, m->pos.z);
-    v3 at = v3f(player_eye.x, player_eye.y - PLAYER_EYE * 0.35f, player_eye.z);
 
-    int n = S->burst > 0 ? S->burst : 1;
+    /* THE FIRST BOLT TAKES THE AIM AND THE REST INHERIT IT. ::Enemy::volley_at
+       carries the whole argument for why a stream must not track; what is here
+       is only the moment it is taken, which is the first RELEASE and not the
+       start of the wind-up. Taking it at the wind-up would aim
+       ::MonType::windup seconds behind the player, a lead nobody chose.
+       *첫 볼트가 조준을 취하고 나머지가 물려받습니다.* 줄기가 추적해서는 안 되는 이유 전체는
+       ::Enemy::volley_at에 있고, 이곳에 있는 것은 그것을 취하는 *시점*뿐입니다. 준비 동작의
+       시작이 아니라 첫 *발사*입니다. 준비 동작에서 취하면 플레이어보다 ::MonType::windup
+       초만큼 뒤를 겨누게 되는데, 그것은 아무도 고르지 않은 리드입니다. */
+    if (m->swung == 0)
+        m->volley_at = v3f(player_eye.x,
+                           player_eye.y - PLAYER_EYE * 0.35f,
+                           player_eye.z);
 
-    /* A basis across the line of fire, built once: the scatter has to be
-       perpendicular to the shot, and a cone computed per bolt from world axes
-       would be wider sideways than vertically for a monster standing beside
-       you and the other way round for one in front.
-       사격선을 가로지르는 기저를 한 번만 만듭니다. 흩뿌림은 사격 방향에 수직이어야 하며,
-       볼트마다 월드 축으로 계산한 원뿔은 옆에 선 몬스터에게는 가로로, 앞에 선 몬스터에게는
-       세로로 더 넓어집니다. */
+    v3 at = m->volley_at;
+
+    /* A basis across the line of fire, built per bolt because the monster has
+       moved since the last one: the scatter has to be perpendicular to THIS
+       shot, and a cone computed from world axes would be wider sideways than
+       vertically for a monster standing beside you and the other way round for
+       one in front.
+       사격선을 가로지르는 기저이며, 지난 볼트 이후 몬스터가 움직였으므로 볼트마다 만듭니다.
+       흩어짐은 *이번* 사격에 수직이어야 하고, 월드 축에서 계산한 원뿔은 옆에 선 몬스터에게는
+       세로보다 가로로 넓고 앞에 선 몬스터에게는 그 반대가 됩니다. */
     v3 d = v3sub(at, from);
     float dist = v3len(d);
     v3 fwd = dist > 1e-4f ? v3scale(d, 1.0f / dist) : v3f(0, 0, 1);
@@ -3226,26 +3372,31 @@ static void release_bolt(Pools *pl, const Level *l, const MonType *S, Enemy *m, 
     v3 right = v3norm(v3cross(hint, fwd));
     v3 up    = v3cross(fwd, right);
 
-    for (int i = 0; i < n; i++) {
-        v3 aim = at;
+    v3 aim = at;
 
-        /* THE FIRST BOLT IS THE AIMED ONE. A volley whose every shot is
-           scattered is a monster that can miss entirely from four metres,
-           which reads as a bug rather than as a spray -- and the player has no
-           way to tell a wide cone from bad aim. One true shot in the middle
-           says "this is where it meant to hit" and the rest say how much room
-           there is around it.
-           *첫 볼트는 조준된 것입니다.* 모든 발이 흩어지는 일제 사격은 4미터에서 전부
-           빗나갈 수 있는 몬스터이며, 그것은 난사가 아니라 결함으로 읽힙니다. 그리고
-           플레이어에게는 넓은 원뿔과 나쁜 조준을 구분할 방법이 없습니다. 가운데의 정확한
-           한 발이 "여기를 맞히려 했다"고 말하고, 나머지가 그 주위에 얼마나 여유가 있는지를
-           말합니다. */
-        if (i > 0 && S->spread > 0.0f) {
-            float rx = (frand(&pl->enemy) * 2.0f - 1.0f) * S->spread * dist;
-            float ry = (frand(&pl->enemy) * 2.0f - 1.0f) * S->spread * dist;
-            aim = v3add(aim, v3add(v3scale(right, rx), v3scale(up, ry)));
-        }
-        shot_fire(pl, from, aim, S->shot_speed, S->damage, m->type);
+    /* THE FIRST BOLT IS THE AIMED ONE. A volley whose every shot is scattered
+       is a monster that can miss entirely from four metres, which reads as a
+       bug rather than as a spray -- and the player has no way to tell a wide
+       cone from bad aim. One true shot at the head of the stream says "this is
+       where it meant to hit" and the rest say how much room there is around it.
+       *첫 볼트는 조준된 것입니다.* 모든 발이 흩어지는 일제 사격은 4미터에서 전부 빗맞힐 수
+       있는 몬스터이며, 그것은 난사가 아니라 버그로 읽힙니다. 그리고 플레이어에게는 넓은 원뿔과
+       나쁜 조준을 구별할 방법이 없습니다. 줄기의 머리에 놓인 정확한 한 발이 "여기를 맞히려
+       했다"고 말하고, 나머지가 그 둘레에 얼마나 여유가 있는지를 말합니다. */
+    if (m->swung > 0 && S->spread > 0.0f) {
+        float rx = (frand(&pl->enemy) * 2.0f - 1.0f) * S->spread * dist;
+        float ry = (frand(&pl->enemy) * 2.0f - 1.0f) * S->spread * dist;
+        aim = v3add(aim, v3add(v3scale(right, rx), v3scale(up, ry)));
     }
-    play_at(m->pos, "ecast", 90);
+    shot_fire(pl, from, aim, S->shot_speed, S->damage, m->type);
+
+    /* ONCE PER VOLLEY, not once per bolt, and that is what it already was: the
+       call sat after the loop when the five left together. Ten of these inside
+       0.7s would be a sound effect rather than a monster, and the mixer has a
+       voice table a stream would spend entirely on itself.
+       *일제 사격당 한 번이지 볼트당 한 번이 아니며*, 그것은 이미 그러했습니다. 다섯이 함께
+       떠나던 시절 이 호출은 반복문 뒤에 있었습니다. 0.7초 안에 이것을 열 번 내는 것은 몬스터가
+       아니라 효과음이며, 믹서에는 줄기가 자기 자신에게 다 써 버릴 보이스 표가 있습니다. */
+    if (m->swung == 0)
+        play_at(m->pos, "ecast", 90);
 }

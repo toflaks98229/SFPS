@@ -303,8 +303,25 @@
    ::scene_draw_shots가 이제 볼트 둘레에 그리는 발광 겹에 맞춰 예전보다 멀리 닿습니다. 둘은
    하나의 사건을 두 번 말하는 것입니다. 눈에게는 발광으로, 지오메트리에게는 빛으로. 헤일로는
    2미터인데 뒤의 벽은 1미터에 걸쳐 밝아지는 볼트는 눈에 보이는 이음매를 가진 볼트입니다. */
-#define LIGHT_SHOT_RADIUS    6.0f   ///< @brief Metres a monster bolt lights. / 몬스터 볼트가 밝히는 거리 (미터).
-#define LIGHT_SHOT_POWER     1.00f  ///< @brief Bolts are the brighter thing in the room, and now the only one that moves. / 볼트는 방에서 더 밝은 것이며, 이제 움직이는 유일한 것이기도 합니다.
+/* CUT WHEN THE VOLLEY GREW. One bolt lighting six metres at full strength was a
+   bolt that owned the room it crossed, and that was the right size for five of
+   them arriving as a single event. A stream of up to ten is ten of these in the
+   air at once, each taking one of ::RD_MAX_LIGHTS's eight slots on distance
+   alone -- so at the old strength a water spirit firing at you would both blow
+   the room out and evict every other light in it, including the grenade that
+   went off behind you.
+   Smaller and dimmer, they read as what they now are: a stream of small hot
+   things, bright together rather than each.
+   *일제 사격이 커지면서 줄였습니다.* 6미터를 최대 세기로 밝히는 볼트 하나는 자기가 가로지르는
+   방을 소유하는 볼트였고, 그것은 하나의 사건으로 도착하는 다섯 발에 대해서는 옳은 크기였습니다.
+   최대 열 발의 줄기는 그것이 동시에 열 개 공중에 있다는 뜻이며, 각각이 거리만으로
+   ::RD_MAX_LIGHTS의 여덟 칸 중 하나를 가져갑니다. 그래서 옛 세기라면 당신을 향해 쏘는 물의
+   정령은 방을 날려 버리는 동시에 그 안의 다른 모든 빛을(당신 뒤에서 터진 유탄을 포함해서)
+   쫓아냈을 것입니다.
+   작고 어두워지면서, 이제 그것들이 실제로 그러한 것으로 읽힙니다. 작고 뜨거운 것들의
+   줄기이며, 각각이 아니라 함께 밝습니다. */
+#define LIGHT_SHOT_RADIUS    3.6f   ///< @brief Metres a monster bolt lights. / 몬스터 볼트가 밝히는 거리 (미터).
+#define LIGHT_SHOT_POWER     0.55f  ///< @brief One of a stream, so bright together rather than each. / 줄기의 하나이므로 각각이 아니라 함께 밝습니다.
 
 /* --- the blast -------------------------------------------------------------
  *
@@ -982,8 +999,22 @@ static void scene_lights(const World *w, v3 eye) {
    보이며, 여러 개를 겹치기 전에는 정확히 그렇게 보였습니다. */
 #define SHOT_HALOS      3       /* wide dim petals -- these carry the round shape */
 #define SHOT_CORES      2       /* small bright ones -- a star, not a white square */
-#define SHOT_HALO_SIZE  0.62f
-#define SHOT_CORE_SIZE  0.22f
+/* SCALED WITH ::SHOT_RADIUS WHEN THE WATER SPIRIT STOPPED FIRING A SHOTGUN, and
+   the core is the one that MATTERS: it is the same number as the collision
+   radius, deliberately, so the bright middle of a bolt is exactly the part that
+   can hit you. The halo is the glow around that and is allowed to be bigger --
+   what it must not do is grow so far past the core that the player aims their
+   dodge at light rather than at the bolt.
+   Both fell by the ratio ::SHOT_RADIUS did. Ten bolts drawn at the old size are
+   not a stream, they are a wall with gaps too narrow to stand in.
+   물의 정령이 산탄을 그만두면서 ::SHOT_RADIUS와 함께 줄었고, *중요한 쪽은 코어*입니다.
+   의도적으로 충돌 반경과 같은 수이며, 그래서 볼트의 밝은 한가운데가 정확히 맞힐 수 있는
+   부분입니다. 헤일로는 그 둘레의 빛이고 더 커도 됩니다. 다만 코어보다 너무 멀리 자라서
+   플레이어가 볼트가 아니라 빛을 보고 회피를 조준하게 만들어서는 안 됩니다.
+   둘 다 ::SHOT_RADIUS가 줄어든 비율만큼 줄었습니다. 옛 크기로 그려진 열 발은 줄기가 아니라
+   서 있을 수 없을 만큼 틈이 좁은 벽입니다. */
+#define SHOT_HALO_SIZE  0.37f
+#define SHOT_CORE_SIZE  0.13f
 #define SHOT_SPIN       2.3f    /* radians per second of remaining life */
 
 /* --- the emission ----------------------------------------------------------
@@ -1025,7 +1056,7 @@ static void scene_lights(const World *w, v3 eye) {
  * *숨을 쉬며*, 그것이 이것을 더 큰 스프라이트가 아니라 발광으로 읽히게 하는 나머지 절반입니다.
  * 일정한 빛의 원반은 형태이고, 부풀었다 가라앉는 것은 광원입니다. */
 #define SHOT_GLOWS      2       /* the outer emission: big, dim, and it breathes */
-#define SHOT_GLOW_SIZE  1.30f
+#define SHOT_GLOW_SIZE  0.78f
 #define SHOT_GLOW_PULSE 0.22f   /* fraction of the size it swells by */
 #define SHOT_GLOW_RATE  9.0f    /* radians per second of remaining life */
 

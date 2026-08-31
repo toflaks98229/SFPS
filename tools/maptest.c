@@ -1023,8 +1023,8 @@ static void test_bake_matches(void) {
     printf("\nthe baked blob and the file on disk describe the same map\n");
 
     int flen = 0, blen = 0;
-    const char *ftext = data_map("lqdm1", &flen);
-    const char *btext = data_map_baked("lqdm1", &blen);
+    const char *ftext = data_map("lqdm4", &flen);
+    const char *btext = data_map_baked("lqdm4", &blen);
 
     check(ftext != 0, "the file is there");
     check(btext != 0, "and so is the baked copy");

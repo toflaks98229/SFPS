@@ -127,7 +127,7 @@ int main(void) {
     }
 
     /* --- the shipped level, asked only what any level must satisfy --- */
-    if (!level_load("lqdm1", &L)) {
+    if (!level_load("lqdm4", &L)) {
         printf("\n  no level 'arena' to smoke test\n");
     } else {
         printf("\n  smoke testing '%s' (%d sectors)\n", L.name, L.n_sectors);

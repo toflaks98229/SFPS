@@ -210,6 +210,26 @@ CAPS = read_caps()
 #
 # clip / trigger / skip are NOT in this table on purpose -- see NODRAW below.
 TEXTURES = {
+    # NOT A TYPO, AND THAT TOOK A FAILING TEST TO SEE. `lqdm4` names two faces
+    # `med_cslbrk18_t*` where the wad it declares holds `med_csl_brk18_t*`, one
+    # underscore apart, and correcting the map to match the wad is the obvious
+    # move. It is also wrong: `med_csl_brk18_tb` is SIXTEEN characters and
+    # ::BR_TEX is sixteen BYTES -- Quake's fifteen plus a nul, which is the same
+    # limit LibreQuake's own author was working to. The short spelling is not a
+    # slip, it is the name that fits, and substituting the long one here put two
+    # truncated names into the level and turned tools/mapcap.c red.
+    # So the map keeps its own word and the fix lives on the other side: the
+    # texture importer looks the wad file up under the long name and writes it
+    # out under the short one. See MEANT there.
+    # *오타가 아니며, 그것을 알아보는 데 실패한 검사가 필요했습니다.* `lqdm4`는 면 둘을
+    # `med_cslbrk18_t*`로 부르고 그것이 선언한 wad는 `med_csl_brk18_t*`를 갖고 있습니다.
+    # 밑줄 하나 차이이고, 맵을 wad에 맞춰 고치는 것이 뻔한 수입니다. 그리고 그것은 틀렸습니다.
+    # `med_csl_brk18_tb`는 *열여섯* 글자이고 ::BR_TEX는 열여섯 *바이트*입니다. Quake의 열다섯
+    # 더하기 널이며, LibreQuake 제작자가 맞추고 있던 것과 같은 상한입니다. 짧은 철자는 실수가
+    # 아니라 *들어가는* 이름이고, 이곳에서 긴 쪽으로 치환한 것은 잘린 이름 둘을 레벨에 넣고
+    # tools/mapcap.c를 빨갛게 만들었습니다.
+    # 그래서 맵은 자기 낱말을 지키고 수정은 반대편에 있습니다. 텍스처 임포터가 긴 이름으로
+    # wad 파일을 찾아 짧은 이름으로 씁니다. 그곳의 MEANT를 참조하십시오.
     'wall_grey_c':  'wall_stone',
     'wall_grey_b':  'wall_rough',
     'floor_grey_c': 'wall_plain',
@@ -348,6 +368,46 @@ DROP = {
     'item_artifact_invisibility': 'no powerups',
     'item_artifact_super_damage': 'no powerups',
     'item_armorInv':              'no armour pool; the other two become health',
+
+    # A LAMP LIGHTS NOTHING, so carrying one is bytes for nothing.
+    #
+    # scene.c's `scene_lights` says it outright -- `::Level::lights` is not read
+    # there, "not from the vertices, not from these slots" -- and level.c's
+    # bake_light says the other half. What lights this game is the sun in the
+    # vertex colours and the things the player and the monsters put in the air.
+    # A `light` entity is parsed, stored in `Level::lights`, counted against
+    # LVL_MAX_LIGHTS, and then read by nothing except tools/lightprobe.c.
+    #
+    # DROPPED HERE RATHER THAN LEFT FOR THE ENGINE TO IGNORE, because the engine
+    # ignoring them is not free: they are entities in the .map text that is baked
+    # into the exe, they count against LVL_MAX_LIGHTS and can push a map over it,
+    # and tools/scenetest.c asserts that no shipped level declares one.
+    #
+    # THIS TABLE IS WHY `lqdm1` HAD NONE. That map was stripped of its
+    # thirty-two by hand when the lamps stopped lighting anything, and the
+    # importer was not taught the same thing -- so re-running it would have put
+    # them back, and the recipe stopped reproducing the map it made. `lqdm4`
+    # arriving with fifty-two is what found that.
+    #
+    # *등은 아무것도 밝히지 않으므로*, 하나를 지니는 것은 아무것도 아닌 것에 바이트를 쓰는
+    # 일입니다.
+    #
+    # scene.c의 `scene_lights`가 그것을 명시합니다. `::Level::lights`를 그곳에서 읽지
+    # 않으며 "정점에서도, 이 슬롯에서도"입니다. 나머지 절반은 level.c의 bake_light가
+    # 말합니다. 이 게임을 밝히는 것은 정점 색에 든 태양과, 플레이어와 몬스터가 공중에 놓는
+    # 것들입니다. `light` 엔티티는 파싱되어 `Level::lights`에 저장되고 LVL_MAX_LIGHTS에
+    # 대해 세어진 다음, tools/lightprobe.c 말고는 아무것도 읽지 않습니다.
+    #
+    # *엔진이 무시하도록 두지 않고 이곳에서 버리는* 이유는, 엔진이 무시하는 것이 공짜가
+    # 아니기 때문입니다. 그것들은 exe에 구워지는 .map 텍스트 안의 엔티티이고,
+    # LVL_MAX_LIGHTS에 대해 세어져 맵을 상한 너머로 밀 수 있으며, tools/scenetest.c가
+    # 어떤 출하 레벨도 하나도 선언하지 않는다고 단언합니다.
+    #
+    # *이 표가 `lqdm1`에 등이 없던 이유입니다.* 그 맵은 등이 아무것도 밝히지 않게 되었을 때
+    # 서른두 개를 손으로 걷어냈는데 임포터는 같은 것을 배우지 못했습니다. 그래서 다시
+    # 실행하면 되돌아왔을 것이고, 레시피는 자기가 만든 맵을 재현하기를 그만둔 상태였습니다.
+    # `lqdm4`가 쉰둘을 데리고 도착한 것이 그것을 찾아냈습니다.
+    'light':                      'a lamp lights nothing; see scene_lights',
 }
 
 # Quake's roster against ours. By role: shells are the spread weapon's, spikes

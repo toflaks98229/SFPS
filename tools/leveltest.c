@@ -1669,7 +1669,7 @@ int main(void) {
            일어나기 때문입니다. */
         {
             static const char *const LEVELS[] = { "arena", "vault",
-                                                  "atrium", "lqdm1" };
+                                                  "atrium", "lqdm4" };
             const int n_levels = (int)(sizeof(LEVELS)/sizeof(LEVELS[0]));
             int before = diag_count(DIAG_ENT_KIND), seen = 0;
 

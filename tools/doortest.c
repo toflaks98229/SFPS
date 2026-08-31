@@ -484,7 +484,35 @@ int main(void) {
             ok(0, "the shipped arena loads");
         } else {
             ok(1, "the shipped arena loads");
-            ok(A.n_doors > 0, "and it has doors at all");
+
+            /* DORMANT, NOT DELETED, and the difference is the point.
+               `lqdm1` had two doors and this block was written for them. The
+               arena is `lqdm4` now and Psychofuge has NONE -- so the two checks
+               below have nothing to range over and pass vacuously, which is a
+               worse thing to leave unsaid than a missing test.
+               The obvious repair is to point them at `atrium`, and it does not
+               work: atrium is hand-authored, its one door carries a
+               `targetname` and opens along `angle -1`, so it is tagged and it
+               is VERTICAL -- both of the things these lines exist to forbid in
+               an IMPORTED door. It is not a smaller version of the same
+               subject, it is a different one.
+               So the count is printed rather than asserted, and the properties
+               stay guarded by it. The day an arena with doors arrives they wake
+               up on their own; until then this says out loud that nothing here
+               is being checked.
+               *지워진 것이 아니라 잠든 것이며*, 그 차이가 요점입니다.
+               `lqdm1`에는 문이 둘 있었고 이 블록은 그것들을 위해 쓰였습니다. 아레나는 이제
+               `lqdm4`이고 Psychofuge에는 문이 *없습니다.* 그래서 아래 두 검사는 훑을 대상이
+               없어 공허하게 통과하는데, 그것은 없는 검사보다 말하지 않고 두기에 더 나쁜
+               것입니다.
+               뻔한 수선은 `atrium`을 가리키게 하는 것이고, 그것은 통하지 않습니다. atrium은
+               손으로 저작되었고 그 하나뿐인 문은 `targetname`을 지니며 `angle -1`로 열립니다.
+               태그가 붙었고 *수직*이며, 둘 다 이 줄들이 *가져온* 문에 대해 금지하려고 존재하는
+               것입니다. 같은 대상의 작은 판본이 아니라 다른 대상입니다.
+               그래서 개수는 단언하지 않고 출력하며, 속성 검사는 그것에 걸어 둡니다. 문이 있는
+               아레나가 오는 날 스스로 깨어납니다. 그때까지 이것은 이곳에서 아무것도 검사되고
+               있지 않다고 소리 내어 말합니다. */
+            printf("      the shipped arena declares %d door(s)\n", A.n_doors);
 
             int tagged = 0, vertical = 0;
             for (int i = 0; i < A.n_doors; i++) {
@@ -492,12 +520,14 @@ int main(void) {
                 if (A.doors[i].axis == DOOR_UP || A.doors[i].axis == DOOR_DOWN)
                     vertical++;
             }
+            if (A.n_doors > 0) {
             okf(tagged == 0,
                 "none of them waits on a switch that did not cross",
                 (float)tagged, 0.0f);
             okf(vertical == 0,
                 "and they slide sideways, not up",
                 (float)vertical, 0.0f);
+            }
         }
     }
 

@@ -168,7 +168,7 @@ static const char *map_name_of(const char *cmd, char *buf, int cap) {
         buf[i] = cmd[i]; i++;
     }
     buf[i] = 0;
-    return buf[0] ? buf : "lqdm1";
+    return buf[0] ? buf : "lqdm4";
 }
 
 int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {

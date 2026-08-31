@@ -22,7 +22,7 @@ Models, materials, sounds and levels are all authored as text and hot-reload
 into the running game.
 
 ```
-983,552 / 1,474,560 bytes   (66.7% used)
+1,282,048 / 1,474,560 bytes   (86.94% used)
 ```
 
 ## Build
@@ -1619,7 +1619,7 @@ chain. See [assets/trenchbroom/README.md](assets/trenchbroom/README.md).
 **And a third route: somebody else's editor.** `brush_parse` reads Valve 220 and
 Standard `.map` text, which is the format TrenchBroom writes and the format the
 Quake mapping world has been publishing in for thirty years. The arena the game
-is fought in — `lqdm1`, LibreQuake's **Solstice** by ZungryWare — is a converted
+is fought in — `lqdm4`, LibreQuake's **Psychofuge** — is a converted
 LibreQuake deathmatch map, produced by
 [assets/maps/import-librequake.py](assets/maps/import-librequake.py) — no
 compiler in the path, and no `levels.txt` entry needed because the file *is* the
@@ -1628,6 +1628,27 @@ dropped, armour becomes health, eight Quake weapons become four of ours, movers
 this engine has no counterpart for arrive frozen, and a room built for other
 players gains the spawners, the shrine, the maw and the ward slots that make it
 an arena here.
+
+> **The arena is `lqdm4` ("Psychofuge") now, and most of what follows measured
+> `lqdm1` ("Solstice").** Everything below about how a LibreQuake map crosses —
+> the texture import, the sun, the tiling divisor, the caps it pushed on — is
+> the account of the first map that made the crossing, and it is kept because
+> the *mechanism* is what it describes and the mechanism did not change. The
+> numbers in it are Solstice's.
+>
+> What changed is the room. Solstice was picked for being the map LibreQuake
+> tells a first-time host to start on, which is a good rule for choosing a
+> *first* arena and the wrong one for choosing this game's *only* one: a winter
+> castle and a maw in the wall do not belong to each other. Psychofuge is "an
+> ancient lava fortress" with a lava-filled underbelly, and it is **1,149
+> brushes over 1,616 × 1,200** against Solstice's 807 over 2,614 × 2,016 —
+> denser and *smaller*, which is the direction a wave shooter wants. A big room
+> buys a deathmatch somewhere to run; it costs this game a fight you can walk
+> away from.
+>
+> It also brought a sun back. Solstice's `_sunlight` had been stripped when the
+> lamps stopped lighting anything, so `bake_light` ran on nothing; Psychofuge
+> declares 90 and 11% of its surfaces are lit by it.
 
 **And then the walls came too.** The import above kept LibreQuake's geometry and
 threw away its surface: every face was looked up in a table and given one of
@@ -3330,9 +3351,9 @@ the 3-clause BSD licence. The full text is in
 [docs/LICENSE-Freedoom.txt](docs/LICENSE-Freedoom.txt), reproduced verbatim
 because a tidied licence is not the licence that was granted.
 
-**The `lqdm1` arena — "Solstice" — from
-[LibreQuake](https://github.com/lavenderdotpet/LibreQuake)**, mapped by
-ZungryWare, under the same 3-clause BSD licence — text in
+**The `lqdm4` arena — "Psychofuge" — from
+[LibreQuake](https://github.com/lavenderdotpet/LibreQuake)**, under the same
+3-clause BSD licence — text in
 [docs/LICENSE-LibreQuake.txt](docs/LICENSE-LibreQuake.txt). LibreQuake ships
 under two licences and says so itself: its `docs/COPYING` is BSD-3 project-wide,
 and `docs/README-IMPORTANT-LICENCE-INFO` carves GPL-2 out for the QuakeC,

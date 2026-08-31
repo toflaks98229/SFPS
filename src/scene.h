@@ -88,6 +88,21 @@
    ::mb_init allocates once and ::scene_free gives it back. 2.1MB, paid whether
    the level is spire (612 verts) or lqdm11, which is the argument for measuring
    before tripling rather than after.
+
+   RAISED TO 65536 WHEN THE ARENA BECAME `lqdm4`. Psychofuge wants 42,267
+   vertices against lqdm11's 15,411 -- 2.7x the map this cap was measured from,
+   and 86% of the old 49152, which tools/mapcap.c refuses because it asks for a
+   quarter spare rather than a fourteenth.
+   AND THE `THREE TIMES` RULE ABOVE IS NOT APPLIED AGAIN, deliberately. Tripling
+   42,267 gives 131,072 and 5.8MB of heap paid on every level including the ones
+   with six hundred vertices, to hold room for a map half again bigger than
+   anything that has ever shipped here. The rule earned that multiple when the
+   widest map was fifteen thousand vertices and the whole buffer was 700KB; at
+   this size the same multiple buys the same insurance for eight times the
+   premium. 65536 is the enforced margin -- mapcap's quarter -- with the round
+   number above it, and it is 2.9MB.
+   If a wider map than Psychofuge arrives, this moves again, and mapcap is what
+   will say so rather than a wall quietly going missing.
    *왜 49152인가.* tools/mapcap.c가 lqdm11이 옛 16,384에 대해 정점 15,411개를 원한다고
    측정했습니다. 94% 소비, 벽을 잃기까지 973개를 남긴 상태로 출하된 맵입니다. 가장 넓은 출하
    맵의 세 배이며, 이 재작성의 다른 모든 상한과 같은 방식으로 골랐습니다. 들어맞게 만들 수 있는
@@ -96,7 +111,7 @@
    ::scene_free가 돌려줍니다. 2.1MB이고, 레벨이 spire(정점 612개)이든 lqdm11이든 치릅니다.
    그것이 세 배로 늘리기 전에 재야 한다는 논거이지 늘린 뒤에 잴 이유가 아닙니다. */
 #ifndef LEVEL_BUF_VERTS
-#define LEVEL_BUF_VERTS 49152
+#define LEVEL_BUF_VERTS 65536
 #endif
 
 /**

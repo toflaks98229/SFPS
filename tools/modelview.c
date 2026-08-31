@@ -213,7 +213,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
        Scene이 아니라 지역 변수인 이유는, 이 도구가 월드가 아니라 모델 하나를 그리며
        wpview_set_model이 그로부터 원하는 전부이기 때문입니다. */
     static Level level;
-    level_load("lqdm1", &level);
+    level_load("lqdm4", &level);
     wp_init(&g_weapon);
 
     static WeaponView view;

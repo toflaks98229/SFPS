@@ -684,29 +684,33 @@ typedef struct {
  * put a Quake sun on the same scale. The lamps light nothing now and the
  * yardstick is gone with them, but the number it produced is unchanged and
  * still correct -- it was never a ratio to a lamp, only chosen beside one.
- * `_sunlight 120`
- * -- what `lqdm1` declares, and an ordinary value for an outdoor map -- lands
- * at 0.47, which is a strong sun that does not on its own saturate a surface
- * that also has ambient and a key light on it.
+ * `_sunlight 90`
+ * -- what `lqdm4` declares, and an ordinary value for a map with sky -- lands
+ * at 0.35, which is a sun you can read the direction of without it saturating
+ * a surface that also has ambient and something burning on it.
  *
  * @note Deliberately not tuned per map. A number that has to be chosen again
  *       for every level is a number nobody can predict, and the whole reason
  *       to read `_sunlight` at all is that the author already chose one.
- * @note No shipped map declares one now, so nothing multiplies by this. It is
- *       what a `_sunlight` would still be worth, kept alongside the parse that
- *       would still read it.
+ * @note The arena declares one, so this multiplies something again. It spent a
+ *       while as a constant nothing reached -- `lqdm1` stopped carrying a sun
+ *       and `lqdm4` brought one back -- and the value did not move across
+ *       either change, which is the point of the paragraph above.
  *
  * 한국어
  * ------
  * 이 값을 고를 때의 잣대는 점광원이었습니다. 기준 세기의 등 하나가 셰이더 조도 범위에서
  * 1.0의 값어치였고, 이 값이 Quake의 태양을 같은 눈금에 올렸습니다. 이제 등은 아무것도 밝히지
  * 않으므로 잣대도 함께 사라졌지만, 그것이 만들어 낸 수는 그대로이고 여전히 옳습니다. 등에
- * 대한 비율이었던 적은 없고 다만 그 곁에서 골라졌을 뿐입니다. `lqdm1`이 선언하던 `_sunlight
- * 120`은 0.47이 되며, 주변광과 주광이 함께
- * 얹힌 표면을 혼자서 포화시키지는 않는 강한 태양입니다.
+ * 대한 비율이었던 적은 없고 다만 그 곁에서 골라졌을 뿐입니다. `lqdm4`가 선언하는
+ * `_sunlight 90`은 0.35가 되며, 주변광과 타고 있는 무언가가 함께 얹힌 표면을 혼자서
+ * 포화시키지 않으면서 방향은 읽을 수 있는 태양입니다.
  *
  * @note 맵마다 다시 맞추지 않습니다. 레벨마다 다시 골라야 하는 수는 아무도 예측할 수 없는
  *       수이고, 애초에 `_sunlight`를 읽는 이유가 제작자가 이미 골랐다는 데 있습니다.
+ * @note 아레나가 태양을 선언하므로 이 값은 다시 무언가를 곱합니다. 한동안은 아무것도
+ *       닿지 않는 상수였습니다. `lqdm1`이 태양을 그만 지녔고 `lqdm4`가 되돌려 놓았는데,
+ *       두 변화 어느 쪽에서도 이 값은 움직이지 않았습니다. 그것이 위 문단의 요점입니다.
  */
 #define LVL_SUN_SCALE (1.0f / 255.0f)
 
@@ -1646,8 +1650,11 @@ typedef struct {
      * ENGLISH: Kept in the file's own numbers and scaled at the bake, so the
      * one place that decides what a Quake brightness is worth here is the one
      * place that uses it. 0 disables each independently -- a map may declare a
-     * sun and no sky. `lqdm1` declared both and declares neither now, so both
-     * are 0 in every level the game loads.
+     * sun and no sky. `lqdm1` declared both and then declared neither; the
+     * arena is `lqdm4` now and it declares both again, at 90 and 100. This
+     * line has said all three things and the field never changed -- which is
+     * the argument for describing what the numbers MEAN here and letting the
+     * map say what they are.
      * 한국어: 파일 자신의 수 그대로 두고 베이크에서 환산합니다. Quake의 밝기가 이곳에서
      * 얼마인지를 정하는 곳이 그것을 쓰는 곳 하나가 되게 하기 위함입니다. 각각 0이면 꺼집니다.
      */

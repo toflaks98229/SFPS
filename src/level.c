@@ -1163,10 +1163,13 @@ static void brush_start_of(Level *out, const BrushMap *bm) {
  * them and an imported outdoor map arrived with only its accent lamps -- which
  * on `lqdm1` was 0.5% of the light the author placed.
  *
- * NOTHING DECLARES THESE ANY MORE. `lqdm1`'s worldspawn carried all three and
- * does not now; this reads keys no shipped map writes. Kept because the keys
- * are still what an author would put in a .map, and a parser that stopped
- * reading them would turn a working `_sunlight` into a silent nothing.
+ * THE ARENA DECLARES ALL THREE. This paragraph said the opposite for a while
+ * -- `lqdm1` had carried them and stopped, so the reader was parsing keys no
+ * shipped map wrote, and it was kept on the argument that a parser which
+ * stopped reading them would turn a working `_sunlight` into a silent
+ * nothing. `lqdm4` writes `_sunlight 90`, `_sunlight2 100` and
+ * `_sun_mangle "80 -90 0"`, so the argument is no longer needed and the
+ * code it defended is on the shipped path.
  *
  * MANGLE IS YAW, PITCH, ROLL, IN DEGREES, and it names the direction the light
  * TRAVELS: ericw's default is "0 -90 0", straight down. ::Level::sun wants the
@@ -3055,13 +3058,18 @@ int level_sun_reaches(const Level *l, v3 from) {
  * fragment shader here cannot do. The lamps could leave because their falloff
  * already ends; the sun cannot, because the shadow IS the light.
  *
- * @note So this is a SUN bake, the guard below says so, and NO SHIPPED LEVEL
- *       GETS PAST IT. `lqdm1` was the only map that ever declared a sun and
- *       its worldspawn no longer carries one, so every level this game loads
- *       returns on the first line and is lit entirely from the shader. The
- *       function is kept because it is what a `_sunlight` key still means:
- *       delete it and the importer would be reading three worldspawn keys into
- *       fields nothing could ever use.
+ * @note So this is a SUN bake, and A SHIPPED LEVEL GETS PAST IT AGAIN. This
+ *       note used to say that none did: `lqdm1` was the only map that had
+ *       ever declared a sun, its worldspawn stopped carrying one, and the
+ *       function survived on the argument that a `_sunlight` key still had
+ *       to mean something. `lqdm4` declares all three -- `_sunlight 90`,
+ *       `_sunlight2 100`, `_sun_mangle "80 -90 0"` -- so the bake runs, and
+ *       tools/lightprobe.c measures 11% of the arena's surfaces sunlit and
+ *       38% in shadow behind geometry.
+ *       KEPT-FOR-LATER BECAME LOAD-BEARING, which is the good ending for a
+ *       function held on principle, and worth noticing: the argument that
+ *       saved it was about what the KEY means, not about what any map
+ *       happened to carry that week.
  *
  * 한국어
  * ------

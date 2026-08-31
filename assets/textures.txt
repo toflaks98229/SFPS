@@ -419,8 +419,12 @@ gloss 35
 
 # --- LibreQuake's own surfaces ----------------------------------------------
 #
-# THE MAP BROUGHT ITS WALLS WITH IT. The arena is LibreQuake's `lqdm1`
-# ("Solstice"), and the first version of that import looked every face's
+# THE MAP BROUGHT ITS WALLS WITH IT. The arena was LibreQuake's `lqdm1`
+# ("Solstice") when this was written -- it is `lqdm4` ("Psychofuge") now, and
+# the block at the end of this file is that map's set. Solstice's rows stay
+# because the files stay: nothing else names them today, and deleting a
+# material is a separate decision from replacing a level.
+# The first version of that import looked every face's
 # texture up in a table and wrote one of the materials ABOVE in its place --
 # `med_csl_brk14b` became `wall_stone`, four `met_brn_*` collapsed into
 # `wall_metal` and `wall_track`, four woods into one `pwood`. Twenty-three
@@ -532,3 +536,63 @@ t sq_trim1_2_s
 image sq_trim1_2_s 2
 t star_water0
 image star_water0 2
+
+# --- Psychofuge / lqdm4, LibreQuake (BSD-3) -----------------------------------
+#
+# The arena's own walls, and they arrive as a set rather than as substitutions.
+# `med_tmpl_*` is a temple trim, `med_csl_brk18/19` is castle brick, and
+# `star_lava3` is the lava the map is named for -- an ancient lava fortress,
+# which is what this level is and what the winter castle before it was not.
+#
+# EVERY COUNT IS 2, and in this block that is not a coincidence. BRUSH_TEXELS is
+# one divisor every brush face uses, so a material repeating its cell a different
+# number of times is a material at a different SCALE from its neighbours on the
+# same wall. assets/sprites/import-librequake-textures.py reads that count out of
+# brush.h for exactly this reason, and tools/texprobe.c is the check.
+#
+# 아레나 자신의 벽이며, 치환이 아니라 한 세트로 도착합니다. `med_tmpl_*`는 신전 트림,
+# `med_csl_brk18/19`는 성벽 벽돌, `star_lava3`은 이 맵의 이름이 된 용암입니다. 고대 용암
+# 요새이며, 그것이 이 레벨이고 그 전의 겨울 성이 아니었던 것입니다.
+#
+# *모든 카운트가 2이며*, 이 블록에서 그것은 우연이 아닙니다. BRUSH_TEXELS는 모든 브러시 면이
+# 쓰는 하나의 제수이므로, 자기 셀을 다른 횟수로 반복하는 재질은 같은 벽의 이웃과 *배율*이 다른
+# 재질입니다. assets/sprites/import-librequake-textures.py가 그 수를 brush.h에서 읽는 이유가
+# 정확히 이것이고, 검사는 tools/texprobe.c입니다.
+t med_csl_brk18_f
+image med_csl_brk18_f 2
+t med_csl_brk18_t
+image med_csl_brk18_t 2
+t med_csl_brk18b
+image med_csl_brk18b 2
+t med_csl_brk19_f
+image med_csl_brk19_f 2
+t med_csl_brk19_t
+image med_csl_brk19_t 2
+t med_csl_brk19b
+image med_csl_brk19b 2
+t med_cslbrk18_tb
+image med_cslbrk18_tb 2
+t med_cslbrk18_tc
+image med_cslbrk18_tc 2
+t med_roof5
+image med_roof5 2
+t med_tanwall8
+image med_tanwall8 2
+t med_tmpl_tele
+image med_tmpl_tele 2
+t med_tmpl_trim1
+image med_tmpl_trim1 2
+t med_tmpl_trim1b
+image med_tmpl_trim1b 2
+t med_tmpl_trim2
+image med_tmpl_trim2 2
+t med_tmpl_trim3
+image med_tmpl_trim3 2
+t med_tmpl_trim4
+image med_tmpl_trim4 2
+t sky_orng
+image sky_orng 2
+t star_lava3
+image star_lava3 2
+t med_tmpl_lit3
+image med_tmpl_lit3 2

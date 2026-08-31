@@ -82,6 +82,64 @@ MAP = ('https://raw.githubusercontent.com/lavenderdotpet/LibreQuake/main/'
 # cropped.
 # 벽 그림이 들어가는 셀입니다. src/sprite.h의 SPR_WALL이며, import-librequake.py가 상한을
 # 헤더에서 읽는 것과 같은 이유로 이곳에 적지 않고 그곳에서 읽습니다.
+# The spellings `lqdm4` gets wrong, and what its own wad calls them.
+#
+# assets/maps/import-librequake.py's TEXTURES table carries the same two
+# entries, because the two scripts each need half of one fact: that one
+# substitutes the name INSIDE the converted map, so the engine asks for the
+# corrected material; this one substitutes it BEFORE the lookup, so the file
+# arrives under the name the engine will ask for. Correcting it in only one of
+# them leaves either a face with no material or a material no face names.
+#
+# Applied to `n` itself rather than to the lookup key, because the name is also
+# the OUTPUT filename -- fixing only the key would fetch the right pixels and
+# write them to `med_cslbrk18_tb.png`, which nothing would ever open.
+#
+# `lqdm4`가 틀리게 적은 철자와, 그 맵 자신의 wad가 그것을 부르는 이름입니다.
+#
+# assets/maps/import-librequake.py의 TEXTURES 표가 같은 두 항목을 갖고 있습니다. 두
+# 스크립트가 하나의 사실을 절반씩 필요로 하기 때문입니다. 그쪽은 변환된 맵 *안에서* 이름을
+# 치환하여 엔진이 고쳐진 재질을 요구하게 하고, 이쪽은 조회 *전에* 치환하여 파일이 엔진이
+# 요구할 이름으로 도착하게 합니다. 둘 중 하나에서만 고치면, 재질 없는 면이 남거나 아무 면도
+# 부르지 않는 재질이 남습니다.
+#
+# 조회 키가 아니라 `n` 자체에 적용하는 이유는, 이름이 곧 *출력 파일명*이기 때문입니다. 키만
+# 고치면 올바른 픽셀을 가져와 `med_cslbrk18_tb.png`로 쓰게 되고, 그것은 아무도 열지 않습니다.
+MEANT = {
+    'med_cslbrk18_tb': 'med_csl_brk18_tb',
+    'med_cslbrk18_tc': 'med_csl_brk18_tc',
+}
+
+
+def resolve(n, have):
+    """The wad key for a face's name, or None.
+
+    ONE CHAIN, TWO CALLERS, and it is one function because it was two. The
+    emit loop grew `_fbr` and the entries loop did not, so `*lava3` fetched
+    its pixels and never got a row in textures.txt -- six faces of lava and
+    twenty-one of temple lamp drawing the fallback material, with the PNG
+    sitting right there beside them. A resolution rule that only half the
+    script knows is a rule that writes files nothing can reach.
+
+    *하나의 사슬, 두 호출자이며*, 하나의 함수인 이유는 그것이 둘이었기 때문입니다. 방출
+    반복문은 `_fbr`을 얻었고 항목 반복문은 얻지 못해서, `*lava3`은 자기 픽셀을 가져오고도
+    textures.txt에 행을 얻지 못했습니다. 용암 여섯 면과 신전 램프 스물한 면이 대체 재질로
+    그려지는데 PNG는 바로 그 곁에 있었습니다. 스크립트의 절반만 아는 해석 규칙은 아무도
+    닿을 수 없는 파일을 쓰는 규칙입니다.
+    """
+    k = n.lower()
+    if k in have:
+        return k
+    k = legal_name(n).lower()
+    if k in have:
+        return k
+    if (k + '_fbr') in have:
+        return k + '_fbr'
+    if MEANT.get(k) in have:
+        return MEANT[k]
+    return None
+
+
 def wall_cell():
     here = os.path.dirname(os.path.abspath(__file__))
     path = os.path.join(here, '..', '..', 'src', 'sprite.h')
@@ -92,6 +150,53 @@ def wall_cell():
                          'src/sprite.h. Fix this rather than typing the number: '
                          'a cropped texture does not announce itself.')
     return int(m.group(1))
+
+
+# How many cells a wall material spans, and it is ONE NUMBER FOR EVERY MATERIAL.
+#
+# This used to be `(2 * SPR_WALL) // source_side` -- the count that FILLS a
+# material, which is 2 for a 128 drawing, 4 for a 64 and 16 for a 16. That was
+# wrong in a way nothing on this side could see. BRUSH_TEXELS is a single
+# divisor every brush face uses, so a material tiling its cell a different
+# number of times is a material at a different SCALE from its neighbours on the
+# same wall. The engine's own table was normalised to one count when
+# BRUSH_TEXELS went from 128 to 256; this script kept emitting the old formula,
+# and importing a map with any 64-pixel source would have written
+# `image med_tmpl_trim1 4` into a table whose other thirty-three rows say 2.
+#
+# tools/texprobe.c is the check that catches it, and it catches it in the
+# ENGINE rather than here -- so a stale importer fails a test run instead of
+# shipping one wall at twice its neighbours' scale, which reads as an authoring
+# mistake in the map and not as a number in a .py file.
+#
+# 벽 재질이 걸치는 셀 수이며, *모든 재질에 대해 하나의 수*입니다.
+#
+# 예전에는 `(2 * SPR_WALL) // 소스 변`이었습니다. 재질을 *채우는* 수이며 128 그림에 2,
+# 64에 4, 16에 16입니다. 이쪽에서는 보이지 않는 방식으로 틀렸습니다. BRUSH_TEXELS는 모든
+# 브러시 면이 쓰는 단일 제수이므로, 자기 셀을 다른 횟수로 반복하는 재질은 같은 벽의 이웃과
+# *배율*이 다른 재질입니다. BRUSH_TEXELS가 128에서 256이 될 때 엔진의 표는 하나의 카운트로
+# 정규화되었는데, 이 스크립트는 옛 공식을 계속 내보냈습니다. 64픽셀 소스를 가진 맵을
+# 가져왔다면 나머지 서른세 행이 2라고 적힌 표에 `image med_tmpl_trim1 4`를 써 넣었을
+# 것입니다.
+#
+# 그것을 잡는 검사는 tools/texprobe.c이며, 이곳이 아니라 *엔진에서* 잡습니다. 그래서 낡은
+# 임포터는 이웃의 두 배 배율인 벽을 출하하는 대신 테스트 실행을 실패시킵니다. 그 벽은 .py
+# 파일의 숫자가 아니라 맵의 저작 실수처럼 보입니다.
+def tiles_per_material():
+    here = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(here, '..', '..', 'src', 'brush.h')
+    with open(path, encoding='utf-8') as f:
+        m = re.search(r'^#define\s+BRUSH_TEXELS\s+([0-9.]+)', f.read(), re.M)
+    if not m:
+        raise SystemExit('import-librequake-textures: cannot read BRUSH_TEXELS '
+                         'from src/brush.h. Fix this rather than typing the '
+                         'number: a wall at the wrong scale looks like a map '
+                         'authoring mistake, not like a stale constant.')
+    n = int(float(m.group(1))) // wall_cell()
+    if n < 1:
+        raise SystemExit('import-librequake-textures: BRUSH_TEXELS is smaller '
+                         'than SPR_WALL, so a material cannot hold one cell.')
+    return n
 
 
 # Names brush.c never draws, so nothing needs an image for them.
@@ -292,8 +397,24 @@ def main():
         # 두 철자 모두입니다. 액체의 면은 `*water0`이라고 말하고 그것을 담은 파일은
         # `star_water0.png`이기 때문입니다. 면이 말하는 것만 조회하면 이 맵의 유일한
         # 액체가 없는 것으로 보고되었습니다.
-        key = n.lower() if n.lower() in have else legal_name(n).lower()
-        if key not in have:
+        # AND THE FULLBRIGHT SPELLING, which is the third one. LibreQuake
+        # keeps the glowing variant of a liquid or a lamp under a `_fbr`
+        # suffix -- `star_lava3_fbr.png` holds the face a map calls `*lava3` --
+        # while the still ones (`star_water0.png`) carry no suffix at all. So
+        # the suffix cannot be added to every lookup and cannot be left out of
+        # them either; it is a fallback after both plain spellings fail.
+        # This is not cosmetic on a map like `lqdm4`, whose whole lower half is
+        # lava: without it the fortress's underbelly draws in the fallback
+        # material and the level loses the thing it is named for.
+        # *그리고 풀브라이트 철자이며, 그것이 세 번째입니다.* LibreQuake는 액체나 램프의
+        # 빛나는 변형을 `_fbr` 접미사로 둡니다. 맵이 `*lava3`이라 부르는 면을 담은 것은
+        # `star_lava3_fbr.png`입니다. 반면 잔잔한 것들(`star_water0.png`)에는 접미사가
+        # 아예 없습니다. 그래서 이 접미사는 모든 조회에 붙일 수도, 빼 둘 수도 없습니다.
+        # 두 평범한 철자가 모두 실패한 뒤의 대비책입니다.
+        # `lqdm4`처럼 아래쪽 절반이 통째로 용암인 맵에서 이것은 겉치레가 아닙니다. 이것이
+        # 없으면 요새의 아랫배가 대체 재질로 그려지고, 레벨은 자기 이름의 유래를 잃습니다.
+        key = resolve(n, have)
+        if key is None:
             missing.append(n)
             print('  %-18s NOT IN THE WADS THIS MAP NAMES' % n)
             continue
@@ -323,14 +444,12 @@ def main():
     # 레시피이며, 재질이 존재하기 위한 나머지 절반입니다. 쓰지 않고 출력합니다.
     # assets/textures.txt는 사람이 쓴 파일이고 순서에 뜻이 있으며, 그것을 제자리에서 고치는
     # 스크립트는 언젠가 남의 파일을 재배열하는 스크립트입니다.
-    print('\n  add to assets/textures.txt (tiles = %d / the source side):' % (2 * cell))
+    tiles = tiles_per_material()
+    print('\n  add to assets/textures.txt (tiles = %d for every material):' % tiles)
     for n in sorted(names):
-        key = n.lower()
-        if key not in have:
+        if resolve(n, have) is None:
             continue
-        raw = urllib.request.urlopen(have[key][1], timeout=60).read()
-        side = min(min(Image.open(io.BytesIO(raw)).size), cell)
-        print('t %s\nimage %s %d\n' % (legal_name(n), legal_name(n), (2 * cell) // side))
+        print('t %s\nimage %s %d\n' % (legal_name(n), legal_name(n), tiles))
 
     if not a.emit:
         print('(nothing written -- pass --emit)')

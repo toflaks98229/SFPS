@@ -181,8 +181,13 @@
  * `glasstower` -- seven brushes, a ring of ward slots around a tower, nothing
  * else in it. There was no room to be dropped into. The room WAS the fight.
  *
- * ::WORLD_BOSS_ARENA is `lqdm1` now: 807 brushes, three wave spawners,
- * twenty-six pickups and 2,614 x 2,016 units of deathmatch map. Measured, the
+ * ::WORLD_BOSS_ARENA is `lqdm4` now: 1,149 brushes, three wave spawners,
+ * thirty-two pickups and 1,616 x 1,200 units of floor the entities stand on.
+ * MORE BRUSHES OVER LESS GROUND than the `lqdm1` it replaced, which had 807
+ * over 2,614 x 2,016 -- the arena got denser and smaller at once, and for a
+ * wave shooter that is the direction worth moving: what a big room buys a
+ * deathmatch is somewhere to run to, and what it costs this game is a fight
+ * you can walk away from. Measured on that older, wider room, the
  * maw stood up one frame after the intro cutscene ended, at wave 1, with four
  * wards already placed and five monsters already walking -- so the player met
  * the boss before reaching a single weapon the map lays out, in a room they had
@@ -211,8 +216,12 @@
  * 대한 정확한 추론이었습니다. 브러시 일곱 개, 탑을 둘러싼 결계핵 자리의 고리, 그 밖에는
  * 아무것도 없었습니다. 떨어질 방이라는 것이 없었습니다. 방이 *곧* 전투였습니다.
  *
- * ::WORLD_BOSS_ARENA는 이제 `lqdm1`입니다. 브러시 807개, 웨이브 스포너 셋, 획득물 스물여섯,
- * 2,614 x 2,016 크기의 데스매치 맵입니다. 재어 보니 아귀는 인트로 컷신이 끝난 *한 프레임 뒤*에
+ * ::WORLD_BOSS_ARENA는 이제 `lqdm4`입니다. 브러시 1,149개, 웨이브 스포너 셋, 획득물 서른둘,
+ * 엔티티가 서 있는 바닥 1,616 x 1,200입니다. *더 좁은 땅 위에 더 많은 브러시*이며, 이것이
+ * 대신한 `lqdm1`은 2,614 x 2,016 위에 807개였습니다. 아레나가 동시에 조밀해지고 작아진
+ * 것이며, 웨이브 슈터에게 그것은 움직일 값어치가 있는 방향입니다. 큰 방이 데스매치에게
+ * 사 주는 것은 달아날 곳이고, 이 게임에게서 앗아가는 것은 걸어서 벗어날 수 없는
+ * 전투이기 때문입니다. 그 더 넓던 옛 방에서 재어 보니 아귀는 인트로 컷신이 끝난 *한 프레임 뒤*에
  * 일어섰습니다. 웨이브 1, 이미 배치된 결계핵 넷, 이미 걷고 있는 몬스터 다섯. 플레이어는 맵이
  * 깔아 둔 무기 하나에 닿기도 전에, 본 적 없는 방에서 보스를 만났습니다. 옛 주석의 전제는 옛
  * 아레나와 함께 죽었고, 이것이 그것을 대신합니다.
@@ -473,7 +482,7 @@
  *
  * And "walked through by nobody" was an argument about `glasstower`, a
  * seven-brush greybox tower nobody would want behind a menu. The arena is
- * LibreQuake's Solstice now. A finished deathmatch map is a better backdrop
+ * LibreQuake's Psychofuge now. A finished deathmatch map is a better backdrop
  * than a room kept alive to be one.
  *
  * @warning THIS IS NO LONGER THE HEAD OF THE CAMPAIGN, and has not been since
@@ -506,7 +515,7 @@
  * 아레나를 다시 로드하며, 그것은 새 레벨과 지워진 플레이입니다.
  *
  * 그리고 "아무도 걸어 보지 않은"은 `glasstower`에 대한 논거였습니다. 메뉴 뒤에 두고 싶지 않을
- * 브러시 일곱 개짜리 그레이박스 탑입니다. 아레나는 이제 LibreQuake의 Solstice입니다. 완성된
+ * 브러시 일곱 개짜리 그레이박스 탑입니다. 아레나는 이제 LibreQuake의 Psychofuge입니다. 완성된
  * 데스매치 맵은, 배경이 되기 위해 살려 둔 방보다 나은 배경입니다.
  */
 /**
@@ -541,7 +550,7 @@
  * 이름 짓는 것은 타이틀 화면이 그 위에 그려지는 배경뿐입니다. ::RunState::title 자신의 이유에
  * 따라 실제로 로드되어 정지한 레벨입니다.
  */
-#define WORLD_START_DEFAULT "lqdm1"
+#define WORLD_START_DEFAULT "lqdm4"
 
 #ifndef WORLD_START_LEVEL
 #define WORLD_START_LEVEL WORLD_START_DEFAULT
@@ -585,17 +594,28 @@
  *       같은 방을 지목해야 하기 때문입니다. 픽스처에 아레나의 이름을 적어 넣는 도구는 움직이는
  *       사실의 두 번째 사본입니다.
  */
-/* WHY `lqdm1` AND NOT `glasstower`, WHICH THIS WAS FOR MOST OF ITS LIFE.
+/* WHY `lqdm4` AND NOT `glasstower`, WHICH THIS WAS FOR MOST OF ITS LIFE.
  *
  * glasstower is seven brushes. It was authored to prove the boss fight works --
  * a ring of ward slots around a tower, at coordinates written by hand into a
  * .map -- and it did that job. It is not a room anybody would want to fight
  * fifteen waves in, and it was never claimed to be.
  *
- * `lqdm1` is LibreQuake's "Solstice" by ZungryWare, BSD-3, 807 brushes, and the
- * map LibreQuake's own docs/deathmatch-setup-guide.txt tells a first-time host
- * to start on. It won its slot inside that project by being finished: commit
- * 8ae29a30, Dec 2023, "Detailed lqdm1; switched lqdm1 with lqdm11".
+ * `lqdm4` is LibreQuake's "Psychofuge", BSD-3, 1,149 brushes -- "an ancient
+ * lava fortress" whose "dangerous lava-filled underbelly contains some of the
+ * best items", in that project's own words.
+ *
+ * IT REPLACED `lqdm1` ("Solstice"), which was chosen for being the map
+ * LibreQuake tells a first-time host to start on -- a good rule for picking a
+ * FIRST arena and the wrong one for picking this game's only one. Solstice is a
+ * winter castle and this is a wave shooter with a maw in the wall; the room
+ * wanted to be somewhere the fight belongs. Psychofuge brings a temple trim, a
+ * lava underbelly and a sun, and it costs 342 more brushes to say so.
+ *
+ * AND IT BROUGHT THE SUN BACK, which is the part that reaches the code rather
+ * than the eye: Solstice's worldspawn had stopped carrying `_sunlight`, so
+ * level.c's bake ran on nothing. Psychofuge declares 90, and 11% of its
+ * surfaces are lit by it.
  *
  * THE MAP IT DISPLACED THERE IS THE MAP THIS GAME HAD IMPORTED. `lqdm11` and
  * `lqdm13` are the pack's GREYBOXES and it is measurable rather than a matter
@@ -613,13 +633,23 @@
  * survey. Within what a permissive licence actually allows, "most famous"
  * has no answer and "the one the project itself puts forward" does.
  *
- * *왜 `glasstower`가 아니라 `lqdm1`인가.* glasstower는 브러시 일곱 개입니다. 보스 전투가
+ * *왜 `glasstower`가 아니라 `lqdm4`인가.* glasstower는 브러시 일곱 개입니다. 보스 전투가
  * 작동함을 증명하려고 만들어졌고 그 일을 해냈습니다. 웨이브 열다섯을 싸우고 싶은 방은 아니며,
  * 그렇다고 주장된 적도 없습니다.
  *
- * `lqdm1`은 ZungryWare의 LibreQuake "Solstice"이고 BSD-3이며 브러시 807개이고, LibreQuake 자신의
- * docs/deathmatch-setup-guide.txt가 처음 방을 여는 사람에게 시작하라고 말하는 맵입니다. 그
- * 프로젝트 안에서 *완성되었다는 이유로* 그 자리를 얻었습니다.
+ * `lqdm4`는 LibreQuake의 "Psychofuge"이고 BSD-3이며 브러시 1,149개입니다. 그 프로젝트 자신의
+ * 말로 "고대 용암 요새"이며 "위험한 용암투성이 아랫배에 최고의 아이템 일부가 있습니다".
+ *
+ * *이것이 `lqdm1`("Solstice")을 대신했습니다.* Solstice가 뽑힌 기준은 LibreQuake가 처음 방을
+ * 여는 사람에게 시작하라고 말하는 맵이라는 것이었는데, 그것은 *첫* 아레나를 고르는 좋은
+ * 규칙이고 이 게임의 *유일한* 아레나를 고르는 데는 틀린 규칙입니다. Solstice는 겨울 성이고
+ * 이것은 벽에 아귀가 박힌 웨이브 슈터입니다. 방이 전투가 속한 곳이기를 원했습니다.
+ * Psychofuge는 신전 트림과 용암 아랫배와 태양을 가져오며, 그렇게 말하는 데 브러시 342개를
+ * 더 씁니다.
+ *
+ * *그리고 태양을 되돌려 놓았으며*, 그것이 눈이 아니라 코드에 닿는 부분입니다. Solstice의
+ * worldspawn은 `_sunlight`를 그만 지니고 있었으므로 level.c의 베이크는 아무것도 없는 위에서
+ * 돌았습니다. Psychofuge는 90을 선언하고, 그 표면의 11%가 그것에 의해 밝혀집니다.
  *
  * *그곳에서 그것이 밀어낸 맵이 이 게임이 가져왔던 맵입니다.* `lqdm11`과 `lqdm13`은 팩의
  * *그레이박스*이며 이는 취향이 아니라 측정 가능한 사실입니다. 두 맵의 면 중 99.1%와 91.1%가
@@ -630,7 +660,7 @@
  * *왜 유명한 것이 아닌가.* 가질 수 있는 것이 없기 때문입니다. 이 계보의 유명한 아레나는 전부
  * 라이선스가 없거나(모든 권리 유보와 같습니다) GPL-2이며, 이 게임은 맵을 실행 파일 *안에*
  * 굽습니다. 따라서 카피레프트 맵은 카피레프트 바이너리입니다. */
-#define WORLD_BOSS_ARENA "lqdm1"
+#define WORLD_BOSS_ARENA "lqdm4"
 
 /**
  * @brief Where the level text's `next` chain begins.

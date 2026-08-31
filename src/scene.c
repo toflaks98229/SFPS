@@ -115,8 +115,10 @@
    said where that ends: "a brush level has single faces bigger than a
    PlayStation drew in a whole room -- a wall here is one quad where that
    hardware would have had a dozen. At 1.0 those faces crease along their
-   diagonal hard enough to read as a broken renderer." lqdm1's longest edge is
-   72 metres and 13% of its faces are over 4x4m, measured by tools/lightprobe.c
+   diagonal hard enough to read as a broken renderer." lqdm4's longest edge is
+   160 metres and 12% of its faces are over 4x4m, measured by tools/lightprobe.c
+   -- and the edge more than doubled when the arena moved off lqdm1, which was
+   72. The argument did not need the bigger number and now has it
    -- geometry coarser than anything those two numbers were tuned against, so
    the wobble stopped reading as a period and started reading as the mesh
    coming apart.
@@ -128,8 +130,10 @@
    *꺼졌습니다.* 아래의 기구는 그대로이며 한 번의 편집으로 돌아옵니다. 바뀐 것은 이
    프로젝트가 그 룩을 더 이상 요구하지 않는다는 것입니다.
    *아레나가 그것을 결정했습니다.* 플레이스테이션 룩의 두 절반 모두 폴리곤 하나가 화면을
-   얼마나 덮는지에 따라 커지며, ::PSX_AFFINE의 각주가 그 끝을 이미 말해 두었습니다. lqdm1의
-   가장 긴 모서리는 72미터이고 면의 13%가 4x4m를 넘습니다. 그 두 수가 맞춰졌던 어떤 것보다
+   얼마나 덮는지에 따라 커지며, ::PSX_AFFINE의 각주가 그 끝을 이미 말해 두었습니다. lqdm4의
+   가장 긴 모서리는 160미터이고 면의 12%가 4x4m를 넘습니다. 아레나가 lqdm1을 떠나면서
+   모서리가 두 배 넘게 길어졌습니다. 그쪽은 72였습니다. 논거는 더 큰 수를 필요로 하지
+   않았고 이제 그것을 갖고 있습니다. 그 두 수가 맞춰졌던 어떤 것보다
    거친 지오메트리이므로, 흔들림은 시대의 표현이기를 그만두고 메쉬가 무너지는 것으로 읽히기
    시작했습니다.
    *하나가 아니라 둘 다입니다.* 호출 지점의 각주가 둘이 한 가지의 절반이라고 분명히 말하므로,

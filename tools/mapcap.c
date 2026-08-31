@@ -84,7 +84,7 @@ static void ok(int cond, const char *what) {
    때문입니다. 맵은 하나의 블롭에 구워져 이름으로 도달하며, data_map은 이름을 받습니다. 목록이
    그것의 정직한 형태입니다. */
 static const char *const MAPS[] = {
-    "lqdm1",
+    "lqdm4",
 #ifdef MAPCAP_OVERSIZE
     /* Maps this project does NOT ship, staged only while the caps are being
        chosen. They are here to be too big: the question a cap answers is "what

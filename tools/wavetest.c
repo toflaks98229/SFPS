@@ -696,7 +696,7 @@ int main(void) {
            하나만큼이고, 이것이 그 검사입니다. 바닥 위에 있고, 시작 지점에서 떨어져 있고,
            용암 속이 아닐 것. */
         static const char *const LEVELS[] = { "arena", "vault", "dm03",
-                                              "lqdm1" };
+                                              "lqdm4" };
         int arenas = 0;
 
         /* ONE ::world_init FOR THE WHOLE SWEEP, and it matters. A brush level

@@ -52,7 +52,7 @@ static Pools g_pools;
    배포되는 아레나이며 한 번만 적습니다. 단언이 아니라 이곳에 적어서, 레벨 이름을 바꾸는 일이
    편집 하나가 되고, 아무것도 가리키지 않게 된 테스트가 더 이상 존재하지 않는 레벨을 조용히
    검사하는 대신 로드 실패로 그렇게 말하도록 합니다. */
-#define BOSS_ARENA "lqdm1"
+#define BOSS_ARENA "lqdm4"
 
 static int fails;
 static Level L;

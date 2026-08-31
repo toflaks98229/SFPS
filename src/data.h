@@ -147,7 +147,7 @@ const char *data_baked(int which);
  * ENGLISH
  * -------
  * @param[in]  name    Level name, which is the .map's filename without the
- *                     extension: `assets\maps\lqdm1.map` is "lqdm1".
+ *                     extension: `assets\maps\lqdm4.map` is "lqdm4".
  * @param[out] out_len Receives the length in bytes. The text is NOT null
  *                     terminated -- the next map follows it -- so the length is
  *                     the only thing that says where this map ends. Pass it to
@@ -173,7 +173,7 @@ const char *data_baked(int which);
  * ------
  * @brief 포장된 맵 블롭 안에서 이름이 주어진 .map 하나를 찾습니다.
  * @param[in]  name    레벨 이름이며 확장자를 뺀 .map 파일명입니다.
- *                     `assets\maps\lqdm1.map`은 "lqdm1"입니다.
+ *                     `assets\maps\lqdm4.map`은 "lqdm4"입니다.
  * @param[out] out_len 바이트 길이를 받습니다. 텍스트는 널로 끝나지 *않습니다*. 뒤에 다음
  *                     맵이 이어지므로 이 맵이 어디서 끝나는지를 말해 주는 것은 길이뿐입니다.
  *                     종료 문자에 기대지 말고 ::brush_parse에 그대로 넘기십시오.

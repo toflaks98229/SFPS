@@ -39,16 +39,27 @@ licence is not the licence that was granted. That is the same rule
 docs/LICENSE-Freedoom.txt is kept under.
 
 WHAT IT COVERS HERE:
-  assets/maps/lqdm1.map -- "Solstice" -- converted from LibreQuake by
+  assets/maps/lqdm4.map -- "Psychofuge" -- converted from LibreQuake by
   assets/maps/import-librequake.py, and
-  the 23 wall textures that map uses, in assets/sprites/, fetched from
-  LibreQuake's texture-wads by assets/sprites/import-librequake-textures.py:
-    black             grk_leaf1_1     med_cobstn1_1    med_csl_brk14_f
-    med_csl_brk14b    med_csl_flr5_1  med_dr1a         med_dr3c
-    med_glass5        med_roof4       med_tanwall4     med_wood2_plk1
+  the 36 wall textures in assets/sprites/ fetched from LibreQuake's
+  texture-wads by assets/sprites/import-librequake-textures.py:
+    grk_leaf1_1       med_cobstn1_1   med_csl_brk14_f  med_csl_brk14b
+    med_csl_brk18_f   med_csl_brk18_t med_csl_brk18b   med_csl_brk19_f
+    med_csl_brk19_t   med_csl_brk19b  med_csl_flr5_1   med_cslbrk18_tb
+    med_cslbrk18_tc   med_dr1a        med_dr3c         med_glass5
+    med_roof4         med_roof5       med_tanwall4     med_tanwall8
+    med_tmpl_lit3     med_tmpl_tele   med_tmpl_trim1   med_tmpl_trim1b
+    med_tmpl_trim2    med_tmpl_trim3  med_tmpl_trim4   med_wood2_plk1
     med_wood3_plk1    med_wood5       med_wood_riv1b   met_brn_flat
-    met_brn_trim16    met_brn_trim32  met_brn_trim64   sky5_blu
-    snow1             sq_trim1_2_s    star_water0
+    met_brn_trim16    met_brn_trim32  met_brn_trim64   sky_orng
+    snow1             sq_trim1_2_s    star_lava3       star_water0
+
+  THE MAP CHANGED AND THE TEXTURES DID NOT ALL LEAVE WITH IT. The arena was
+  `lqdm1` ("Solstice") and is `lqdm4` ("Psychofuge") now. Solstice's own set is
+  still listed above because the files are still in assets/sprites/ and still
+  come from LibreQuake -- a licence notice describes what is in the tree, not
+  what the current level happens to draw. If those files are ever deleted this
+  list shrinks with them, and not before.
 
 THE TEXTURES ARE THE BETTER-EVIDENCED HALF. The note below enumerates the BSD-3
 side as "models, textures and sounds" -- textures by NAME. The maps reach BSD-3
@@ -86,7 +97,7 @@ no progs.dat, no pop.lmp.
 
 한국어: LibreQuake 프로젝트의 docs/COPYING을 그대로 옮겼습니다. 정돈된 라이선스는
 허락받은 그 라이선스가 아니기 때문이며, docs/LICENSE-Freedoom.txt와 같은 규칙입니다.
-이곳에서 이 라이선스가 덮는 것은 assets/maps/lqdm1.map("Solstice")입니다. 위에 인용한
+이곳에서 이 라이선스가 덮는 것은 assets/maps/lqdm4.map("Psychofuge")입니다. 위에 인용한
 LibreQuake 자신의 문장을 다시 보십시오. "맵"이라는 낱말은 양쪽 어디에도 없습니다. 맵이
 BSD-3인 것은 *열거*가 아니라 *잔여*에 의해서입니다. 프로젝트에 부여된 라이선스가 위의
 BSD-3(그들의 docs/COPYING을 그대로 옮긴 것)이고, 그 문장은 거기에서 QuakeC와 progs.dat과

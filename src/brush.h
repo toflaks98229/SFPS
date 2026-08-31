@@ -280,8 +280,8 @@ typedef struct MdlRange MdlRange;
  *     lqdm13         244   1,555      83    8,946      6    2ms
  *     lqdm11         425   2,564      90   15,411      4    3ms
  *     lqdm2          607   3,677     104   20,211     17    5ms
- *     lqdm1          737   4,340      83   24,957     24    5ms   <- the arena
- *     lqdm4        1,180   7,166      91   42,267     20   12ms
+ *     lqdm1          737   4,340      83   24,957     24    5ms
+ *     lqdm4        1,149   6,978      56   42,267     18   11ms   <- the arena
  *     lqdm3        2,191  13,124     111   71,142     53   20ms
  *
  * NOTHING MEASURED HERE IS A CEILING. A 2,191-brush map parses, builds and
@@ -466,8 +466,11 @@ _Static_assert(BR_MAX_BRUSHES <= 32767,
  * than in the test because it is a fact about the two constants, and a test
  * only catches it on the run after somebody has already shipped the pair.
  *
- * Real content agrees with the six: lqdm1 is 4,746 faces over 807 brushes,
- * 5.88 each. The bound is not conservative, it is the floor.
+ * Real content agrees with the six: `lqdm4` is 6,978 faces over 1,149 brushes,
+ * 6.07 each, and `lqdm1` before it was 4,746 over 807. Two maps by different
+ * authors land within a fifth of the minimum a closed solid can have, which is
+ * what makes this a floor rather than a guess: brushes in a real level are
+ * boxes, and a box has six sides.
  *
  * *면 풀이 먹여 살릴 수 없는 브러시 풀은 발동할 수 없는 상한입니다.*
  *

@@ -107,17 +107,22 @@
 // The classname's suffix IS the kind enemy.c claims: level.c strips `monster_`
 // and hands the rest through unchanged. A new monster is a row in enemy.c's
 // table and a line here.
+//
+// THREE KINDS, AND THE LIST IS THE BESTIARY. `monster_imp`, `monster_hound` and
+// `monster_wraith` were here and are gone: the hound and the wraith stopped
+// being rows in enemy.c, and `imp` had already stopped being one before that.
+//
+// A .map that still says one of those three STILL LOADS. enemy.c's MON_LEGACY
+// resolves each retired name to whatever replaced it -- `hound` to the water
+// spirit, `imp` and `wraith` to the caster -- so an old level fills instead of
+// arriving half-empty. What is gone is the editor's offer of them: TrenchBroom
+// will show an existing one as an unknown class with a default box, which is
+// the right amount of complaining. Repoint it and the complaint goes away.
 
 @baseclass size(-16 -16 -32, 16 16 32) color(220 60 60) = Monster []
 
 @PointClass base(Monster) = monster_water_spirit : "Water spirit. The baseline. Holds mid range and sprays a cone of bolts rather than closing." []
-// The name this slot had before the water spirit took it. Kept because two
-// shipped maps place it and a rename must not empty them; new maps should use
-// monster_water_spirit.
-@PointClass base(Monster) = monster_imp : "DEPRECATED alias for monster_water_spirit. Placing it still works." []
 @PointClass base(Monster) = monster_brute : "Brute. A wall with health; slow, and hits hard." []
-@PointClass base(Monster) = monster_hound : "Hound. Fast and weak. Punishes standing still." []
-@PointClass base(Monster) = monster_caster : "Caster. Keeps its distance and throws bolts." []
 
 // A monster that HOLDS THE HEIGHT IT IS PLACED AT, and the reason it needs a
 // box of its own rather than the one above.
@@ -129,16 +134,25 @@
 //
 // A flyer does not do that. make_monster keeps `from_y` when the kind carries
 // MON_FLIES, so the origin IS the feet and the box has to sit ON the origin
-// instead of below it. With the Monster box a wraith would draw one metre
+// instead of below it. With the Monster box a caster would draw one metre
 // lower than it flies -- an editor that disagrees with the game about where a
 // thing is, which is worse than no box at all.
 //
-// 13 x 50 units is the wraith's own 0.40m radius and 1.55m height at 1/32 m per
-// unit, rather than the shared 32 x 64. Something you cannot always reach is
-// worth measuring: the clearance under it is the space the player fights in.
-@baseclass size(-13 -13 0, 13 13 50) color(120 170 230) = Flyer []
+// 17 x 61 units is the caster's own 0.546m radius and 1.90m height at 1/32 m
+// per unit, rather than the shared 32 x 64. It was 13 x 50 while the wraith
+// wore this box; the wraith's row is gone, MON_FLIES moved onto the caster, and
+// a box measured for a creature that no longer exists is a box that lies.
+// Something you cannot always reach is worth measuring: the clearance under it
+// is the space the player fights in.
+//
+// STILL A BASECLASS WITH ONE USER, on purpose. monster_spawner_caster needs
+// exactly these numbers and cannot inherit them -- an @PointClass may name one
+// base and that one is already Spawner -- so it writes them out and this
+// comment is where the pair is recorded. Change the caster's size in enemy.c
+// and BOTH lines move.
+@baseclass size(-17 -17 0, 17 17 61) color(120 170 230) = Flyer []
 
-@PointClass base(Flyer) = monster_wraith : "Wraith. Holds the air and throws bolts. PLACED HEIGHT IS KEPT -- put the origin where the feet should hover." []
+@PointClass base(Flyer) = monster_caster : "Caster. Holds the air and throws bolts; the only kind that is not on the floor. PLACED HEIGHT IS KEPT -- put the origin where the feet should hover." []
 
 // --- The boss fight ------------------------------------------------------
 //
@@ -167,15 +181,28 @@
 
 @PointClass size(-48 -48 0, 48 48 192) color(200 40 40) = monster_maw : "The Maw. A stationary boss embedded in a wall. Invulnerable while any ward stands. PLACED HEIGHT IS KEPT. Place one." []
 
-@PointClass size(-16 -16 -16, 16 16 16) color(255 200 40) = info_ward_air : "Ward slot (air). A ward raised here summons things that fight at range. PLACED HEIGHT IS KEPT -- put it where the ward should hang. Place several; a few are used each cycle." []
+@PointClass size(-16 -16 -16, 16 16 16) color(255 200 40) = info_ward_air : "Ward slot (air). Summons casters and water spirits -- the only marker in the game that can put a flyer in the room. PLACED HEIGHT IS KEPT -- put it where the ward should hang. Place several; a few are used each cycle." []
 
-@PointClass size(-16 -16 -16, 16 16 16) color(255 120 40) = info_ward_ground : "Ward slot (ground). A ward raised here summons things that close to melee. Place several; a few are used each cycle." []
+@PointClass size(-16 -16 -16, 16 16 16) color(255 120 40) = info_ward_ground : "Ward slot (ground). Summons brutes and water spirits; never a flyer. Place several; a few are used each cycle." []
 
 // --- Spawners ------------------------------------------------------------
 //
 // One class per monster because the NAME carries which one, the same way a
 // sprite name carries its frame number. That costs a line here and saves a
 // second field on every entity in the level.
+//
+// ONE PER ROW IN enemy.c's TABLE, AND EXACTLY ONE. Three monsters, three
+// spawners, and the list below is checkable against the bestiary by reading
+// it. `monster_spawner_imp`, `monster_spawner_hound` and
+// `monster_spawner_wraith` were here; the first named a kind that had already
+// been renamed, and the other two named kinds that no longer exist. A .map that
+// still carries one keeps working -- see the note under Monsters -- but the
+// editor no longer offers a spawner that delivers something other than what its
+// name says.
+//
+// The maw and the ward have no spawner and are not an omission: the maw is
+// raised by the fight at its own marker, and a ward is placed as an info_ward_*
+// candidate. Both are up under "The boss fight".
 //
 // `count` 0 means it never stops. `maxalive` is a ceiling on the monsters in
 // the whole level while it runs, and leaving it 0 on an endless spawner will
@@ -189,16 +216,21 @@
 ]
 
 @PointClass base(Spawner) = monster_spawner_water_spirit : "Keeps making water spirits." []
-@PointClass base(Spawner) = monster_spawner_imp : "DEPRECATED alias for monster_spawner_water_spirit." []
 @PointClass base(Spawner) = monster_spawner_brute : "Keeps making brutes." []
-@PointClass base(Spawner) = monster_spawner_hound : "Keeps making hounds." []
-@PointClass base(Spawner) = monster_spawner_caster : "Keeps making casters." []
 
 // The spawner carries the height too: spawners_of stores the marker's origin
-// and every wraith it makes appears at that Z, so this box sits on the origin
-// for the same reason monster_wraith's does. Size and colour override the
-// Spawner baseclass; wait/count/maxalive still come from it.
-@PointClass base(Spawner) size(-13 -13 0, 13 13 50) color(120 170 230) = monster_spawner_wraith : "Keeps making wraiths, at the height it is placed." []
+// and every caster it makes appears at that Z, so this box sits on the origin
+// for the same reason monster_caster's does. Size and colour are the Flyer
+// baseclass's numbers written out, because an @PointClass may name only one
+// base and this one has already spent it on Spawner; wait/count/maxalive still
+// come from there.
+//
+// PUT AIR UNDER IT. A caster spawner sitting on the floor makes casters that
+// hover at ankle height for their whole lives -- the flag is not broken, the
+// marker is. assets/maps/import-librequake.py lifts it two metres off a
+// deathmatch start for exactly this reason, and tools/wavetest.c measures it on
+// the shipped arena.
+@PointClass base(Spawner) size(-17 -17 0, 17 17 61) color(120 170 230) = monster_spawner_caster : "Keeps making casters, at the height it is placed. Give it air underneath." []
 
 // --- Items ---------------------------------------------------------------
 //

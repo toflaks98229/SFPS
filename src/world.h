@@ -290,12 +290,22 @@
  * WHAT SHAKES AND WHAT DOES NOT. The drawn camera shakes; the aim does not.
  * See ::RunState::shake for why that separation is not negotiable.
  *
- * The three sources are the three moments the player already knows something
+ * The four sources are the four moments the player already knows something
  * violent happened, so the shake confirms an event rather than inventing one:
- * the gun going off, taking a hit, and landing hard. Each is detected in
- * ::world_step from state that already exists -- the muzzle flash coming up,
- * the damage total, the ground arriving under a falling player -- so none of
- * them needed a new signal plumbed out of the module that causes it.
+ * the gun going off, taking a hit, landing hard, and an explosion. Each is
+ * detected in ::world_step from state that already exists -- the muzzle flash
+ * coming up, the damage total, the ground arriving under a falling player, the
+ * ::Flash a detonation leaves -- so none of them needed a new signal plumbed
+ * out of the module that causes it.
+ *
+ * THE EXPLOSION IS THE ONLY ONE THAT IS NOT ABOUT THE PLAYER. The other three
+ * all happen TO them and are therefore always at full strength wherever they
+ * are standing. A blast happens somewhere, and the whole of what a shake can
+ * say about it is HOW FAR AWAY -- so it is the only source with a falloff, and
+ * ::WORLD_SHAKE_BLAST_REACH is where the distance it dies over is written down.
+ * Without one, a grenade thrown across the arena would hit as hard as one at
+ * your feet, which is the same fault ::detonate's own note records the sound
+ * having had.
  *
  * Public because ::scene_frame reads the magnitude to place the camera, and
  * because a second copy of the decay rate on the drawing side would be a
@@ -306,11 +316,18 @@
  * *무엇이 흔들리고 무엇이 흔들리지 않는가.* 그려지는 카메라는 흔들리고 조준은 흔들리지
  * 않습니다. 그 분리가 타협 불가능한 이유는 ::RunState::shake를 참조하십시오.
  *
- * 세 개의 원천은 플레이어가 이미 격렬한 일이 일어났음을 아는 세 순간이므로, 흔들림은 사건을
- * 만들어 내지 않고 확인해 줍니다. 총이 발사되는 것, 피격당하는 것, 세게 착지하는 것입니다.
- * 각각은 이미 존재하는 상태로부터 ::world_step에서 감지됩니다. 올라오는 총구 섬광, 피해
- * 총량, 떨어지는 플레이어 밑에 도착하는 지면입니다. 그래서 그중 어느 것도 그것을 일으키는
- * 모듈로부터 새 신호를 끌어낼 필요가 없었습니다.
+ * 네 개의 원천은 플레이어가 이미 격렬한 일이 일어났음을 아는 네 순간이므로, 흔들림은 사건을
+ * 만들어 내지 않고 확인해 줍니다. 총이 발사되는 것, 피격당하는 것, 세게 착지하는 것, 그리고
+ * 폭발입니다. 각각은 이미 존재하는 상태로부터 ::world_step에서 감지됩니다. 올라오는 총구
+ * 섬광, 피해 총량, 떨어지는 플레이어 밑에 도착하는 지면, 그리고 폭발이 남기는 ::Flash입니다.
+ * 그래서 그중 어느 것도 그것을 일으키는 모듈로부터 새 신호를 끌어낼 필요가 없었습니다.
+ *
+ * *폭발만이 플레이어에 대한 것이 아닙니다.* 나머지 셋은 모두 플레이어*에게* 일어나므로 어디에
+ * 서 있든 언제나 최대 세기입니다. 폭발은 *어딘가에서* 일어나며, 흔들림이 그것에 대해 말할 수
+ * 있는 것의 전부는 *얼마나 먼가*입니다. 그래서 감쇠를 가진 유일한 원천이며, 그 감쇠가 끝나는
+ * 거리는 ::WORLD_SHAKE_BLAST_REACH에 적혀 있습니다. 감쇠가 없으면 아레나 건너로 던진 유탄이
+ * 발밑의 유탄만큼 세게 때리는데, 그것은 ::detonate 자신의 주석이 소리에 대해 기록해 둔 것과
+ * 같은 결함입니다.
  *
  * 공개하는 이유는 ::scene_frame이 카메라를 놓기 위해 크기를 읽기 때문이며, 그리는 쪽의 두
  * 번째 감쇠율 사본은 실제로 흔들림을 끝내는 값과 어긋날 수 있는 숫자이기 때문입니다. */
@@ -351,6 +368,58 @@
  * 카메라를 흔들며, 그것은 플레이어가 무겁다는 뜻이 아니라 엔진이 고장 났다는 뜻으로 읽힙니다.
  */
 #define WORLD_SHAKE_LAND_MIN 7.0f
+
+/**
+ * @brief An explosion, at the centre of it.
+ *
+ * ENGLISH
+ * -------
+ * Past ::WORLD_SHAKE_MAX on purpose, so that the middle of a blast saturates
+ * and the falloff is what the player actually reads. The alternative -- a peak
+ * that lands just under the ceiling -- makes the strongest jolt in the game
+ * distinguishable from the second strongest, which is a distinction nobody
+ * needs and which costs the one that matters: near against far.
+ *
+ * THIS IS THE ONLY FEEDBACK A BLAST AT YOUR FEET GIVES YOU. ::proj_blast walks
+ * the monsters and no one else, so a grenade the player is standing on top of
+ * takes nothing off their health and therefore raises no ::WORLD_SHAKE_HURT.
+ * That is a deliberate rule about damage, not an oversight, and it leaves the
+ * camera as the only thing in a position to say the grenade went off where it
+ * did.
+ *
+ * 한국어
+ * ------
+ * @brief 폭발. 그 중심에서의 값입니다.
+ *
+ * 의도적으로 ::WORLD_SHAKE_MAX를 넘습니다. 폭발의 한가운데는 포화하고, 플레이어가 실제로
+ * 읽는 것은 감쇠가 되도록 하기 위함입니다. 대안(상한 바로 아래에 닿는 최댓값)은 게임에서
+ * 가장 센 충격과 두 번째로 센 충격을 구별 가능하게 만드는데, 그것은 아무도 필요로 하지 않는
+ * 구별이며 정작 중요한 구별인 *가까움과 멂*을 희생합니다.
+ *
+ * *발밑에서 터진 폭발이 주는 피드백은 이것뿐입니다.* ::proj_blast는 몬스터만 훑으므로,
+ * 플레이어가 올라타고 있는 유탄은 체력을 전혀 깎지 않고 따라서 ::WORLD_SHAKE_HURT도 올리지
+ * 않습니다. 그것은 실수가 아니라 피해에 대한 의도된 규칙이며, 그 결과 유탄이 터진 자리를
+ * 말할 수 있는 위치에 있는 것은 카메라뿐입니다.
+ */
+#define WORLD_SHAKE_BLAST 1.25f
+
+/**
+ * @brief Multiples of the blast radius the shake dies over.
+ *
+ * ENGLISH: Further than the damage, and further than the light -- see
+ * ::LIGHT_BLAST_REACH, which is 1.7. The order is not arbitrary: a blast you
+ * cannot be hurt by can still light you, and one too far away to light you can
+ * still be felt through the floor. Each of the three is a different physical
+ * thing arriving over a different distance, and collapsing them onto one
+ * number would mean picking which two to get wrong.
+ *
+ * 한국어: @brief 흔들림이 사그라드는 거리. 폭발 반경의 배수입니다.
+ * 피해보다 멀고 빛보다도 멉니다(::LIGHT_BLAST_REACH는 1.7입니다). 이 순서는 임의가
+ * 아닙니다. 다칠 수 없는 거리의 폭발도 당신을 비출 수 있고, 비추기에는 너무 먼 폭발도 바닥을
+ * 통해 느껴질 수 있습니다. 셋은 각각 다른 거리를 두고 도착하는 서로 다른 물리 현상이며,
+ * 하나의 수로 합치는 것은 어느 둘을 틀리게 할지 고르는 일입니다.
+ */
+#define WORLD_SHAKE_BLAST_REACH 2.5f
 
 /**
  * @brief Seconds after which ::RunState::world_time wraps.

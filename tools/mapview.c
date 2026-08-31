@@ -285,10 +285,12 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
         mat4 view = mat4_fps_view(g_eye, g_yaw, g_pitch);
 
         /* The world pass, set up the way scene_draw_level sets it up, down to
-           passing no dynamic lights: brush geometry carries no baked light yet,
-           so what is on screen is AMBIENT plus the shader's key. That is worth
-           knowing while judging a texture -- it is flatter here than the lit
-           game will be. */
+           passing no dynamic lights -- which since the lamps became dynamic
+           means no lamps either, so what is on screen is AMBIENT, the shader's
+           key, and whatever sun the bake put in the vertices. Deliberate, and
+           worth knowing while judging a texture: it is flatter here than the
+           lit game will be. dithershot is the tool that shows the lighting;
+           this one shows the surface. */
         rd_mode(RD_WORLD);
         rd_mvp(mat4_mul(proj, view));
         rd_eye(g_eye);

@@ -87,6 +87,16 @@
  */
 struct Pools {
     ProjPool   proj;     /**< Grenades and bolts in flight. / 비행 중인 유탄과 볼트. */
+    /* The light and the jolt an explosion leaves, which outlive the round that
+       made it by design: the projectile is gone the instant it goes off and
+       what a player sees of an explosion all happens afterwards. Beside the
+       projectiles rather than folded into them for the same reason ::DecalPool
+       is not part of ::EnemyPool -- a mark outlives the shot.
+       폭발이 남기는 빛과 충격이며, 그것을 만든 탄보다 오래 사는 것이 설계입니다. 발사체는
+       터지는 즉시 사라지고, 플레이어가 폭발에서 보는 것은 전부 그 뒤에 일어납니다. 발사체
+       안에 접어 넣지 않고 그 곁에 두는 이유는 ::DecalPool이 ::EnemyPool의 일부가 아닌 것과
+       같습니다. 자국은 사격보다 오래 남습니다. */
+    FlashPool  flash;    /**< Detonations still lighting the room. / 아직 방을 밝히고 있는 폭발. */
     PickupPool pickup;   /**< Items the level laid out, and which are left. / 레벨이 배치한 아이템과 남아 있는 것들. */
     DecalPool  decal;    /**< The marks and tracers a shot leaves. / 사격이 남긴 자국과 예광탄. */
     FxPool     fx;       /**< Particles in flight. / 날아다니는 입자. */

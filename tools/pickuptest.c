@@ -55,7 +55,7 @@ static void build(void) {
     h->x = 500; h->z = 0;
     /* A monster entity must NOT become a pickup. */
     Entity *m = &L.ents[L.n_ents++];
-    m->kind[0]='i';m->kind[1]='m';m->kind[2]='p';m->kind[3]=0;
+    m->kind[0]='b';m->kind[1]='r';m->kind[2]='u';m->kind[3]='t';m->kind[4]='e';m->kind[5]=0;
     m->x = -500; m->z = 0;
 }
 
@@ -84,7 +84,7 @@ int main(void) {
     build();
 
     pickup_spawn_level(&g_pools, &L);
-    ok(pickup_count(&g_pools) == 2, "two pickups spawned (the imp is not one)");
+    ok(pickup_count(&g_pools) == 2, "two pickups spawned (the monster is not one)");
 
     /* --- standing away from anything collects nothing --- */
     {

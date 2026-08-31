@@ -26,6 +26,11 @@
  *     drag 40            per-second speed loss, percent
  *     spin 300           degrees per second each particle rolls
  *     gravity 0          cm/s^2 downward
+ *     stretch 30         draw the quad over 30ms of its own travel, along the
+ *                        velocity -- a streak instead of a square, and one
+ *                        that shortens as `drag` takes the speed away
+ *     trail emberwake    the effect it leaves BEHIND it as it flies
+ *     trailms 60         and how often, in milliseconds
  *     blend add          `add` for glows, `alpha` for decals and smoke
  *     face camera        `camera` billboards, `normal` lies flat on the surface
  *
@@ -90,14 +95,47 @@ typedef struct MeshBuf MeshBuf;
 /* --- Capacity limits / 용량 제한 --- */
 
 /* Raised from 16 when the blast became four layers and the saw got two of its
-   own. A definition past the cap is DROPPED -- reported through DIAG_FX_CAP,
-   but dropped -- so the symptom is an effect that silently does nothing, and
-   the ones that go missing are the ones added last, which are the ones nobody
-   has looked at yet.
-   폭발이 네 겹이 되고 톱이 자기 것 둘을 얻으면서 16에서 올렸습니다. 상한을 넘는 정의는
-   *버려집니다*. DIAG_FX_CAP으로 보고되기는 하지만 버려지므로, 증상은 아무 일도 하지 않는
-   이펙트이며, 사라지는 것은 가장 나중에 추가된 것, 즉 아직 아무도 보지 않은 것입니다. */
-#define FX_MAX_DEFS      40   ///< @brief Effect definitions the text may hold. / 텍스트가 담을 수 있는 이펙트 정의 수.
+   own, and from 40 when the blast became NINE. A definition past the cap is
+   DROPPED -- reported through DIAG_FX_CAP, but dropped -- so the symptom is an
+   effect that silently does nothing, and the ones that go missing are the ones
+   added last, which are the ones nobody has looked at yet.
+
+   The file holds 44. Five of headroom was the margin before the flash, the
+   ground wave and the embers were written, and the layer that keeps eating it
+   is always the same one: an explosion has grown from four definitions to
+   ELEVEN over the life of this file, because each new question it has to
+   answer -- how big, how hot, how far, how long ago, and now what it looks
+   like while it is still burning -- costs a layer. The array is .bss, so the
+   eight added here are eight that the floppy never sees.
+
+   THE NINE ADDED LAST WERE NOT ALL THE BLAST'S, and only two of them were.
+   The fireball and the lit half of the ground rim belong to the pattern above.
+   Four more are what a projectile leaves BEHIND it -- `fusespark`,
+   `fusetrail`, `boltwake` and `emberwake` -- and three are what one leaves
+   WHERE IT LANDS: `scorch`, `zapflash` and `zapburst`. Those are two further
+   kinds of growth this cap has to absorb, and neither is bounded by how many
+   explosions the game has. A trail is a definition per emitter and a landing
+   is a definition per weapon per surface; there are more of both than there
+   are ways for a grenade to go off.
+
+   그리고 *마지막에 더해진 아홉 중 폭발의 것은 둘뿐이었습니다.* 화구와 지면 테두리의 빛나는
+   절반이 위의 패턴에 속합니다. 넷은 발사체가 *뒤에* 남기는 것이고(`fusespark`, `fusetrail`,
+   `boltwake`, `emberwake`), 셋은 발사체가 *착탄한 자리에* 남기는 것입니다(`scorch`,
+   `zapflash`, `zapburst`). 이 캡이 흡수해야 하는 성장의 종류가 둘 더 생긴 것이며, 어느 쪽도
+   이 게임에 폭발이 몇 가지인가로 한계 지어지지 않습니다. 자취는 방출기당 정의 하나이고
+   착탄은 무기당 표면당 정의 하나입니다. 둘 다 유탄이 터지는 방식의 가짓수보다 많습니다.
+
+   폭발이 네 겹이 되고 톱이 자기 것 둘을 얻으면서 16에서 올렸고, 폭발이 *아홉* 겹이 되면서
+   40에서 올렸습니다. 상한을 넘는 정의는 *버려집니다*. DIAG_FX_CAP으로 보고되기는 하지만
+   버려지므로, 증상은 아무 일도 하지 않는 이펙트이며, 사라지는 것은 가장 나중에 추가된 것,
+   즉 아직 아무도 보지 않은 것입니다.
+
+   파일에는 35개가 있습니다. 섬광과 지면 파동과 불티가 작성되기 전의 여유가 5였고, 그
+   여유를 계속 먹는 것은 언제나 같은 겹입니다. 폭발은 이 파일의 생애 동안 정의 넷에서 아홉으로
+   자랐습니다. 그것이 답해야 하는 새 질문(얼마나 큰가, 얼마나 뜨거운가, 얼마나 먼가, 얼마나
+   지났는가)마다 한 겹이 들기 때문입니다. 이 배열은 .bss이므로, 이곳에서 더한 여덟은 플로피가
+   결코 보지 않는 여덟입니다. */
+#define FX_MAX_DEFS      48   ///< @brief Effect definitions the text may hold. / 텍스트가 담을 수 있는 이펙트 정의 수.
 
 /**
  * @brief Particles alive at once, across every effect.
@@ -105,39 +143,94 @@ typedef struct MeshBuf MeshBuf;
  * ENGLISH
  * -------
  * Sized against the worst case that can actually occur rather than against a
- * round number. The continuous emitters are what decide it: a caster bolt lays
- * a trail particle every SHOT_TRAIL_INTERVAL and each lives ~260ms, so one
- * bolt in flight holds about nine, and ENEMY_MAX_SHOTS of them is ~416 -- past
- * 256, at which point the trails alone would evict every impact, spark and
- * pickup burst in the level.
+ * round number. The continuous emitters are what decide it, and a caster bolt
+ * is now TWO of them: `bolttrail` every SHOT_TRAIL_INTERVAL at ~280ms is about
+ * nine alive, `boltwake` on the same timer at 620ms is about twenty-one, so a
+ * bolt in flight holds thirty and ENEMY_MAX_SHOTS of them is ~1440. Add the
+ * 297 one grenade going off costs -- see the note under this comment -- and
+ * about 110 for the rapid's landings, which is the third continuous
+ * population: eleven hits a second, four layers each, and `scorch` lives 4.5
+ * seconds so fifty of those alone are on the walls at any moment during
+ * sustained fire. The worst frame this project can produce is a little under
+ * 1850.
  *
- * 640 covers that with room for the one-shot effects firing on top of it. The
- * array is .bss, so it is zero-filled at load and costs nothing on disk -- the
- * same reasoning LVL_MAX_RANGES is sized by.
+ * 2048 covers that, with two hundred to spare rather than the comfortable
+ * margin it started with -- and what the ring evicts first when it does run
+ * out is the oldest scorch on a wall behind the player, which is exactly the
+ * particle worth losing. The array is .bss, so it is zero-filled at load and
+ * costs nothing on disk -- the same reasoning LVL_MAX_RANGES is sized by.
  *
  * 한국어
  * ------
  * @brief 모든 이펙트를 통틀어 동시에 살아 있는 입자 수입니다.
  *
  * 어림수가 아니라 실제로 발생 가능한 최악의 경우를 기준으로 정했습니다. 이를 결정하는
- * 것은 지속적으로 방출하는 쪽입니다. 캐스터의 볼트는 SHOT_TRAIL_INTERVAL마다 궤적
- * 입자를 남기고 각각 약 260ms를 살므로, 비행 중인 볼트 하나가 약 9개를 유지하며
- * ENEMY_MAX_SHOTS개면 약 416개가 됩니다. 256을 넘으며, 그 시점에는 궤적만으로 레벨의
- * 모든 피격·스파크·획득 효과가 밀려납니다.
+ * 것은 지속적으로 방출하는 쪽이며, 캐스터의 볼트는 이제 *둘*입니다. `bolttrail`은
+ * SHOT_TRAIL_INTERVAL마다 남고 280ms를 살아 약 9개, `boltwake`는 같은 타이머로 620ms를
+ * 살아 약 21개이므로, 비행 중인 볼트 하나가 30개를 유지하며 ENEMY_MAX_SHOTS개면 약
+ * 1440개가 됩니다. 여기에 유탄 하나가 터질 때 드는 297(이 주석 아래의 설명을 참조하십시오)과,
+ * 연사의 착탄에 드는 약 110을 더합니다. 그것이 세 번째 지속 인구입니다. 초당 열한 번 명중하고
+ * 각각 네 겹이며, `scorch`는 4.5초를 살기에 지속 사격 중에는 그것만으로도 언제나 쉰 개가
+ * 벽에 붙어 있습니다. 이 프로젝트가 만들어 낼 수 있는 최악의 프레임은 1850에 조금 못
+ * 미칩니다.
  *
- * 640은 그 위에 일회성 이펙트가 겹쳐 발생하는 것까지 감당합니다. 이 배열은 .bss이므로
- * 로드 시 0으로 채워지며 디스크 용량을 소모하지 않습니다. LVL_MAX_RANGES의 크기를 정한
- * 것과 동일한 근거입니다.
+ * 2048이 그것을 감당합니다. 다만 출발할 때의 넉넉한 여유가 아니라 이백의 여유입니다. 그리고
+ * 실제로 바닥났을 때 링이 가장 먼저 밀어내는 것은 플레이어 뒤쪽 벽의 가장 오래된 그을음이며,
+ * 그것이야말로 잃어도 되는 입자입니다. 이 배열은 .bss이므로 로드 시 0으로 채워지며 디스크
+ * 용량을 소모하지 않습니다. LVL_MAX_RANGES의 크기를 정한 것과 동일한 근거입니다.
  */
-/* Raised from 640: one layered blast is 84 particles, and the pool evicts the
-   OLDEST, so two explosions close together used to eat the first one's dome
-   while it was still expanding -- which removes exactly the thing the dome is
-   there to show. .bss, so it is zeroed at load and costs the floppy nothing.
-   640에서 올렸습니다. 여러 겹의 폭발 하나가 84개이고 풀은 *가장 오래된* 것을 밀어내므로,
-   가까이서 두 번 터지면 첫 번째의 돔이 아직 팽창하는 중에 잡아먹혔습니다. 돔이 보여
-   주려던 바로 그것이 사라집니다. .bss이므로 로드 시 0으로 채워지고 플로피 용량은 들지
-   않습니다. */
-#define FX_MAX_PARTICLES 1536
+/* Raised from 640: a layered blast is a large fraction of the pool on its own,
+   and the pool evicts the OLDEST, so two explosions close together used to eat
+   the first one's dome while it was still expanding -- which removes exactly
+   the thing the dome is there to show. .bss, so it is zeroed at load and costs
+   the floppy nothing.
+
+   THE NUMBER TO CHECK THIS AGAINST IS 297, which is what one grenade going off
+   costs now: eleven layers spawning 213 particles at the instant, plus the 84
+   that `blastember`'s fourteen embers keep in the air behind them for the next
+   second and a half. The count is written down here because it is the one that
+   moves -- it was 84 when the cap was 640, 126 before the flash, the wave and
+   the embers, and 171 before the fireball, the lit rim and the ember wakes. A
+   capacity argument that cites a stale number is a capacity argument nobody
+   can check.
+
+   RAISED FROM 1536 BECAUSE THAT LAST STEP WAS THE BIG ONE. At 171 a blast was
+   a ninth of the pool and nine could overlap; at 297 it is a fifth and five
+   can, which is inside the range a player reaches -- the launcher holds twenty
+   and fires every 0.85 seconds, so three or four in the air at once is a
+   volley rather than an edge case. The eviction is oldest-first and what it
+   takes first is the dome of the blast before, which is the layer whose whole
+   job is to say where the damage stopped.
+   AND THE WAKES ARE THE OTHER HALF OF IT. `trail` made particles into emitters,
+   so the pool now has a second continuous population on top of the bolts'
+   trails: 84 per blast that did not exist, arriving over a second and a half
+   rather than all at once, which is exactly the shape that quietly crowds out
+   whatever was there first. .bss, so the 512 added here cost the floppy nothing
+   and cost a running frame one more pass over slots that are mostly empty.
+
+   *이 마지막 단계가 컸기에 1536에서 올렸습니다.* 171일 때 폭발 하나는 풀의 9분의 1이었고 아홉
+   개가 겹칠 수 있었습니다. 297이면 5분의 1이고 다섯 개가 겹칠 수 있는데, 그것은 플레이어가
+   실제로 도달하는 범위 안입니다. 발사기는 스무 발을 담고 0.85초마다 쏘므로, 서넛이 동시에
+   공중에 있는 것은 예외적 상황이 아니라 일제 사격입니다. 축출은 오래된 것부터이며 가장 먼저
+   가져가는 것은 직전 폭발의 돔인데, 그것은 피해가 어디서 멈췄는지 말하는 것이 임무의 전부인
+   겹입니다.
+   *그리고 자취가 나머지 절반입니다.* `trail`이 입자를 방출기로 만들었으므로, 이제 풀에는 볼트의
+   궤적 위에 두 번째 지속 인구가 있습니다. 폭발당 84개이며 존재하지 않던 것이고, 한꺼번에가
+   아니라 1.5초에 걸쳐 도착합니다. 먼저 있던 것을 조용히 밀어내는 것이 바로 그 형태입니다.
+   .bss이므로 이곳에서 더한 512는 플로피에 아무 비용도 들지 않고, 실행 중인 프레임에는 대부분
+   비어 있는 슬롯을 한 번 더 훑는 비용이 듭니다.
+
+   640에서 올렸습니다. 여러 겹의 폭발 하나가 그 자체로 풀의 큰 몫을 차지하고 풀은 *가장
+   오래된* 것을 밀어내므로, 가까이서 두 번 터지면 첫 번째의 돔이 아직 팽창하는 중에
+   잡아먹혔습니다. 돔이 보여 주려던 바로 그것이 사라집니다. .bss이므로 로드 시 0으로 채워지고
+   플로피 용량은 들지 않습니다.
+
+   *이것을 검증할 수 있는 수는 171이며*, 이제 유탄 하나가 터질 때 드는 비용입니다. 아홉 겹이고,
+   `blastember` 하나만으로도 다른 모든 것이 끝난 뒤 1.5초 동안 열네 슬롯을 붙들고 있습니다.
+   이 수를 이곳에 적어 두는 이유는 그것이 *움직이는* 수이기 때문입니다. 이 상한을 정할 때는
+   84였고 섬광과 파동과 불티가 추가되기 전에는 126이었는데, 늘어날 때마다 상한 옆의 설명은 옛
+   숫자에 머물렀습니다. 낡은 수를 인용하는 용량 논거는 아무도 검증할 수 없는 용량 논거입니다. */
+#define FX_MAX_PARTICLES 2048
 #define FX_NAME_LEN      16   ///< @brief Longest effect name. / 이펙트 이름의 최대 길이.
 
 /**
@@ -174,6 +267,35 @@ typedef struct {
      * 시작 회전각을 주는 것이, 빌보드 열두 개를 열두 개의 무언가로 보이게 만드는 핵심입니다.
      */
     float roll;
+    /**
+     * @brief Seconds until this one emits its wake. Negative means never.
+     *
+     * ENGLISH
+     * -------
+     * Per particle rather than per effect, for the reason ::FxParticle::roll is:
+     * fourteen embers spawned on one frame share a definition, and a timer that
+     * lived on the definition would fire all fourteen wakes together, forever,
+     * on the same frame. Started at a random fraction of the interval instead,
+     * so the trail behind each is laid down out of step with the others.
+     *
+     * THE NEGATIVE IS LOAD-BEARING. A particle that is itself somebody's wake
+     * gets one, and that is the only thing stopping a wake from having a wake:
+     * ::spawn_def decides it once, at birth, and nothing reads the definition
+     * table again to ask. See the note above ::spawn_def.
+     *
+     * 한국어
+     * ------
+     * 이펙트 단위가 아니라 입자 단위이며, ::FxParticle::roll이 그러한 것과 같은 이유입니다.
+     * 한 프레임에 생성된 불티 열넷은 정의를 공유하므로, 타이머가 정의 쪽에 있었다면 열넷의
+     * 자취가 언제까지나 같은 프레임에 함께 발화했을 것입니다. 대신 간격의 무작위 일부에서
+     * 시작하므로, 각자의 뒤에 놓이는 궤적이 서로 어긋납니다.
+     *
+     * *음수가 하중을 받습니다.* 스스로 누군가의 자취인 입자가 음수를 받으며, 자취가 자기
+     * 자취를 갖지 못하게 막는 것은 그것 하나입니다. ::spawn_def가 태어날 때 한 번
+     * 결정하고, 그 뒤로 아무것도 정의 표에 다시 묻지 않습니다. ::spawn_def 위의 설명을
+     * 참조하십시오.
+     */
+    float trail_t;
     short def;
 } FxParticle;
 

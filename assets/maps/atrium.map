@@ -227,14 +227,25 @@
 "_color" "1 0.7 0.45"
 }
 // Things to find and things to fight. `monster_` and `item_` are Quake's
-// prefixes and level.c strips them: what enemy.c and pickup.c see is `imp` and
-// `health`, the names they already claimed. Adding a monster is a row in
+// prefixes and level.c strips them: what enemy.c and pickup.c see is `caster`
+// and `health`, the names they already claimed. Adding a monster is a row in
 // enemy.c's table and a line in the FGD; nothing in between changes.
 //
+// THE CASTER IS AT 64 AND THAT IS NOT A ROUNDING. It carries MON_FLIES, so its
+// origin is where its feet HOVER rather than where a floor search begins -- two
+// metres up, with four of the room's six left over its head. The marker said
+// `monster_imp` at 24 while this slot was a floor-bound creature; the row is a
+// caster now and the height had to become a decision rather than a leftover.
+//
 // 찾을 것과 싸울 것입니다. `monster_`와 `item_`은 Quake의 접두사이고 level.c가 그것을 떼어
-// 냅니다. enemy.c와 pickup.c가 보는 것은 `imp`와 `health`이며, 그들이 이미 차지한 이름입니다.
-// 몬스터를 추가하는 일은 enemy.c 표의 행 하나와 FGD의 줄 하나이고, 그 사이의 무엇도 바뀌지
-// 않습니다.
+// 냅니다. enemy.c와 pickup.c가 보는 것은 `caster`와 `health`이며, 그들이 이미 차지한
+// 이름입니다. 몬스터를 추가하는 일은 enemy.c 표의 행 하나와 FGD의 줄 하나이고, 그 사이의
+// 무엇도 바뀌지 않습니다.
+//
+// 캐스터가 64에 있는 것은 반올림이 아닙니다. MON_FLIES를 지니므로 origin은 바닥 탐색이
+// 시작되는 곳이 아니라 발이 *떠 있는* 곳입니다. 2미터 높이이고, 방의 6미터 중 4미터가 머리
+// 위에 남습니다. 이 슬롯이 바닥에 묶인 생물이던 시절 표식은 24에서 `monster_imp`라고 적혀
+// 있었습니다. 이제 그 행은 캐스터이고, 높이는 남은 값이 아니라 결정이 되어야 했습니다.
 {
 "classname" "item_health"
 "origin" "-160 -160 24"
@@ -244,19 +255,28 @@
 "origin" "160 -160 24"
 }
 {
-"classname" "monster_imp"
-"origin" "192 192 24"
+"classname" "monster_caster"
+"origin" "192 192 64"
 }
-// THE SPAWNER. The kind carries the monster -- `spawner_imp` makes imps -- the
-// same way a sprite name carries its frame number and `switch<n>` carries its
-// tag. One every eight seconds, six of them, and never more than four monsters
-// alive in the level at once.
+// THE SPAWNER. The kind carries the monster -- `spawner_water_spirit` makes
+// water spirits -- the same way a sprite name carries its frame number and
+// `switch<n>` carries its tag. One every eight seconds, six of them, and never
+// more than four monsters alive in the level at once.
 //
-// 스포너입니다. 종류가 몬스터를 나릅니다. `spawner_imp`는 임프를 만들며, 스프라이트 이름이
-// 프레임 번호를 나르고 `switch<n>`이 태그를 나르는 것과 같은 방식입니다. 8초마다 하나씩 여섯
-// 개이고, 레벨에 살아 있는 몬스터가 동시에 넷을 넘지 않습니다.
+// A GROUND SPAWNER OVER THE BALCONY, which is the half of the chain the caster
+// above no longer tests. Its origin is at 112 and the balcony under it is at
+// 96, so every water spirit it makes settles onto the storey the marker was
+// over rather than onto the floor below it or the outside of the roof.
+//
+// 스포너입니다. 종류가 몬스터를 나릅니다. `spawner_water_spirit`는 물의 정령을 만들며,
+// 스프라이트 이름이 프레임 번호를 나르고 `switch<n>`이 태그를 나르는 것과 같은 방식입니다.
+// 8초마다 하나씩 여섯 개이고, 레벨에 살아 있는 몬스터가 동시에 넷을 넘지 않습니다.
+//
+// 발코니 위의 지상형 스포너이며, 위의 캐스터가 더 이상 검사하지 않게 된 사슬의 절반이
+// 이것입니다. origin이 112이고 그 아래 발코니가 96이므로, 이것이 만드는 모든 물의 정령은
+// 아래의 바닥이나 지붕 바깥면이 아니라 표식이 있던 층에 안착합니다.
 {
-"classname" "monster_spawner_hound"
+"classname" "monster_spawner_water_spirit"
 "origin" "-192 192 112"
 "wait" "8"
 "count" "6"

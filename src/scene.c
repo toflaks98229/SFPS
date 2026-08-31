@@ -185,18 +185,30 @@
  * with a count of zero. The loop was live, the lamps were baked, and the only
  * light that ever MOVED in this game was the one nobody had written.
  *
- * The sources below are the three that already exist as visible things: the
- * gun going off, the player's projectiles, and the monsters'. Each of those is
- * drawn as a glow already, so a light beside it is the same event told to the
- * geometry rather than a new effect invented here.
+ * The sources below are the three that already existed as visible things --
+ * the gun going off, the player's projectiles, and the monsters' -- each of
+ * which is drawn as a glow already, so a light beside it is the same event
+ * told to the geometry rather than a new effect invented here. A cleared
+ * wave's shrine joined them, and is the only one that is not an event.
+ * A DETONATION JOINED THEM LAST, and it is the odd one in the other
+ * direction: the only source here that no longer exists when its light is
+ * read. See ::LIGHT_BLAST_POWER, and ::Flash in proj.h for what is read
+ * instead.
+ *
+ * THEY ARE ALSO, NOW, THE ONLY LIGHTS THERE ARE. A level's lamps went through
+ * here for one release and were switched off again; the note above ::MoveLight
+ * says why, and every power below was raised because of it.
  *
  * @note Radii are metres and generous. A muzzle flash lasts ::FLASH_TIME and a
  *       radius that only reaches the wall it is fired at would never be seen
  *       on anything else; the point is the room, not the wall.
- * @note Powers are what ::rd_lights takes in `.a`. They sit under 1 because
- *       the shader adds them on top of the baked light rather than replacing
- *       it, and a corridor already lit to 0.6 does not have 0.4 of headroom
- *       to spare before it clips.
+ * @note Powers are what ::rd_lights takes in `.a`. They used to sit under 1,
+ *       on the reasoning that the shader adds them on top of what is already
+ *       there rather than replacing it, and that a corridor lit to 0.6 has
+ *       only 0.4 of headroom before it clips. That was a rule about a corridor
+ *       the lamps had lit; nothing lights one now, so the headroom is the
+ *       whole range and the block below spends it. See it for what changed and
+ *       for why one of these is deliberately over 1.
  *
  * 한국어
  * ------
@@ -206,19 +218,83 @@
  * 프레임 셰이더의 조명 루프가 개수 0으로 돌았습니다. 루프는 살아 있었고 등은 구워져 있었으며,
  * 이 게임에서 실제로 *움직이는* 유일한 빛은 아무도 쓰지 않은 그것이었습니다.
  *
- * 아래의 광원들은 이미 눈에 보이는 것으로 존재하는 셋입니다. 발사되는 총, 플레이어의 발사체,
+ * 아래의 광원들은 이미 눈에 보이는 것으로 존재하던 셋입니다. 발사되는 총, 플레이어의 발사체,
  * 그리고 몬스터의 발사체입니다. 각각은 이미 발광체로 그려지고 있으므로, 그 곁의 광원은 이곳에서
- * 새로 발명한 효과가 아니라 같은 사건을 지오메트리에게도 알리는 것입니다.
+ * 새로 발명한 효과가 아니라 같은 사건을 지오메트리에게도 알리는 것입니다. 정리된 웨이브의
+ * 제단이 거기 합류했고, 그것만이 사건이 아닙니다.
+ * *폭발이 가장 나중에 합류했고*, 그것은 반대 방향으로 특이합니다. 이곳에서 유일하게, 자기
+ * 빛이 읽히는 시점에 광원이 더 이상 존재하지 않는 것입니다. ::LIGHT_BLAST_POWER를, 그리고
+ * 대신 무엇이 읽히는지는 proj.h의 ::Flash를 참조하십시오.
+ *
+ * *그리고 이제 그것들이 존재하는 광원의 전부입니다.* 레벨의 등이 한 판 동안 이곳을 지나갔다가
+ * 다시 꺼졌습니다. 이유는 ::MoveLight 위의 설명에 있고, 아래의 모든 세기가 그것 때문에
+ * 올라갔습니다.
  *
  * @note 반경은 미터이며 넉넉합니다. 총구 섬광은 ::FLASH_TIME 동안 지속되는데, 겨눈 벽에만 닿는
  *       반경이라면 다른 무엇에서도 보이지 않을 것입니다. 요점은 벽이 아니라 방입니다.
- * @note 세기는 ::rd_lights가 `.a`로 받는 값입니다. 1보다 작은 이유는 셰이더가 이것을 구워진 빛을
- *       대체하지 않고 그 위에 *더하기* 때문이며, 이미 0.6으로 밝은 복도에는 잘리기 전까지 0.4의
- *       여유밖에 없기 때문입니다. */
+ * @note 세기는 ::rd_lights가 `.a`로 받는 값입니다. 예전에는 1보다 작았고, 근거는 셰이더가 이것을
+ *       이미 있는 것 위에 *더하지* 대체하지 않는다는 것, 그리고 0.6으로 밝은 복도에는 잘리기
+ *       전까지 0.4의 여유밖에 없다는 것이었습니다. 그것은 *등이 밝혀 둔* 복도에 대한 규칙이었고,
+ *       이제 그 복도를 밝히는 것이 없으므로 여유는 전 범위이며 아래의 블록이 그것을 씁니다.
+ *       무엇이 바뀌었는지, 그리고 그중 하나가 왜 의도적으로 1을 넘는지는 그곳을 참조하십시오. */
+/* --- how bright, now that these are the only lights that move --------------
+ *
+ * ENGLISH
+ * -------
+ * EVERY POWER HERE WENT UP, and the reason is that the room emptied out. A
+ * level's lamps used to light it and no longer do -- see the note below on
+ * ::Level::lights -- so what a muzzle flash competes with is the shader's flat
+ * ambient rather than a room somebody lit. A flash worth 0.85 against a
+ * corridor already at 0.6 is a flash; the same flash against a corridor that
+ * is ambient and nothing else has to carry the whole moment.
+ *
+ * ABOVE 1.0 IS ALLOWED NOW, and it is a decision rather than an oversight.
+ * `lum` clamps at 1.0 before it bands, so power past that saturates -- which
+ * is exactly what a shotgun going off in your hands should do. It also drives
+ * the shader's `tint` mix, which weights by `clamp(e, 0, 1)`: at e >= 1 the
+ * surface takes the light's colour outright. That is what makes the palette
+ * below read as colour-coding rather than as a wash.
+ *
+ * 한국어
+ * ------
+ * *이곳의 모든 세기가 올라갔고*, 이유는 방이 비었기 때문입니다. 레벨의 등이 방을 밝히던
+ * 일을 그만두었으므로(아래 ::Level::lights에 대한 설명을 참조하십시오), 총구 섬광이 겨루는
+ * 상대는 누군가가 밝혀 놓은 방이 아니라 셰이더의 평평한 주변광입니다. 이미 0.6인 복도에
+ * 대한 0.85의 섬광은 섬광이지만, 주변광뿐인 복도에 대한 같은 섬광은 그 순간 전체를 혼자
+ * 짊어져야 합니다.
+ *
+ * *이제 1.0을 넘어도 됩니다.* 실수가 아니라 결정입니다. `lum`은 밴딩 전에 1.0에서 잘리므로
+ * 그것을 넘는 세기는 포화하는데, 손안에서 터지는 샷건이 해야 할 일이 바로 그것입니다. 또한
+ * 셰이더의 `tint` 혼합은 `clamp(e, 0, 1)`로 가중하므로, e >= 1에서 표면은 광원의 색을 그대로
+ * 취합니다. 아래의 팔레트가 색조가 아니라 색 구분으로 읽히게 하는 것이 그것입니다. */
 #define LIGHT_MUZZLE_RADIUS  7.0f   ///< @brief Metres a muzzle flash reaches. / 총구 섬광이 닿는 거리 (미터).
-#define LIGHT_MUZZLE_POWER   0.85f  ///< @brief Peak power, faded over ::FLASH_TIME. / 최대 세기. ::FLASH_TIME에 걸쳐 감쇠합니다.
+#define LIGHT_MUZZLE_POWER   1.15f  ///< @brief Peak power, faded over ::FLASH_TIME. Over 1 on purpose: a shotgun blows out. / 최대 세기. ::FLASH_TIME에 걸쳐 감쇠합니다. 1을 넘는 것은 의도이며, 샷건은 화면을 날립니다.
 #define LIGHT_PROJ_RADIUS    5.0f   ///< @brief Metres a player projectile lights. / 플레이어 발사체가 밝히는 거리 (미터).
-#define LIGHT_PROJ_POWER     0.55f  ///< @brief Steady, for as long as it is in the air. / 공중에 있는 동안 일정합니다.
+
+/* --- one pool, two projectiles ---------------------------------------------
+ * ENGLISH: ::Proj carries no kind, and it does not need one: a grenade is the
+ * round with gravity on it, which is the same test ::fire_projectile already
+ * makes to decide whether what leaves the barrel arcs. Reading the discriminator
+ * that is already there beats adding a field that could disagree with it.
+ *
+ * THE BOLT IS THE DIMMER OF THE TWO, and that is about how many there are. The
+ * grenade launcher holds six and one is in the air at a time; `rapid` holds two
+ * hundred and empties at 0.085s a shot, so a burst puts a line of them across a
+ * room. At the grenade's power that line fills every slot and saturates `lum`
+ * along its whole length, which reads as the room strobing rather than as a
+ * weapon firing.
+ *
+ * 한국어: ::Proj에는 종류가 없고 필요하지도 않습니다. 유탄은 중력이 걸린 탄이며, 그것은
+ * ::fire_projectile이 총구를 떠난 것이 포물선을 그리는지 정할 때 이미 하는 검사와 같습니다.
+ * 이미 있는 판별자를 읽는 편이, 그것과 어긋날 수 있는 필드를 새로 다는 것보다 낫습니다.
+ *
+ * *둘 중 볼트가 더 어둡고*, 그것은 개수의 문제입니다. 유탄 발사기는 여섯 발을 지니고 한
+ * 번에 하나가 공중에 있지만, `rapid`는 이백 발을 지니고 0.085초마다 비웁니다. 한 번의
+ * 연사가 방을 가로지르는 한 줄을 만듭니다. 유탄의 세기라면 그 줄이 모든 슬롯을 채우고 길
+ * 전체에서 `lum`을 포화시키며, 그것은 무기가 발사되는 것이 아니라 방이 명멸하는 것으로
+ * 읽힙니다. */
+#define LIGHT_PROJ_POWER     0.95f  ///< @brief The grenade, steady while it is in the air. / 유탄. 공중에 있는 동안 일정합니다.
+#define LIGHT_BOLT_POWER     0.70f  ///< @brief The plasma bolt, dimmer because a burst puts many in the air. / 플라즈마 볼트. 한 연사가 여럿을 띄우므로 더 어둡습니다.
 /* Reaches further than it did, to match the emission tier ::scene_draw_shots
    now draws around the bolt. The two are one event told twice -- to the eye as
    a glow and to the geometry as a light -- and a bolt whose halo is two metres
@@ -228,7 +304,115 @@
    하나의 사건을 두 번 말하는 것입니다. 눈에게는 발광으로, 지오메트리에게는 빛으로. 헤일로는
    2미터인데 뒤의 벽은 1미터에 걸쳐 밝아지는 볼트는 눈에 보이는 이음매를 가진 볼트입니다. */
 #define LIGHT_SHOT_RADIUS    6.0f   ///< @brief Metres a monster bolt lights. / 몬스터 볼트가 밝히는 거리 (미터).
-#define LIGHT_SHOT_POWER     0.70f  ///< @brief Bolts read as the brighter thing in a dark room. / 볼트는 어두운 방에서 더 밝은 것으로 읽힙니다.
+#define LIGHT_SHOT_POWER     1.00f  ///< @brief Bolts are the brighter thing in the room, and now the only one that moves. / 볼트는 방에서 더 밝은 것이며, 이제 움직이는 유일한 것이기도 합니다.
+
+/* --- the blast -------------------------------------------------------------
+ *
+ * ENGLISH
+ * -------
+ * THE BRIGHTEST THING IN THE GAME, AND THE LAST ONE TO GET A LIGHT. Every
+ * entry above this was already drawn as a glow before it was given a slot
+ * here, so each of them was one event told twice. A detonation was drawn as
+ * six layers of additive particle and told to the geometry not at all -- the
+ * grenade's own light went out with the round on the frame it went off. See
+ * ::Flash in proj.h for the record this reads and for why it is not a particle.
+ *
+ * PAST WHERE THE DAMAGE STOPS, and that is the one place this file is allowed
+ * to disagree with `blastdome`. The dome is scaled to the blast radius exactly,
+ * because it is a claim about a gameplay number and a claim drawn at the wrong
+ * distance is a lie the player will believe. A light makes no such claim: light
+ * from an explosion falls off, it does not stop, and a 4.2m blast whose room
+ * brightens only inside 4.2m has a visible edge on the floor that says the
+ * engine ran out of something. So the light reaches further and nothing about
+ * the radius is being stated by it.
+ *
+ * OVER 1.0 BY MORE THAN ANY OTHER ENTRY, and deliberately. The block above
+ * ::LIGHT_MUZZLE_RADIUS explains what happens past 1: `lum` clamps before it
+ * bands, so the surface saturates, and the shader's `tint` mix weights by
+ * `clamp(e, 0, 1)`, so at e >= 1 the wall takes the light's colour outright.
+ * A shotgun going off in your hands is worth 1.15 of that. A charge going off
+ * across the room has to blow the room out for two frames and then not be
+ * there, which is a curve rather than a level -- ::proj_flash_fade is the
+ * curve, and the number here is only what it starts from.
+ *
+ * 한국어
+ * ------
+ * *게임에서 가장 밝은 것이면서 광원을 가장 늦게 얻은 것입니다.* 이 위의 모든 항목은 슬롯을
+ * 받기 전에 이미 발광으로 그려지고 있었으므로 각각은 하나의 사건을 두 번 말하는 것이었습니다.
+ * 폭발은 가산 입자 여섯 겹으로 그려졌고 지오메트리에게는 전혀 말해지지 않았습니다. 유탄
+ * 자신의 빛은 터지는 프레임에 그 탄과 함께 꺼졌습니다. 이것이 읽는 기록과 그것이 왜 입자가
+ * 아닌지는 proj.h의 ::Flash를 참조하십시오.
+ *
+ * *피해가 멈추는 곳 너머까지 닿으며*, 그것이 이 파일이 `blastdome`과 어긋나도 되는 유일한
+ * 지점입니다. 돔은 폭발 반경에 정확히 맞춰 배율이 정해집니다. 게임플레이 수치에 대한
+ * 주장이고, 틀린 거리에 그려진 주장은 플레이어가 믿어 버릴 거짓이기 때문입니다. 빛은 그런
+ * 주장을 하지 않습니다. 폭발의 빛은 감쇠하지 멈추지 않으며, 4.2m 폭발인데 방이 4.2m
+ * 안에서만 밝아지면 바닥에 보이는 경계가 생기고 그것은 엔진이 무언가를 다 썼다는 뜻으로
+ * 읽힙니다. 그래서 빛은 더 멀리 닿고, 그것으로 반경에 대해 말해지는 것은 없습니다.
+ *
+ * *다른 어느 항목보다도 1.0을 크게 넘으며*, 의도입니다. ::LIGHT_MUZZLE_RADIUS 위의 블록이
+ * 1을 넘으면 무슨 일이 일어나는지 설명합니다. `lum`은 밴딩 전에 잘리므로 표면이 포화하고,
+ * 셰이더의 `tint` 혼합은 `clamp(e, 0, 1)`로 가중하므로 e >= 1에서 벽은 광원의 색을 그대로
+ * 취합니다. 손안에서 터지는 샷건이 그중 1.15의 값어치입니다. 방 건너에서 터지는 장약은 두
+ * 프레임 동안 방을 날려 버리고 그 뒤에는 없어야 하며, 그것은 수준이 아니라 곡선입니다.
+ * ::proj_flash_fade가 그 곡선이고, 이곳의 수는 그것이 출발하는 지점일 뿐입니다. */
+#define LIGHT_BLAST_REACH    1.7f   ///< @brief Multiples of the damage radius the light reaches. / 빛이 닿는 거리. 피해 반경의 배수.
+#define LIGHT_BLAST_POWER    2.40f  ///< @brief Peak power, on the curve ::proj_flash_fade gives. / 최대 세기. ::proj_flash_fade가 주는 곡선을 따릅니다.
+
+/**
+ * @brief The same two numbers for a bolt landing, which is a PING and not an event.
+ *
+ * ENGLISH
+ * -------
+ * A blast is allowed to blow the room out for two frames; a hit is not, and
+ * the difference is not a matter of degree. The rapid lands one of these every
+ * 85ms and a monster's caster adds its own, so whatever this is, the room is
+ * living under it continuously rather than being lit by it once. A power over
+ * 1 saturates the surface -- see the block above ::LIGHT_MUZZLE_RADIUS -- and a
+ * saturating light arriving eleven times a second is a strobe, which is both
+ * unreadable and the kind of thing that hurts to look at.
+ *
+ * Under 1 on purpose, then, and reaching further than it is strong: what a hit
+ * has to say is WHERE, and a dim pool with a soft edge says that better than a
+ * bright one with a hard edge does. Quake II's blaster impact carries a light
+ * of 150 against a rocket's 350 for the same reason, and Xonotic fades its
+ * `electro_impact` radius out over the same distance it reaches.
+ *
+ * 한국어
+ * ------
+ * @brief 착탄한 볼트에 대한 같은 두 수. 그것은 사건이 아니라 *신호*입니다.
+ *
+ * 폭발은 두 프레임 동안 방을 날려도 되지만 피탄은 안 되며, 그 차이는 정도의 문제가
+ * 아닙니다. 연사는 85ms마다 이것을 하나씩 착탄시키고 몬스터의 캐스터가 자기 것을 더하므로,
+ * 이것이 무엇이든 방은 그것에 한 번 밝혀지는 것이 아니라 그 아래에서 계속 살게 됩니다. 세기가
+ * 1을 넘으면 표면이 포화하며(::LIGHT_MUZZLE_RADIUS 위의 블록 참조), 포화하는 빛이 초당 열한
+ * 번 도착하면 그것은 점멸입니다. 읽을 수 없을뿐더러 보기에 아픈 종류의 것입니다.
+ *
+ * 그래서 의도적으로 1보다 작고, 세기보다 멀리 닿습니다. 피탄이 말해야 하는 것은 *어디*이며,
+ * 가장자리가 부드러운 어두운 웅덩이가 가장자리가 날카로운 밝은 것보다 그것을 더 잘 말합니다.
+ * Quake II의 블래스터 피탄이 로켓의 350에 대해 150의 빛을 지니는 것도 같은 이유이고,
+ * Xonotic은 `electro_impact`의 반경을 그것이 닿는 거리에 걸쳐 사그라뜨립니다.
+ */
+#define LIGHT_HIT_REACH      2.2f   ///< @brief Multiples of ::PROJ_HIT_RADIUS. / ::PROJ_HIT_RADIUS의 배수.
+#define LIGHT_HIT_POWER      0.85f  ///< @brief Peak power. Under one, deliberately. / 최대 세기. 의도적으로 1 미만입니다.
+
+/**
+ * @brief The instant of a detonation: hotter and whiter than anything else here.
+ *
+ * ENGLISH: It cools into ::LIGHT_COL_PROJ rather than into a second colour of
+ * its own, and that is the point of reading that array here instead of copying
+ * a number out of it. The light a grenade throws while it flies and the light
+ * its detonation throws are then the same statement, so the room does not
+ * change what it is saying about the object at the exact moment the object
+ * arrives. Two colours would drift apart the first time either was tuned.
+ *
+ * 한국어: @brief 폭발의 순간. 이곳의 무엇보다도 뜨겁고 흽니다.
+ * 자기만의 두 번째 색이 아니라 ::LIGHT_COL_PROJ로 식으며, 그 배열에서 숫자를 베껴 오지 않고
+ * 이곳에서 *읽는* 이유가 그것입니다. 유탄이 날아가는 동안 던지는 빛과 그 폭발이 던지는 빛이
+ * 같은 진술이 되므로, 대상이 도착하는 바로 그 순간에 방이 그 대상에 대해 하던 말을 바꾸지
+ * 않습니다. 색이 둘이면 어느 한쪽을 처음 조정하는 순간 갈라집니다.
+ */
+static const float LIGHT_COL_BLAST[3] = { 1.00f, 0.94f, 0.80f };
 
 /* --- the shrine ------------------------------------------------------------
    Generous and warm, because unlike every other entry above this one is not an
@@ -242,31 +426,212 @@
    것입니다. 볼트와 갈고리가 쓰는 파랑이 아니라 금색인 이유는, 방에서 유일하게 *보상*인 것이
    곧 아프게 할 것들의 색으로 밝혀져서는 안 되기 때문입니다. */
 #define LIGHT_ALTAR_RADIUS   9.0f   ///< @brief Metres a burning shrine lights. / 타오르는 제단이 밝히는 거리 (미터).
-#define LIGHT_ALTAR_POWER    0.55f  ///< @brief Steady, for as long as it burns. / 타오르는 동안 일정합니다.
+#define LIGHT_ALTAR_POWER    0.80f  ///< @brief Steady, for as long as it burns. / 타오르는 동안 일정합니다.
 #define LIGHT_ALTAR_HEIGHT   0.9f   ///< @brief Metres above the floor it sits, so the floor is what brightens. / 바닥 위 높이(미터). 바닥이 밝아지도록 합니다.
+
+/* --- the palette, and what it is for ---------------------------------------
+ *
+ * ENGLISH
+ * -------
+ * COLOUR IS THE ONLY THING LEFT TO TELL THESE APART. When a level's lamps lit
+ * the room, a light in the air was one more source among many and its hue was
+ * flavour. It is not any more: the moving lights ARE the lighting, so the
+ * colour a wall goes is the game telling the player what just happened to it --
+ * from behind, in the dark, before any sound arrives.
+ *
+ * So the palette is meant to be read as a legend rather than as decoration:
+ *
+ *   WARM IS YOURS, COOL IS THEIRS. Everything the player causes -- the flash,
+ *   the grenade, the bolt they fired -- is warm or green; everything a monster
+ *   casts is cold. A room that goes blue behind you is something shooting at
+ *   you and nothing else.
+ *   THE ONE EXCEPTION IS THE BOSS, and it is the point of the exception. The
+ *   maw's bolt is the only monster attack painted warm, because it is the only
+ *   one that must not be filed with the rest at a glance.
+ *   GOLD IS THE REWARD, and nothing that hurts is allowed to use it.
+ *
+ * 한국어
+ * ------
+ * *이것들을 구분할 수단이 색밖에 남지 않았습니다.* 레벨의 등이 방을 밝히던 시절에는 공중의
+ * 빛이 여럿 중 하나였고 그 색조는 풍미였습니다. 이제는 아닙니다. 움직이는 빛이 *곧*
+ * 조명이므로, 벽이 어떤 색이 되는가는 게임이 플레이어에게 방금 무슨 일이 있었는지를 말하는
+ * 방식입니다. 등 뒤에서, 어둠 속에서, 어떤 소리가 도착하기도 전에.
+ *
+ * 그래서 이 팔레트는 장식이 아니라 범례로 읽히도록 만들어졌습니다.
+ *
+ *   *따뜻한 것은 당신 것, 차가운 것은 그들 것.* 플레이어가 일으키는 모든 것(섬광, 유탄,
+ *   자신이 쏜 볼트)은 따뜻하거나 녹색이고, 몬스터가 시전하는 모든 것은 차갑습니다. 등
+ *   뒤에서 방이 파래지면 그것은 당신을 쏘는 무언가이며 그 외의 무엇도 아닙니다.
+ *   *유일한 예외가 보스이며*, 그것이 예외의 요점입니다. 아귀의 볼트는 따뜻하게 칠해진
+ *   유일한 몬스터 공격인데, 한눈에 나머지와 같은 칸에 묶여서는 안 되는 유일한 것이기
+ *   때문입니다.
+ *   *금색은 보상이고*, 아프게 하는 무엇도 그것을 쓸 수 없습니다. */
 
 /** @brief Warm white: burnt powder, not a torch. / 따뜻한 백색. 횃불이 아니라 연소한 화약입니다. */
 static const float LIGHT_COL_MUZZLE[3] = { 1.00f, 0.86f, 0.62f };
-/** @brief The grenade's own hot orange. / 유탄 자신의 뜨거운 주황색. */
-static const float LIGHT_COL_PROJ[3]   = { 1.00f, 0.62f, 0.26f };
+/** @brief The grenade's own hot orange, pushed further from the muzzle's white than it was. / 유탄 자신의 뜨거운 주황색. 예전보다 총구의 백색에서 더 멀어졌습니다. */
+static const float LIGHT_COL_PROJ[3]   = { 1.00f, 0.55f, 0.18f };
 /**
- * @brief The bolt's cold blue, taken from how ::scene_draw_shots actually draws it.
+ * @brief The plasma bolt's acid green.
  *
- * ENGLISH: This said "cold green" and was green, and the bolt it lights is BLUE
- * -- scene_draw_shots paints the halo (0.10,0.42,0.85) and the core
- * (0.85,0.98,1.00), and boltburst cools into the same blue. A light that
- * disagrees with the thing emitting it is worse than no light: the wall says one
- * colour and the bolt in front of it says another, and the eye reads the wall.
+ * ENGLISH: Green because it is the one hue nothing else here uses, and because
+ * `rapid`'s own fire sound is already named `plasma` -- the weapon was asking
+ * for it. It also has to survive being the busiest light in the game: a burst
+ * lays a line of these across a room, and a hue sitting between the grenade's
+ * orange and the monsters' blue would read as either one at that speed.
  *
- * 한국어: 이 값은 "차가운 녹색"이라 적혀 있었고 실제로 녹색이었는데, 그것이 밝히는 볼트는
- * *파란색*입니다. scene_draw_shots가 헤일로를 (0.10,0.42,0.85)로, 코어를 (0.85,0.98,1.00)로
- * 칠하고 boltburst도 같은 파랑으로 식습니다. 자기를 내는 것과 어긋나는 광원은 광원이 없는 것보다
- * 나쁩니다. 벽은 한 색을 말하고 그 앞의 볼트는 다른 색을 말하는데, 눈은 벽을 믿습니다.
+ * 한국어: 녹색인 이유는 이곳의 다른 무엇도 쓰지 않는 유일한 색조이기 때문이며, `rapid`의
+ * 발사음 이름이 이미 `plasma`입니다. 무기가 그것을 요구하고 있었습니다. 또한 이 게임에서
+ * 가장 바쁜 빛이 되어도 견뎌야 합니다. 한 번의 연사가 방을 가로지르는 줄을 놓는데, 유탄의
+ * 주황과 몬스터의 파랑 사이에 앉은 색조는 그 속도에서 둘 중 아무것으로나 읽힙니다.
  */
-static const float LIGHT_COL_SHOT[3]   = { 0.42f, 0.68f, 1.00f };
+static const float LIGHT_COL_BOLT[3]   = { 0.45f, 1.00f, 0.55f };
+/**
+ * @brief What each monster's bolt is lit in, indexed by ::MonTypeID.
+ *
+ * ENGLISH
+ * -------
+ * ONE ROW PER CREATURE, not one colour for "a monster shot". Three types can
+ * cast -- the ones ::types_check pairs with a `shot_speed` -- and all three
+ * threw the same blue, so a room lit from behind said "something is shooting"
+ * and stopped there. A caster's bolt and the maw's differ in damage and in
+ * everything the player should do about them, and the light is the half that
+ * arrives first.
+ *
+ * A FULL TABLE RATHER THAN THE FOUR THAT SHOOT, indexed straight by
+ * ::MonTypeID with no mapping in between. A row for a melee creature costs
+ * twelve bytes of `.rdata` and cannot be wrong; a compressed table needs a
+ * second array saying whose row is whose, and that is the array that goes
+ * stale the day somebody gives the brute a spit attack.
+ *
+ * @note The drawn bolt takes the same row -- see ::scene_draw_shots. A light
+ *       that disagrees with the thing emitting it is worse than no light: the
+ *       wall says one colour and the bolt in front of it says another, and the
+ *       eye believes the wall. That note used to live on a single blue, and
+ *       keeping it true is why the table is READ in both places rather than
+ *       copied into each.
+ *
+ * 한국어
+ * ------
+ * @brief ::MonTypeID로 인덱싱되는, 몬스터별 볼트의 색입니다.
+ *
+ * *"몬스터 발사체" 하나의 색이 아니라 생물마다 한 행입니다.* 시전할 수 있는 종류는
+ * 셋이며(::types_check가 `shot_speed`와 짝지어 검사하는 것들), 셋 모두 같은 파랑을
+ * 던졌습니다. 그래서 등 뒤에서 밝아진 방은 "무언가 쏘고 있다"고만 말하고 거기서 멈췄습니다.
+ * 캐스터의 볼트와 아귀의 볼트는 피해량이 다르고 플레이어가 취해야 할 행동이 전부 다른데,
+ * 둘 중 먼저 도착하는 절반이 빛입니다.
+ *
+ * *쏘는 셋이 아니라 전체 표이며*, 중간 사상 없이 ::MonTypeID로 곧장 인덱싱합니다. 근접
+ * 생물의 행 하나는 `.rdata` 12바이트이고 틀릴 수가 없습니다. 압축한 표에는 어느 행이 누구
+ * 것인지 말하는 두 번째 배열이 필요하고, 누군가 브루트에게 뱉기 공격을 주는 날 낡아 버리는
+ * 것이 바로 그 배열입니다.
+ *
+ * @note 그려지는 볼트도 같은 행을 씁니다. ::scene_draw_shots를 참조하십시오. 자기를 내는
+ *       것과 어긋나는 광원은 광원이 없는 것보다 나쁩니다. 벽은 한 색을 말하고 그 앞의 볼트는
+ *       다른 색을 말하는데, 눈은 벽을 믿습니다. 이 설명은 예전에 파랑 하나에 붙어 있었고,
+ *       그것을 참으로 유지하려고 표를 양쪽에 복사하지 않고 두 곳에서 *읽습니다.*
+ */
+static const float LIGHT_COL_SHOT[MON_TYPES][3] = {
+    [MON_WATER_SPIRIT] = { 0.30f, 0.92f, 1.00f },  /* drowned cyan                  */
+    [MON_BRUTE]        = { 0.42f, 0.68f, 1.00f },  /* melee; never reaches this     */
+    [MON_CASTER]       = { 0.72f, 0.45f, 1.00f },  /* violet, and it flies          */
+    [MON_MAW]          = { 1.00f, 0.34f, 0.42f },  /* the boss, warm on purpose     */
+    [MON_WARD]         = { 0.42f, 0.68f, 1.00f },  /* never acts; see enemy.h       */
+};
+
+/* A ROW MISSING FROM THAT TABLE IS A BLACK LIGHT, which is worse than a wrong
+   one: the shader mixes `tint` toward the colour in proportion to how much
+   light lands, so an all-zero row DARKENS what its bolt flies past. Designated
+   initialisers zero-fill silently, so a new ::MonTypeID would get exactly that
+   and nothing would say so -- the bolt would be drawn, the wall behind it would
+   go dim, and the report would be "the new monster's shots look wrong".
+   This is the line that stops it, and it names what to do.
+   *그 표에서 빠진 행은 검은 광원*이며, 그것은 틀린 색보다 나쁩니다. 셰이더는 도달한 빛의
+   양에 비례해 `tint`를 그 색으로 섞으므로, 전부 0인 행은 자기 볼트가 지나는 곳을 *어둡게*
+   만듭니다. 지정 초기화는 조용히 0으로 채우므로 새 ::MonTypeID는 정확히 그것을 얻고 아무도
+   말해 주지 않습니다. 볼트는 그려지고 뒤의 벽은 어두워지며, 보고는 "새 몬스터의 발사체가
+   이상하다"가 됩니다. 이 줄이 그것을 막으며, 무엇을 해야 하는지도 말합니다. */
+_Static_assert(MON_TYPES == 5,
+               "a monster type was added: give it a row in LIGHT_COL_SHOT, or"
+               " its bolts will darken the wall they fly past");
 
 /** @brief The shrine's warm gold, the same hue `altarcore` burns in. / 제단의 따뜻한 금색. `altarcore`가 타는 것과 같은 색조입니다. */
 static const float LIGHT_COL_ALTAR[3]  = { 1.00f, 0.82f, 0.46f };
+
+/* --- the level's own lamps, and why none of them is here -------------------
+ *
+ * ENGLISH
+ * -------
+ * ::Level::lights IS PARSED, STORED, AND EMPTY. Nothing here reads the array,
+ * and no shipped level fills it: the lamps were switched off first and deleted
+ * from the maps afterwards, so `lqdm1` carries no `light` entity and no level
+ * in levels.txt carries a `light` line. The parser still knows the word, which
+ * is why the array is still here to be empty.
+ *
+ * WHY THE PARSER STAYED WHEN THE LIGHT WENT. The lamps were tried in both
+ * places a light can live in this engine and neither one worked:
+ *
+ *   BAKED INTO THE VERTICES, which is where they started, a lamp is sampled at
+ *   the corners of the faces it touches and interpolated over everything
+ *   between them. On a brush level whose single faces are metres across that is
+ *   not a pool of light -- it is a gradient smeared along one side of a wall,
+ *   stopping dead at a seam. tools/lightprobe.c measured it on `lqdm1`: of
+ *   798,624 vertex-lamp pairs, 93.3% were rejected on distance alone and 0.5%
+ *   lit anything.
+ *
+ *   OFFERED TO THE SHADER'S LOOP, which is where they went next, the pools come
+ *   out round -- and the lighting still did not come right. Eight slots against
+ *   a level that declares thirty-two means the room re-lights itself as the
+ *   player walks, unshadowed, so a lamp behind a wall lights the wall's far
+ *   side and then hands its slot to another lamp two steps later.
+ *
+ * So the lamps were switched off rather than fixed a third time, and the room
+ * is lit by the shader's ambient plus the things the player and the monsters
+ * put in the air. That is a DESIGN decision, not a defect being routed around:
+ * a level whose light is what is being fired in it is a level where the
+ * shooting is the lighting.
+ *
+ * @note The parser stays because a format that silently drops a word it can
+ *       read is worse than one that reads a word nothing uses -- and because
+ *       turning this back on is one call plus the lamps somebody would have to
+ *       place again. levels.txt documents the line where an author would look
+ *       for it, and says that writing one changes nothing they can see.
+ * @note ::level_light_cache and ::bake_light are untouched by this and still
+ *       run: they carry the SUN, which is a different term with a different
+ *       reason to be baked. See level.c.
+ *
+ * 한국어
+ * ------
+ * *::Level::lights는 파싱되고 보관되며 비어 있습니다.* 이곳의 무엇도 그 배열을 읽지 않고,
+ * 출하되는 어떤 레벨도 그것을 채우지 않습니다. 등은 먼저 꺼졌고 그다음 맵에서 삭제되었으므로
+ * `lqdm1`에는 `light` 엔티티가 없고 levels.txt의 어떤 레벨에도 `light` 줄이 없습니다. 파서는
+ * 여전히 그 단어를 알며, 그래서 비어 있을 배열이 여전히 이곳에 있습니다.
+ *
+ * *빛이 떠날 때 파서가 남은 이유.* 등은 이 엔진에서 빛이 살 수 있는 두 자리 모두에서
+ * 시도되었고 어느 쪽도 되지 않았습니다.
+ *
+ *   *정점에 구워지면*(처음 있던 자리입니다) 등은 자기가 닿는 면의 모서리에서 표본추출되어
+ *   그 사이 전부로 보간됩니다. 면 하나가 몇 미터인 브러시 레벨에서 그것은 빛 웅덩이가
+ *   아니라 벽의 한쪽을 따라 번지다 이음매에서 뚝 끊기는 그러데이션입니다. tools/lightprobe.c가
+ *   `lqdm1`에서 쟀습니다. 정점-등 쌍 798,624개 중 93.3%가 거리에서만 걸러지고 0.5%만
+ *   무언가를 밝혔습니다.
+ *
+ *   *셰이더의 반복문에 제안되면*(그다음 간 자리입니다) 웅덩이는 둥글게 나오지만, 조명은
+ *   여전히 제대로 되지 않았습니다. 서른둘을 선언한 레벨에 슬롯 여덟이라는 것은 플레이어가
+ *   걸을 때마다 방이 스스로를 다시 밝힌다는 뜻이고, 그림자도 없으므로 벽 뒤의 등이 벽
+ *   반대편을 비추다가 두 걸음 뒤에는 자기 슬롯을 다른 등에게 넘깁니다.
+ *
+ * 그래서 세 번째로 고치는 대신 등을 껐고, 방은 셰이더의 주변광과 플레이어·몬스터가 공중에
+ * 띄우는 것들로 밝혀집니다. 이것은 결함을 우회하는 것이 아니라 *설계* 결정입니다. 빛이 곧
+ * 그 안에서 발사되는 것인 레벨은, 사격이 곧 조명인 레벨입니다.
+ *
+ * @note 파서를 남기는 이유는, 읽을 수 있는 단어를 조용히 버리는 형식이 아무도 쓰지 않는
+ *       단어를 읽는 형식보다 나쁘기 때문이고, 이것을 다시 켜는 것이 호출 하나에 더해 누군가가
+ *       등을 다시 놓는 일이면 되기 때문입니다. levels.txt가 제작자가 찾아볼 자리에서 그 줄을
+ *       문서로 남기고, 하나 적어도 눈에 보이는 것은 달라지지 않는다고 말합니다.
+ * @note ::level_light_cache와 ::bake_light는 이 변경과 무관하며 여전히 돌아갑니다. 그것들이
+ *       나르는 것은 *태양*이고, 그것은 구워질 이유가 다른 별개의 항입니다. level.c를
+ *       참조하십시오. */
 
 /* --- how a shake looks -----------------------------------------------------
  * HOW HARD is ::RunState::shake's and the world's; how it LOOKS is this file's,
@@ -298,11 +663,29 @@ typedef struct { float pos[4], col[4], d2; } MoveLight;
 /**
  * @brief Offers one light to the frame's set, keeping the nearest eight.
  *
+ * ENGLISH
+ * -------
+ * @note EVERY CALLER IS AN EVENT NOW, so the contest is distance and nothing
+ *       else. This took a `keep` for one release -- a reserved prefix the
+ *       level's lamps were offered against, so thirty-two of them could not
+ *       crowd out a grenade thrown twenty metres. The lamps do not reach this
+ *       function any more and the parameter went with them: a reservation with
+ *       nobody on either side of it is a rule that cannot be got wrong, and a
+ *       rule that cannot be got wrong is the kind that quietly stops meaning
+ *       anything.
  * @note Silently ignores a power of zero, so a caller may hand over a faded
  *       source without testing it first -- a muzzle flash on its last frame is
  *       the normal case, not an error.
  *
+ * 한국어
+ * ------
  * @brief 한 프레임의 광원 집합에 광원 하나를 제안하며, 가장 가까운 여덟 개를 유지합니다.
+ *
+ * @note *이제 모든 호출자가 사건이므로* 경쟁은 거리뿐입니다. 한 판 동안 이 함수는 `keep`을
+ *       받았습니다. 레벨의 등이 그것을 두고 제안되던 예약된 앞부분이며, 서른둘의 등이 20미터
+ *       날아간 유탄 하나를 밀어내지 못하게 하려는 것이었습니다. 이제 등은 이 함수에 도달하지
+ *       않고 인자도 함께 떠났습니다. 양쪽 어느 쪽에도 아무도 없는 예약은 틀릴 수가 없는
+ *       규칙이고, 틀릴 수 없는 규칙은 조용히 아무 뜻도 가지지 않게 되는 종류입니다.
  * @note 세기가 0이면 조용히 무시하므로, 호출자는 먼저 검사하지 않고 사그라든 광원을 그대로
  *       건네도 됩니다. 마지막 프레임의 총구 섬광이 오류가 아니라 평범한 경우입니다.
  */
@@ -336,6 +719,114 @@ static void light_offer(MoveLight *ls, int *n, v3 p, float radius,
     ls[slot].d2 = d2;
 }
 
+/* Flattened into the two arrays ::rd_lights takes. Kept apart until here
+   because the eviction above needs the distance beside the light, and
+   ::rd_lights wants neither.
+   ::rd_lights가 받는 두 배열로 펼칩니다. 이곳까지 나누어 둔 이유는 축출이 광원 곁의
+   거리를 필요로 하는데 ::rd_lights는 그 어느 것도 원하지 않기 때문입니다. */
+static void lights_upload(const MoveLight *ls, int n) {
+    float pos[RD_MAX_LIGHTS * 4], col[RD_MAX_LIGHTS * 4];
+    for (int i = 0; i < n; i++)
+        for (int k = 0; k < 4; k++) {
+            pos[i*4 + k] = ls[i].pos[k];
+            col[i*4 + k] = ls[i].col[k];
+        }
+
+    /* ::rd_use first, because ::rd_lights sets uniforms and says nothing about
+       which program is bound.
+       ::rd_lights는 유니폼을 설정할 뿐 어느 프로그램이 바인딩되어 있는지에 대해 아무 말도
+       하지 않으므로 ::rd_use를 먼저 호출합니다. */
+    rd_use();
+    rd_lights(pos, col, n);
+}
+
+/**
+ * @brief Which row of ::LIGHT_COL_SHOT this bolt was cast in.
+ *
+ * ENGLISH: Bounds-checked rather than trusted, and it falls back to the caster
+ * because that is the row every monster used to share -- an out-of-range type
+ * comes out looking exactly like the game did before this table existed, which
+ * is a failure nobody has to debug at three in the morning. The static assert
+ * beside the table is what actually catches the mistake; this is what happens
+ * if one gets past it.
+ * 한국어: 신뢰하지 않고 범위를 검사하며, 예비값은 캐스터입니다. 그것이 모든 몬스터가 함께
+ * 쓰던 행이기 때문입니다. 범위를 벗어난 종류는 이 표가 있기 전의 게임과 정확히 똑같아
+ * 보이며, 그것은 새벽 세 시에 아무도 추적할 필요가 없는 실패입니다. 실수를 실제로 잡는 것은
+ * 표 옆의 정적 검사이고, 이것은 그것을 빠져나간 하나가 생겼을 때의 처리입니다.
+ */
+static const float *shot_hue(int type) {
+    if (type < 0 || type >= MON_TYPES) return LIGHT_COL_SHOT[MON_CASTER];
+    return LIGHT_COL_SHOT[type];
+}
+
+/* Takes the bolt rather than the row, because a caller holding a live ::Shot
+   should not have to know that the row is what the table is indexed by. The
+   flash a landing leaves has no Shot left to hand over -- the slot is freed on
+   the frame it hits -- so ::flash_look goes to ::shot_hue directly, and the
+   bounds check stays in one place for both.
+   행이 아니라 볼트를 받습니다. 살아 있는 ::Shot을 든 호출자가 표의 색인이 그 행이라는 것까지
+   알아야 할 이유는 없습니다. 착탄이 남기는 섬광에는 건넬 Shot이 남아 있지 않으므로(슬롯은
+   맞는 프레임에 해제됩니다) ::flash_look은 ::shot_hue로 곧장 가며, 범위 검사는 둘 모두에
+   대해 한 곳에 머무릅니다. */
+static const float *shot_colour(const Shot *sh) { return shot_hue(sh->type); }
+
+/**
+ * @brief What one ::Flash looks like: its colour, and how far and hard it goes.
+ *
+ * ENGLISH
+ * -------
+ * THE WHOLE OF THE FLASH'S LOOK, IN ONE PLACE, which is the point of it being
+ * a function at all. Colour, reach and power used to be three lines inlined in
+ * ::scene_lights with a comment saying there was only ever one blast colour;
+ * there are three kinds now, and three inlined ternaries would be the version
+ * of this nobody could check.
+ *
+ * The blast keeps exactly what it had: white at the instant and its own orange
+ * on the way out, mixed here rather than stored as two rows because the second
+ * row it would need is already on file as the colour of the thing that made
+ * it. A bolt does not fade between two colours -- it is the one hue the whole
+ * way, because the wall it is landing on has been that hue for the entire
+ * flight and a hit that arrived in a different colour would read as a second,
+ * unrelated event.
+ *
+ * 한국어
+ * ------
+ * @brief ::Flash 하나가 어떻게 보이는가. 색, 그리고 얼마나 멀리 얼마나 세게 가는가.
+ *
+ * *섬광의 겉모습 전부가 한 곳에 있으며*, 그것이 애초에 이것이 함수인 이유입니다. 색과 도달
+ * 거리와 세기는 ::scene_lights 안에 인라인된 세 줄이었고, 폭발 색은 언제나 하나뿐이라는
+ * 설명이 붙어 있었습니다. 이제 종류가 셋이며, 인라인된 삼항 연산자 셋은 아무도 검사할 수 없는
+ * 판본이 되었을 것입니다.
+ *
+ * 폭발은 가지고 있던 것을 정확히 유지합니다. 순간에는 흰색, 사그라들며 자기 주황이고, 두
+ * 행으로 저장하지 않고 이곳에서 섞습니다. 필요할 두 번째 행이 이미 그것을 만든 것의 색으로
+ * 파일에 있기 때문입니다. 볼트는 두 색 사이를 오가지 않습니다. 내내 하나의 색조입니다. 그것이
+ * 착탄하는 벽이 비행 내내 그 색조였고, 다른 색으로 도착하는 피탄은 별개의 무관한 사건으로
+ * 읽히기 때문입니다.
+ */
+static void flash_look(const Flash *f, float e, float col[3],
+                       float *reach, float *power) {
+    if (f->kind == FLASH_BLAST) {
+        for (int k = 0; k < 3; k++)
+            col[k] = LIGHT_COL_PROJ[k] + (LIGHT_COL_BLAST[k] - LIGHT_COL_PROJ[k]) * e;
+        *reach = LIGHT_BLAST_REACH;
+        *power = LIGHT_BLAST_POWER;
+        return;
+    }
+
+    /* The bolt's own row, whichever side of the fight threw it. FLASH_BOLT is
+       the player's and has one colour; FLASH_SHOT is a monster's and has one
+       per creature, which is the table the drawn bolt and the bolt's own
+       travelling light already read.
+       어느 쪽이 던졌든 그 볼트 자신의 행입니다. FLASH_BOLT는 플레이어의 것이고 색이 하나이며,
+       FLASH_SHOT은 몬스터의 것이고 생물마다 하나입니다. 그려지는 볼트와 볼트 자신의 이동하는
+       빛이 이미 읽고 있는 그 표입니다. */
+    const float *hue = (f->kind == FLASH_SHOT) ? shot_hue(f->type) : LIGHT_COL_BOLT;
+    for (int k = 0; k < 3; k++) col[k] = hue[k];
+    *reach = LIGHT_HIT_REACH;
+    *power = LIGHT_HIT_POWER;
+}
+
 /**
  * @brief Gathers this frame's moving lights and hands them to the shader.
  *
@@ -344,11 +835,15 @@ static void light_offer(MoveLight *ls, int *n, v3 p, float radius,
  * @param[in] w   The world, read for the gun and the things in the air.
  * @param[in] eye Camera position: what "nearest" is measured from.
  *
+ * @note EVERYTHING OFFERED HERE IS AN EVENT, and they compete on distance
+ *       alone. The level's own lamps are deliberately not among them -- see
+ *       the note above ::MoveLight -- which is why ::light_offer no longer
+ *       takes the reserved prefix it took while they were.
+ *
  * @note Uploaded ONCE for the whole frame rather than per pass. Every pass
  *       after this one -- the level, the monsters, the pickups -- reads the
  *       same eight, which is what makes a grenade light a wall and the monster
- *       standing against it by the same amount. ::rd_use first, because
- *       ::rd_lights sets uniforms and says nothing about which program is bound.
+ *       standing against it by the same amount.
  * @note The muzzle flash is placed at the EYE rather than at the gun's muzzle.
  *       They are about half a metre apart and the light reaches seven, so the
  *       difference is invisible -- and solving the muzzle would mean repeating
@@ -360,10 +855,13 @@ static void light_offer(MoveLight *ls, int *n, v3 p, float radius,
  * @param[in] w   월드. 총과 공중에 있는 것들을 읽습니다.
  * @param[in] eye 카메라 위치. "가깝다"를 재는 기준입니다.
  *
+ * @note *이곳에서 제안되는 모든 것이 사건이며*, 거리만으로 경쟁합니다. 레벨 자신의 등은
+ *       의도적으로 그중에 없습니다(::MoveLight 위의 설명을 참조하십시오). ::light_offer가
+ *       등이 있던 동안 받던 예약된 앞부분을 더 이상 받지 않는 이유가 그것입니다.
+ *
  * @note 패스마다가 아니라 프레임 전체에 대해 *한 번* 업로드합니다. 이후의 모든 패스(레벨,
  *       몬스터, 아이템)가 같은 여덟 개를 읽으며, 그것이 유탄이 벽과 그 앞에 선 몬스터를 같은
- *       양만큼 밝히게 하는 것입니다. ::rd_lights는 유니폼을 설정할 뿐 어느 프로그램이
- *       바인딩되어 있는지에 대해 아무 말도 하지 않으므로 ::rd_use를 먼저 호출합니다.
+ *       양만큼 밝히게 하는 것입니다.
  * @note 총구 섬광은 총구가 아니라 *눈*에 놓습니다. 둘은 0.5미터쯤 떨어져 있고 빛은 7미터를
  *       가므로 차이가 보이지 않습니다. 총구를 구하려면 이곳에서 ::wp_update의 뷰 모델 투영을
  *       반복해야 하는데, 아무도 볼 수 없는 결과를 위해서입니다.
@@ -383,20 +881,64 @@ static void scene_lights(const World *w, v3 eye) {
                     LIGHT_MUZZLE_POWER * f, eye);
     }
 
-    /* The player's grenades and bolts, for as long as they are in the air. */
+    /* The player's grenades and bolts, for as long as they are in the air,
+       and told apart by the field that already tells them apart: a grenade is
+       the round with gravity on it. See LIGHT_PROJ_POWER.
+       플레이어의 유탄과 볼트이며, 공중에 있는 동안 지속됩니다. 둘을 구분하는 것은 이미
+       둘을 구분하고 있는 필드입니다. 유탄은 중력이 걸린 탄입니다. LIGHT_PROJ_POWER를
+       참조하십시오. */
     for (int i = 0, pn = proj_count(&w->pools); i < pn; i++) {
         const Proj *p = proj_at(&w->pools, i);
         if (!p->active) continue;
-        light_offer(ls, &n, p->pos, LIGHT_PROJ_RADIUS, LIGHT_COL_PROJ,
-                    LIGHT_PROJ_POWER, eye);
+        int arcs = p->gravity > 0.0f;
+        light_offer(ls, &n, p->pos, LIGHT_PROJ_RADIUS,
+                    arcs ? LIGHT_COL_PROJ  : LIGHT_COL_BOLT,
+                    arcs ? LIGHT_PROJ_POWER : LIGHT_BOLT_POWER, eye);
+    }
+
+    /* Detonations, for the third of a second their light lasts. THE ONLY
+       ENTRY HERE WHOSE SOURCE NO LONGER EXISTS: every other one reads a live
+       object -- a gun mid-flash, a round in the air, a shrine burning -- and
+       this one reads a record of something that is over. That is what a ::Flash
+       is for, and why it could not be a field on ::Proj: the projectile is
+       cleared on the frame it goes off and everything a player sees of an
+       explosion happens after that.
+       폭발이며, 그 빛이 지속되는 0.3초 동안입니다. *이곳에서 유일하게 광원이 더 이상
+       존재하지 않는 항목입니다.* 다른 모든 항목은 살아 있는 대상(섬광 중인 총, 공중의 탄,
+       타오르는 제단)을 읽지만 이것은 이미 끝난 것의 기록을 읽습니다. ::Flash가 그것을 위해
+       있으며, 그것이 ::Proj의 필드가 될 수 없었던 이유입니다. 발사체는 터지는 프레임에
+       지워지고, 플레이어가 폭발에서 보는 모든 것은 그 뒤에 일어납니다. */
+    for (int i = 0, fn = proj_flash_count(&w->pools); i < fn; i++) {
+        const Flash *f = proj_flash_at(&w->pools, i);
+        if (!f || f->life <= 0.0f) continue;
+
+        /* WHAT IT LOOKS LIKE IS ::flash_look'S, and this loop's remaining job
+           is where and when. It used to mix the blast's white and orange
+           inline under a comment saying there was only ever one blast colour;
+           a landing bolt is a flash too now, in the hue the wall has been lit
+           in the whole way in, so the mix moved to a function that can hold
+           more than one answer.
+           *어떻게 보이는가는 ::flash_look의 것이고*, 이 반복문에 남은 일은 어디에서와
+           언제입니다. 예전에는 폭발 색이 언제나 하나뿐이라는 설명 아래에서 흰색과 주황을
+           인라인으로 섞었습니다. 이제는 착탄한 볼트도 섬광이며, 벽이 오는 내내 밝혀져 있던 그
+           색조를 띱니다. 그래서 그 혼합은 하나 이상의 답을 담을 수 있는 함수로 옮겼습니다. */
+        float e = proj_flash_fade(f);
+        float col[3], reach, power;
+        flash_look(f, e, col, &reach, &power);
+
+        light_offer(ls, &n, f->pos, f->radius * reach, col,
+                    power * f->power * e, eye);
     }
 
     /* The monsters'. Drawn as additive rosettes already -- see
-       ::scene_draw_shots -- so this is the same bolt told to the geometry. */
+       ::scene_draw_shots -- so this is the same bolt told to the geometry, in
+       the same colour, out of the same table.
+       몬스터의 것입니다. 이미 가산 로제트로 그려지므로(::scene_draw_shots 참조) 이것은 같은
+       볼트를 같은 색으로, 같은 표에서 꺼내어 지오메트리에게 말하는 것입니다. */
     for (int i = 0, sn = enemy_shot_count(&w->pools); i < sn; i++) {
         const Shot *sh = enemy_shot_at(&w->pools, i);
         if (!sh->active) continue;
-        light_offer(ls, &n, sh->pos, LIGHT_SHOT_RADIUS, LIGHT_COL_SHOT,
+        light_offer(ls, &n, sh->pos, LIGHT_SHOT_RADIUS, shot_colour(sh),
                     LIGHT_SHOT_POWER, eye);
     }
 
@@ -415,20 +957,19 @@ static void scene_lights(const World *w, v3 eye) {
                         w->run.altar_pos.z),
                     LIGHT_ALTAR_RADIUS, LIGHT_COL_ALTAR, LIGHT_ALTAR_POWER, eye);
 
-    /* Flattened into the two arrays ::rd_lights takes. Kept apart until here
-       because the eviction above needs the distance beside the light, and
-       ::rd_lights wants neither.
-       ::rd_lights가 받는 두 배열로 펼칩니다. 이곳까지 나누어 둔 이유는 위의 축출이 광원 곁의
-       거리를 필요로 하는데 ::rd_lights는 그 어느 것도 원하지 않기 때문입니다. */
-    float pos[RD_MAX_LIGHTS * 4], col[RD_MAX_LIGHTS * 4];
-    for (int i = 0; i < n; i++)
-        for (int k = 0; k < 4; k++) {
-            pos[i*4 + k] = ls[i].pos[k];
-            col[i*4 + k] = ls[i].col[k];
-        }
+    /* ::Level::lights IS NOT READ HERE, and its absence is the whole of the
+       lighting design. The lamps a level declares light nothing -- not from
+       the vertices, not from these slots -- so the set this hands over is
+       exactly what the player and the monsters have put in the air. See the
+       note above LIGHT_MUZZLE_RADIUS for what that is, and the one above
+       ::MoveLight for why the lamps are still parsed and stored.
+       ::Level::lights를 이곳에서 읽지 않으며, 그 부재가 조명 설계 전부입니다. 레벨이
+       선언한 등은 아무것도 밝히지 않습니다. 정점에서도, 이 슬롯에서도. 따라서 이 함수가
+       건네는 집합은 정확히 플레이어와 몬스터가 공중에 띄운 것들입니다. 그것이 무엇인지는
+       LIGHT_MUZZLE_RADIUS 위의 설명을, 등이 여전히 파싱되고 보관되는 이유는 ::MoveLight
+       위의 설명을 참조하십시오. */
 
-    rd_use();
-    rd_lights(pos, col, n);
+    lights_upload(ls, n);
 }
 
 /* --- monster projectiles ---
@@ -1008,6 +1549,21 @@ void scene_draw_pickups(Scene *s, const Pools *pl, mat4 vp, v3 eye, v3 cam_right
     glEnable(GL_CULL_FACE);
 }
 
+/* One channel of one tier of one bolt: brightened, then dragged toward white
+   or away from it. Clamped because `pull` is allowed to be negative and a
+   channel that was already near zero comes out below it -- the maw's row does
+   exactly that in green. GL would clamp at the framebuffer anyway; doing it
+   here means the value this function computes is the value it says it is.
+   볼트 하나의 겹 하나의 채널 하나입니다. 밝힌 뒤 흰색 쪽으로 끌거나 그 반대로 밉니다.
+   `pull`이 음수일 수 있고 이미 0에 가깝던 채널은 그 아래로 나오기 때문에 잘라 냅니다.
+   아귀의 행이 녹색에서 정확히 그렇습니다. GL이 어차피 프레임버퍼에서 자르지만, 이곳에서
+   자르면 이 함수가 계산하는 값이 곧 그것이 말하는 값이 됩니다. */
+static float tier_chan(float c, float mul, float pull) {
+    float v = c * mul;
+    v += (1.0f - v) * pull;
+    return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
+}
+
 void scene_draw_shots(Scene *s, const Pools *pl, mat4 vp, v3 cam_right, v3 cam_up) {
     DIAG_WANT_WORLD_PASS();
 
@@ -1020,12 +1576,59 @@ void scene_draw_shots(Scene *s, const Pools *pl, mat4 vp, v3 cam_right, v3 cam_u
        "내가 코어인가"를 유도하던 산술 대신 표 하나를 씁니다. 그 산술은 두 겹에서는
        동작했지만 이미 이 함수에서 가장 읽기 어려운 줄이었고, 세 번째 겹은 그것을 아무도
        검사할 수 없는 조건문 사슬로 만들었을 것입니다. */
-    struct Tier { int n; float size; float r, g, b, a; };
+    /* THE COLOUR LEFT THIS TABLE AND THE SHAPE OF IT STAYED. Each tier used to
+       name a literal blue, which was fine while every bolt in the game was the
+       same blue. They are not: ::LIGHT_COL_SHOT gives each creature its own
+       hue, and the wall behind the bolt is already being lit in it. A halo
+       that stayed blue while the wall went violet is the exact failure that
+       table's own note warns about, read from the other side.
+
+       So a tier now says how to TREAT a hue rather than what colour to be:
+       `mul` is how bright the layer burns, and `pull` is how far it is dragged
+       toward white -- NEGATIVE for the outer layers, which drags them away
+       from it instead, deepening the colour. That sign is not a trick. The
+       ::LIGHT_COL_SHOT row is a light's colour, chosen bright enough to tint a
+       wall it lands on; a glow blended additively onto the frame wants the
+       same hue deeper and darker, and one number that can go either way says
+       that better than two tables would.
+
+       THE THREE PAIRS ARE SOLVED, NOT PICKED. Feeding the caster's row through
+       them reproduces the blue this function used to name outright:
+
+           glow  wanted (0.16, 0.46, 0.95)   gets (0.14, 0.51, 0.96)
+           halo  wanted (0.10, 0.42, 0.85)   gets (0.10, 0.44, 0.86)
+           core  wanted (0.85, 0.98, 1.00)   gets (0.86, 0.92, 1.00)
+
+       which is the point: nothing about how a bolt looks changed except that
+       it can now be a different colour.
+
+       *색이 이 표를 떠나고 형태만 남았습니다.* 각 겹은 파랑 리터럴을 적고 있었고, 게임의
+       모든 볼트가 같은 파랑인 동안에는 괜찮았습니다. 이제는 아닙니다. ::LIGHT_COL_SHOT이
+       생물마다 고유한 색조를 주고, 볼트 뒤의 벽은 이미 그 색으로 밝혀지고 있습니다. 벽이
+       보라색이 되는데 헤일로가 파란 채로 남는 것은 그 표 자신의 설명이 경고하는 실패를
+       반대쪽에서 읽은 것입니다.
+
+       그래서 이제 겹은 무슨 색이 될지가 아니라 색조를 *어떻게 다룰지*를 말합니다. `mul`은
+       이 겹이 얼마나 밝게 타는지이고 `white`는 코어의 열기 쪽으로 얼마나 씻겨 나가는지입니다.
+       이 수치는 캐스터의 행에서 옛 파랑을 거의 그대로 재현하며, 그것이 요점입니다. 볼트가
+       이제 다른 색일 수 있다는 것 말고는 그 생김새의 무엇도 바뀌지 않았습니다. */
+    struct Tier { int n; float size; float mul, pull, a; };
     const struct Tier tier[3] = {
-        { SHOT_GLOWS, SHOT_GLOW_SIZE, 0.16f, 0.46f, 0.95f, 0.14f },  /* the emission */
-        { SHOT_HALOS, SHOT_HALO_SIZE, 0.10f, 0.42f, 0.85f, 0.30f },  /* halo petals  */
-        { SHOT_CORES, SHOT_CORE_SIZE, 0.85f, 0.98f, 1.00f, 0.85f },  /* hot core     */
+        { SHOT_GLOWS, SHOT_GLOW_SIZE, 0.97f, -0.45f, 0.14f },  /* the emission */
+        { SHOT_HALOS, SHOT_HALO_SIZE, 0.90f, -0.45f, 0.30f },  /* halo petals  */
+        { SHOT_CORES, SHOT_CORE_SIZE, 1.00f,  0.75f, 0.85f },  /* hot core     */
     };
+
+    /* One hue per live bolt, in the order they are packed into the buffer, so
+       the draw loop below can find the colour that goes with quad group `i`.
+       The fill loop walks slots and skips the dead ones, so slot order and
+       draw order are not the same thing and the index has to be recorded as it
+       is written rather than recomputed after.
+       살아 있는 볼트마다 색조 하나이며, 버퍼에 담기는 순서 그대로입니다. 그래야 아래의 그리기
+       반복문이 사각형 묶음 `i`에 딸린 색을 찾을 수 있습니다. 채우기 반복문은 슬롯을 훑으며
+       죽은 것을 건너뛰므로 슬롯 순서와 그리기 순서는 같지 않고, 인덱스는 나중에 다시
+       계산하는 것이 아니라 쓰이는 그 자리에서 기록되어야 합니다. */
+    const float *hue[ENEMY_MAX_SHOTS];
     const int stride = SHOT_QUADS * 6;
     int sn = enemy_shot_count(pl), live = 0;
 
@@ -1063,6 +1666,7 @@ void scene_draw_shots(Scene *s, const Pools *pl, mat4 vp, v3 cam_right, v3 cam_u
                 mb_billboard(&s->shot_buf, sh->pos, r, u, size, size);
             }
         }
+        hue[live] = shot_colour(sh);
         live++;
     }
 
@@ -1077,8 +1681,12 @@ void scene_draw_shots(Scene *s, const Pools *pl, mat4 vp, v3 cam_right, v3 cam_u
     glBlendFunc(GL_SRC_ALPHA, GL_ONE);
     glBindVertexArray(s->shot_mesh.vao);
     for (int i = 0; i < live; i++) {
+        const float *h = hue[i];
         for (int t = 0, first = 0; t < 3; first += tier[t].n, t++) {
-            rd_color(tier[t].r, tier[t].g, tier[t].b, tier[t].a);
+            rd_color(tier_chan(h[0], tier[t].mul, tier[t].pull),
+                     tier_chan(h[1], tier[t].mul, tier[t].pull),
+                     tier_chan(h[2], tier[t].mul, tier[t].pull),
+                     tier[t].a);
             glDrawArrays(GL_TRIANGLES, i * stride + first * 6, tier[t].n * 6);
         }
     }
@@ -2451,7 +3059,23 @@ void scene_draw_proj(Scene *s, const Pools *pl, mat4 vp, v3 cam_right, v3 cam_up
             if (t > 1.0f) t = 1.0f;
             rd_color(1.0f, 0.30f + 0.55f * t, 0.12f + 0.60f * t, 0.90f);
         } else {
-            rd_color(0.55f, 0.85f, 1.00f, 0.85f);
+            /* THE BOLT'S OWN ROW, not a literal. This line said (0.55, 0.85,
+               1.00) -- a pale BLUE -- while ::LIGHT_COL_BOLT lit the wall
+               behind it acid green, so the player's own plasma was drawn in
+               the colour the palette reserves for things shooting at them and
+               left a green pool under itself as it went. That is precisely the
+               failure ::LIGHT_COL_SHOT's note describes for the monsters' side
+               ("a halo that stayed blue while the wall went violet"), and the
+               note under ::scene_draw_shots records the same line being fixed
+               there. This is the one call site that never got the message.
+               *볼트 자신의 행이며* 리터럴이 아닙니다. 이 줄은 (0.55, 0.85, 1.00), 즉 옅은
+               *파랑*이었는데 ::LIGHT_COL_BOLT는 그 뒤의 벽을 강한 녹색으로 밝히고 있었습니다.
+               플레이어 자신의 플라즈마가 팔레트에서 *자신을 쏘는 것들*을 위해 예약된 색으로
+               그려지면서 지나가는 자리마다 녹색 웅덩이를 남긴 것입니다. ::LIGHT_COL_SHOT의
+               설명이 몬스터 쪽에 대해 묘사하는 실패("벽이 보라색이 되는데 헤일로가 파란 채로
+               남는 것") 바로 그것이며, ::scene_draw_shots 아래의 설명이 그곳에서 같은 줄을
+               고친 기록입니다. 이곳은 그 소식을 끝내 받지 못한 유일한 호출 지점이었습니다. */
+            rd_color(LIGHT_COL_BOLT[0], LIGHT_COL_BOLT[1], LIGHT_COL_BOLT[2], 0.85f);
         }
         glDrawArrays(GL_TRIANGLES, k * 6, 6);
         k++;
@@ -2892,7 +3516,24 @@ void scene_frame(const World *w, Scene *sc, int vw, int vh, int frozen) {
        최고 웨이브가 save.c에서 오는 이유는, 그것이 자신을 만들어 낸 모든 플레이보다 오래
        살아남기 때문입니다. ::RunState는 그것을 나를 수 없고 이 패스가 그것이 보이는 유일한
        곳입니다. UI를 위한 사실을 상태 모듈에서 읽는 것은 이 함수가 세 줄 위에서
-       ::menu_screen에 대해 이미 하고 있는 일입니다. */
-    if (w->run.title)
+       ::menu_screen에 대해 이미 하고 있는 일입니다.
+       AND ONLY WHILE THE TITLE IS THE SCREEN IN FRONT OF THE PLAYER. Settings
+       and credits are reached FROM the title, and while one of them is up the
+       menu's own header stands in this one's band -- both are placed by
+       ::menu_title_y, and at a real window size the two land within a dozen
+       pixels of each other -- so drawing the game's name as well printed two
+       headers over each other. The name is the title screen's own art, not the
+       backdrop's, and it leaves with the screen it belongs to. The ::ui_end
+       argument above survives intact: those are precisely the frames on which
+       ::scene_draw_menu runs a UI pass of its own, so none of them is left
+       without one.
+       *그리고 타이틀이 플레이어 앞의 화면인 동안에만 그립니다.* 설정과 크레딧은 타이틀에서
+       들어가는 곳이며, 그중 하나가 떠 있는 동안 메뉴 자신의 머리글이 이것과 정확히 같은 자리에
+       섭니다. 둘 다 ::menu_title_y가 놓으며, 실제 창 크기에서 그 둘은 십여 픽셀 안쪽에
+       떨어집니다. 그래서 게임의 이름까지 그리면 머리글 둘이 서로 겹쳐 찍혔습니다. 이름은 배경의 아트가 아니라 타이틀 화면 자신의 아트이며,
+       자신이 속한 화면과 함께 떠납니다. 위의 ::ui_end 논거는 그대로 살아 있습니다. 그 프레임들이
+       바로 ::scene_draw_menu가 자기 UI 패스를 도는 프레임이므로, 그중 어느 것도 패스 없이 남지
+       않습니다. */
+    if (w->run.title && (!menu_is_open() || menu_screen() == MENU_TITLE))
         scene_draw_title(sc, vw, vh, w->run.title_time, save_best_wave());
 }

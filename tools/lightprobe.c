@@ -2,11 +2,29 @@
  *
  * TWO THINGS IN ONE FILE, and only the second is a claim. Most of it measures:
  * how big a face is, what subdividing would cost, what the bake put on each
- * vertex, and which of bake_light's three refusals accounts for the dark. Those
- * are numbers to read rather than assertions to hold, and reading them is what
- * found the defect below. The bake is per VERTEX (see level.c's bake_light), so
- * the resolution of the light is the resolution of the geometry, and the
- * geometry is most of what these numbers describe.
+ * vertex, and which of the three refusals accounts for a lamp lighting nothing.
+ * Those are numbers to read rather than assertions to hold, and reading them is
+ * what found the defect below. The bake is per VERTEX (see level.c's
+ * bake_light), so the resolution of the light is the resolution of the
+ * geometry, and the geometry is most of what these numbers describe.
+ *
+ * WHAT THESE NUMBERS ARGUED FOR, AND WON. The measurement below -- 93.3% of
+ * vertex-lamp pairs rejected on distance, 0.5% lighting anything -- is the
+ * evidence that took the point lamps OUT of the bake and into the shader's
+ * per-fragment loop (scene.c's LIGHT_LAMP_POWER). So the lamp half of this
+ * file no longer describes what happens at load; it describes what WOULD
+ * happen if a lamp were baked, which is exactly the question to ask before
+ * anybody proposes baking one again. The face-size and sun halves are
+ * unchanged and still measure the shipping path.
+ *
+ * NO SHIPPED MAP DECLARES A SUN ANY MORE, so the claim below runs against one
+ * this file puts there: `lqdm1`'s own `_sunlight 120` / `_sunlight2 50` /
+ * `_sun_mangle "136 -73 0"`, which is what its worldspawn carried until the
+ * sky lighting was taken out of it. That makes this a FIXTURE rather than a
+ * measurement of what ships. It is kept because the code it exercises is kept:
+ * ::level_sun_reaches and the walk beneath it still compile, still run for any
+ * level that declares a sun, and would still be wrong in the way recorded
+ * below if nothing held them to it.
  *
  * WHAT IT CHECKS, AND WHAT THAT CAUGHT. A level lit by "_sunlight" needs its
  * rays to pass THROUGH the sky, because this engine has no sky pass: a sky face
@@ -179,7 +197,8 @@ int main(void) {
     }
 
     /* WHAT THE BAKE ACTUALLY PUT ON THE VERTICES. The geometry above bounds
-       where light CAN vary; this is whether it does. */
+       where light CAN vary; this is whether it does. Since the lamps left,
+       everything counted here is the sun and the sky dome. */
     {
         static MeshBuf mb;
         static int made;
@@ -202,14 +221,18 @@ int main(void) {
                zero, 100.0 * zero / (n ? n : 1));
         printf("    range %.3f .. %.3f, mean %.3f\n",
                (double)lo, (double)hi, (double)(sum / (n ? n : 1)));
-        printf("    (ambient alone is %.2f, so a vertex at 0 is lit by the key\n", 0.32);
-        printf("     light and nothing else -- flat across its whole face)\n");
+        printf("    (ambient alone is %.2f, so a vertex at 0 is lit by the key\n", 0.45);
+        printf("     light and nothing else -- flat across its whole face,\n");
+        printf("      which is every vertex in every shipped level now)\n");
     }
 
-    /* WHICH OF THE BAKE'S THREE REFUSALS DOES IT. Reproduced here rather than
-       instrumented in level.c, because the bake runs on every level load and a
-       counter in it would be a cost the game pays forever to answer a question
-       asked once. Same tests, same order. */
+    /* WHICH OF THE THREE REFUSALS DOES IT -- range, facing, shadow -- asked
+       of every vertex against every lamp. The bake no longer runs this loop;
+       this file still does, because the answer is what says whether a lamp is
+       worth a bake at all, and it is the number that moved them out of one.
+       Reproduced here rather than instrumented in level.c for the reason it
+       always was: a counter in the bake is a cost the game pays forever to
+       answer a question asked once. */
     {
         const Level *L2 = &W.level;
         long far_ = 0, away = 0, shadow = 0, lit2 = 0;
@@ -244,26 +267,76 @@ int main(void) {
         long tot = far_ + away + shadow + lit2;
         printf("\n  every vertex against every one of the %d lights (%ld pairs):\n",
                L2->n_lights, tot);
+        /* A level with no lamps leaves rmin/rmax at their sentinels, and
+           printing 1000000000.0 .. -1000000000.0 as a radius range reads as a
+           bug in the probe rather than as an empty set. Every shipped level is
+           that level now.
+           등이 없는 레벨은 rmin/rmax를 초기 감시값 그대로 남기며, 반경 범위로
+           1000000000.0 .. -1000000000.0을 찍는 것은 빈 집합이 아니라 프로브의 결함으로
+           읽힙니다. 이제 출하되는 모든 레벨이 그런 레벨입니다. */
+        if (L2->n_lights < 1) {
+            printf("    (the level declares none, so there are no pairs)\n");
+        } else {
         printf("    out of range   %9ld  (%.1f%%)   radii %.1f .. %.1f m\n",
                far_, 100.0 * far_ / (tot ? tot : 1), (double)rmin, (double)rmax);
         printf("    facing away    %9ld  (%.1f%%)\n", away, 100.0 * away / (tot ? tot : 1));
         printf("    shadowed       %9ld  (%.1f%%)\n", shadow, 100.0 * shadow / (tot ? tot : 1));
         printf("    LIT            %9ld  (%.1f%%)\n", lit2, 100.0 * lit2 / (tot ? tot : 1));
+        }
     }
 
     /* THE ONE CLAIM THIS FILE MAKES. Everything above is a report.
        이 파일이 하는 유일한 주장입니다. 위의 모든 것은 보고입니다. */
     {
-        const Level *l = &W.level;
+        Level *l = &W.level;
+
+        /* THE SUN THIS ARENA USED TO DECLARE, PUT BACK FOR THE CHECK. Its
+           worldspawn carried these three keys until the sky lighting came out
+           of it, and no map declares a sun now -- so the branch below would
+           take the "nothing to reach" path on every run and this file would
+           report `ok` while asserting nothing at all. That is a worse state
+           than a red test: a suite that passes because its subject is missing
+           says the subject is fine.
+
+           Written here rather than restored to the .map because the map was
+           changed on purpose. The numbers are `lqdm1`'s own, so what the walk
+           is measured against is the case it was written for.
+
+           *이 아레나가 선언하던 태양을 검사를 위해 되돌려 놓습니다.* 이 맵의 worldspawn은
+           하늘 조명이 빠지기 전까지 이 세 키를 지니고 있었고, 이제 어떤 맵도 태양을 선언하지
+           않습니다. 그래서 아래의 분기는 매 실행마다 "닿을 것이 없음" 경로를 타고, 이 파일은
+           아무것도 단언하지 않으면서 `ok`를 보고하게 됩니다. 그것은 빨간 테스트보다 나쁜
+           상태입니다. 대상이 없어서 통과하는 스위트는 대상이 멀쩡하다고 말합니다.
+
+           .map에 되돌리지 않고 이곳에 적는 이유는 맵이 의도적으로 바뀌었기 때문입니다. 수치는
+           `lqdm1` 자신의 것이므로, 걸음이 측정되는 대상은 그것이 쓰이게 된 바로 그 경우입니다. */
+        if (l->sun_power <= 0 && l->sky_power <= 0) {
+            printf("\n  the map declares no sun; putting its old one back for"
+                   " the check below\n");
+            /* _sun_mangle "136 -73 0" through brush_sun_of's own conversion:
+               yaw 136 deg, pitch -73 deg, Quake axes to this engine's, negated
+               because the file names the direction light TRAVELS.
+               brush_sun_of 자신의 변환을 거친 _sun_mangle "136 -73 0"입니다. yaw 136도,
+               pitch -73도, Quake 축에서 이 엔진의 축으로, 그리고 파일이 빛이 *진행하는*
+               방향을 적으므로 부호를 뒤집습니다. */
+            float yaw = 136.0f * 0.01745329f, pitch = -73.0f * 0.01745329f;
+            float cp = cosf(pitch);
+            float qx = cosf(yaw) * cp, qy = sinf(yaw) * cp, qz = sinf(pitch);
+            float ex = qx, ey = qz, ez = -qy;
+            float len = sqrtf(ex * ex + ey * ey + ez * ez);
+            l->sun[0] = -ex / len;
+            l->sun[1] = -ey / len;
+            l->sun[2] = -ez / len;
+            l->sun_power = 120;
+            l->sky_power = 50;
+            level_light_cache_reset();
+        }
+
         printf("\n  sun: power %d  sky %d  dir (%.3f %.3f %.3f)\n",
                l->sun_power, l->sky_power,
                (double)l->sun[0], (double)l->sun[1], (double)l->sun[2]);
 
         if (l->sun_power <= 0) {
-            /* Not a failure. Every hand-authored level in this project declares
-               no sun and bakes exactly as it did before any of this existed.
-               실패가 아닙니다. 이 프로젝트의 손으로 만든 레벨은 태양을 선언하지
-               않으며 이전과 똑같이 구워집니다. */
             printf("    no sun declared -- nothing to reach\n");
         } else {
             static MeshBuf mb3;

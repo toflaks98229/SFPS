@@ -241,6 +241,41 @@ typedef struct {
 #define AXE_SLAM_DAMAGE     70
 
 /**
+ * @brief How big an event the slam is, for ::proj_flash. 1 is a charge going off.
+ *
+ * ENGLISH
+ * -------
+ * A THIRD OF A GRENADE, and the radius is what makes the number necessary
+ * rather than redundant. A slam reaches further than a blast does -- 5.5m
+ * against 4.2 -- so anything deriving brightness from reach would light the
+ * room harder for the impact that has no fire in it than for the charge that
+ * does. What a falling axe actually throws is sparks off stone and a shock
+ * through the floor: enough light to be seen happening, nowhere near enough to
+ * blow the room out the way ::LIGHT_BLAST_POWER does at full strength.
+ *
+ * The SHAKE takes the same number, and that half is not a discount at all:
+ * ::WORLD_SHAKE_BLAST_REACH is measured in radii, and the slam's is the larger,
+ * so the jolt from coming down carries further than the one from a grenade
+ * while hitting less hard at the middle. Which is what landing on something is.
+ *
+ * 한국어
+ * ------
+ * @brief 내려찍기가 얼마나 큰 사건인지. ::proj_flash용이며, 1은 장약이 터지는 것입니다.
+ *
+ * *유탄의 3분의 1이며*, 이 수를 불필요한 것이 아니라 필요한 것으로 만드는 것은 반경입니다.
+ * 내려찍기는 폭발보다 멀리 닿습니다(4.2m에 대해 5.5m). 그래서 밝기를 도달 거리에서 끌어내는
+ * 것은 무엇이든, 불이 있는 장약보다 불이 없는 충격에 대해 방을 더 세게 밝히게 됩니다. 떨어지는
+ * 도끼가 실제로 던지는 것은 돌에서 튀는 불꽃과 바닥을 통한 충격입니다. 일어났다는 것이 보일
+ * 만큼의 빛이지, ::LIGHT_BLAST_POWER가 최대 세기에서 하듯 방을 날려 버릴 정도는 전혀 아닙니다.
+ *
+ * *흔들림*도 같은 수를 받으며, 그쪽 절반은 전혀 할인이 아닙니다.
+ * ::WORLD_SHAKE_BLAST_REACH는 반경의 배수로 재고 내려찍기 쪽이 더 크므로, 착지의 충격은
+ * 유탄의 것보다 멀리 퍼지면서 한가운데에서는 덜 세게 때립니다. 무언가 위로 내려앉는다는 것이
+ * 바로 그런 일입니다.
+ */
+#define AXE_SLAM_FLASH    0.33f
+
+/**
  * @brief Seconds a leap may stay airborne before the slam is forced.
  *
  * A leap that carries you off a ledge would otherwise never land, and its

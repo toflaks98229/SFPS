@@ -782,17 +782,39 @@ static void test_level_on_map(void) {
     check(highest > 1.0f + PLAYER_EYE,
           "and got up onto the ramp or the balcony at some point");
 
-    /* --- the lamps, baked into the vertices ---------------------------------
-       Quake's `light` entities became Level::lights, and level_geometry ran the
-       SAME bake the sector path runs -- ::bake_light reads Level::lights and
-       shadows with ::level_blocked, and both already answered for either model.
-       So this asserts two things at once: that the entities were read, and that
-       the shared bake reached brush geometry.
-       Quake의 `light` 엔티티가 Level::lights가 되었고, level_geometry는 섹터 경로가 돌리는
-       것과 *같은* 베이크를 돌렸습니다. ::bake_light는 Level::lights를 읽고
-       ::level_blocked로 그림자를 지우며, 그 둘은 이미 어느 모델에 대해서든 답했습니다.
-       따라서 이것은 두 가지를 한 번에 단언합니다. 엔티티가 읽혔다는 것과, 공유된 베이크가
-       브러시 지오메트리에 닿았다는 것입니다. */
+    /* --- the lamps, which are read here and lit somewhere else --------------
+       Quake's `light` entities became Level::lights. What happens to them next
+       used to be this file's business too: level_geometry ran the SAME bake the
+       sector path runs, ::bake_light summed the lamps, and asserting on the
+       vertices asserted both that the entities were read and that the shared
+       bake reached brush geometry.
+
+       THE LAMPS LEFT THE BAKE. They are per-fragment lights in the shader now,
+       beside the grenades -- see scene.c's LIGHT_LAMP_POWER for why a light
+       sampled at the corners of a face metres across is not a light. So the
+       two halves separated: the import is still this file's business and is
+       checked below, and whether a lamp lights anything is a question about a
+       frame, which tools/scenetest.c is the file that has one.
+
+       What is left here is the half that would otherwise go unwatched: the
+       lamps must NOT reach a vertex. A lamp applied in the loop and in the
+       bake is a lamp applied twice, and a room lit twice does not look broken,
+       it looks bright.
+
+       Quake의 `light` 엔티티가 Level::lights가 되었습니다. 그다음에 무슨 일이 일어나는지도
+       한때 이 파일의 소관이었습니다. level_geometry가 섹터 경로와 *같은* 베이크를 돌렸고
+       ::bake_light가 등을 합했으므로, 정점에 대해 단언하는 것이 엔티티가 읽혔다는 것과 공유된
+       베이크가 브러시 지오메트리에 닿았다는 것을 동시에 단언했습니다.
+
+       *등이 베이크를 떠났습니다.* 이제 등은 유탄 곁의, 셰이더 안 프래그먼트 광원입니다. 몇
+       미터짜리 면의 모서리에서 표본추출된 빛이 왜 빛이 아닌지는 scene.c의
+       LIGHT_LAMP_POWER를 참조하십시오. 그래서 두 절반이 갈라졌습니다. 임포트는 여전히 이
+       파일의 소관이고 아래에서 확인하며, 등이 무언가를 밝히는가는 프레임에 대한 질문이므로
+       프레임을 가진 tools/scenetest.c의 몫입니다.
+
+       이곳에 남는 것은 그러지 않으면 아무도 지켜보지 않을 절반입니다. 등은 정점에 닿아서는
+       *안 됩니다.* 반복문과 베이크 양쪽에서 적용된 등은 두 번 적용된 등이고, 두 번 밝혀진
+       방은 고장 나 보이지 않고 밝아 보입니다. */
     check(LV.n_lights == 3, "the map's three light entities were read");
     check(LV.lights[0].radius > 1000 && LV.lights[0].radius < 1300,
           "with `light 400` read as reach in centimetres");
@@ -813,16 +835,59 @@ static void test_level_on_map(void) {
         if (s > 0.001f) lit++;
         if (s > brightest) brightest = s;
     }
-    check(lit > 0, "and the bake reached its vertices");
+    check(LV.sun_power == 0 && LV.sky_power == 0,
+          "atrium declares lamps and no sun, so the bake has nothing to sum");
+    check(lit == 0, "and not one lamp reached a vertex");
+
+    /* --- the shared bake still reaches brush geometry ----------------------
+       THE CLAIM THE BLOCK ABOVE USED TO MAKE, kept by giving the level the term
+       the bake still has. ::bake_light is called from level_geometry rather
+       than from inside brush_geometry so that ONE bake answers for both
+       geometry models, and nothing else in this suite watches that: a bake
+       wired only into the sector path would leave every brush level flat and
+       every check above would still pass.
+
+       Overhead and bright, because the subject is the wiring rather than the
+       lighting. Put back afterwards so nothing below inherits a sun the map
+       does not declare, and the cache with it -- it holds readings traced
+       against this sun.
+
+       *위의 블록이 하던 주장*을, 베이크에 아직 남아 있는 항을 레벨에 주어 유지합니다.
+       ::bake_light를 brush_geometry 안이 아니라 level_geometry에서 부르는 이유는 *하나의*
+       베이크가 두 지오메트리 모델 모두에 답하게 하기 위함이며, 이 스위트에서 그것을 지켜보는
+       것은 달리 없습니다. 섹터 경로에만 연결된 베이크는 모든 브러시 레벨을 평평하게 두지만
+       위의 모든 검사는 그대로 통과합니다.
+
+       주제가 조명이 아니라 배선이므로 머리 위이고 밝은 태양입니다. 뒤에 되돌려 아래의
+       무엇도 맵이 선언하지 않은 태양을 물려받지 않게 하며, 그 태양에 대해 판정된 값을 담고
+       있는 캐시도 함께 비웁니다. */
+    LV.sun[0] = 0.0f; LV.sun[1] = 1.0f; LV.sun[2] = 0.0f;
+    LV.sun_power = 200;
+
+    mb_reset(&LB);
+    level_light_cache_reset();
+    level_geometry(&LB, &LV, LR, LVL_MAX_RANGES);
+
+    lit = 0; brightest = 0.0f;
+    for (int i = 0; i < LB.count; i++) {
+        float s = LB.v[i].lr + LB.v[i].lg + LB.v[i].lb;
+        if (s > 0.001f) lit++;
+        if (s > brightest) brightest = s;
+    }
+    check(lit > 0, "give it a sun and the bake reaches its vertices");
     check(brightest > 0.1f, "with somewhere actually bright");
 
     /* NOT EVERYTHING, which is the half that says the shadows work. A bake that
-       ignored ::level_blocked would light every vertex it could reach, including
-       the ones facing away from every lamp and the ones behind a wall.
-       전부는 아니며, 그 절반이 그림자가 동작한다고 말합니다. ::level_blocked를 무시한
-       베이크는 닿을 수 있는 모든 정점을 밝히며, 그중에는 모든 등을 등지고 있는 정점과 벽
-       뒤의 정점도 포함됩니다. */
+       ignored the trace would light every vertex it could reach, including the
+       ones facing away from the sun and the ones under a roof.
+       전부는 아니며, 그 절반이 그림자가 동작한다고 말합니다. 판정을 무시한 베이크는 닿을 수
+       있는 모든 정점을 밝히며, 그중에는 태양을 등지고 있는 정점과 지붕 아래의 정점도
+       포함됩니다. */
     check(lit < LB.count, "and did not light every vertex in the level");
+
+    LV.sun_power = 0;
+    LV.sun[1] = 0.0f;
+    level_light_cache_reset();
     mb_free(&LB);
 }
 
@@ -929,18 +994,20 @@ static void test_entities(void) {
         printf("  no atrium.map\n"); fails++; return;
     }
 
-    int imps = 0, heals = 0, spawners = 0;
+    int casters = 0, heals = 0, spawners = 0;
     for (int i = 0; i < LV.n_ents; i++) {
-        if (txt_is(LV.ents[i].kind, 3, "imp"))    imps++;
+        if (txt_is(LV.ents[i].kind, 6, "caster")) casters++;
         if (txt_is(LV.ents[i].kind, 6, "health")) heals++;
-        if (txt_is(LV.ents[i].kind, 12, "spawner_hound")) spawners++;
+        if (txt_is(LV.ents[i].kind, 20, "spawner_water_spirit")) spawners++;
     }
-    check(imps == 1,     "`monster_imp` became the kind `imp`");
+    check(casters == 1,  "`monster_caster` became the kind `caster`");
     check(heals == 1,    "`item_health` became the kind `health`");
     check(LV.n_ents >= 4, "and the markers are all there");
 
-    /* The prefix is stripped, not the name mangled: spawner_hound keeps its
-       own suffix because enemy.c is what reads it. */
+    /* The prefix is stripped, not the name mangled: spawner_water_spirit keeps
+       its own suffix -- underscores and all -- because enemy.c is what reads
+       it. This is the longest kind the shipped set has, which is the reason to
+       assert on THIS one rather than on a short name. */
     int found_spawner = 0;
     for (int i = 0; i < LV.n_ents; i++) {
         const char *k = LV.ents[i].kind;
@@ -950,8 +1017,8 @@ static void test_entities(void) {
             check(LV.ents[i].p[2] == 4,  "and its `maxalive 4`");
         }
     }
-    check(found_spawner, "`monster_spawner_hound` came through as a kind");
-    (void)spawners;
+    check(found_spawner, "`monster_spawner_water_spirit` came through as a kind");
+    check(spawners == 1, "under its full name, not a truncation of it");
 
     /* --- and the modules that own those names pick them up ---------------- */
     Pools zero = {0};
@@ -964,14 +1031,21 @@ static void test_entities(void) {
     check(enemy_count(&PL) == 1, "enemy.c made the one monster the level drew");
     check(pickup_count(&PL) >= 2, "and pickup.c laid out the items");
 
-    /* ON THE FLOOR, not on the roof. The marker sits at 24 units -- under a
-       metre -- and the room's floor is at zero; a search that began a kilometre
-       up would have settled it on the outside of the ceiling at six metres.
-       지붕이 아니라 *바닥* 위입니다. 표식은 24유닛, 1미터도 안 되는 높이에 있고 방의 바닥은
-       0입니다. 1킬로미터 위에서 시작한 탐색이었다면 6미터의 천장 바깥면에 안착시켰을
-       것입니다. */
+    /* AT THE HEIGHT ITS MARKER NAMED, because the caster carries MON_FLIES and
+       is the one kind whose origin is its feet rather than the start of a floor
+       search. The marker sits at 64 units -- two metres -- over a floor at
+       zero, so a build that had lost the flag would report 0.0 here and a build
+       that had lost the unit conversion would report 64.
+       The other half of the chain, "settles onto the storey its origin was over
+       rather than the outside of the roof", is asserted on the monster the
+       SPAWNER makes further down: that marker is over the balcony.
+       표식이 말한 높이에 있습니다. 캐스터가 MON_FLIES를 지니며, origin이 바닥 탐색의 시작점이
+       아니라 자기 발인 유일한 종류이기 때문입니다. 표식은 바닥이 0인 곳 위 64유닛, 2미터에
+       있습니다. 플래그를 잃은 빌드는 이곳에서 0.0을, 단위 변환을 잃은 빌드는 64를 보고합니다.
+       사슬의 나머지 절반("지붕 바깥면이 아니라 origin이 있던 층에 안착한다")은 아래에서
+       *스포너*가 만드는 몬스터에 대해 단언합니다. 그 표식은 발코니 위에 있습니다. */
     const Enemy *m = enemy_at(&PL, 0);
-    checkf(m->pos.y, 0.0f, 0.05f, "and it is standing on the floor, not the roof");
+    checkf(m->pos.y, 2.0f, 0.05f, "and it is hovering where its marker put it");
 
     /* --- the spawner ------------------------------------------------------ */
     check(PL.enemy.n_spawners == 1, "the spawner was read into the pool");
@@ -1013,13 +1087,13 @@ static void test_entities(void) {
     checkf(made->pos.y, 3.0f, 0.05f,
            "made on the balcony its origin was over, not on the floor below it");
 
-    /* THE CEILING HOLDS IT, and nothing here is dying: the level drew one imp
-       and `maxalive 4` allows three more, after which the spawner has nowhere
+    /* THE CEILING HOLDS IT, and nothing here is dying: the level drew one
+       caster and `maxalive 4` allows three more, after which the spawner has nowhere
        to put anything. Run it far past six intervals and it is still holding.
        This is the assertion that says the ceiling is a ceiling rather than a
        suggestion -- without it an endless spawner fills the pool and raises
        DIAG_ENEMY_CAP every few seconds forever.
-       천장이 그것을 붙잡고 있으며 이곳에서는 아무것도 죽지 않습니다. 레벨이 임프 하나를
+       천장이 그것을 붙잡고 있으며 이곳에서는 아무것도 죽지 않습니다. 레벨이 캐스터 하나를
        그렸고 `maxalive 4`가 셋을 더 허용하며, 그 뒤로 스포너는 아무것도 놓을 자리가
        없습니다. 여섯 주기를 한참 넘겨 돌려도 여전히 붙잡혀 있습니다. 천장이 권고가 아니라
        천장이라고 말하는 단언입니다. 이것이 없으면 무제한 스포너가 풀을 채우고 몇 초마다

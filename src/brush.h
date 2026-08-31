@@ -569,30 +569,89 @@ _Static_assert(BR_MAX_POLY >= BR_MAX_FACES + 4,
  * ENGLISH
  * -------
  * A Valve 220 face gives its offsets and scales in TEXELS, so turning them into
- * a 0..1 coordinate needs to know how many texels a tile has. That number is
- * not the engine's: ::TEX_SIZE is 256 because materials are generated at 256
- * for filtering headroom, while the hand-drawn wall art is 128 and 128 is what
- * TrenchBroom will show when the texture collection is exported.
+ * a 0..1 coordinate needs to know how many texels ONE MATERIAL SPANS.
  *
  * IT MUST MATCH THE EDITOR, not the renderer. If they disagree, a texture the
  * author fitted to a face in TrenchBroom arrives in the game at half or double
  * scale, and every face in the level is wrong by the same factor -- which reads
  * as a scale mistake in the map rather than as a constant here.
  *
+ * THIS WAS 128, AND 128 WAS WRONG. The reasoning behind it was that TrenchBroom
+ * shows the hand-drawn wall art at 128, so 128 is the tile the author fits to.
+ * The first half is true and the second does not follow, because a material is
+ * not one copy of its drawing:
+ *
+ *   sprite.c tiles a drawing that is SMALLER than its cell, so one ::SPR_WALL
+ *   cell always holds exactly SPR_WALL texels of the source's own grid -- one
+ *   copy of a 128 drawing, four of a 64, sixty-four of a 16.
+ *   tex.c's `image <name> <n>` then repeats that CELL `n` times across the
+ *   ::TEX_SIZE material.
+ *
+ * So a material spans `SPR_WALL * n` source texels, and that -- not the size of
+ * the drawing -- is what a UV of 1.0 crosses. Every wall material now uses
+ * n = TEX_SIZE / SPR_WALL = 2, which is the count that puts the art in the
+ * material at its native density, so the span is TEX_SIZE.
+ *
+ * WHAT IT LOOKED LIKE WHILE THEY DISAGREED. `image` counts were being chosen
+ * by a different rule -- 256 divided by the source's side, so 2 for a 128
+ * drawing, 4 for a 64, 16 for a 16 -- which is the count that fills the
+ * material, not the count that matches the editor. Against a divisor of 128
+ * that made every 128 surface tile TWICE as often in game as in TrenchBroom,
+ * every 64 surface four times, and `black` sixteen. On `lqdm1` that is 2,721
+ * faces at 2x and 1,593 at 4x: a whole level whose walls read as authored at
+ * the wrong scale.
+ *
+ * @note Equal to ::TEX_SIZE, and deliberately not written as it. They are the
+ *       same number for a reason that could stop being true -- TEX_SIZE is a
+ *       filtering-headroom decision and this is an agreement with an editor.
+ * @note NOT CHECKED FROM HERE, and that is the point of where it is checked
+ *       instead. The two facts this rests on live in sprite.h and in
+ *       assets/textures.txt, and this header includes only m.h -- reaching
+ *       them would couple the geometry module to the material and sprite
+ *       layers it is deliberately ignorant of. tools/texprobe.c holds the
+ *       check, because half of what it verifies is in a text asset that no
+ *       static assert can see anyway.
+ *
  * 한국어
  * ------
  * @brief 에디터와 엔진이 합의하는 텍스처 크기이며 픽셀 단위입니다.
  *
- * Valve 220 면은 오프셋과 배율을 *텍셀*로 줍니다. 따라서 그것을 0..1 좌표로 바꾸려면 타일
- * 하나에 텍셀이 몇 개인지 알아야 합니다. 그 숫자는 엔진의 것이 아닙니다. ::TEX_SIZE가 256인
- * 것은 필터링 여유를 위해 재질을 256으로 생성하기 때문이고, 손으로 그린 벽 그림은 128이며
- * 텍스처 모음을 내보냈을 때 TrenchBroom이 보여 줄 것도 128입니다.
+ * Valve 220 면은 오프셋과 배율을 *텍셀*로 줍니다. 따라서 그것을 0..1 좌표로 바꾸려면
+ * *재질 하나가 몇 텍셀에 걸치는지*를 알아야 합니다.
  *
  * 렌더러가 아니라 *에디터*와 일치해야 합니다. 둘이 어긋나면 제작자가 TrenchBroom에서 면에
  * 맞춘 텍스처가 게임에서는 절반이나 두 배 크기로 도착하고, 레벨의 모든 면이 같은 배수만큼
  * 틀립니다. 그것은 이곳의 상수가 아니라 맵의 배율 실수처럼 읽힙니다.
+ *
+ * *이 값은 128이었고, 128은 틀렸습니다.* 그 근거는 TrenchBroom이 손으로 그린 벽 그림을
+ * 128로 보여 주므로 제작자가 맞추는 타일이 128이라는 것이었습니다. 앞 절반은 참이고 뒤
+ * 절반은 따라 나오지 않습니다. 재질은 자기 그림 한 장이 아니기 때문입니다.
+ *
+ *   sprite.c는 셀보다 *작은* 그림을 타일링하므로, ::SPR_WALL 셀 하나는 언제나 원본 격자의
+ *   SPR_WALL 텍셀에 정확히 해당합니다. 128 그림은 한 장, 64는 네 장, 16은 예순네 장입니다.
+ *   그다음 tex.c의 `image <name> <n>`이 그 *셀*을 ::TEX_SIZE 재질에 걸쳐 `n`번 반복합니다.
+ *
+ * 따라서 재질 하나는 `SPR_WALL * n` 원본 텍셀에 걸치며, 그림의 크기가 아니라 그것이 UV 1.0이
+ * 가로지르는 값입니다. 이제 모든 벽 재질이 n = TEX_SIZE / SPR_WALL = 2를 쓰며, 그것이 아트를
+ * 재질 안에 원본 밀도로 놓는 수이므로 걸침은 TEX_SIZE가 됩니다.
+ *
+ * *둘이 어긋나 있는 동안 어떻게 보였는가.* `image` 수는 다른 규칙으로 골라지고 있었습니다.
+ * 256을 원본의 변으로 나눈 값이며, 128 그림에 2, 64에 4, 16에 16입니다. 그것은 재질을 채우는
+ * 수이지 에디터와 맞추는 수가 아닙니다. 128이라는 제수에 대해 그것은 모든 128 표면을
+ * TrenchBroom보다 게임에서 *두 배* 자주 반복하게 만들었고, 모든 64 표면은 네 배,
+ * `black`은 열여섯 배였습니다. `lqdm1`에서 그것은 2,721개 면이 2배, 1,593개 면이 4배입니다.
+ * 벽 전체가 잘못된 배율로 제작된 것처럼 읽히는 레벨입니다.
+ *
+ * @note ::TEX_SIZE와 같은 값이지만 일부러 그것으로 적지 않습니다. 둘이 같은 이유는 참이기를
+ *       그만둘 수 있는 것입니다. TEX_SIZE는 필터링 여유에 관한 결정이고 이것은 에디터와의
+ *       약속입니다.
+ * @note *이곳에서 검사하지 않으며*, 그것이 대신 어디에서 검사하는지의 요점입니다. 이 값이 딛고
+ *       선 두 사실은 sprite.h와 assets/textures.txt에 있고 이 헤더는 m.h만 포함합니다. 그것에
+ *       닿으려면 지오메트리 모듈을 그것이 일부러 모르고 있는 재질·스프라이트 계층에 묶어야
+ *       합니다. 검사는 tools/texprobe.c가 가지고 있습니다. 확인해야 할 것의 절반이 애초에 어떤
+ *       정적 검사도 볼 수 없는 텍스트 에셋 안에 있기 때문입니다.
  */
-#define BRUSH_TEXELS 128.0f
+#define BRUSH_TEXELS 256.0f
 
 /* --- Types / 타입 --------------------------------------------------------- */
 

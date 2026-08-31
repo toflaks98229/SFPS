@@ -282,7 +282,19 @@ static void test_uv(void) {
 
     /* The four corners of that wall, in world metres, and what a 128x128
        texture must give at each. 0,0 is the top-left of the texture; v grows
-       downward, which is the same direction level.c's walls run. */
+       downward, which is the same direction level.c's walls run.
+
+       128 HERE IS AN ARGUMENT, NOT ::BRUSH_TEXELS. What is under test is the
+       projection ::brush_face_uv performs given a tile size, and 128 is the
+       size that makes this 4m wall come out as exactly one tile -- which is
+       what makes the expected numbers above readable. The divisor the game
+       actually passes is BRUSH_TEXELS, and it is 256; tools/texprobe.c is
+       what holds that number to the material library it has to agree with.
+       *이곳의 128은 인자이지 ::BRUSH_TEXELS가 아닙니다.* 검사 대상은 타일 크기가 주어졌을 때
+       ::brush_face_uv가 수행하는 투영이고, 128은 이 4미터 벽이 정확히 한 타일로 나오게 하는
+       크기입니다. 그래야 위의 기댓값을 읽을 수 있습니다. 게임이 실제로 넘기는 제수는
+       BRUSH_TEXELS이며 256입니다. 그 수를 그것이 합의해야 할 재질 라이브러리에 붙들어 두는
+       것은 tools/texprobe.c입니다. */
     struct { v3 p; float u, v; const char *what; } c[] = {
         { v3f(-2.0f, 4.0f, -2.0f), 0.0f, 0.0f, "west top    -> u 0 v 0" },
         { v3f( 2.0f, 4.0f, -2.0f), 1.0f, 0.0f, "east top    -> u 1 v 0" },
@@ -1082,7 +1094,32 @@ static void test_geometry(void) {
     checki(nr, 1, "one material run, because one texture");
 
     /* Every vertex of the ceiling run must carry the UV its own face's axes
-       give it, which is what makes this different from a planar projection. */
+       give it, which is what makes this different from a planar projection.
+
+       HALF A MATERIAL IS ONE COPY OF THE ART, which is why the numbers below
+       are 0.5 and not 1.0. The fixture is a 4m wall -- 128 map units -- fitted
+       to one tile of a 128 drawing, and ::BRUSH_TEXELS is 256, so it spans
+       half of one material. That material holds two drawing cells across, so
+       half of it is exactly one cell: the wall shows one copy of the art, the
+       same thing 1.0 meant when the divisor was 128 and a material was one
+       cell. What changed is the unit, not the picture.
+
+       The check above this one uses 128 as a literal ARGUMENT to
+       ::brush_face_uv and still expects 0..1, because that call is asking what
+       the projection does for a given tile size. This one goes through
+       ::brush_geometry, which uses the divisor the game ships. Both are worth
+       having and they are not the same question.
+
+       *재질의 절반이 아트 한 장이며*, 그래서 아래의 수가 1.0이 아니라 0.5입니다. 픽스처는
+       4미터, 곧 128맵 단위 벽이고 128짜리 그림의 한 타일에 맞춰져 있으며, ::BRUSH_TEXELS가
+       256이므로 재질 하나의 절반에 걸칩니다. 그 재질은 가로로 그림 셀 두 개를 담으므로 절반이
+       정확히 셀 하나입니다. 벽은 아트 한 장을 보여 주며, 제수가 128이고 재질이 셀 하나이던
+       시절의 1.0이 뜻하던 것과 같습니다. 바뀐 것은 단위이지 그림이 아닙니다.
+
+       이 위의 검사는 128을 ::brush_face_uv에 리터럴 *인자*로 넘기며 여전히 0..1을 기대합니다.
+       그 호출은 주어진 타일 크기에 대해 투영이 무엇을 하는지 묻기 때문입니다. 이 검사는 게임이
+       출하하는 제수를 쓰는 ::brush_geometry를 지납니다. 둘 다 가질 가치가 있고 같은 질문이
+       아닙니다. */
     checki(brush_parse(DOOR_FACE, -1, &M2), 1, "the fitted-door fixture parses");
     mb_reset(&GB);
     brush_geometry(&GB, &M2, 0, M2.n_brushes, GR, BR_MAX_RANGES);
@@ -1099,10 +1136,17 @@ static void test_geometry(void) {
         if (GB.v[i].v > vmax) vmax = GB.v[i].v;
     }
     checki(n, 4, "the door face is a quad");
-    checkf(umin, 0.0f, 0.001f, "built u starts at 0");
-    checkf(umax, 1.0f, 0.001f, "built u ends at 1");
-    checkf(vmin, 0.0f, 0.001f, "built v starts at 0");
-    checkf(vmax, 1.0f, 0.001f, "built v ends at 1");
+    /* 128 map units over a 256-texel material. Written as the arithmetic
+       rather than as 0.5, so the day ::BRUSH_TEXELS moves this says what it
+       depends on instead of failing with a bare number.
+       256텍셀 재질에 대한 128맵 단위입니다. 0.5가 아니라 산술로 적으므로,
+       ::BRUSH_TEXELS가 움직이는 날 이 검사는 맨 숫자로 실패하는 대신 무엇에 의존하는지를
+       말합니다. */
+    const float DOOR_SPAN = 128.0f / BRUSH_TEXELS;
+    checkf(umin, 0.0f,       0.001f, "built u starts at 0");
+    checkf(umax, DOOR_SPAN,  0.001f, "built u ends at one drawing cell");
+    checkf(vmin, 0.0f,       0.001f, "built v starts at 0");
+    checkf(vmax, DOOR_SPAN,  0.001f, "built v ends at one drawing cell");
 
     /* A nodraw texture bounds the solid and produces no triangles. */
     checki(brush_parse(TB_CUBE, -1, &M2), 1, "the all-__TB_empty cube parses");

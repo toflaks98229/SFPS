@@ -44,6 +44,43 @@
 
 static int fails;
 
+/* Builds a level's geometry with a sun on it, and reports what that left in
+ * the light cache.
+ *
+ * ENGLISH
+ * -------
+ * THE SUN IS PUT THERE BECAUSE NOTHING DECLARES ONE. ::bake_light is a sun
+ * bake -- the point lamps left it, and then `lqdm1`'s worldspawn keys left too
+ * -- so it returns on its first line for every level the game loads and the
+ * cache it feeds stays empty. The checks below are about a cache being DROPPED
+ * on the paths that make a level into a different level, and "the cache is
+ * empty after a reload" is worth nothing if it was empty before.
+ *
+ * Overhead and bright, because the subject is the reset rather than the
+ * lighting. Re-applied at every fill rather than once: each of the paths under
+ * test reloads the level, and a reload is exactly what puts ::Level::sun back
+ * to the zero the file declares.
+ *
+ * 한국어
+ * ------
+ * *태양을 이곳에서 놓는 이유는 그것을 선언하는 것이 없기 때문입니다.* ::bake_light는 태양
+ * 베이크입니다. 점광원이 그것을 떠났고 그다음 `lqdm1`의 worldspawn 키도 떠났으므로, 게임이
+ * 로드하는 모든 레벨에서 첫 줄에 반환하며 그것이 채우는 캐시는 비어 있습니다. 아래의 검사는
+ * 레벨을 *다른* 레벨로 만드는 경로에서 캐시가 *버려지는지*에 관한 것이고, "다시 로드한 뒤
+ * 캐시가 비어 있다"는 그 전에도 비어 있었다면 아무 가치가 없습니다.
+ *
+ * 주제가 조명이 아니라 리셋이므로 머리 위이고 밝은 태양입니다. 한 번이 아니라 채울 때마다 다시
+ * 적용합니다. 검사 대상인 각 경로가 레벨을 다시 로드하고, 다시 로드하는 것이야말로
+ * ::Level::sun을 파일이 선언하는 0으로 되돌리는 일이기 때문입니다.
+ */
+static int fill_light_cache(World *w, MeshBuf *b) {
+    w->level.sun[0] = 0.0f; w->level.sun[1] = 1.0f; w->level.sun[2] = 0.0f;
+    w->level.sun_power = 200;
+    mb_reset(b);
+    level_geometry(b, &w->level, 0, 0);
+    return level_light_cache_count();
+}
+
 static void ok(int cond, const char *what) {
     printf("  %-58s %s\n", what, cond ? "ok" : "FAIL");
     if (!cond) fails++;
@@ -301,10 +338,10 @@ static void check_score(void) {
     /* THE ONE THAT WOULD NOT BE NOTICED. The corpse is still in its slot and
        still dead, so anything that answers "how many dead monsters are there"
        instead of "how many died since you last asked" counts it again every
-       frame -- and reports several hundred kills for one imp.
+       frame -- and reports several hundred kills for one monster.
        알아채지 못할 바로 그것입니다. 시체는 여전히 자기 슬롯에 죽은 채로 있으므로, "죽은
        몬스터가 몇인가"에 답하는 것은 "마지막으로 물은 뒤 몇이 죽었는가" 대신 매 프레임 그것을
-       다시 세고, 임프 하나로 수백 처치를 보고합니다. */
+       다시 세고, 몬스터 하나로 수백 처치를 보고합니다. */
     for (int i = 0; i < 60; i++) world_step(&w, &in, ASPECT, DT);
     ok(w.run.kills == 1, "a corpse is paid out once, not once per frame");
 
@@ -1230,6 +1267,8 @@ int main(void) {
        leveltest가 아니라 이곳에서 검사하는 이유는 이것들이 *월드* 경로이기 때문입니다.
        재시작, 스테이지 전환, 새 플레이이며, 그것들을 소유하는 것은 world.c입니다. */
     printf("\n  --- the light cache belongs to one level ---\n");
+    /* The three fills below go through ::fill_light_cache, which gives the
+       level a sun first. See it for why. */
     {
         static World w;
         MeshBuf b;
@@ -1243,8 +1282,7 @@ int main(void) {
            않습니다. */
         world_init(&w);
         world_load_level(&w, w.cur_level, WORLD_ENTER_NEW);
-        level_geometry(&b, &w.level, 0, 0);
-        int filled = level_light_cache_count();
+        int filled = fill_light_cache(&w, &b);
         ok(filled > 0, "a build fills the cache, so an empty one means something");
 
         /* 1. A fresh load. */
@@ -1252,7 +1290,7 @@ int main(void) {
         ok(level_light_cache_count() == 0, "loading a level drops the cache");
 
         /* 2. A restart, which replays the stage the player is in. */
-        level_geometry(&b, &w.level, 0, 0);
+        fill_light_cache(&w, &b);
         world_restart(&w);
         ok(level_light_cache_count() == 0, "and so does a restart");
 
@@ -1261,8 +1299,7 @@ int main(void) {
               does rather than calling the loader directly.
               step_between은 인터미션 시계가 끝나면 다음 레벨을 로드하므로, 로더를 직접
               호출하지 않고 프레임이 하는 방식으로 구동합니다. */
-        level_geometry(&b, &w.level, 0, 0);
-        int before_stage = level_light_cache_count();
+        int before_stage = fill_light_cache(&w, &b);
 
         w.run.between      = 1;
         w.run.between_time = 0.0f;

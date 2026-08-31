@@ -71,10 +71,25 @@ static void oki(int cond, const char *what, int got, int want) {
    name out.
    픽스처에 엔티티 종류를 씁니다. ::Entity::kind는 고정 버퍼이고 이 테스트에는 여러 개가
    필요하므로, 이름을 적어 넣는 곳은 이 한 곳입니다. */
+/* LVL_KIND, NOT LVL_MAT, and the difference is sixteen characters. A kind and a
+   material name shared one budget once and this helper kept the material's
+   after they split. Nothing showed it while every kind here was short: `maw`,
+   `wardair` and `spawner_hound` all fit in 15. `spawner_water_spirit` is 20, so
+   it arrived as `spawner_water_s`, resolved to no monster, and the spawner
+   simply was not there -- the same silent failure leveltest's "spawner
+   classnames survive the import" section exists to catch in the shipped
+   pipeline, reproduced in a test fixture.
+   LVL_MAT가 아니라 LVL_KIND이며, 그 차이는 열여섯 글자입니다. 종류 이름과 재질 이름은 한때
+   예산을 공유했고, 둘이 갈라선 뒤에도 이 도우미는 재질 쪽을 붙들고 있었습니다. 이곳의 모든
+   종류가 짧은 동안에는 아무것도 드러나지 않았습니다. `maw`, `wardair`, `spawner_hound`는 모두
+   15자 안에 들어갑니다. `spawner_water_spirit`는 20자라서 `spawner_water_s`로 도착했고, 어떤
+   몬스터로도 해석되지 않았으며, 스포너는 그냥 없었습니다. leveltest의 "스포너 클래스명이 임포트를
+   견딘다" 구획이 출하 파이프라인에서 잡으려고 존재하는 바로 그 조용한 실패를, 테스트 픽스처에서
+   재현한 것입니다. */
 static void put_ent(const char *kind, int x, int y, int z) {
     Entity *e = &L.ents[L.n_ents++];
     int i = 0;
-    while (kind[i] && i < LVL_MAT - 1) { e->kind[i] = kind[i]; i++; }
+    while (kind[i] && i < LVL_KIND - 1) { e->kind[i] = kind[i]; i++; }
     e->kind[i] = 0;
     e->x = (short)x; e->y = (short)y; e->z = (short)z;
 }
@@ -98,7 +113,7 @@ static void build(int n_air, int n_ground) {
        스포너 하나입니다. ::enemy_wave_done이 답할 아레나를 갖게 하기 위함입니다. 그 함수는
        스포너가 없는 레벨에서는 곧바로 0을 반환하며, 이 파일이 검사하는 규칙(서 있는 보스가
        웨이브 시계를 세우지 않는다)은 스포너 없이는 도달할 수 없습니다. */
-    put_ent("spawner_hound", 2500, 16, 2500);
+    put_ent("spawner_water_spirit", 2500, 16, 2500);
 
     /* Spread along two lines, far enough apart that no two share a position --
        the position IS the identity as far as the candidate sort is concerned.
@@ -171,7 +186,7 @@ static void wfix(int endless, int n_air, int n_ground) {
        put_ent가 그곳에 쓰므로, 그동안 둘을 같은 것으로 만듭니다. */
     L = *l;
     put_ent("maw", 0, 20, 2500);
-    put_ent("spawner_hound", 2500, 16, 2500);
+    put_ent("spawner_water_spirit", 2500, 16, 2500);
     for (int i = 0; i < n_air; i++)    put_ent("wardair",    -2000 + i * 300, 400, -1000);
     for (int i = 0; i < n_ground; i++) put_ent("wardground", -2000 + i * 300,  60,  1000);
     *l = L;
@@ -184,7 +199,7 @@ static void wfix(int endless, int n_air, int n_ground) {
 }
 
 /* THE PLAYER IS TOPPED UP EVERY FRAME, and without it this file measures the
-   wrong thing. The maw shoots, the arena's spawner keeps sending hounds, and
+   wrong thing. The maw shoots, the arena's spawner keeps sending monsters, and
    the groggy-timeout case has to stand still for a full minute -- so an honest
    player dies partway through, ::world_frozen goes true, and ::step_boss stops
    being called. The fight then "fails" every assertion after that point for a

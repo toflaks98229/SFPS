@@ -159,51 +159,70 @@ enum MonTypeID {
      *
      * ENGLISH: Named `imp` until a water spirit took the slot -- a melee
      * creature became a mid-range one, so the name stopped describing it. The
-     * ENUM keeps its position because the position is the sprite atlas row,
-     * and `imp` keeps working as a level name because two shipped maps say it.
-     * See ::MON_LEGACY.
+     * ENUM keeps its position because the position is the sprite atlas row.
+     *
+     * `imp` still resolves and no longer resolves HERE. The bestiary lost its
+     * fast melee row and its flyer, and a retired name is pointed at whatever
+     * replaced it rather than left aimed at where it used to live: `hound`
+     * arrives at this row, `imp` at ::MON_CASTER. See ::MON_LEGACY.
      *
      * 한국어: 물의 정령이 이 자리를 차지하기 전까지 `imp`였습니다. 근접 생물이 중거리
      * 생물이 되면서 그 이름이 더 이상 그것을 설명하지 못하게 되었습니다. *열거형*은 자기
-     * 위치를 유지합니다. 그 위치가 곧 스프라이트 아틀라스의 행이기 때문입니다. 그리고
-     * `imp`는 레벨 이름으로 계속 동작합니다. 배포된 맵 둘이 그렇게 적고 있기 때문입니다.
-     * ::MON_LEGACY를 참조하십시오.
+     * 위치를 유지합니다. 그 위치가 곧 스프라이트 아틀라스의 행이기 때문입니다.
+     *
+     * `imp`는 여전히 해석되며, 더 이상 *이곳으로* 해석되지 않습니다. 도감이 빠른 근접 행과
+     * 비행체를 잃었고, 은퇴한 이름은 예전에 살던 자리를 계속 겨누는 대신 그것을 대신한 것을
+     * 가리킵니다. `hound`는 이 행에, `imp`는 ::MON_CASTER에 도착합니다. ::MON_LEGACY를
+     * 참조하십시오.
      */
     MON_WATER_SPIRIT,
-    MON_BRUTE,      /**< A slow imp with more of everything. / 모든 것이 더 많은 느린 임프. */
-    MON_HOUND,      /**< A fast one with less. / 더 적은 것을 가진 빠른 임프. */
-    MON_CASTER,     /**< Fights at range, with a projectile. / 발사체로 원거리에서 싸웁니다. */
+    MON_BRUTE,      /**< A slow water spirit with more of everything, and it closes. / 모든 것이 더 많고 붙는 느린 물의 정령. */
 
     /**
-     * @brief The one that is not on the floor.
+     * @brief Fights at range with a projectile, and does it from the air.
      *
      * ENGLISH
      * -------
-     * THE FIRST MONSTER THAT ADDS AN AXIS RATHER THAN A STAT BLOCK. The other
-     * four differ by numbers -- the brute is a slow imp with more of everything,
-     * the hound a fast one with less -- and all four are solved by aiming
-     * forward and backing up. A wraith holds the air over a chasm, where backing
-     * up is a fall and aiming forward finds nothing, and it is the reason the
-     * grapple exists in a game about a room.
+     * THE ONE MONSTER THAT ADDS AN AXIS RATHER THAN A STAT BLOCK. The other two
+     * differ from each other by numbers -- the brute is a slow water spirit
+     * with more of everything -- and both are solved by aiming forward and
+     * backing up. This one holds the air over a chasm, where backing up is a
+     * fall and aiming forward finds nothing, and it is the reason the grapple
+     * exists in a game about a room.
+     *
+     * IT DID NOT ALWAYS FLY. There was a floor-bound caster and a `wraith`
+     * hanging above it, and what separated them was a metre of air, four points
+     * of health and this file's ::MON_FLIES bit -- one idea spread over two
+     * rows, paying for two sprite bodies, two FGD boxes and two ::LOOT_TABLES
+     * slots. The flying one was the reason either was worth having, so the flag
+     * came down onto the caster and the second row went. What is left is a
+     * single ranged creature that is never on the floor.
      *
      * Ranged, because a flyer that had to close would simply descend and become
-     * a slow imp. Fragile, because something you cannot always reach must not
+     * a slow brute. Fragile, because something you cannot always reach must not
      * also take a magazine.
      *
      * 한국어
      * ------
-     * @brief 바닥에 있지 않은 유일한 몬스터.
+     * @brief 발사체로 원거리에서 싸우며, 그것을 공중에서 합니다.
      *
-     * 수치가 아니라 *축*을 더하는 첫 몬스터입니다. 나머지 넷은 숫자로 다릅니다. 브루트는 모든
-     * 것이 더 많은 느린 임프이고 하운드는 더 적은 빠른 임프이며, 넷 모두 앞을 조준하고 뒤로
-     * 물러나면 해결됩니다. 레이스는 협곡 위 공중을 차지하는데, 그곳에서 물러나는 것은 추락이고
-     * 앞을 조준하면 아무것도 없습니다. 그리고 그것이 방 하나짜리 게임에 그래플이 존재하는
+     * *수치가 아니라 축을 더하는 유일한 몬스터입니다.* 나머지 둘은 서로 숫자로 다릅니다.
+     * 브루트는 모든 것이 더 많은 느린 물의 정령이며, 둘 다 앞을 조준하고 뒤로 물러나면
+     * 해결됩니다. 이것은 협곡 위 공중을 차지하는데, 그곳에서 물러나는 것은 추락이고 앞을
+     * 조준하면 아무것도 없습니다. 그리고 그것이 방 하나짜리 게임에 그래플이 존재하는
      * 이유입니다.
      *
-     * 원거리인 이유는, 접근해야 하는 비행체는 그냥 내려와서 느린 임프가 되기 때문입니다.
+     * *처음부터 날지는 않았습니다.* 바닥에 묶인 캐스터가 있었고 그 위에 `wraith`가 걸려
+     * 있었으며, 둘을 가른 것은 공중 1미터와 체력 4점과 이 파일의 ::MON_FLIES 비트였습니다.
+     * 하나의 착상을 두 행에 펼친 것이며, 스프라이트 몸체 둘과 FGD 상자 둘과 ::LOOT_TABLES
+     * 칸 둘을 치렀습니다. 둘 중 어느 쪽이든 가질 값어치가 있었던 이유는 나는 쪽이었으므로,
+     * 플래그가 캐스터로 내려오고 두 번째 행이 사라졌습니다. 남은 것은 결코 바닥에 있지 않은
+     * 원거리 생물 하나입니다.
+     *
+     * 원거리인 이유는, 접근해야 하는 비행체는 그냥 내려와서 느린 브루트가 되기 때문입니다.
      * 무른 이유는, 언제나 닿을 수는 없는 것이 탄창까지 먹어서는 안 되기 때문입니다.
      */
-    MON_WRAITH,
+    MON_CASTER,
 
     /**
      * @brief The boss: a mouth in the wall that never leaves it.
@@ -474,20 +493,30 @@ enum {
      * ENGLISH: Everything in this world falls, and until now that was written
      * into ::enemy_update rather than decided per kind. A flyer is what the
      * vertical arena on the roadmap wants -- floating platforms and a chasm are
-     * only a threat if something can be out over them.
+     * only a threat if something can be out over them. ::MON_CASTER carries it,
+     * and is the only kind that does. It was carried by a `wraith` first, a row
+     * that was a caster plus this bit; the bit turned out to be the whole of
+     * the difference, so it moved and the row went.
      *
-     * @warning NO SHIPPED MONSTER CARRIES THIS YET. The mechanism is here and
-     *          checked; the creature that uses it is a design decision and a
-     *          sprite, neither of which belongs in the same change as the bit.
+     * ONLY WHILE IT IS ALIVE. This suppresses the fall for a monster that is
+     * flying, and a corpse is not flying: ::E_DEAD hands a flyer back to
+     * gravity, so a caster shot out of the air drops rather than hanging at the
+     * height it was killed at. ::holds_height in enemy.c is where that is said,
+     * and it is the difference between this bit and ::MON_ANCHORED, which holds
+     * through death because a thing bolted to a wall is still bolted to it.
      *
      * 한국어: 바닥으로 떨어지는 대신 생성된 높이를 유지합니다. 이 세계의 모든 것은 떨어지며,
      * 지금까지 그것은 종류별로 정해진 것이 아니라 ::enemy_update 안에 적혀 있었습니다. 비행체는
      * 로드맵의 수직 아레나가 원하는 것입니다. 떠 있는 발판과 협곡은 그 위로 나올 수 있는 무언가가
-     * 있어야만 위협이 됩니다.
+     * 있어야만 위협이 됩니다. ::MON_CASTER가 이 비트를 가지며, 가진 유일한 종류입니다. 처음
+     * 이것을 가진 것은 `wraith`였습니다. 캐스터에 이 비트를 더한 행이었고, 결국 그 비트가 차이의
+     * 전부였으므로 비트가 옮겨 가고 행은 사라졌습니다.
      *
-     * @warning 아직 어떤 배포 몬스터도 이 비트를 갖고 있지 않습니다. 기구는 이곳에 있고 검사도
-     *          됩니다. 그것을 쓰는 크리처는 설계 결정과 스프라이트이며, 둘 다 이 비트와 같은
-     *          변경에 속하지 않습니다.
+     * *살아 있는 동안만입니다.* 이것은 *날고 있는* 몬스터의 낙하를 억제하며, 시체는 날고 있지
+     * 않습니다. ::E_DEAD는 비행체를 중력에 돌려주므로, 공중에서 격추된 캐스터는 죽은 높이에
+     * 걸려 있지 않고 떨어집니다. 그 말이 적힌 곳은 enemy.c의 ::holds_height이며, 그것이 이
+     * 비트와 ::MON_ANCHORED의 차이입니다. 후자는 죽음을 넘어 유지됩니다. 벽에 박힌 것은 여전히
+     * 벽에 박혀 있기 때문입니다.
      */
     MON_FLIES = 1 << 0,
 
@@ -507,6 +536,10 @@ enum {
      * turns to face the player and still shoots. ::AI_CASTER minus the footwork
      * is "it shoots", which is the whole of what the maw does.
      *
+     * AND IT OUTLIVES THE MONSTER, which is the other place it parts company
+     * with ::MON_FLIES. A dead flyer falls; a dead anchored thing does not,
+     * because what held it up was never that it was alive. See ::holds_height.
+     *
      * 한국어
      * ------
      * @brief 결코 움직이지 않으며, 놓인 높이를 그대로 지킵니다.
@@ -519,6 +552,10 @@ enum {
      *
      * 억제하는 것은 *이동*이지 조준이 아닙니다. 고정된 캐스터도 여전히 플레이어를 향해 돌고
      * 여전히 쏩니다. 발놀림을 뺀 ::AI_CASTER는 "쏜다"이고, 그것이 아귀가 하는 일의 전부입니다.
+     *
+     * *그리고 몬스터보다 오래 갑니다.* ::MON_FLIES와 갈라서는 또 하나의 지점입니다. 죽은
+     * 비행체는 떨어지지만 죽은 고정물은 떨어지지 않습니다. 그것을 떠받치던 것은 애초에 살아
+     * 있다는 사실이 아니었기 때문입니다. ::holds_height를 참조하십시오.
      */
     MON_ANCHORED = 1 << 1,
 
@@ -610,8 +647,11 @@ typedef struct {
      * makes ::height the one number that resizes a monster proportionally.
      *
      * WHAT FOLLOWS height ON ITS OWN: the top of the hitscan cylinder, the step
-     * it can climb (height/3), the ceiling clearance a spawn needs, where the
-     * grapple attaches, and where blood sprays.
+     * it can climb (::mon_step, height/3 but never under ::PLAYER_STEP -- a
+     * kind shrunk below that keeps the player's stride and stops shrinking in
+     * this one respect, because the stairs belong to the level), the ceiling
+     * clearance a spawn needs, where the grapple attaches, and where blood
+     * sprays.
      *
      * WHAT DOES NOT, and has to be scaled by hand in the same edit:
      *   ::radius  -- the cylinder is `radius` wide and `height` tall, so a
@@ -636,8 +676,11 @@ typedef struct {
      * *그려지는 빌보드는 `height` 높이에 `height * aspect` 너비*이며, 그래서 ::height 하나가
      * 몬스터를 비례해서 키우고 줄이는 유일한 숫자입니다.
      *
-     * height를 저절로 따라가는 것: 히트스캔 원기둥의 윗면, 오를 수 있는 턱 높이(height/3),
-     * 스폰에 필요한 천장 높이, 갈고리가 붙는 자리, 피가 튀는 자리.
+     * height를 저절로 따라가는 것: 히트스캔 원기둥의 윗면, 오를 수 있는 턱
+     * 높이(::mon_step이며, height/3이되 결코 ::PLAYER_STEP 아래로는 내려가지 않습니다. 그보다
+     * 작아진 종류는 플레이어의 보폭을 그대로 가지며 이 한 가지에 대해서만 작아지기를 멈춥니다.
+     * 계단은 레벨의 것이기 때문입니다), 스폰에 필요한 천장 높이, 갈고리가 붙는 자리, 피가 튀는
+     * 자리.
      *
      * 따라가지 *않아* 같은 수정에서 손으로 함께 조정해야 하는 것:
      *   ::radius  -- 원기둥은 `radius` 굵기에 `height` 높이입니다. 반경을 그대로 둔 채 키운
@@ -652,7 +695,50 @@ typedef struct {
      * @note ::types_check는 이 중 무엇도 보지 않습니다. `eye`가 `height`보다 높아도 잡히지
      *       않고 그대로 플레이됩니다. */
 
-    float radius;       /**< Collision and hitscan radius, metres. / 충돌·히트스캔 반경(미터). */
+    /**
+     * @brief Collision and hitscan radius, metres.
+     *
+     * ENGLISH
+     * -------
+     * BOTH HALVES OF THAT ARE NOW TRUE. For a long time only the hitscan half
+     * was: ::enemy_hitscan was the single reader, while the movement path asked
+     * about the monster's centre column alone. So this number said how wide a
+     * monster was to SHOOT AT and nothing about how wide it was to the world,
+     * and a monster could stand with its middle on a wall face and the rest of
+     * itself inside the geometry. ::foot_ok and ::air_ok sample it now, the
+     * same five points ::can_stand takes around ::PLAYER_RADIUS.
+     *
+     * IT IS ALSO WHAT KEEPS THE SPRITE OUT OF THE WALL, which is the surprising
+     * part and the reason a drawing bug is fixed by a number in this column. A
+     * monster is drawn as a billboard `height * aspect` wide that turns to face
+     * the camera, so the most of itself it can bury in whatever it stands
+     * against is `height * aspect / 2 - radius`. Raise this and that shrinks;
+     * at `height * aspect / 2` it is zero.
+     *
+     * @note Keep it UNDER the drawn half-width. Past that the monster is wider
+     *       to shoot at than it is to look at, and shots that visibly pass
+     *       beside it register as hits.
+     *
+     * 한국어
+     * ------
+     * @brief 충돌 및 히트스캔 반경(미터).
+     *
+     * *이제 그 두 절반이 모두 참입니다.* 오랫동안 히트스캔 쪽 절반만 참이었습니다.
+     * ::enemy_hitscan이 유일한 독자였고, 이동 경로는 몬스터의 중심 기둥 하나만 물었습니다.
+     * 그래서 이 숫자는 몬스터가 *쏘아 맞히기에* 얼마나 넓은지를 말했을 뿐 세계에 대해 얼마나
+     * 넓은지는 말하지 않았고, 몬스터는 한가운데를 벽면에 둔 채 나머지를 지오메트리 안에 넣고
+     * 서 있을 수 있었습니다. 이제 ::foot_ok와 ::air_ok가 이것을 표본하며, ::can_stand가
+     * ::PLAYER_RADIUS 둘레에서 취하는 것과 같은 다섯 점입니다.
+     *
+     * *그리고 이것이 스프라이트를 벽 밖에 붙들어 둡니다.* 놀라운 부분이자, 그리기 버그가 이
+     * 열의 숫자로 고쳐지는 이유입니다. 몬스터는 `height * aspect` 너비의 빌보드로 그려지고
+     * 카메라를 향해 돌므로, 기대 선 것에 묻을 수 있는 최대치는 `height * aspect / 2 - radius`
+     * 입니다. 이 값을 올리면 그만큼 줄고, `height * aspect / 2`에서 0이 됩니다.
+     *
+     * @note 그려지는 반너비보다 *작게* 유지하십시오. 그것을 넘으면 몬스터는 보이는 것보다 쏘아
+     *       맞히기에 더 넓어지고, 눈에 띄게 옆으로 지나가는 사격이 명중으로 처리됩니다.
+     */
+    float radius;
     float height;       /**< Standing height, metres. Also the drawn height. / 신장(미터). 그려지는 높이이기도 합니다. */
     float eye;          /**< Eye height above the feet, metres. Where it looks and shoots from. / 발 위의 시선 높이(미터). 보고 쏘는 자리입니다. */
 
@@ -700,11 +786,11 @@ typedef struct {
      * ENGLISH: Quake's `yaw_speed`. A monster that snaps to face the player
      * every frame cannot be got behind, which makes strafing pointless -- there
      * is no angle left to win. Per monster because it is character: the brute
-     * is a wall that cannot track you, the hound is a beast that can.
+     * is a wall that cannot track you, the water spirit is quick enough to.
      *
      * 한국어: Quake의 `yaw_speed`입니다. 매 프레임 플레이어 쪽으로 즉시 도는 몬스터는 뒤를
      * 잡을 수 없고, 그러면 이길 각도가 없어 횡이동이 무의미해집니다. 몬스터별인 이유는 그것이
-     * 성격이기 때문입니다. 브루트는 추적하지 못하는 벽이고 하운드는 추적하는 짐승입니다.
+     * 성격이기 때문입니다. 브루트는 추적하지 못하는 벽이고 물의 정령은 추적할 만큼 빠릅니다.
      */
     float yaw_speed;
 
@@ -957,6 +1043,38 @@ typedef struct {
     float life;     /**< Seconds until it expires; 0 means the slot is free. / 사라지기까지 남은 시간(초). 0이면 빈 슬롯입니다. */
     int   damage;   /**< Damage it deals on impact. / 명중 시 피해량. */
     int   active;   /**< Whether this slot is in use. / 이 슬롯이 사용 중인지 여부. */
+
+    /**
+     * @brief Which creature cast it, a ::MonTypeID.
+     *
+     * ENGLISH
+     * -------
+     * WHAT IT IS FOR IS COLOUR, and that is a small use for a field on a
+     * struct this file is careful about. It earns the four bytes because the
+     * alternative is worse: a bolt in the air has no other link back to the
+     * monster that made it -- ::shot_fire copies a position, a velocity and a
+     * damage number and the caster walks away -- so scene.c would otherwise
+     * have to guess a creature from a damage value, which two of them share.
+     *
+     * The renderer is the only reader. Nothing in this module branches on it,
+     * and a bolt behaves identically whoever threw it: ::MON_MAW's hurts more
+     * because ::MonType::damage is larger, not because of this.
+     *
+     * 한국어
+     * ------
+     * @brief 이것을 시전한 생물. ::MonTypeID 값입니다.
+     *
+     * *쓰임은 색이며*, 이 파일이 신중하게 다루는 구조체의 필드치고는 작은 쓰임입니다. 그럼에도
+     * 4바이트의 값을 하는 이유는 대안이 더 나쁘기 때문입니다. 공중의 볼트에는 자기를 만든
+     * 몬스터로 돌아가는 다른 연결이 없습니다. ::shot_fire는 위치와 속도와 피해량을 복사하고
+     * 시전자는 걸어가 버립니다. 그것이 없으면 scene.c는 피해량으로 생물을 추측해야 하는데, 그
+     * 값을 공유하는 종류가 둘 있습니다.
+     *
+     * 읽는 것은 렌더러뿐입니다. 이 모듈의 무엇도 이것으로 분기하지 않으며, 누가 던졌든 볼트는
+     * 똑같이 행동합니다. ::MON_MAW의 볼트가 더 아픈 것은 ::MonType::damage가 크기 때문이지
+     * 이것 때문이 아닙니다.
+     */
+    int   type;
 
     /**
      * @brief Seconds until the next trail particle is emitted.
@@ -1557,7 +1675,7 @@ const MonType *mon_stats(int type);
  *
  * ENGLISH
  * -------
- * @param[in] kind Entity kind string, e.g. "imp" or "brute".
+ * @param[in] kind Entity kind string, e.g. "water_spirit" or "brute".
  * @return The ::MonTypeID, or -1 if no kind has that name.
  *
  * @note Matched against ::MonType::name, so the names live in the stat table
@@ -1567,7 +1685,7 @@ const MonType *mon_stats(int type);
  * ------
  * @brief 레벨 텍스트의 엔티티 이름이 가리키는 몬스터 종류.
  *
- * @param[in] kind 엔티티 종류 문자열. 예를 들어 "imp"나 "brute"입니다.
+ * @param[in] kind 엔티티 종류 문자열. 예를 들어 "water_spirit"이나 "brute"입니다.
  * @return ::MonTypeID 값. 그 이름을 가진 종류가 없으면 -1입니다.
  *
  * @note ::MonType::name과 대조하므로 이름이 수치 표 안에 살며, 자신이 배치하는 종류와

@@ -87,9 +87,9 @@ static int shade(int win, float best, float ny, float glow,
     return 255;
 }
 
-/* ------------------------------------------------------------------ imp */
+/* ---------------------------------------------------------- water spirit */
 
-static const unsigned char PAL_IMP[C_COUNT][3] = {
+static const unsigned char PAL_SPIRIT[C_COUNT][3] = {
     { 150,  58,  40 }, { 176,  96,  62 }, {  96,  34,  26 },
     { 208, 198, 168 }, { 255, 224,  70 }, {  30,  10,  12 },
     { 200,  60,  60 },   /* C_GLOW: red-hot maw */
@@ -111,7 +111,7 @@ static int spirit_pixel(int fr, float nx, float ny, unsigned char *rgb) {
         part(ell(nx, ny, 0.10f, 0.13f, 0.34f, 0.10f), C_BELLY, &best, &win);
         part(cap(nx, ny, -0.35f, 0.16f, -0.48f, 0.30f, 0.035f), C_HORN, &best, &win);
         part(cap(nx, ny, -0.20f, 0.16f, -0.28f, 0.28f, 0.035f), C_HORN, &best, &win);
-        return shade(win, best, ny / 0.28f, 0.0f, PAL_IMP, rgb);
+        return shade(win, best, ny / 0.28f, 0.0f, PAL_SPIRIT, rgb);
     }
 
     nx += lean * ny;
@@ -143,7 +143,7 @@ static int spirit_pixel(int fr, float nx, float ny, unsigned char *rgb) {
     if (mouth > 0.0f) win = C_MAW;
 
     float glow = (win == C_MAW && maw > 0.0f) ? 1.0f : 0.0f;
-    return shade(win, best, ny, glow, PAL_IMP, rgb);
+    return shade(win, best, ny, glow, PAL_SPIRIT, rgb);
 }
 
 /* ----------------------------------------------------------------- brute */
@@ -221,80 +221,6 @@ static int brute_pixel(int fr, float nx, float ny, unsigned char *rgb) {
     return shade(win, best, ny, glow, PAL_BRUTE, rgb);
 }
 
-/* ----------------------------------------------------------------- hound */
-
-static const unsigned char PAL_HOUND[C_COUNT][3] = {
-    {  86, 108,  66 },   /* body: sickly green */
-    { 110, 128,  84 },   /* belly */
-    {  56,  70,  44 },   /* legs */
-    { 226, 224, 200 },   /* fangs, claws */
-    { 240, 255, 110 },   /* eyes: pale yellow-green */
-    {  20,  10,  10 },   /* maw */
-    { 200,  60,  60 },   /* C_GLOW: red-hot maw */
-};
-
-/* A Pinky-style charging beast: a bulky body on stubby legs, mostly a huge
-   fanged head. The gaping maw is the whole read -- it says "monster" even a few
-   pixels tall, which a low quadruped silhouette does not. */
-static int hound_pixel(int fr, float nx, float ny, unsigned char *rgb) {
-    float leg = 0.0f, maw = 0.0f, crouch = 0.0f, lunge = 0.0f;
-    switch (fr) {
-    case SPR_WALK0:  leg =  0.06f; break;
-    case SPR_WALK1:  leg = -0.06f; break;
-    case SPR_ATTACK: maw = 1.0f; lunge = 0.05f; break;
-    case SPR_HURT:   crouch = 0.05f; break;
-    default: break;
-    }
-
-    if (fr == SPR_DEAD) {
-        float best = -1e9f; int win = C_BODY;
-        part(ell(nx, ny, 0.0f, 0.11f, 0.78f, 0.16f), C_BODY, &best, &win);
-        part(ell(nx, ny, 0.0f, 0.12f, 0.34f, 0.09f), C_MAW,  &best, &win);
-        part(cap(nx, ny, -0.55f, 0.14f, -0.66f, 0.06f, 0.03f), C_HORN, &best, &win);
-        return shade(win, best, ny / 0.30f, 0.0f, PAL_HOUND, rgb);
-    }
-
-    ny += crouch;
-    float best = -1e9f; int win = C_BODY;
-
-    /* Four stubby legs. */
-    part(cap(nx, ny, -0.24f, 0.24f, -0.26f - leg, 0.0f, 0.075f), C_LIMB, &best, &win);
-    part(cap(nx, ny,  0.24f, 0.24f,  0.26f + leg, 0.0f, 0.075f), C_LIMB, &best, &win);
-    part(cap(nx, ny, -0.42f, 0.22f, -0.46f + leg, 0.0f, 0.075f), C_LIMB, &best, &win);
-    part(cap(nx, ny,  0.42f, 0.22f,  0.46f - leg, 0.0f, 0.075f), C_LIMB, &best, &win);
-
-    /* A muscular hunched body... */
-    part(ell(nx, ny, 0.0f, 0.52f, 0.40f, 0.26f), C_BODY,  &best, &win);
-    /* ...that is mostly a huge head thrust forward. */
-    part(ell(nx, ny, 0.0f, 0.44f, 0.46f, 0.34f), C_BODY,  &best, &win);
-    part(ell(nx, ny, 0.0f, 0.40f, 0.30f, 0.20f), C_BELLY, &best, &win);
-    /* Two horn nubs on the brow. */
-    part(cap(nx, ny, -0.22f, 0.70f, -0.30f, 0.86f, 0.035f), C_HORN, &best, &win);
-    part(cap(nx, ny,  0.22f, 0.70f,  0.30f, 0.86f, 0.035f), C_HORN, &best, &win);
-
-    if (best <= 0.0f) return 0;
-
-    /* Small close-set eyes glaring over the mouth. */
-    if (ell(nx, ny, -0.13f, 0.58f, 0.055f, 0.06f) > 0.0f ||
-        ell(nx, ny,  0.13f, 0.58f, 0.055f, 0.06f) > 0.0f) win = C_EYE;
-
-    /* The maw dominates the face: a wide dark gash, wider when it lunges, with
-       a ring of fangs biting in from the lips. */
-    float my = 0.30f - lunge;
-    float mouth = ell(nx, ny, 0.0f, my, 0.34f, 0.09f + maw * 0.09f);
-    if (mouth > 0.0f) {
-        win = C_MAW;
-        /* Fangs: fold x to the nearest tooth slot, and bite in from whichever
-           lip is nearer, so teeth line the top and bottom of the opening. */
-        float fx = nx - 0.12f * floorf(nx / 0.12f + 0.5f);
-        float lip = 0.09f + maw * 0.09f - fabsf(ny - my);   /* distance inside the maw */
-        if (fabsf(fx) < 0.028f && lip < 0.055f) win = C_HORN;
-    }
-
-    float glow = (win == C_MAW && maw > 0.0f) ? 1.0f : 0.0f;
-    return shade(win, best, ny, glow, PAL_HOUND, rgb);
-}
-
 /* ---------------------------------------------------------------- caster */
 
 static const unsigned char PAL_CASTER[C_COUNT][3] = {
@@ -308,9 +234,11 @@ static const unsigned char PAL_CASTER[C_COUNT][3] = {
 };
 
 /* A robed, hovering figure -- no legs at all, just a robe tapering to a point.
-   Tall, narrow and cyan against three squat warm-coloured melee types, so
+   Tall, narrow and cyan against two squat warm-coloured floor-bound types, so
    "the one that shoots" is legible from across a room, which is the whole job
-   of a ranged enemy's silhouette. */
+   of a ranged enemy's silhouette. The missing legs are not decoration now: this
+   is the kind that carries MON_FLIES, and a silhouette ending in a point is the
+   only thing telling the player it is not standing on anything. */
 static int caster_pixel(int fr, float nx, float ny, unsigned char *rgb) {
     float arm = 0.0f, glowamt = 0.0f, lean = 0.0f, bobp = 0.0f;
     switch (fr) {
@@ -374,102 +302,6 @@ static int caster_pixel(int fr, float nx, float ny, unsigned char *rgb) {
        punch rather than being shaded down with the cloth. */
     float glow = (win == C_EYE) ? (0.35f + 0.65f * glowamt) : 0.0f;
     return shade(win, best, ny, glow, PAL_CASTER, rgb);
-}
-
-/* Cold where the others are warm. Every creature above is fire, meat or bone;
-   this one is the only thing in the bestiary that is not, so a shape glimpsed
-   overhead is identified by its colour before its outline is read.
-   다른 것들이 따뜻한 자리에서 차갑습니다. 위의 모든 크리처는 불이거나 살이거나 뼈이며, 이것은
-   도감에서 그렇지 않은 유일한 것입니다. 그래서 머리 위로 스친 형체는 윤곽을 읽기 전에 색으로
-   먼저 식별됩니다. */
-static const unsigned char PAL_WRAITH[C_COUNT][3] = {
-    {  58,  66, 104 }, {  84,  96, 140 }, {  38,  44,  72 },
-    { 196, 206, 228 }, { 140, 226, 255 }, {  14,  16,  30 },
-    {  90, 180, 255 },   /* C_GLOW: cold light */
-};
-
-/* NO LEGS, and that is the whole of the read. A silhouette that ends in a
-   tapering rag says "not standing on anything" from across a room, which is
-   the one fact about this monster the player has to get right immediately --
-   they cannot back away from it the way they can from everything else.
-   다리가 없으며, 그것이 읽힘의 전부입니다. 뾰족하게 좁아지는 넝마로 끝나는 실루엣은 방 건너에서
-   "아무것도 딛고 있지 않다"고 말하며, 그것이 플레이어가 즉시 알아야 할 이 몬스터에 대한 단 하나의
-   사실입니다. 다른 모든 것에서와 달리 이것에게서는 물러날 수 없습니다. */
-static int wraith_pixel(int fr, float nx, float ny, unsigned char *rgb) {
-    float arm = 0.0f, glowamt = 0.0f, lean = 0.0f, bobp = 0.0f, tatter = 0.0f;
-    switch (fr) {
-    case SPR_WALK0:  bobp =  0.05f; tatter =  0.05f; break;   /* it never walks */
-    case SPR_WALK1:  bobp = -0.05f; tatter = -0.05f; break;
-    case SPR_ATTACK: arm = 1.0f; glowamt = 1.0f; bobp = 0.02f; break;
-    case SPR_HURT:   lean = -0.16f; bobp = -0.07f; break;
-    default: break;
-    }
-
-    if (fr == SPR_DEAD) {
-        /* It does not fall over -- it comes apart. Three shreds sinking, with
-           nothing holding them in a body shape.
-           쓰러지지 않고 흩어집니다. 몸의 형태로 묶어 두는 것 없이 가라앉는 넝마 셋입니다. */
-        float best = -1e9f; int win = C_BODY;
-        part(ell(nx, ny, -0.22f, 0.08f, 0.26f, 0.07f), C_LIMB,  &best, &win);
-        part(ell(nx, ny,  0.06f, 0.12f, 0.34f, 0.09f), C_BODY,  &best, &win);
-        part(ell(nx, ny,  0.30f, 0.07f, 0.18f, 0.06f), C_BELLY, &best, &win);
-        return shade(win, best, ny / 0.24f, 0.0f, PAL_WRAITH, rgb);
-    }
-
-    ny -= bobp;
-    nx += lean * ny;
-    float best = -1e9f; int win = C_BODY;
-
-    /* The shroud: broad at the shoulders and drawn to a point in the air. It
-       stops well above where a floor would be, which is the difference between
-       this outline and the caster's.
-       수의입니다. 어깨에서 넓고 공중의 한 점으로 좁아집니다. 바닥이 있을 자리보다 한참 위에서
-       끝나며, 그것이 이 윤곽과 캐스터의 윤곽의 차이입니다. */
-    part(cap(nx, ny, 0.0f, 0.30f, tatter * 0.6f, 0.86f, 0.05f), C_LIMB, &best, &win);
-    part(ell(nx, ny, 0.0f, 0.62f, 0.29f, 0.26f), C_BODY,  &best, &win);
-    part(ell(nx, ny, 0.0f, 0.58f, 0.16f, 0.18f), C_BELLY, &best, &win);
-
-    /* Three tatters trailing below, swinging out of phase with the hover. */
-    part(cap(nx, ny, -0.13f, 0.44f, -0.17f + tatter, 0.20f, 0.045f), C_LIMB, &best, &win);
-    part(cap(nx, ny,  0.00f, 0.42f,  0.02f - tatter, 0.14f, 0.050f), C_LIMB, &best, &win);
-    part(cap(nx, ny,  0.13f, 0.44f,  0.18f + tatter, 0.22f, 0.045f), C_LIMB, &best, &win);
-
-    /* Sleeves, thrown wide on the attack rather than raised: a thing with no
-       feet braces by spreading, not by planting.
-       공격 시 들어올리는 것이 아니라 넓게 펼칩니다. 발이 없는 것은 딛는 대신 펼쳐서
-       버팁니다. */
-    float hy = 0.66f - arm * 0.06f;
-    float hx = 0.33f + arm * 0.16f;
-    part(cap(nx, ny, -0.20f, 0.74f, -hx, hy, 0.065f), C_LIMB, &best, &win);
-    part(cap(nx, ny,  0.20f, 0.74f,  hx, hy, 0.065f), C_LIMB, &best, &win);
-
-    /* Cowl. Lower and wider than the caster's, so the two do not read alike
-       when both are on screen.
-       카울입니다. 캐스터의 것보다 낮고 넓어, 둘이 동시에 화면에 있어도 같게 읽히지 않습니다. */
-    part(ell(nx, ny, 0.0f, 0.92f, 0.22f, 0.16f), C_BODY, &best, &win);
-
-    if (best <= 0.0f) return 0;
-
-    /* The void under the cowl, and one eye rather than two: a single cold point
-       is what tells it apart from the caster at a glance and from a distance,
-       which is exactly the range this thing is fought at.
-       카울 아래의 공허, 그리고 둘이 아닌 *하나*의 눈입니다. 차가운 점 하나가 한눈에, 그리고
-       멀리서 이것을 캐스터와 구별해 주며, 그 거리가 바로 이것과 싸우는 거리입니다. */
-    if (ell(nx, ny, 0.0f, 0.90f, 0.14f, 0.11f) > 0.0f) win = C_MAW;
-    if (ell(nx, ny, 0.0f, 0.91f, 0.052f, 0.048f) > 0.0f) win = C_EYE;
-
-    /* Bone at the sleeve ends, as the caster has -- the one thing they share,
-       because they are the same order of creature. */
-    if (ell(nx, ny, -hx, hy, 0.05f, 0.05f) > 0.0f ||
-        ell(nx, ny,  hx, hy, 0.05f, 0.05f) > 0.0f) win = C_HORN;
-
-    /* The bolt gathers BETWEEN the spread hands rather than at the chest, so
-       the telegraph is as wide as the pose that sells it. */
-    if (arm > 0.0f && ell(nx, ny, 0.0f, hy + 0.04f, 0.10f, 0.10f) > 0.0f)
-        win = C_EYE;
-
-    float glow = (win == C_EYE) ? (0.45f + 0.55f * glowamt) : 0.0f;
-    return shade(win, best, ny, glow, PAL_WRAITH, rgb);
 }
 
 /* ------------------------------------------------------------------- maw
@@ -638,9 +470,7 @@ static int ward_pixel(int fr, float nx, float ny, unsigned char *rgb) {
 static int creature_pixel(int type, int fr, float nx, float ny, unsigned char *rgb) {
     switch (type) {
     case MON_BRUTE:  return brute_pixel(fr, nx, ny, rgb);
-    case MON_HOUND:  return hound_pixel(fr, nx, ny, rgb);
     case MON_CASTER: return caster_pixel(fr, nx, ny, rgb);
-    case MON_WRAITH: return wraith_pixel(fr, nx, ny, rgb);
     case MON_MAW:    return maw_pixel(fr, nx, ny, rgb);
     case MON_WARD:   return ward_pixel(fr, nx, ny, rgb);
     default:         return spirit_pixel(fr, nx, ny, rgb);
@@ -1040,9 +870,9 @@ static GLuint g_atlas;
 static int g_weapon_muz[WP_TYPES][WPN_FRAMES][2];
 
 /* The viewmodel's name prefix. "gun0" is frame 0 of the weapon, the same way
-   "imp0" is frame 0 of the imp -- the name carries the placement, so adding art
-   needs no table anywhere.
-   뷰 모델의 이름 접두사입니다. "imp0"이 임프의 프레임 0인 것과 같은 방식으로 "gun0"은
+   "brute0" is frame 0 of the brute -- the name carries the placement, so adding
+   art needs no table anywhere.
+   뷰 모델의 이름 접두사입니다. "brute0"이 브루트의 프레임 0인 것과 같은 방식으로 "gun0"은
    무기의 프레임 0입니다. 이름이 배치 정보를 담고 있으므로 아트를 추가하는 데 어떤 표도
    필요하지 않습니다. */
 /* Which weapon a drawing belongs to, matched against the WEAPONS table's own
@@ -1571,7 +1401,7 @@ static int decode_sprites(const char *p, unsigned char *buf, int W, int H,
            the SDF version underneath means every place the drawing is narrower
            than it shows through as a halo -- which is exactly what the first
            Freedoom import looked like, a green shape standing behind the
-           hound and a horn poking out above the caster.
+           creature and a horn poking out above it.
            Cleared per CELL rather than per atlas, so this keeps the property
            it is named for: a bestiary that is only half drawn still shows
            creatures, because a frame with no art never reaches this line and
@@ -1618,7 +1448,10 @@ static int decode_sprites(const char *p, unsigned char *buf, int W, int H,
            ::fill_from_image samples the whole cell, so what it repeated four
            times was the drawing AND the black around it.
            Nothing pointed at it because no shipped map used `wall_meat`. An
-           imported map that names a 64x64 surface would have, on every face.
+           imported map that names a 64x64 surface would have, on every face --
+           and `lqdm1` names six. That is also why `wall_meat` itself is gone:
+           once shipped maps walked this branch, the drawing that only a test
+           had ever walked it with was carrying nothing but its own bytes.
            벽이 자기 셀보다 작으면 셀 안으로 *타일링*됩니다. 다른 모든 대상은 어떤 것의
            그림을 담습니다. 생물, 총, 획득물이며, 셀보다 좁은 그림은 셀 안에 앉아야 하고
            위의 두 숫자가 그것을 계산합니다. *벽은 어떤 것의 그림이 아닙니다.* 반복하는 것이

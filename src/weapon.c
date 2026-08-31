@@ -109,22 +109,25 @@
  * -------
  * The numbers are tuned against the bestiary rather than against each other,
  * because "is this weapon good" is not a question that has an answer on its
- * own. An imp has 40hp, a brute 120, a hound 18:
+ * own. A water spirit has 40hp, a brute 120, a caster 26:
  *
- *   shotgun  6 x 7 = 42 point blank, so one blast kills an imp and three are
- *            needed for a brute. Unchanged from before this table existed.
- *   grenade  55 in a radius, so it kills a clustered pair of imps outright and
- *            takes a brute to half. Travel time is what it pays for that.
+ *   shotgun  6 x 7 = 42 point blank, so one blast kills a water spirit and
+ *            three are needed for a brute. Unchanged from before this table
+ *            existed.
+ *   grenade  55 in a radius, so it kills a clustered pair of water spirits
+ *            outright and takes a brute to half. Travel time is what it pays
+ *            for that.
  *   rapid    9 a shot at 12/sec = 108 dps sustained, the highest here, against
  *            a magazine that empties in under four seconds of holding fire.
- *   axe      45 a swing kills an imp in one and a hound without thinking, and
- *            asks you to be within 2.2m of something trying to hit you.
+ *   axe      45 a swing kills a water spirit in one and asks you to be within
+ *            2.2m of something trying to hit you -- which the caster never
+ *            lets you be, because it is the one kind that is not on the floor.
  *
  * 한국어
  * ------
  * 수치는 서로가 아니라 몬스터 도감을 기준으로 조정했습니다. "이 무기가 좋은가"는 그
- * 자체로는 답이 있는 질문이 아니기 때문입니다. 임프는 체력 40, 브루트는 120, 하운드는
- * 18입니다.
+ * 자체로는 답이 있는 질문이 아니기 때문입니다. 물의 정령은 체력 40, 브루트는 120, 캐스터는
+ * 26입니다.
  */
 static const WeaponType WEAPONS[WP_TYPES] = {
     /* EVERY ROW USED TO SAY "shot". The shotgun was the only weapon when this
@@ -1170,8 +1173,52 @@ int wp_axe_land(Weapon *w, Pools *pl, v3 feet, int grounded, float dt) {
        눈이 아니라 발을 중심으로 합니다. 도끼는 바닥으로 내려오며, 1.7m 위를 중심으로 한
        폭발은 플레이어가 뒤에 서 있는 낮은 벽을 넘어갑니다. */
     proj_blast(pl, feet, AXE_SLAM_RADIUS, AXE_SLAM_DAMAGE);
-    fx_spawn(pl, "boltburst", feet, v3f(0, 1, 0));
-    fx_spawn(pl, "spark", feet, v3f(0, 1, 0));
+
+    /* THE REACH, DRAWN ON THE FLOOR IT LANDED ON. ::AXE_SLAM_RADIUS is a
+       gameplay number the player had no way to see: the slam killed things a
+       metre and a half further out than a grenade does and looked smaller than
+       one, so the only way to learn its size was to keep missing with it.
+       `blastwave` is authored for a radius of one metre and scaled by the
+       caller, which is the arrangement fx.h describes and names this exact
+       case as the reason for.
+       NOT `blastdome`, and that is the one layer of the grenade's vocabulary
+       this does not borrow. The dome is fire -- it opens at 255,214,130 and
+       cools to a burnt orange -- and there is no fire here. What comes down is
+       a mass of metal, so what goes out is the dust it throws off the floor.
+       *그것이 착지한 바닥에 그려진 도달 거리입니다.* ::AXE_SLAM_RADIUS는 플레이어가 볼
+       방법이 없던 게임플레이 수치였습니다. 내려찍기는 유탄보다 1.5미터 더 멀리 있는 것까지
+       죽이면서 유탄보다 작아 보였으므로, 그 크기를 배우는 유일한 방법은 계속 빗맞히는
+       것이었습니다. `blastwave`는 반경 1미터로 작성되어 호출자가 배율을 정하며, 그것이 fx.h가
+       서술하고 바로 이 경우를 그 이유로 지목하는 방식입니다.
+       `blastdome`이 *아니며*, 그것이 유탄의 어휘 중 이곳이 빌리지 않는 유일한 겹입니다. 돔은
+       불입니다. 255,214,130으로 열려 그을린 주황으로 식습니다. 그리고 이곳에는 불이 없습니다.
+       내려오는 것은 금속 덩어리이므로, 퍼져 나가는 것은 그것이 바닥에서 일으키는 먼지입니다. */
+    fx_spawn_scaled(pl, "blastwave",
+                    v3f(feet.x, feet.y + PROJ_WAVE_LIFT, feet.z),
+                    v3f(0, 1, 0), AXE_SLAM_RADIUS);
+
+    /* blastburst, NOT boltburst. The same line detonate carried until it was
+       found: this borrowed the monster bolt's flash, which cools into that
+       bolt's blue, so the player's own axe coming down threw the colour every
+       other thing in the palette reserves for something shooting at them. See
+       ::LIGHT_COL_BOLT's neighbours in scene.c -- warm is yours, cool is theirs.
+       boltburst가 아니라 blastburst입니다. detonate가 발견되기 전까지 지니고 있던 것과 같은
+       줄입니다. 이 줄은 몬스터 볼트의 섬광을 빌려 썼고 그것은 그 볼트의 파랑으로 식으므로,
+       플레이어 자신의 도끼가 내려찍을 때 팔레트의 다른 모든 것이 *자신을 쏘는 무언가*를 위해
+       예약해 둔 색이 튀었습니다. scene.c의 ::LIGHT_COL_BOLT 이웃들을 참조하십시오. 따뜻한 것은
+       당신 것, 차가운 것은 그들 것입니다. */
+    fx_spawn(pl, "blastburst",  feet, v3f(0, 1, 0));
+    fx_spawn(pl, "spark",       feet, v3f(0, 1, 0));
+    fx_spawn(pl, "blastdebris", feet, v3f(0, 1, 0));
+
+    /* And the light and the jolt, off the same record a grenade leaves, at a
+       third of its strength. ::AXE_SLAM_FLASH says why a third rather than the
+       whole thing, and why the number cannot simply be read off the radius.
+       그리고 유탄이 남기는 것과 같은 기록에서 나오는 빛과 충격이며, 세기는 그 3분의 1입니다.
+       왜 전부가 아니라 3분의 1인지, 그리고 왜 그 수를 반경에서 그냥 읽어 낼 수 없는지는
+       ::AXE_SLAM_FLASH에 있습니다. */
+    proj_flash(pl, feet, AXE_SLAM_RADIUS, AXE_SLAM_FLASH, FLASH_BLAST, -1);
+
     audio_play_at("impact", 100, feet);
 
     w->punch += wp_stats(WP_AXE)->punch * 1.5f;

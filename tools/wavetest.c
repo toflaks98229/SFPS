@@ -184,7 +184,7 @@ int main(void) {
     printf("\nstarting the arena\n");
     {
         fixture(&w);
-        add_spawner(&w.level, "spawner_imp", 2000, 0, 10, 0, 0);
+        add_spawner(&w.level, "spawner_water_spirit", 2000, 0, 10, 0, 0);
         enemy_spawn_level(&w.pools, &w.level);
 
         oki(enemy_spawner_count(&w.pools) == 1, "the level's spawner is read",
@@ -208,7 +208,7 @@ int main(void) {
     printf("\nthe telegraph\n");
     {
         fixture(&w);
-        add_spawner(&w.level, "spawner_imp", 2000, 0, 10, 0, 0);
+        add_spawner(&w.level, "spawner_water_spirit", 2000, 0, 10, 0, 0);
         enemy_spawn_level(&w.pools, &w.level);
 
         /* One authored interval is p[0] tenths = 1.0s. */
@@ -229,7 +229,7 @@ int main(void) {
     printf("\nhow many arrive at once\n");
     {
         fixture(&w);
-        add_spawner(&w.level, "spawner_imp", 2000, 0, 10, 0, 0);
+        add_spawner(&w.level, "spawner_water_spirit", 2000, 0, 10, 0, 0);
         enemy_spawn_level(&w.pools, &w.level);
         step_n(&w, 1);
 
@@ -263,7 +263,7 @@ int main(void) {
     {
         fixture(&w);
         /* Well inside SPAWN_MIN_DIST of the player at the origin. */
-        add_spawner(&w.level, "spawner_imp", 100, 100, 10, 0, 0);
+        add_spawner(&w.level, "spawner_water_spirit", 100, 100, 10, 0, 0);
         enemy_spawn_level(&w.pools, &w.level);
 
         step_n(&w, 600);
@@ -282,7 +282,7 @@ int main(void) {
     printf("\nclearing a wave\n");
     {
         fixture(&w);
-        add_spawner(&w.level, "spawner_imp", 2000, 0, 5, 0, 0);
+        add_spawner(&w.level, "spawner_water_spirit", 2000, 0, 5, 0, 0);
         enemy_spawn_level(&w.pools, &w.level);
         step_n(&w, 1);
 
@@ -330,7 +330,7 @@ int main(void) {
     printf("\nthe difficulty curve\n");
     {
         fixture(&w);
-        add_spawner(&w.level, "spawner_imp", 2000, 0, 40, 0, 0);   /* 4.0s */
+        add_spawner(&w.level, "spawner_water_spirit", 2000, 0, 40, 0, 0);   /* 4.0s */
         enemy_spawn_level(&w.pools, &w.level);
 
         enemy_wave_arm(&w.pools, 1);
@@ -369,7 +369,7 @@ int main(void) {
     printf("\nre-arming\n");
     {
         fixture(&w);
-        add_spawner(&w.level, "spawner_imp", 2000, 0, 10, 0, 0);
+        add_spawner(&w.level, "spawner_water_spirit", 2000, 0, 10, 0, 0);
         enemy_spawn_level(&w.pools, &w.level);
         step_n(&w, 62);           /* into the warning */
         ok(w.pools.enemy.spawner[0].warn > 0.0f, "a warning is in flight");
@@ -389,7 +389,7 @@ int main(void) {
     printf("\nthe wave reward\n");
     {
         fixture(&w);
-        add_spawner(&w.level, "spawner_imp", 2000, 0, 5, 0, 0);
+        add_spawner(&w.level, "spawner_water_spirit", 2000, 0, 5, 0, 0);
         enemy_spawn_level(&w.pools, &w.level);
         w.weapon.owned[WP_SHOTGUN] = 1;
         w.weapon.ammo[WP_SHOTGUN]  = 0;
@@ -485,7 +485,7 @@ int main(void) {
     printf("\nwhat a kill leaves behind\n");
     {
         fixture(&w);
-        add_spawner(&w.level, "spawner_imp", 2000, 0, 3, 0, 0);
+        add_spawner(&w.level, "spawner_water_spirit", 2000, 0, 3, 0, 0);
         enemy_spawn_level(&w.pools, &w.level);
         w.weapon.owned[WP_SHOTGUN] = 1;
         step_alive(&w, 1);

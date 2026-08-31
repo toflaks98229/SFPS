@@ -79,9 +79,24 @@ static void fixture(World *w) {
     box(&w->level, -2000, -2000, 2000, 2000,   0, 3000);
     box(&w->level,   400,   400, 1200, 1200, 150, 3000);
 
+    /* THE BASELINE MONSTER, NAMED. This said `imp` for as long as `imp` was the
+       name of MON_WATER_SPIRIT's row; it is a retired alias now and retired
+       aliases follow what REPLACED them, so `imp` would hand this fixture a
+       caster -- a different creature with different health that does not stand
+       on the floor -- and the golden below would have to be re-blessed for a
+       change nobody made to the demo.
+       기준 몬스터를 이름으로 적습니다. `imp`가 MON_WATER_SPIRIT 행의 이름이던 동안에는 이곳도
+       `imp`라고 적혀 있었습니다. 이제 그것은 은퇴한 별칭이고 은퇴한 별칭은 자기를 *대신한* 것을
+       따라가므로, `imp`는 이 픽스처에 캐스터를 건네게 됩니다. 체력이 다르고 바닥에 서지도 않는
+       다른 생물이며, 그러면 아래의 골든을 아무도 하지 않은 변경 때문에 다시 승인해야 합니다. */
     Entity *e;
     e = &w->level.ents[w->level.n_ents++];
-    e->kind[0]='i'; e->kind[1]='m'; e->kind[2]='p'; e->kind[3]=0;
+    {
+        const char *kind = "water_spirit";
+        int ki = 0;
+        while (kind[ki]) { e->kind[ki] = kind[ki]; ki++; }
+        e->kind[ki] = 0;
+    }
     e->x = 900; e->z = -900;
     e = &w->level.ents[w->level.n_ents++];
     e->kind[0]='a'; e->kind[1]='m'; e->kind[2]='m'; e->kind[3]='o'; e->kind[4]=0;
@@ -331,9 +346,9 @@ static void digest_print(const Digest *d) {
    and nothing else; none of them was chosen.
    `demotest -bless`가 채웁니다. 이곳의 모든 숫자는 아래의 실행이 만들어 낸 것이며 그 외에는
    없습니다. 어느 것도 사람이 고르지 않았습니다. */
-/* RE-BLESSED four times: for `landdust`, for thickening the lava smoke, for
-   floor items giving off specks instead of carrying a halo, and for the water
-   spirit taking the imp's slot. Worth recording what moved and what did not,
+/* RE-BLESSED five times: for `landdust`, for thickening the lava smoke, for
+   floor items giving off specks instead of carrying a halo, for the water
+   spirit taking the imp's slot, and for a bolt gaining a wake and a landing. Worth recording what moved and what did not,
    because the two answer different questions: `frng` changed and NOTHING ELSE
    did -- not the position, not the velocity, not the aim, not the health, not
    the monsters, not world_time. A hard landing now spawns a puff, so the
@@ -392,14 +407,36 @@ static void digest_print(const Digest *d) {
    볼트를 따라갔습니다.
    *움직이지 않은 것*이 요점의 전부입니다. `px`, `vx`, `yaw`, `pitch`, `world_time`이 비트
    단위로 그대로입니다. 기록된 입력은 같은 입력이고 여전히 같은 자리에 떨어집니다. 플레이어
-   주위의 전투가 바뀌었을 뿐 플레이어는 바뀌지 않았습니다. */
+   주위의 전투가 바뀌었을 뿐 플레이어는 바뀌지 않았습니다.
+
+   THE FIFTH IS THE FOURTH'S OPPOSITE, and reading them together is the point.
+   Twelve effects arrived and four of them attach to a bolt in flight or to the
+   place it stops: `boltwake` behind it, `zapflash` and `zapburst` where it
+   lands, `emberwake` on what is still burning. The monster this demo walks past
+   is the same monster shooting the same bolts -- `health` is still 80, `erng`
+   and `wrng` have not moved a bit, and the round arrives at the same place on
+   the same frame. What changed is that the flight is now DRAWN, so `frng` alone
+   ran further.
+   That is the fourth entry's diff with the simulation half removed. The fourth
+   moved `health` and `erng` because the FIGHT changed; this one moved neither
+   because only the PICTURE of it did, and the two sitting next to each other
+   are what makes this golden worth keeping.
+   다섯 번째는 네 번째의 반대이며, 둘을 나란히 읽는 것이 요점입니다. 효과 열둘이 도착했고 그중
+   넷이 날아가는 볼트나 그것이 멈추는 자리에 붙습니다. 뒤로는 `boltwake`, 떨어지는 자리에는
+   `zapflash`와 `zapburst`, 아직 타고 있는 것에는 `emberwake`입니다. 이 데모가 지나치는
+   몬스터는 같은 볼트를 쏘는 같은 몬스터입니다. `health`는 여전히 80이고 `erng`와 `wrng`는
+   조금도 움직이지 않았으며, 탄은 같은 프레임에 같은 자리에 도착합니다. 바뀐 것은 그 비행이
+   이제 *그려진다*는 것뿐이므로 `frng`만 더 진행되었습니다.
+   이것은 네 번째의 차이에서 시뮬레이션 절반을 덜어 낸 것입니다. 네 번째가 `health`와 `erng`를
+   움직인 것은 *전투*가 바뀌었기 때문이고, 이번 것이 둘 다 움직이지 않은 것은 그 *그림*만
+   바뀌었기 때문입니다. 그 둘이 나란히 있다는 것이 이 골든을 지킬 값어치를 만듭니다. */
 static const Digest GOLDEN = {
     /* px py pz */ -12.2013168f, 2.84367466f, -14.8857975f,
     /* vx vy vz */ -0.312936455f, 1.9998908f, 0.38904506f,
     /* yaw pitch */ 0.382800102f, 0.534599602f,
     /* health keys grounded */ 80, 0, 0,
     /* cur ammo */ 0, 0,
-    /* wrng srng erng frng */ 2972006077u, 522628529u, 1060800797u, 1387843671u,
+    /* wrng srng erng frng */ 2972006077u, 522628529u, 1060800797u, 1894450831u,
     /* enemies hp */ 1, 40,
     /* proj marks */ 0, 0,
     /* world_time */ 29.9002438f

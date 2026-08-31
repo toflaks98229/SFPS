@@ -1294,8 +1294,8 @@ static const char *FS_SRC =
  *
  * THE BUG THIS FIXES. Affine error is proportional to the UV RANGE across a
  * triangle, and this project's UVs are world-space projections: brush_face_uv
- * divides map units by 128, so a 512-unit wall spans 4 tiles and a large room
- * spans a dozen or more. A face mapped 0..1 warped subtly and a face mapped
+ * divides map units by ::BRUSH_TEXELS, so a 512-unit wall spans two tiles and
+ * a large room spans a dozen or more. A face mapped 0..1 warped subtly and a face mapped
  * 0..16 warped sixteen times as hard, off the same uAffine -- so the materials
  * that tile most were exactly the ones that came apart. That is not a period
  * artifact, it is a texture that has stopped being attached to its surface.
@@ -1314,8 +1314,8 @@ static const char *FS_SRC =
  * 텍스처가 미끄러질 수 있는 최대치이며 단위는 UV, 즉 이곳에서는 *타일*입니다.
  *
  * *이것이 고치는 결함.* 어파인 오차는 삼각형을 가로지르는 UV *범위*에 비례하는데, 이
- * 프로젝트의 UV는 월드 공간 투영입니다. brush_face_uv가 맵 단위를 128로 나누므로 512유닛 벽은
- * 4타일, 큰 방은 열 몇 타일에 걸칩니다. 0..1로 매핑된 면은 미묘하게 일그러지고 0..16으로
+ * 프로젝트의 UV는 월드 공간 투영입니다. brush_face_uv가 맵 단위를 ::BRUSH_TEXELS로 나누므로
+ * 512유닛 벽은 2타일, 큰 방은 열 몇 타일에 걸칩니다. 0..1로 매핑된 면은 미묘하게 일그러지고 0..16으로
  * 매핑된 면은 같은 uAffine에서 열여섯 배로 일그러졌습니다. 그래서 가장 많이 타일링되는 재질이
  * 정확히 무너지는 재질이었습니다. 그것은 시대의 아티팩트가 아니라 표면에 붙어 있기를 그만둔
  * 텍스처입니다.
@@ -1626,8 +1626,53 @@ static const char *FS_MAIN =
    멈추고 0.75 단계로 내려앉았습니다. 횃불이 닿지 않는 모든 표면이 기존 고정 조명보다
    25% 어두워졌는데, 이는 "광원을 더하는 것"이 아니라 레벨을 어둡게 만든 뒤 일부를 다시
    덧대는 것입니다. */
+/* --- how bright a surface nothing is lighting comes out ---------------------
+ *
+ * ENGLISH
+ * -------
+ * RAISED FROM 0.32, AND THE REASON IS THAT THE LAMPS LEFT. This number is the
+ * floor: what a wall is worth with the key light edge-on and nothing in the
+ * air. It was chosen when a level's own lamps lit the room and the floor only
+ * had to be dark rather than black. They light nothing now -- scene.c's note
+ * above ::MoveLight says why -- so between shots the ambient IS the lighting,
+ * and 0.32 of an albedo that is itself under half reads as a room the player
+ * cannot navigate rather than as a room that is dark.
+ *
+ * THE KEY'S SHARE COMES DOWN BY EXACTLY WHAT THE FLOOR GOES UP, so the two
+ * still sum to 1.0 and a fully key-lit surface is still worth the whole range.
+ * That constraint is not arithmetic tidiness: the comment above this block
+ * records that a first attempt used 0.22 + 0.58, topped out at 0.80, banded
+ * down to 0.75, and made every surface a light did not reach a quarter dimmer
+ * than before. Anything that does not sum to 1.0 dims the level and then
+ * patches some of it back.
+ *
+ * WHAT IT COSTS IS TONAL RANGE, and it is worth saying rather than
+ * discovering. `lum` now spans 0.45..1.0 instead of 0.32..1.0, which is 2.2
+ * bands of the five instead of 2.7 -- so a face has a little less room to
+ * shade across before it lands in the same band as its neighbour. Judged
+ * against the alternative, which is a room lit to 0.32 by nothing at all.
+ *
+ * 한국어
+ * ------
+ * *0.32에서 올렸고, 이유는 등이 떠났기 때문입니다.* 이 수는 바닥값입니다. 주광이 스치듯
+ * 닿고 공중에 아무것도 없을 때 벽이 지니는 값입니다. 이 값은 레벨 자신의 등이 방을 밝히던
+ * 때에 골라졌고, 그때 바닥값은 검지만 않으면 되었습니다. 이제 등은 아무것도 밝히지
+ * 않으므로(scene.c의 ::MoveLight 위 설명을 참조하십시오) 사격과 사격 사이에는 주변광이 *곧*
+ * 조명이며, 그 자체로 절반에 못 미치는 알베도의 0.32는 어두운 방이 아니라 플레이어가 길을
+ * 찾을 수 없는 방으로 읽힙니다.
+ *
+ * *주광의 몫은 바닥값이 오른 만큼 정확히 내려가므로* 둘의 합은 여전히 1.0이고, 주광을 온전히
+ * 받는 표면은 여전히 전 범위의 값어치입니다. 이 제약은 산술적 정돈이 아닙니다. 이 블록 위의
+ * 주석이 기록하듯 첫 시도는 0.22 + 0.58이었고 최대 0.80에서 멈춰 0.75 단계로 내려앉았으며,
+ * 빛이 닿지 않는 모든 표면을 이전보다 25% 어둡게 만들었습니다. 합이 1.0이 아닌 것은 레벨을
+ * 어둡게 만든 뒤 일부를 다시 덧대는 것입니다.
+ *
+ * *대가는 톤의 폭이며*, 발견되기보다 적혀 있어야 합니다. `lum`은 이제 0.32~1.0이 아니라
+ * 0.45~1.0을 지나며, 다섯 단계 중 2.7이 아니라 2.2단계입니다. 면 하나가 이웃과 같은 단계에
+ * 들어가기 전까지 음영이 변할 여유가 조금 줄어듭니다. 그 대안이 *아무것도* 밝히지 않는 0.32의
+ * 방이라는 점에 비추어 판단했습니다. */
 "    const float LIGHT_BANDS = 5.0;\n"
-"    const float AMBIENT     = 0.32;\n"
+"    const float AMBIENT     = 0.45;\n"
 
 /* --- normal mapping ---------------------------------------------------------
  *
@@ -1675,7 +1720,7 @@ static const char *FS_MAIN =
 "      n = procNormal(uProc, uv*uPScale, uPCol, n, uPParam.y);\n"
 
 "    float key=max(dot(n,normalize(vec3(0.40,0.90,0.25))),0.0);\n"
-"    float lum=AMBIENT+0.68*key;\n"
+"    float lum=AMBIENT+(1.0-AMBIENT)*key;\n"
 "    vec3  tint=vec3(1.0);\n"
 
 /* Point lights. Distance attenuation is (1 - d/r)^2 rather than the physical
@@ -1700,16 +1745,20 @@ static const char *FS_MAIN =
 "    }\n"
 
 /* The baked light, folded in the same way a dynamic one is. It arrives already
-   attenuated and already shadowed -- the bake did that at load, against every
-   light in the level rather than the eight this loop can hold -- so all that is
-   left is to add it.
-   Its own luminance drives the tint, so a room lit red by a static light and
-   crossed by a white muzzle flash blends between them exactly as two dynamic
-   lights would.
-   구워 넣은 조명이며 동적 광원과 같은 방식으로 합칩니다. 감쇠와 그림자는 로드 시점에 이미
-   처리되었고, 위 반복문이 담을 수 있는 여덟 개가 아니라 레벨의 *모든* 광원을 대상으로
-   했습니다. 남은 일은 더하는 것뿐입니다. 자기 휘도가 색조를 이끌므로, 정적 광원으로 붉게
-   밝은 방을 흰 총구 섬광이 가로지르면 두 동적 광원과 똑같이 섞입니다. */
+   shadowed -- the bake cast that ray at load, which is the one thing this
+   shader cannot do and therefore the one thing still baked -- so all that is
+   left is to add it. What is in it is the sun and the sky dome, and nothing
+   else: a level's point lamps are not baked and are not in the loop above
+   either. See level.c's bake_light and scene.c's note above ::MoveLight.
+   Its own luminance drives the tint, so a room lit warm by the sun and crossed
+   by a white muzzle flash blends between them exactly as two dynamic lights
+   would.
+   구워 넣은 조명이며 동적 광원과 같은 방식으로 합칩니다. 그림자는 로드 시점에 이미
+   처리되었고, 그 광선이야말로 이 셰이더가 할 수 없는 유일한 일이자 그래서 여전히 구워지는
+   유일한 것입니다. 남은 일은 더하는 것뿐입니다. 그 안에 담긴 것은 태양과 하늘 돔이고 그
+   외에는 없습니다. 레벨의 점광원은 구워지지도 않고 위의 반복문에 있지도 않습니다. level.c의
+   bake_light와 scene.c의 ::MoveLight 위 설명을 참조하십시오. 자기 휘도가 색조를 이끌므로, 태양으로 따뜻하게 밝은 방을 흰 총구 섬광이
+   가로지르면 두 동적 광원과 똑같이 섞입니다. */
 "    float bl=dot(vLit,vec3(0.299,0.587,0.114));\n"
 "    if(bl>0.0){\n"
 "      lum+=bl;\n"
@@ -1867,14 +1916,22 @@ static GLint  g_u_mvp, g_u_eye, g_u_mode, g_u_color;
 static GLint  g_u_nlights, g_u_lpos, g_u_lcol;
 
 /* How many dynamic lights the last ::rd_lights left in the shader. Kept so a
-   test can ask, because the interesting number is usually ZERO: a level's own
-   lamps are baked into the vertices at load and must not also occupy these
-   slots, and nothing about a frame that got that wrong looks wrong -- the room
-   is simply lit twice and reads as "bright".
-   마지막 ::rd_lights가 셰이더에 남긴 동적 광원의 수입니다. 테스트가 물어볼 수 있도록
-   보관합니다. 흥미로운 값은 대개 *0*이기 때문입니다. 레벨 자신의 등은 로드 시 정점에
-   구워지므로 이 슬롯을 함께 차지해서는 안 되는데, 그것을 틀린 프레임은 어디도 틀려 보이지
-   않습니다. 방이 두 번 밝혀질 뿐이고 그것은 "밝다"로 읽힙니다. */
+   test can ask, and what it is asking has changed twice, which is the reason
+   to keep it rather than to inline it: a level's lamps were baked and the
+   interesting number was zero, then they were gathered per frame and the
+   interesting number was that a lit level reached this loop, and now they are
+   switched off and it is zero again -- but for a different reason, and with a
+   grenade in the air it must not be. Every one of those failures is the same
+   kind of invisible. A room lit twice does not look broken, it looks bright;
+   a room lit zero times looks like a room with the lights off. Neither says
+   which half moved. 마지막 ::rd_lights가 셰이더에 남긴 동적 광원의 수입니다. 테스트가
+   물어볼 수 있도록 보관하며, 무엇을 묻는지가 이미 두 번 바뀌었다는 것이 인라인하지 않고
+   보관하는 이유입니다. 레벨의 등은 구워졌고 그때 흥미로운 값은 0이었으며, 다음에는
+   프레임마다 모여 조명이 있는 레벨이 이 반복문에 도달하는지가 흥미로웠고, 이제는 꺼져서
+   다시 0입니다. 다만 이유가 다르고, 유탄이 공중에 있을 때는 0이어서는 안 됩니다. 그 모든
+   실패가 같은 종류로 보이지 않습니다. 두 번 밝혀진 방은 고장 나 보이지 않고 *밝아* 보이며,
+   0번 밝혀진 방은 그저 불이 꺼진 방으로 보입니다. 어느 쪽도 어느 절반이 움직였는지 말해
+   주지 않습니다. */
 static int    g_n_lights;
 static GLint  g_u_snap;
 static GLint  g_u_affine;

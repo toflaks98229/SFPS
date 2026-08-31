@@ -680,6 +680,71 @@ static void step_smoke(World *w, float dt) {
     }
 }
 
+/**
+ * @brief Shakes the camera for every detonation whose light is still up.
+ *
+ * ENGLISH
+ * -------
+ * @param[in,out] w The world whose view is shaken, and whose player's position
+ *                  the falloff is measured from.
+ *
+ * @note READS THE SAME RECORD ::scene_lights DOES. A blast is one event and the
+ *       two things it does to the player -- brightening the room and moving the
+ *       camera -- have to end together, so both come off the ::Flash pool and
+ *       both go through ::proj_flash_fade. A separate timer here would be a
+ *       second opinion about when the explosion was over, and the way that
+ *       fails is a camera still rolling in a room that has gone dark again.
+ * @note FED EVERY FRAME, NOT ONCE AT THE MOMENT IT WENT OFF, and that is what
+ *       lets this function have no notion of "new". ::world_shake takes the
+ *       LOUDER of what it holds and what it is offered, so handing it the same
+ *       decaying curve on every frame of the flash's life is idempotent -- and
+ *       ::WORLD_SHAKE_DECAY outruns the flash's own curve within two frames
+ *       anyway, so the result is the peak, set once, without a flag anybody
+ *       could get wrong.
+ * @note Measured to the player's FEET. They are what is standing on the floor
+ *       the blast travelled through, and the half metre up to the eye is
+ *       nothing beside a reach of ten.
+ *
+ * 한국어
+ * ------
+ * @brief 빛이 아직 남아 있는 모든 폭발에 대해 카메라를 흔듭니다.
+ * @param[in,out] w 시야가 흔들릴 월드이며, 감쇠를 재는 기준이 되는 플레이어의 위치를 가진
+ *                  쪽이기도 합니다.
+ *
+ * @note *::scene_lights와 같은 기록을 읽습니다.* 폭발은 하나의 사건이고, 그것이 플레이어에게
+ *       하는 두 가지(방을 밝히는 것과 카메라를 움직이는 것)는 함께 끝나야 하므로, 둘 다
+ *       ::Flash 풀에서 나오고 둘 다 ::proj_flash_fade를 거칩니다. 이곳에 별도의 타이머를 두면
+ *       폭발이 언제 끝났는지에 대한 두 번째 견해가 되며, 그것이 실패하는 방식은 이미 다시
+ *       어두워진 방에서 카메라만 계속 흔들리는 것입니다.
+ * @note *터진 순간에 한 번이 아니라 매 프레임 먹입니다.* 그 덕분에 이 함수는 "새것"이라는
+ *       개념을 가질 필요가 없습니다. ::world_shake는 자신이 들고 있는 것과 제안받은 것 중 *더
+ *       큰* 쪽을 취하므로, 섬광이 사는 매 프레임에 같은 감쇠 곡선을 건네는 것은 멱등입니다.
+ *       게다가 ::WORLD_SHAKE_DECAY가 두 프레임 안에 섬광 자신의 곡선을 앞지르므로, 결과는
+ *       누구든 틀릴 수 있는 플래그 없이 최댓값을 한 번 설정한 것과 같습니다.
+ * @note 플레이어의 *발*까지 잽니다. 폭발이 지나온 바닥에 서 있는 것이 발이며, 눈까지의 0.5m는
+ *       10미터의 도달 거리 곁에서는 아무것도 아닙니다.
+ */
+static void step_blast(World *w) {
+    for (int i = 0, n = proj_flash_count(&w->pools); i < n; i++) {
+        const Flash *f = proj_flash_at(&w->pools, i);
+        if (!f || f->life <= 0.0f) continue;
+
+        float reach = f->radius * WORLD_SHAKE_BLAST_REACH;
+        if (reach <= 0.0f) continue;
+
+        float dist = v3len(v3sub(f->pos, w->player.pos));
+        if (dist >= reach) continue;
+
+        /* Linear, and named `t` for the same falloff ::proj_blast writes: one
+           shape for how a blast weakens, whether what it is weakening is
+           damage or the camera.
+           선형이며, ::proj_blast가 쓰는 것과 같은 감쇠이므로 이름도 `t`입니다. 폭발이 약해지는
+           방식은 하나의 형태이며, 약해지는 대상이 피해든 카메라든 마찬가지입니다. */
+        float t = 1.0f - dist / reach;
+        world_shake(w, WORLD_SHAKE_BLAST * f->power * t * proj_flash_fade(f));
+    }
+}
+
 /* ------------------------------ screens, the belt, pads, the exit, the arena */
 
 /**
@@ -2368,11 +2433,32 @@ int world_step(World *w, const Input *in, float aspect, float dt) {
        when it is not. */
     if (!frozen) proj_update(&w->pools, &w->level, dt);
 
+    /* AFTER the grenades, because a detonation happens inside ::proj_update and
+       the frame a blast goes off is the frame the camera has to move. Frozen
+       with the world even though the flash it reads is not -- a menu is a thing
+       to read, and reading it through a shaking camera is the shake being
+       spent on the one moment it has nothing to confirm.
+       유탄 *다음*입니다. 폭발은 ::proj_update 안에서 일어나고, 폭발이 터지는 프레임이 곧
+       카메라가 움직여야 하는 프레임이기 때문입니다. 이것이 읽는 섬광은 멈추지 않는데도
+       이쪽은 월드와 함께 멈춥니다. 메뉴는 읽는 것이고, 흔들리는 카메라로 읽는 것은 흔들림이
+       확인해 줄 것이 아무것도 없는 유일한 순간에 그것을 쓰는 일입니다. */
+    if (!frozen) step_blast(w);
+
     /* Particles advance even on the win screen: freezing the world mid-air
        would strand whatever was in flight when the exit was reached.
        승리 화면에서도 입자는 진행합니다. 월드를 공중에서 정지시키면 출구에 도달한 순간
        날아가던 것들이 그대로 멈춰 버립니다. */
     fx_update(&w->pools, dt);
+
+    /* And the light those explosions left, on the particles' terms rather than
+       the projectile's: it belongs to the same event as the burst it is
+       lighting, and freezing one while the other keeps expanding leaves a
+       white room under a smoke cloud that is still growing. See
+       ::proj_flash_update.
+       그리고 그 폭발들이 남긴 빛이며, 발사체가 아니라 *입자*의 기준을 따릅니다. 그것은
+       자신이 밝히고 있는 폭발과 같은 사건에 속하며, 한쪽만 멈추면 아직 커지고 있는 연기
+       구름 아래에 하얀 방이 남습니다. ::proj_flash_update를 참조하십시오. */
+    proj_flash_update(&w->pools, dt);
 
     /* Pickups top up health, ammo and the roster when walked over. The weapon
        is passed whole rather than one ammo pointer, because a box says which

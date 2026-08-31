@@ -601,19 +601,27 @@ typedef struct {
  * -------
  * Was 8, and was 8 because ::RD_MAX_LIGHTS was: lighting was point lights
  * evaluated per fragment, so a lamp the shader could not hold was a lamp the
- * level did not have. The static bake ended that. A level's lamps are compiled
- * into its vertices when it loads -- all of them, shadowed -- and the shader
- * never sees one, so this cap now answers a different question: how many can
- * an author place before the load gets slow?
+ * level did not have. The static bake ended that, the lamps went back to the
+ * shader, and then they were switched off altogether -- see scene.c's note
+ * above ::MoveLight for what each of those two attempts looked like and why
+ * neither held. A lamp lights NOTHING now, from either place.
+ *
+ * So this cap no longer answers a question about light at all, and at present
+ * it is not answering a question about anything: no shipped level declares a
+ * lamp, so the array is empty in every level the game loads. It is how many an
+ * author COULD write down, kept because the parser still reads the word and a
+ * format that silently drops a word it can read is worse than one that reads a
+ * word nothing uses.
  *
  * 64, matching ::LVL_MAX_SECTORS, because the case that raised it is a level
  * where every sector carries its own brightness -- which is what a converted
  * Doom map is. One lamp per sector is the shape that data arrives in.
  *
- * @note What this costs is `.bss` and load time, never frame time. The bake is
- *       a ray per vertex per lamp IN RANGE, so a level of many small lamps
- *       costs far less than the product suggests: the radius test rejects most
- *       pairs before anything is traced.
+ * @note What this costs is `.bss` and nothing else -- no ray, no per-frame
+ *       scan, no per-fragment slot. The bake charged a trace per vertex per
+ *       lamp in range and the frame briefly charged a walk of this array; both
+ *       are gone, so the cap is purely about how much zeroed memory a Level
+ *       carries.
  * @note Lamps past this are parsed and dropped, and that is reported through
  *       ::DIAG_LIGHT_CAP. A room darker than its author intended gives no hint
  *       that a cap was the cause.
@@ -624,18 +632,24 @@ typedef struct {
  *
  * 8이었고, 8이었던 이유는 ::RD_MAX_LIGHTS가 8이었기 때문입니다. 조명이 프래그먼트마다
  * 평가되는 점광원이었으므로, 셰이더가 담을 수 없는 등은 곧 레벨에 없는 등이었습니다. 정적
- * 베이크가 그것을 끝냈습니다. 레벨의 등은 로드될 때 정점에 구워지며(그림자까지 포함해 전부)
- * 셰이더는 하나도 보지 않으므로, 이 상한은 이제 다른 질문에 답합니다. 로드가 느려지기
- * 전까지 제작자가 몇 개를 놓을 수 있는가?
+ * 베이크가 그것을 끝냈고, 등은 다시 셰이더로 돌아갔다가, 결국 완전히 꺼졌습니다. 그 두 번의
+ * 시도가 각각 어떠했고 왜 어느 쪽도 유지되지 않았는지는 scene.c의 ::MoveLight 위 설명을
+ * 참조하십시오. 이제 등은 어느 자리에서도 *아무것도* 밝히지 않습니다.
+ *
+ * 따라서 이 상한은 더 이상 빛에 관한 질문에 답하지 않으며, 현재로서는 어떤 질문에도 답하고
+ * 있지 않습니다. 등을 선언하는 출하 레벨이 없으므로 게임이 로드하는 모든 레벨에서 이 배열은
+ * 비어 있습니다. 제작자가 몇 개까지 적어 *둘 수 있는가*이며, 남겨 두는 이유는 파서가 여전히
+ * 그 단어를 읽기 때문이고, 읽을 수 있는 단어를 조용히 버리는 형식이 아무도 쓰지 않는 단어를
+ * 읽는 형식보다 나쁘기 때문입니다.
  *
  * ::LVL_MAX_SECTORS와 같은 64입니다. 이 값을 올리게 만든 사례가 *섹터마다 자기 밝기를 지닌*
  * 레벨이고, 변환된 Doom 맵이 바로 그것이기 때문입니다. 섹터당 등 하나가 그 데이터가 도착하는
  * 형태입니다.
  *
- * @note 이것이 치르는 비용은 `.bss`와 로드 시간이며 프레임 시간은 결코 아닙니다. 베이크는
- *       정점마다 *사거리 안의* 등마다 광선 하나이므로, 작은 등이 많은 레벨은 곱이 시사하는
- *       것보다 훨씬 적게 듭니다. 반경 검사가 무엇을 판정하기도 전에 대부분의 쌍을
- *       기각합니다.
+ * @note 이것이 치르는 비용은 `.bss`뿐이며 그 외에는 없습니다. 광선도, 프레임마다의 훑기도,
+ *       프래그먼트마다의 슬롯도 없습니다. 베이크는 정점마다 사거리 안의 등마다 판정 하나를
+ *       물렸고 프레임은 한동안 이 배열을 훑는 비용을 물었지만 둘 다 사라졌으므로, 이 상한은
+ *       순전히 Level이 0으로 채워진 메모리를 얼마나 나르는가에 관한 것입니다.
  * @note 이를 넘는 등은 파싱되되 버려지며 ::DIAG_LIGHT_CAP으로 보고됩니다. 제작자의 의도보다
  *       어두운 방은 상한이 원인이라는 단서를 주지 않기 때문입니다.
  */
@@ -665,9 +679,12 @@ typedef struct {
  *
  * ENGLISH
  * -------
- * A point light here contributes `att * lam * (power * 0.01)`, and its power
- * is 100, so a lamp at its centre is worth 1.0 of the shader's 0.32..1.0
- * illumination range. This puts a Quake sun on the same scale: `_sunlight 120`
+ * The yardstick this was chosen against was a point lamp: one at the
+ * reference power was worth 1.0 of the shader's illumination range, and this
+ * put a Quake sun on the same scale. The lamps light nothing now and the
+ * yardstick is gone with them, but the number it produced is unchanged and
+ * still correct -- it was never a ratio to a lamp, only chosen beside one.
+ * `_sunlight 120`
  * -- what `lqdm1` declares, and an ordinary value for an outdoor map -- lands
  * at 0.47, which is a strong sun that does not on its own saturate a surface
  * that also has ambient and a key light on it.
@@ -675,12 +692,17 @@ typedef struct {
  * @note Deliberately not tuned per map. A number that has to be chosen again
  *       for every level is a number nobody can predict, and the whole reason
  *       to read `_sunlight` at all is that the author already chose one.
+ * @note No shipped map declares one now, so nothing multiplies by this. It is
+ *       what a `_sunlight` would still be worth, kept alongside the parse that
+ *       would still read it.
  *
  * 한국어
  * ------
- * 이곳의 점광원은 `att * lam * (power * 0.01)`을 기여하고 그 power는 100이므로, 중심에 선
- * 램프는 셰이더의 0.32~1.0 조도 범위에서 1.0의 값어치입니다. 이 값은 Quake의 태양을 같은
- * 눈금에 올립니다. `lqdm1`이 선언하는 `_sunlight 120`은 0.47이 되며, 주변광과 주광이 함께
+ * 이 값을 고를 때의 잣대는 점광원이었습니다. 기준 세기의 등 하나가 셰이더 조도 범위에서
+ * 1.0의 값어치였고, 이 값이 Quake의 태양을 같은 눈금에 올렸습니다. 이제 등은 아무것도 밝히지
+ * 않으므로 잣대도 함께 사라졌지만, 그것이 만들어 낸 수는 그대로이고 여전히 옳습니다. 등에
+ * 대한 비율이었던 적은 없고 다만 그 곁에서 골라졌을 뿐입니다. `lqdm1`이 선언하던 `_sunlight
+ * 120`은 0.47이 되며, 주변광과 주광이 함께
  * 얹힌 표면을 혼자서 포화시키지는 않는 강한 태양입니다.
  *
  * @note 맵마다 다시 맞추지 않습니다. 레벨마다 다시 골라야 하는 수는 아무도 예측할 수 없는
@@ -1508,6 +1530,14 @@ typedef struct {
  * @note There is no direction. These are omnidirectional, which is what a
  *       torch or a strip in a ceiling actually is, and a cone would need an
  *       axis and two angles for a look this project does not use.
+ * @note NOT APPLIED, AND NOT DECLARED EITHER. A lamp was tried in the
+ *       vertices and in the shader's point-light loop, neither looked right on
+ *       a brush level, and the room is lit by the shader's ambient plus what
+ *       is in the air instead -- so the lamps were switched off, and then
+ *       removed from the maps. Nothing reads this array and no shipped level
+ *       fills it. scene.c's note above ::MoveLight is where that decision and
+ *       both measurements live. The fields below still mean what they say;
+ *       there is simply nothing in them.
  *
  * 한국어
  * ------
@@ -1519,6 +1549,12 @@ typedef struct {
  *
  * @note 방향이 없습니다. 전방향 광원이며, 횃불이나 천장의 조명등이 실제로 그렇습니다.
  *       원뿔형은 축과 두 개의 각도가 필요한데 이 프로젝트가 쓰지 않는 룩입니다.
+ * @note *적용되지 않으며, 선언되지도 않습니다.* 등은 정점에서도, 셰이더의 점광원
+ *       반복문에서도 시도되었고 브러시 레벨에서는 어느 쪽도 옳아 보이지 않았으며, 대신 방은
+ *       셰이더의 주변광과 공중에 있는 것들로 밝혀집니다. 그래서 등은 꺼졌고, 그다음 맵에서
+ *       제거되었습니다. 이 배열을 읽는 것도 없고 그것을 채우는 출하 레벨도 없습니다. 그
+ *       결정과 두 번의 측정은 scene.c의 ::MoveLight 위 설명에 있습니다. 아래의 필드들은
+ *       여전히 적힌 그대로를 뜻하며, 다만 그 안에 아무것도 없을 뿐입니다.
  */
 typedef struct {
     short x, y, z;                /**< Position in 1/100 units. / 위치 (1/100 단위). */
@@ -1554,11 +1590,14 @@ typedef struct {
      *
      * ENGLISH
      * -------
-     * WHAT AN IMPORTED MAP TURNED OUT TO BE LIT BY. `lqdm1`'s worldspawn
-     * carries `_sun_mangle "136 -73 0"`, `_sunlight "120"` and
+     * WHAT AN IMPORTED MAP TURNED OUT TO BE LIT BY, AND NO LONGER CARRIES.
+     * `lqdm1`'s worldspawn HAD `_sun_mangle "136 -73 0"`, `_sunlight "120"` and
      * `_sunlight2 "50"` -- a directional sun and a sky dome, which is how
-     * ericw-tools lights an outdoor Quake level. Its thirty-two point lamps
-     * are ACCENTS, and measured by tools/lightprobe.c they are exactly that:
+     * ericw-tools lights an outdoor Quake level. Those three keys were taken
+     * out of it, so this field is all zero in every level the game loads and
+     * ::bake_light returns on its first line; what follows is why it mattered
+     * while it was there. Its thirty-two point lamps were ACCENTS, and
+     * measured by tools/lightprobe.c they were exactly that:
      * of 798,624 vertex-light pairs, 93.3% fail on distance alone and 0.5%
      * light anything. The room is 82 x 63 x 43 metres and the lamps reach 9 to
      * 14, so importing only the lamps imported the garnish and left the meal.
@@ -1583,10 +1622,13 @@ typedef struct {
      * ------
      * @brief 태양이 있는 방향의 단위 벡터. 태양이 없으면 전부 0입니다.
      *
-     * *가져온 맵이 무엇으로 조명되고 있었는지.* `lqdm1`의 worldspawn은 `_sun_mangle`,
-     * `_sunlight`, `_sunlight2`를 지닙니다. 방향성 태양과 하늘 돔이며, ericw-tools가 야외
-     * Quake 레벨을 조명하는 방식입니다. 그 맵의 점광원 서른둘은 *장식*이고, tools/lightprobe.c로
-     * 재어 보면 정확히 그렇습니다. 정점-광원 쌍 798,624개 중 93.3%가 거리에서만 걸러지고 0.5%만
+     * *가져온 맵이 무엇으로 조명되고 있었는지, 그리고 이제는 무엇을 지니지 않는지.* `lqdm1`의
+     * worldspawn은 `_sun_mangle`, `_sunlight`, `_sunlight2`를 지니고 *있었습니다*. 방향성
+     * 태양과 하늘 돔이며, ericw-tools가 야외 Quake 레벨을 조명하는 방식입니다. 그 세 키는
+     * 그 맵에서 제거되었으므로 이 필드는 게임이 로드하는 모든 레벨에서 전부 0이고
+     * ::bake_light는 첫 줄에서 반환합니다. 아래는 그것이 있던 동안 왜 중요했는지에 대한
+     * 설명입니다. 그 맵의 점광원 서른둘은 *장식*이었고, tools/lightprobe.c로 재어 보면 정확히
+     * 그러했습니다. 정점-광원 쌍 798,624개 중 93.3%가 거리에서만 걸러지고 0.5%만
      * 무언가를 밝힙니다. 방은 82 x 63 x 43미터이고 램프는 9~14미터를 미치므로, 램프만 가져온
      * 것은 곁들임만 가져오고 본식을 두고 온 것입니다.
      *
@@ -1604,7 +1646,8 @@ typedef struct {
      * ENGLISH: Kept in the file's own numbers and scaled at the bake, so the
      * one place that decides what a Quake brightness is worth here is the one
      * place that uses it. 0 disables each independently -- a map may declare a
-     * sun and no sky, and `lqdm1` declares both.
+     * sun and no sky. `lqdm1` declared both and declares neither now, so both
+     * are 0 in every level the game loads.
      * 한국어: 파일 자신의 수 그대로 두고 베이크에서 환산합니다. Quake의 밝기가 이곳에서
      * 얼마인지를 정하는 곳이 그것을 쓰는 곳 하나가 되게 하기 위함입니다. 각각 0이면 꺼집니다.
      */

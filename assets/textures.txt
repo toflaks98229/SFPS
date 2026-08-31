@@ -356,20 +356,16 @@ gloss 8                   # faint sheen, mostly matte
 
 t wall_brick
 image wall_brick 2
-
 t wall_stone
 image wall_stone 2
-
 t wall_rough
 image wall_rough 2
-
 t wall_metal
 image wall_metal 2
 gloss 30
 
 t wall_plain
 image wall_plain 2
-
 t wall_marble
 image wall_marble 2
 gloss 45
@@ -378,20 +374,19 @@ t wall_track
 image wall_track 2
 gloss 25
 
-# FOUR TILES, not two, because this drawing is 64 and the others are 128. The
-# count is the buffer's 256 divided by the source's side, and it is not a
-# preference: any other number lands the wrap somewhere other than the buffer
-# edge, and a seam that is not on the edge is a seam you can see.
-# Its own surface rather than a variant of one: `wall_meat` is not masonry with
-# a different tint, so nothing above it is the right thing to copy.
-# 이 그림은 64이고 나머지는 128이므로 2가 아니라 *4*입니다. 이 수는 버퍼의 256을 원본의
-# 변으로 나눈 값이며 취향이 아닙니다. 다른 수는 되감김을 가장자리가 아닌 곳에 떨어뜨리고,
-# 가장자리가 아닌 이음매는 눈에 보이는 이음매입니다.
-# 위의 어떤 것의 변종이 아니라 자기 표면입니다. `wall_meat`은 색조가 다른 석조가 아니므로,
-# 위의 무엇도 베껴 올 알맞은 대상이 아닙니다.
-t wall_meat
-image wall_meat 4
-
+# `wall_meat` WAS HERE, and it is worth a line because of what it was for. It
+# was the only 64x64 surface this project drew, which made it the one thing
+# exercising sprite.c's tiling of a drawing smaller than its cell -- and it is
+# where tools/texprobe.c found that path broken. No map ever placed it. The
+# LibreQuake import brought six 64x64 surfaces that maps DO place, so the path
+# is walked by shipped content now and the drawing was carrying nothing but its
+# own bytes.
+# `wall_meat`이 이곳에 있었고, 그것이 무엇을 위한 것이었는지 때문에 한 줄 적어 둡니다. 이
+# 프로젝트가 그린 유일한 64x64 표면이었고, 그래서 셀보다 작은 그림에 대한 sprite.c의 타일링을
+# 실행하는 유일한 것이었습니다. tools/texprobe.c가 그 경로가 깨진 것을 찾은 곳이 그것입니다.
+# 어떤 맵도 그것을 배치한 적이 없습니다. LibreQuake 임포트가 맵이 실제로 배치하는 64x64 표면
+# 여섯을 가져왔으므로 이제 그 경로는 출하되는 콘텐츠가 밟으며, 이 그림은 자기 바이트 말고는
+# 아무것도 나르고 있지 않았습니다.
 # The door, and the same door wearing each key's colour. Doom ships DOORRED,
 # DOORBLU and DOORYEL as three textures; here they are three recipes over one
 # drawing, which is the bargain every other material in this file already
@@ -403,21 +398,21 @@ image wall_meat 4
 # 내놓지만, 여기서는 그림 하나 위의 레시피 셋입니다.
 
 t wall_door
-image wall_door 1
+image wall_door 2
 gloss 35
 
 t door_red
-image wall_door 1
+image wall_door 2
 tint 120 -40 -40
 gloss 35
 
 t door_blue
-image wall_door 1
+image wall_door 2
 tint -40 -20 130
 gloss 35
 
 t door_yellow
-image wall_door 1
+image wall_door 2
 tint 110 90 -50
 gloss 35
 
@@ -437,13 +432,22 @@ gloss 35
 # weapons, by the fixture map, by everything procedural -- and this is a second
 # set beside the first rather than a replacement for it.
 #
-# WHY THE TILE COUNTS DIFFER. `image <name> <tiles>` samples the 256-wide
-# material buffer out of a 128-wide drawing cell, so the count is 256 divided
-# by the SOURCE's side: a 128 texture repeats twice, a 64 texture four times, a
-# 16 one sixteen. LibreQuake authored at all three, and none of them is
-# upscaled on the way in -- sprite.c tiles a drawing smaller than its cell, so
-# a 64x64 source is four copies at a quarter of the bytes rather than an
-# enlargement that invents gradients PNG then charges for.
+# WHY THE TILE COUNTS ARE ALL THE SAME, and why they were not. `image <name>
+# <tiles>` samples the 256-wide material buffer out of a 128-wide drawing cell,
+# so `tiles` is how many CELLS go into one material -- and it is 2 for every
+# wall, whatever the source's size, because 256/128 is 2.
+#
+# It used to be "256 divided by the SOURCE's side", so 2 for a 128 drawing, 4
+# for a 64 and 16 for a 16, and that was wrong in a way that took a bug report
+# to see. sprite.c already tiles a drawing smaller than its cell, so a cell
+# ALWAYS holds exactly 128 texels of the source's own grid -- one copy of a 128
+# drawing, four of a 64, sixty-four of a 16. Counting the source's size a
+# second time here counted it twice: every 64 surface arrived in the game
+# tiling four times as often as TrenchBroom showed it, every 128 surface twice.
+#
+# A 64x64 source is still four copies at a quarter of the bytes rather than an
+# enlargement that invents gradients PNG then charges for -- that part was
+# always true, and it is sprite.c that does it, not this number.
 #
 # Fetched by assets/sprites/import-librequake-textures.py, which is kept for
 # the reason every importer here is kept: these PNGs are the RESULT of a
@@ -460,76 +464,71 @@ gloss 35
 # 여전히 이곳에 있고 여전히 쓰입니다. 무기가, 픽스처 맵이, 모든 절차적 표면이 씁니다. 이것은
 # 대체가 아니라 첫 집합 옆에 놓인 두 번째 집합입니다.
 #
-# *타일 수가 다른 이유.* `image <name> <tiles>`는 128폭 그림 셀에서 256폭 재질 버퍼를
-# 표본추출하므로, 그 수는 256을 *원본*의 변으로 나눈 값입니다. 128짜리는 두 번, 64짜리는 네 번,
-# 16짜리는 열여섯 번 반복합니다. LibreQuake는 셋 모두로 만들었고, 들어오는 길에 어느 것도
-# 확대하지 않습니다.
+# *타일 수가 모두 같은 이유, 그리고 예전에는 왜 아니었는지.* `image <name> <tiles>`는 128폭
+# 그림 셀에서 256폭 재질 버퍼를 표본추출하므로, `tiles`는 재질 하나에 *셀*이 몇 개 들어가는지를
+# 뜻합니다. 그리고 그 값은 원본 크기와 무관하게 모든 벽에 대해 2입니다. 256/128이 2이기
+# 때문입니다.
+#
+# 예전에는 "256을 *원본*의 변으로 나눈 값"이었고, 128짜리에 2, 64짜리에 4, 16짜리에 16이었으며,
+# 그것은 버그 신고가 있어야 보이는 방식으로 틀렸습니다. sprite.c는 셀보다 작은 그림을 이미
+# 타일링하므로 셀 하나는 *언제나* 원본 격자의 128텍셀에 정확히 해당합니다. 128 그림 한 장,
+# 64 네 장, 16 예순네 장입니다. 이곳에서 원본 크기를 한 번 더 세는 것은 그것을 두 번 세는
+# 일이었습니다. 모든 64 표면이 TrenchBroom이 보여 주는 것보다 네 배 자주, 모든 128 표면이 두 배
+# 자주 타일링된 채로 게임에 도착했습니다.
+#
+# 64x64 원본이 확대가 아니라 4분의 1 바이트의 사본 넷이라는 것은 여전히 참이며, 그것을 하는 것은
+# 이 숫자가 아니라 sprite.c입니다.
 
-t black
-image black 16
-
+# `black` WAS HERE. It came across with the rest of LibreQuake's surfaces and
+# `lqdm1` never names it on a face -- the only 16x16 drawing in the project,
+# placed by nothing. The name still appears in
+# assets/maps/import-librequake.py's table, but that is a WAD name on the left
+# hand side being mapped away, not this material.
+# `black`이 이곳에 있었습니다. LibreQuake의 다른 표면들과 함께 건너왔고 `lqdm1`은 어떤 면에서도
+# 그것을 지목하지 않습니다. 이 프로젝트의 유일한 16x16 그림이며 아무것도 그것을 배치하지
+# 않았습니다. 그 이름은 assets/maps/import-librequake.py의 표에 여전히 나오지만, 그것은 왼편에서
+# 다른 것으로 대응되는 WAD 이름이지 이 재질이 아닙니다.
 t grk_leaf1_1
-image grk_leaf1_1 4
-
+image grk_leaf1_1 2
 t med_cobstn1_1
 image med_cobstn1_1 2
-
 t med_csl_brk14_f
 image med_csl_brk14_f 2
-
 t med_csl_brk14b
 image med_csl_brk14b 2
-
 t med_csl_flr5_1
 image med_csl_flr5_1 2
-
 t med_dr1a
 image med_dr1a 2
-
 t med_dr3c
 image med_dr3c 2
-
 t med_glass5
-image med_glass5 4
-
+image med_glass5 2
 t med_roof4
 image med_roof4 2
-
 t med_tanwall4
 image med_tanwall4 2
-
 t med_wood2_plk1
 image med_wood2_plk1 2
-
 t med_wood3_plk1
 image med_wood3_plk1 2
-
 t med_wood5
 image med_wood5 2
-
 t med_wood_riv1b
 image med_wood_riv1b 2
-
 t met_brn_flat
-image met_brn_flat 4
-
+image met_brn_flat 2
 t met_brn_trim16
-image met_brn_trim16 4
-
+image met_brn_trim16 2
 t met_brn_trim32
-image met_brn_trim32 4
-
+image met_brn_trim32 2
 t met_brn_trim64
-image met_brn_trim64 4
-
+image met_brn_trim64 2
 t sky5_blu
 image sky5_blu 2
-
 t snow1
 image snow1 2
-
 t sq_trim1_2_s
-image sq_trim1_2_s 4
-
+image sq_trim1_2_s 2
 t star_water0
-image star_water0 4
+image star_water0 2

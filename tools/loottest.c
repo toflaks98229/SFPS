@@ -3,7 +3,7 @@
  * ENGLISH
  * -------
  * A DROP RATE IS THE ONE NUMBER IN THIS GAME THAT CANNOT BE CHECKED BY LOOKING.
- * "The brute pays about twice as often as the imp" is a claim about a thousand
+ * "The brute pays about twice as often as the water spirit" is a claim about a thousand
  * kills, and a player who sees twenty of them has seen noise. So it is measured
  * here, over enough rolls that the answer is the rate rather than the sample --
  * and the rolls are handed in rather than generated, so this file measures the
@@ -15,14 +15,14 @@
  * dropped instead of silently becoming ammo. Each of those is invisible in the
  * running game -- the symptom is a drop that looks slightly wrong, once.
  *
- * WHAT THIS DOES NOT DO is assert the shipped numbers. `chance 26` for an imp is
+ * WHAT THIS DOES NOT DO is assert the shipped numbers. `chance 26` for a water spirit is
  * a design decision somebody will move next week, and a test that names it goes
  * red on that edit while proving nothing. What is asserted is that the file is
  * READ -- that whatever it says arrives intact at the other end.
  *
  * 한국어
  * ------
- * 드롭 확률은 이 게임에서 *보는 것으로는 검사할 수 없는* 유일한 숫자입니다. "브루트는 임프보다
+ * 드롭 확률은 이 게임에서 *보는 것으로는 검사할 수 없는* 유일한 숫자입니다. "브루트는 물의 정령보다
  * 두 배쯤 자주 지급한다"는 천 번의 처치에 대한 주장이고, 그중 스무 번을 본 플레이어는 잡음을
  * 본 것입니다. 그래서 이곳에서, 답이 표본이 아니라 확률이 될 만큼 충분한 굴림에 걸쳐
  * 측정합니다. 그리고 굴림은 생성하지 않고 건네받으므로, 이 파일이 재는 것은 표이지 난수
@@ -33,7 +33,7 @@
  * 이름의 항목입니다. 각각은 실행 중인 게임에서 보이지 않으며, 증상은 한 번, 조금 이상해 보이는
  * 드롭입니다.
  *
- * *이 파일이 하지 않는 일은* 배포된 숫자를 단언하는 것입니다. 임프의 `chance 26`은 누군가
+ * *이 파일이 하지 않는 일은* 배포된 숫자를 단언하는 것입니다. 물의 정령의 `chance 26`은 누군가
  * 다음 주에 옮길 설계 결정이고, 그것을 적은 검사는 그 편집에 빨개지면서 아무것도 증명하지
  * 않습니다. 단언하는 것은 파일이 *읽힌다는 것*, 즉 그것이 말하는 무엇이든 반대편에 온전히
  * 도착한다는 것입니다.

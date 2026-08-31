@@ -22,7 +22,7 @@ Models, materials, sounds and levels are all authored as text and hot-reload
 into the running game.
 
 ```
-995,840 / 1,474,560 bytes   (67.53% used)
+982,528 / 1,474,560 bytes   (66.63% used)
 ```
 
 ## Build
@@ -307,10 +307,17 @@ of the scene and must be pixelised and dithered with it. A dev build asserts
 this: drawing on the wrong side of the boundary increments `DIAG_PASS_ORDER`
 and shows up in the title bar. See [Making silent truncation visible](#making-silent-truncation-visible).
 
-The pool is shared across every effect (`FX_MAX_PARTICLES`, 256). A flood
+The pool is shared across every effect (`FX_MAX_PARTICLES`, 2048). A flood
 overwrites the oldest particles rather than refusing the newest — the burst
 that just spawned is the one being looked at — and reports `DIAG_FX_CAP` so
 the truncation is visible rather than merely silent.
+
+**The number that decides that cap is the blast**, at 297 particles for one
+grenade — 213 spawned at the moment it goes off, and 84 more arriving behind
+the trails over the second and a half after. It was 256 when three effects
+existed, 640 when the blast was four layers, and 1536 when it was nine; the
+note beside the constant carries the current figure, because a capacity
+argument quoting a stale number is one nobody can check.
 
 ### Verifying an effect you have not seen yet
 
@@ -335,6 +342,149 @@ For the look itself, `build\dithershot.exe <level> <effect>` renders the real
 level with the effect firing and writes a PNG — the same tool used to compare
 dither settings, since an effect has to be judged through the post pass rather
 than beside it.
+
+### An explosion is eleven layers, a light and a jolt
+
+A grenade going off used to be six particle effects and a sound, and what was
+missing was not artistic. **Every one of those six is additive geometry drawn in
+front of the world.** None of them brightens the wall behind the blast, the
+monster standing against it, or the floor under the player's feet.
+
+`scene.c` offers every projectile in flight to the shader as a point light, and
+`detonate` clears `active`. So the loudest event in this game was the one frame
+in which the room got **darker** — the grenade had been lighting it right up
+until it stopped existing, and then six layers of fire were drawn over geometry
+that had fallen back to ambient.
+
+`Flash` in [src/proj.h](src/proj.h) is the record that fixes it: *something went
+off here, this big, this recently.* Three readers each ask it a different
+question.
+
+| the question | who asks it |
+|---|---|
+| how bright is the room | `scene_lights`, which hands it to the shader |
+| how hard is the camera moving | `world_step`, which shakes by distance from it |
+| how long ago was it | both, through `proj_flash_fade` — one curve, so the light and the jolt cannot disagree about when the explosion was over |
+
+**It is not a particle**, and `fx.c` would hold one happily. It could answer
+none of the three: a particle is written to be drawn and nothing may ask where
+it is, the pool evicts the oldest without asking whether something is still
+reading it, and a light has to last exactly as long as it is bright where a
+burst is authored to last as long as it is still expanding. The blast smoke
+lives 900ms; the light that made it is over in a third of that.
+
+**The three reaches are three different numbers, deliberately.**
+
+| | multiple of the blast radius | at the grenade's 4.2m |
+|---|---|---|
+| damage | 1.0 | 4.2m |
+| light — `LIGHT_BLAST_REACH` | 1.7 | 7.1m |
+| shake — `WORLD_SHAKE_BLAST_REACH` | 2.5 | 10.5m |
+
+A blast you cannot be hurt by can still light you, and one too far away to light
+you can still be felt through the floor. Collapsing them onto one number means
+picking which two to get wrong. **The dome is the exception that proves the
+rule:** `blastdome` is scaled to the damage radius *exactly*, because it is a
+claim with a gameplay number in it and a claim drawn at the wrong distance is a
+lie the player will believe. Light makes no such claim, so it is allowed to
+reach past where the damage stops.
+
+The light also runs **over 1.0**, further over than anything else in the file.
+`lum` clamps before it bands, so power past 1 saturates, and the shader's `tint`
+mix weights by `clamp(e, 0, 1)` — at `e >= 1` the wall takes the light's colour
+outright. A shotgun in your hands is worth 1.15 of that; a charge going off has
+to blow the room out for two frames and then not be there, which is a curve
+rather than a level. `proj_flash_fade` is the curve, and it is **squared**: an
+explosion arrives at full and is most of the way gone before the eye finishes
+registering it, where a light walking evenly down to nothing reads as a lamp
+being dimmed.
+
+Five particle layers joined the six:
+
+| layer | what it is for |
+|---|---|
+| `blastflash` | the over-exposed first five frames. The one effect in the file that *wants* the saturation `spawn` exists to prevent — five metre-wide additive quads at full alpha, composited to a hole burnt in the frame |
+| `blastwave` | the dome's equator, drawn on the floor it went off against. `disc 1` with `face normal`, scaled by the caller, because the floor is where a distance can actually be paced out — a hemisphere hanging in space cannot be |
+| `blastember` | what is still burning a second later. Everything else is over inside 300ms except the smoke, and smoke on its own says the fire went *out* |
+| `blastring` | the same rim as `blastwave`, lit. The dust is alpha-blended so it can occlude the floor, which is right for what a shockwave does to grit and wrong for what it does to the eye — in a dark room a pale smudge is not a radius anybody can read. Same position, normal and scale; the dust runs out in 300ms and the light takes 420, so the pale edge arrives first and the bright one stays after it |
+| `blastfire` | the second the blast spends as a cloud. Everything above it is additive and can only brighten, so the explosion had two states and nothing between them: white-hot, then grey smoke climbing out of an empty floor. This one is alpha, which is what lets it go *dark*, and its ramp carries it from flame to soot |
+
+**And the axe's slam finally admits it is one.** `wp_axe_land` calls
+`proj_blast` — it makes a crater by every measure the code has — and what it
+drew was `boltburst`, the *monster* bolt's flash, which cools into that bolt's
+blue. The player's own axe coming down was painted in the colour `scene.c`'s
+palette reserves for something shooting at them, which is the same fault
+`detonate` carried until it was found. It now takes the ground wave at
+`AXE_SLAM_RADIUS`, the warm burst, and a flash at `AXE_SLAM_FLASH` — a third of
+a charge's. The reach is **larger** than a grenade's (5.5m against 4.2) and the
+light is smaller, which is why the two cannot be derived from one another: a
+mass of metal hitting stone is not a charge going off, and anything taking
+brightness from reach would light the room harder for the one with no fire in
+it.
+
+### What a projectile leaves behind it, and where it lands
+
+Two passes, both worked from a screen recording and from what other engines do,
+and both of them found the same shape of hole: **an event with no before and no
+after.** A grenade left the muzzle and arrived at the wall with nothing drawn
+between those two moments. A bolt struck a wall and threw one effect, which was
+the shotgun's.
+
+Two keywords in `effects.txt` came out of it, and both are data rather than C:
+
+| keyword | what it does |
+|---|---|
+| `stretch <ms>` | draws the quad over that many milliseconds of the particle's **own travel**, along its velocity — a streak instead of a square, and one that *shortens* as `drag` takes the speed away, which is what reads as a spark landing rather than merely fading. DarkPlaces calls the same parameter `stretchfactor` |
+| `trail <name>` / `trailms <ms>` | the effect a particle leaves **behind** it as it flies. A bright dot arcing across a dark room is a dot moving; the same dot with half a metre of smoke behind it was *hurled* out of something. The chain is one link deep by construction — a wake never has a wake — so a definition may safely name one that names it back |
+
+**The trail is what makes an arc legible.** A thrown charge is read from its
+path: you learn where a grenade is going by seeing where it has been, and a dot
+has been nowhere. `fusespark` and `fusetrail` are emitted by `proj.c` on a fixed
+`PROJ_TRAIL_INTERVAL` rather than per frame, for the reason `SHOT_TRAIL_INTERVAL`
+already existed on the monsters' side: a rate that follows the frame rate makes
+the same trail denser on a faster machine and lets one round in the air empty a
+pool shared with every other effect in the level.
+
+**A landing is four layers, and none of them is invented here.** Quake II's
+`TE_BLASTER` is particles plus a light; ioquake3's `CG_MissileHitWall` is a
+mark, a sprite, a light and a sound, and it picks `energyMarkShader` over
+`bulletMarkShader` because a bolt *burns* where a bullet chips; Xonotic's
+`electro_impact` is a decal carrying the light, a smoke puff pushed along the
+surface, and a short bright core, with the sparks split off into
+`electro_ballexplode` and drawn stretched. Ours is `zapflash`, `zapburst`,
+`scorch` and `smokepuff` — the last of which the shotgun already wrote, because
+dust off a wall is dust off a wall.
+
+| what changed | before | after |
+|---|---|---|
+| the rapid's impact | `spark` — the **shotgun's** warm orange, on a green plasma weapon | a white-green core, stretched green sparks, a burn, a puff, and a light in the bolt's own hue |
+| a monster bolt's impact | two effects, identical whether it hit a wall or the player | the wall gets the burn and the puff; a hit on the player gets neither, because a scorch hanging where a body was reads as having *missed* |
+| both | the room went **dark** on the frame of impact | `FLASH_BOLT` / `FLASH_SHOT`, at `LIGHT_HIT_REACH` and `LIGHT_HIT_POWER` — deliberately under 1.0, because the rapid lands one every 85ms and a saturating light at that rate is a strobe |
+
+`Flash` had to learn **what made it** to do that. It carries a `kind` and not a
+colour: every hue in this game is in one table in `scene.c`, under a note saying
+warm is yours and cold is theirs, and a `float col[3]` on the record would be a
+second place a light's colour can be decided. `flash_look` is where the three
+kinds turn back into one.
+
+**Three bugs fell out of the two passes**, all of the same shape — a rule stated
+in one place that a second place never heard about:
+
+- `blend 1` in `blastdome`, `blastcore` and `sawgrind`. The parser takes the
+  *word* `add`; `1` is not that word, so it fell through to `alpha` and the two
+  brightest layers of every explosion were drawn as quads that **occluded** the
+  room instead of lighting it. Unknown tokens are skipped by design — that is
+  what lets an old build read a new file — and the cost is that a mistyped value
+  cannot be told from one that was never written.
+- `scene_draw_proj` drew the player's plasma bolt in a literal pale **blue**
+  while `LIGHT_COL_BOLT` lit the wall behind it acid **green**. That is exactly
+  the failure `LIGHT_COL_SHOT`'s own note describes for the monsters' side, and
+  the note under `scene_draw_shots` records the same line being fixed *there*.
+  This was the one call site that never got the message.
+- `detonate`'s bolt branch would have drawn `blood` on a monster that
+  `enemy_hurt` had already bled a line earlier. It does not; there is a comment
+  saying why, because an omission that looks like one gets *fixed* by the next
+  reader.
 
 ## Loot
 
@@ -406,7 +556,7 @@ floor, somewhere other than the start.
 ### The shrine, and why it is three effects
 
 An altar is `altarring`, `altarcore` and `altarmote` in
-[assets/effects.txt](assets/effects.txt), for the same reason the blast is four
+[assets/effects.txt](assets/effects.txt), for the same reason the blast is eleven
 layers: each answers a different question. **Where** (the ring, running out
 across the floor at the instant the wave ends — motion at the edge of vision is
 what turns the head), **what** (the core, a warm column that says shrine and not
@@ -1315,22 +1465,30 @@ the game to the wrong palette indices, which looks like the art was drawn wrong.
 So the test opens the script and compares. Verified by swapping two characters
 in `bake.ps1` and watching it report `2 / 0`.
 
-**Four types, and a new one is a table row plus a `_pixel` function** — no new
+**Three types, and a new one is a table row plus a `_pixel` function** — no new
 code path. The atlas is a grid, one row per type, one column per frame:
 
 | | role | reads as |
 |---|---|---|
 | **water_spirit** | the baseline — holds mid range and sprays a cone of bolts | a small pale drifting shape |
 | **brute** | a wall of health that hits like a truck, slow | broad grey-green hulk, tusks, back spikes |
-| **hound** | fast and frail, punishes standing still | low green beast, all fanged mouth |
-| **caster** | ranged — never closes, shoots across the room | violet robe, no legs, cold cyan eyes |
+| **caster** | ranged, and *off the floor* — never closes, shoots across the room | violet robe, no legs, cold cyan eyes |
+
+**It used to be five, and the two that went were the two that were adjectives.**
+A `hound` was a water spirit with the numbers pushed the other way — faster,
+frailer, lower — and a `wraith` was the caster plus `MON_FLIES` and four points
+of health. Neither added a question the player had to answer differently, so the
+flag moved down onto the caster and both rows went. What is left is one baseline,
+one wall, and one thing you cannot walk up to. Every retired name still resolves
+(`enemy.c`'s `MON_LEGACY`) so a level that places one still fills.
 
 The stats live in one table in [src/enemy.c](src/enemy.c) (`MonType`), so tuning
 a monster is editing a row, and [tools/enemytest.c](tools/enemytest.c) asserts
-the *roles* hold — the brute really is tougher and slower, the hound really is
-faster and frailer — so a careless edit that flattens them gets caught. Each is
-also visibly distinct in silhouette; `tools/sprdump.c` writes the whole atlas
-to a PPM so the art can be eyeballed without launching the game.
+the *roles* hold — the brute really is tougher and slower, the caster really is
+frailer and further away and *up* — so a careless edit that flattens them gets
+caught. Each is also visibly distinct in silhouette; `tools/sprdump.c` writes
+the whole atlas to a PPM so the art can be eyeballed without launching the
+game.
 
 ### The ranged type
 
@@ -1390,9 +1548,12 @@ stops on flesh instead of passing through into the wall, sprays blood, and a
 corpse can no longer be hit. The player has health now, drained by swings,
 shown bottom-left and tinted green→red as it falls.
 
-Monsters spawn at the level's entities — `water_spirit`, `brute`, `hound` (and legacy `imp`,
-`spawn`) — so you place them in `mapedit` with the entity tool, no code change
-to build an encounter.
+Monsters spawn at the level's entities — `water_spirit`, `brute`, `caster` (and
+the retired `imp`, `hound`, `wraith`, `spawn`, each of which resolves to
+whatever replaced it) — so you place them in `mapedit` with the entity tool, no
+code change to build an encounter. A `.map` carries a marker's height and a
+`levels.txt` sector level does not, which matters for exactly one kind: the
+caster flies, so it holds the Z its marker names.
 
 ## Pickups
 
@@ -1494,6 +1655,21 @@ it because no shipped map used that material; an imported map naming a 64×64
 surface wears it on every face, and fourteen of the twenty-three are 64 or 16.
 Walls tile into their cell now, and `tools/texprobe.c` pins it.
 
+**And `wall_meat` has since been deleted, for the reason it was invisible.** No
+map ever placed it — nor `black`, the only 16×16 drawing, which came across with
+the LibreQuake set and is named on no face in Solstice. Both were in the
+material library and on nothing you could walk up to. They went together, 732
+bytes of PNG between them, and the placement path they were the only witnesses
+to is now walked by six 64×64 surfaces that shipped maps actually use.
+
+What was *not* deleted is everything else Solstice does not use. `wall_brick`,
+`wall_stone`, `wall_rough`, `wall_metal`, `wall_marble`, `wall_track` and
+`wall_door` are the surfaces `arena`, `vault`, `dm03` and the `atrium` fixture
+are made of, and `door_red` / `door_blue` / `door_yellow` are picked at runtime
+by `level.c` from a door's key colour, so no map names them at all. "Unused by
+`lqdm1`" and "unused" are different sets, and only the second one is safe to
+delete.
+
 That test is worth its own note, because its first version was wrong. It measured
 how much of the material came out **black**, which is what the bug looks like —
 and it failed on `black` (a texture that is black) and `sky5_blu` (a night sky
@@ -1524,6 +1700,15 @@ query it could not honestly answer. Solstice gets 16 candidates, the same
 number `glasstower` was hand-authored with.
 
 ### The arena was lit by a sun the import left behind
+
+> **This section is history now.** Solstice's `_sunlight`, `_sunlight2` and
+> `_sun_mangle` were taken back out of its worldspawn along with its lamps, so
+> nothing below describes what the game currently draws — no shipped map
+> declares a sun, `bake_light` returns on its first line for every level, and
+> every vertex carries zero baked light. The parse, the bake and the sky walk
+> are all still there and still correct; nothing feeds them. Read on for what
+> the numbers were and why the walk is shaped the way it is, and see the note
+> at the end of this section for where the lighting went.
 
 Solstice looked wrong after the textures came across, and not in the way the
 albedo work had fixed: light did not fall in pools, it bled along one side of a
@@ -1582,8 +1767,10 @@ against the bounding box that was already computed.
 | sunlit vertices | 174 | **3,201** |
 | load | 5 ms | 6 ms |
 
-Purely additive: a level that declares no `_sunlight` gets zero and bakes
-exactly as before, which is every hand-authored level in this project.
+Purely additive at the time: a level that declared no `_sunlight` got zero and
+baked exactly as before, which is every hand-authored level in this project.
+That stopped being true when the lamps left the bake — see below — and such a
+level now bakes nothing at all, because the sun is the only thing left in it.
 
 `tools/lightprobe.c` measured all of this, and measuring is all it did — which
 made it a file `build.ps1 -Test` ran, and passed, without it ever being able to
@@ -1608,6 +1795,258 @@ The probe also replicated the sky walk so it could ask its question, which is a
 test that agrees with itself — the copy would have carried the same
 two-centimetre step, passed, and said nothing. `level_sun_reaches()` is public
 now for exactly one caller, and the copy is gone.
+
+**The same measurement said the lamps should not be baked either, and it took
+a second look to hear it.** The table above reads as a case for the sun, and it
+is; it is also a verdict on the lamps, and the verdict was left on the page:
+**93.3% of vertex-lamp pairs rejected on distance, 0.5% lighting anything.**
+Those are not the numbers of lamps that are too dim. They are the numbers of
+lamps that are **being asked the wrong question** — because the bake samples
+light at VERTICES, and `lqdm1` is a brush level whose single faces are metres
+across.
+
+A lamp reaching nine metres in a room 82 across lands on a handful of corners
+and is then *interpolated* over everything between them. What that looks like
+is light that bleeds along one side of a wall and stops dead at a seam — which
+is the same sentence this section opens with, describing the symptom the sun
+was meant to fix. **The sun fixed the room. It could not fix the lamps, because
+the lamps were broken by the sampling rather than by the dark.**
+
+So the lamps left `bake_light` and went to the shader's point-light loop —
+`scene_lights` offers them beside the muzzle flash and the grenades, per
+fragment, with the same `(1 - d/r)²` falloff and the same banding. Nothing
+about the light model changed; only where it is sampled.
+
+**The sun did not go with them, and the reason is the shape of the two terms.**
+The shader's loop takes a position, a radius and a falloff. A sun has none of
+the three, and what makes a directional light read as shaped is the *trace* —
+the ray that says whether this point can see the sky. A fragment shader here
+cannot cast one. The lamps could leave because their falloff already ends; the
+sun cannot, because for it the shadow **is** the light. `bake_light` is a sun
+bake now, and its guard moved from `n_lights < 1` to `sun_power <= 0 &&
+sky_power <= 0` with it.
+
+Two things are paid for it, both written down rather than discovered later:
+
+- **A lamp no longer casts a shadow.** The bake traced one per lamp per vertex;
+  the loop cannot. Its radius is the only thing that stops it, which is why a
+  lamp's reach is authored rather than physical.
+- **Eight at a time.** `LVL_MAX_LIGHTS` is 64 and `RD_MAX_LIGHTS` is 8, so the
+  nearest eight win, chosen per frame — the rule the grenades already lived
+  under. On Solstice's thirty-two accents the ones that lose are the ones whose
+  reach ended long before the eye.
+
+`LIGHT_LAMP_POWER` is **0.45**, against the bolt's 0.55 and the muzzle flash's
+0.85, scaled by each lamp's own `power`. Lower than an event on purpose: a
+grenade lights one room for a second and leaves, a lamp is on for the whole
+level, eight of them can overlap, and `lum` clamps at 1.0 before it bands. It
+is also a *bigger* light than it was — the bake missed most of what it aimed at
+and the fragment loop misses none of it — so keeping the old effective power of
+1.0 would have made every lamp roughly twice the light the author placed.
+
+**The check that guarded this inverted rather than went away.** `scenetest`
+asserted that a level's lamps occupy *no* dynamic slot, because a lamp applied
+in both places is applied twice and *"a room lit twice does not look broken, it
+looks bright"*. That failure is still real and still invisible; only its
+direction changed, so the check now asserts the lamps **are** in the slots and
+`leveltest` asserts that **none of them reaches a vertex**. Between them the
+double-apply cannot come back from either side.
+
+**One thing a count could not see: the events keeping their slots.** Thirty-two
+lamps against eight means lamps offered on equal terms would hold all of them
+and a grenade thrown twenty metres would light nothing, so `light_offer` took a
+`keep` — a reserved prefix the lamps were offered against. It is gone with
+them: a reservation with nobody on either side of it is a rule that cannot be
+got wrong, and a rule that cannot be got wrong is the kind that quietly stops
+meaning anything.
+
+**And `dithershot` went dark for a release, which nothing would have said.**
+The tool exists so the look can be judged rather than argued about, and it got
+the lamps for free while they lived in the vertices: it called `level_geometry`
+and the light came back inside them. A per-frame upload is something a caller
+has to *make*, and a tool that makes none photographs the level with its lights
+off — then the dark gets blamed on a material. It calls `rd_lights(0, 0, 0)`
+now, explicitly, and that is not the same as making no call: the uniform holds
+whatever the last caller left in it, and a shot lit by a leftover is a shot of a
+frame the game never draws. What it photographs is the game at rest, which is
+what the game at rest is.
+
+**And then the lamps were switched off in the shader too, and the room is lit
+by what is being fired in it.** The per-fragment pools were round and the
+per-vertex ones were not, and it still did not come right on the map that
+started this: eight slots against a level that declares thirty-two means a big
+room **re-lights itself as the player walks through it**, and nothing in the
+loop casts a shadow, so a lamp behind a wall lights the far side of it and then
+hands its slot to another lamp two steps later. Two arrangements, both wrong in
+different ways, is a sign the thing being placed is wrong rather than its
+placement.
+
+So `::Level::lights` is parsed, stored, and **read by nothing** — and then the
+lamps came out of the maps as well. Solstice's thirty-two `light` entities are
+gone from `lqdm1.map`, arena's four `light` lines are gone from `levels.txt`,
+and no shipped level declares one. The parser still knows the word, because a
+format that silently drops a word it can read is worse than one that reads a
+word nothing uses; `levels.txt` documents the line and says outright that
+writing one changes nothing you can see. What lights a room instead is two
+things:
+
+**The floor came up.** `AMBIENT` was 0.32, chosen when the lamps did the work
+and the floor only had to be dark rather than black. It is **0.45**, and the
+key light's share came down to `1.0 - AMBIENT` so the two still sum to one —
+the constraint the first attempt at this block got wrong, topping out at 0.80
+and dimming every surface a light did not reach. It costs tonal range and the
+comment says so: `lum` spans 2.2 of the five bands instead of 2.7.
+
+**And every moving light got brighter, because there is nothing else.** A flash
+worth 0.85 against a corridor already at 0.6 is a flash; the same flash against
+ambient and nothing else has to carry the whole moment. The muzzle is **1.15** —
+over 1.0 deliberately, since `lum` clamps before it bands and a shotgun going
+off in your hands *should* blow out. Monster bolts are 1.00, the grenade 0.95,
+the shrine 0.80.
+
+**Colour stopped being flavour and became the legend.** When lamps lit the
+room, a light in the air was one source among many and its hue was decoration.
+It is the lighting now, so the colour a wall goes is the game saying *what just
+happened to it* — from behind, in the dark, before the sound arrives:
+
+| | |
+|---|---|
+| muzzle flash | warm white — burnt powder |
+| grenade | hot orange |
+| plasma bolt | acid green |
+| shrine | gold, and nothing that hurts may use it |
+| monster bolt | **one row per creature** |
+
+Warm is yours, cool is theirs, and the maw is the single deliberate exception —
+the only monster attack painted warm, because it is the only one that must not
+be filed with the rest at a glance. The player's two projectiles are told apart
+by the field that already tells them apart: a grenade is the round with gravity
+on it, which is the same test `fire_projectile` makes to decide whether what
+leaves the barrel arcs. The bolt is the dimmer of the two at 0.70, and that is
+about *how many* — the launcher holds six and `rapid` holds two hundred at
+0.085s a shot, so a burst lays a line of them across a room and at the
+grenade's power that line saturates `lum` along its whole length.
+
+`Shot` gained one field for this. A bolt in the air has no other link back to
+the monster that made it — `shot_fire` copies a position, a velocity and a
+damage number and the caster walks away — so without it `scene.c` would have to
+guess a creature from a damage value, which two of them share. Nothing in
+`enemy.c` branches on it; the renderer is the only reader.
+
+**The two readers of that table are the failure mode.** `scene_lights` uses the
+row for the light the bolt throws on the wall and `scene_draw_shots` for the
+glow the bolt is drawn as, and they are separate functions that are not obliged
+to agree — which is exactly the drift the table's own note warns about, from
+the other side: *a wall lit violet with a blue bolt in front of it*. So the
+tier table in `scene_draw_shots` stopped naming colours and started naming what
+to **do** to a hue — how bright this layer burns, how far it washes toward the
+core's heat — and the numbers reproduce the old blue almost exactly at the
+caster's row. Nothing about how a bolt looks changed except that it can now be
+a different colour. The check for it changes `Shot::type` and nothing else,
+caster against maw because those two rows are furthest apart; neighbouring hues
+could come out equal after the resolve pass quantises and prove nothing.
+
+**And the check that guards all this has pointed both ways and then lost its
+subject.** It began as *the lamps occupy no dynamic slot* (they were baked, and
+being in both places applies each twice), became *the lamps occupy their slots*
+(the bake sampled them at the corners), and is neither now. With the lamps
+deleted from the levels, a check that only read the shipped maps would pass for
+the wrong reason — zero in, zero out, and it would go on passing if somebody
+wired `Level::lights` straight back into `scene_lights`. So `scenetest` **puts
+the lamps in itself**: eight of them, on top of the camera, reaching twenty
+metres, placed where they would take every slot and light every wall in sight
+if anything read them at all. The count stays at zero and the frame does not
+change by a pixel. The other half — that they do not reach a *vertex* either —
+is `leveltest`'s and `tracetest`'s, because `scenetest` has no vertices to look
+at. Each half is separately invisible: a room lit twice looks bright, a room lit
+once looks fine, and only the pair says which arrangement is in force.
+
+**What went uncovered, said out loud.** `leveltest` used to prove a parser
+property off arena's four lamps — a `light` line is eight integers, the reader
+has to consume exactly those eight, and a miscount leaves it mid-line so every
+declaration after it reads as garbage, silently. With no lamp in any level file
+that check has no input, so it now asserts the fact that replaced it: **every
+shipped level declares zero**, which is worth pinning because "no lamp lights
+anything" is a property of the data as well as of the engine. The eight-integer
+parse itself is unexercised. `tracetest` still covers the other half — Quake
+`light` entities out of a `.map`, on the `atrium` fixture, which keeps its three
+because it is a fixture the game cannot enter and deleting them would delete the
+last coverage of the importer for no gain. If lamps ever come back, a fixture
+for the text line is the first thing to write back.
+
+**And then the sky went too, which is where this ends.** The lamps were
+switched off, then deleted from the maps, and the last thing lighting Solstice
+was the sun this section is about. Its three worldspawn keys came out with
+them, so **`bake_light` now returns on its first line for every level the game
+loads** and `Vtx::lr/lg/lb` is zero on every vertex in the project. Measured
+after: 24,957 of 24,957 vertices carry no baked light.
+
+What is left lighting a room is the shader's `AMBIENT` and whatever is in the
+air. That is the whole model now — a flat floor of illumination, and moments
+that are brighter because something was fired.
+
+**None of the machinery was deleted, and that is a decision worth naming.**
+`brush_sun_of` still reads all three keys, `bake_light` still traces, the sky
+walk still steps past a whole brush rather than a face, and the 8,192-slot
+light cache still stands ready to hold what the bake produces. All of it is
+reachable and none of it is reached: a `.map` with a `_sunlight` key would
+still light correctly. What that costs while nothing declares one is 327,680
+bytes of `.bss` for the cache and twelve bytes a vertex for the light the bake
+would have written.
+
+`tools/lightprobe.c` had to be told about this. Its one claim — *of the
+surfaces that face the sun, the sun reaches at least a twentieth* — took the
+"no sun declared, nothing to reach" branch the moment the keys came out, and
+would have gone on reporting `ok` while asserting nothing. **A suite that
+passes because its subject is missing says the subject is fine.** So it puts
+Solstice's own sun back in memory before it measures, and says in its header
+that it is now a fixture rather than a measurement of what ships. It still
+reads 25.1% against a bar of 5%, and the two broken walks it was written
+against still read 1.67% and 1.39%.
+
+**And every wall in it was tiled at twice the rate the author drew it.**
+Reported from the editor: the tiles in game repeat about twice as often as
+TrenchBroom shows them. Two numbers decide that, and they were being chosen by
+two different rules that each looked right on its own.
+
+`BRUSH_TEXELS` is what one material spans, in the texels a Valve 220 face
+measures its offsets and scales in — every UV in a brush level is a map
+coordinate divided by it. It was **128**, on the reasoning that TrenchBroom
+shows the hand-drawn wall art at 128, so 128 is the tile an author fits a face
+to. The first half of that is true and the second does not follow, **because a
+material is not one copy of its drawing.**
+
+Two things stack before the art reaches the screen:
+
+- `sprite.c` tiles a drawing that is *smaller* than its cell, so one 128-wide
+  cell always holds exactly 128 texels of the source's own grid — one copy of a
+  128 drawing, four of a 64, sixty-four of a 16.
+- `image <name> <n>` in `textures.txt` then repeats that **cell** `n` times
+  across the 256-wide material.
+
+So a material spans `128 · n` source texels, and that is what a UV of 1.0
+crosses. The counts were being picked as *"256 divided by the source's side"* —
+the count that fills a material, not the count that matches an editor — which
+counts the source's size a second time after `sprite.c` already accounted for
+it. Against a divisor of 128 that put every 128 surface at **2×** the editor's
+rate, every 64 surface at **4×**, and `black` at **16×**. On Solstice: 2,721
+faces at 2× and 1,593 at 4×.
+
+The fix is one rule instead of two. Every wall material tiles its cell
+`TEX_SIZE / SPR_WALL` = **2** times — the count that puts the art in the
+material at its native density — and `BRUSH_TEXELS` is `SPR_WALL · 2` = **256**,
+which is simply *how many texels one material spans*.
+
+**Neither half could have caught it alone**, and that decided where the check
+went. A static assert in `brush.h` cannot read a text asset, and the material
+library cannot see the divisor — and the failure is invisible from both sides:
+a wall tiled at twice its intended rate is still a wall, and it reads as an
+authoring mistake in the map rather than as a constant disagreeing with a
+number in a `.txt`. `tools/texprobe.c` is the one place that can hold both, so
+it walks the material library, requires every `image` count to be
+`TEX_SIZE / SPR_WALL`, and requires `BRUSH_TEXELS` to equal `SPR_WALL` times
+that. Both halves were mutation-tested: putting the divisor back to 128 and one
+count back to 4 turns it red on each independently.
 
 **And two gates that could never open.** `lqdm1`'s doors are Quake `func_door`s
 with `angle 90` and `angle 270` — sideways, which is what the engine already
@@ -1686,18 +2125,26 @@ the air.
 `wavetest` asks the *shipped* arena whether at least one spawner is a flyer's
 and then whether anything is off the ground, and both went red the day an
 imported map became that arena. The assertions were right and the furniture was
-wrong: `wraith` carries `MON_FLIES` and is the only type that does, so a room
-without one is a room where the flying path is authored, tested elsewhere, and
-never entered in play. The boss's air wards already summon flyers — so the arena
-knew how to be three-dimensional during a boss fight and not for the fifteen
-waves before it. The duplicate rusher was the thing to spend.
+wrong: a room with no flyer's spawner is a room where the flying path is
+authored, tested elsewhere, and never entered in play. The boss's air wards
+already summon flyers — so the arena knew how to be three-dimensional during a
+boss fight and not for the fifteen waves before it. The duplicate rusher was the
+thing to spend.
 
-**Having the entity is not having the behaviour.** With the wraith spawner
+**Which spawner is the flyer's has since moved, and the assertion did not have
+to.** `wraith` carried `MON_FLIES` when this was written; that row is gone and
+the flag came down onto the caster, so the arena's *ranged* spawner is the air
+now — it did not gain a fourth entry, it stopped being a floor spawner. The test
+asks the shipped level "is at least one of them a flyer's" and never names a
+class, which is the whole reason it survived the bestiary changing under it.
+The three are a water spirit, a caster in the air, and a brute.
+
+**Having the entity is not having the behaviour.** With the flyer's spawner
 placed, "at least one of them is a flyer's" passed and "and something is off the
 ground" still failed — because the importer puts every spawner on a deathmatch
 start, and a start is by construction a place a player's *feet* go. `enemy.c` is
 explicit that "a flyer keeps the height it was spawned at and never asks the
-floor about it", so a wraith made at a start hovers at floor level for its whole
+floor about it", so a flyer made at a start hovers at floor level for its whole
 life: a flying monster that never flies. A flyer's spawner is lifted 64 units —
 two metres at `BRUSH_UNIT` — which clears a player's head and sits under any
 ceiling a deathmatch start has above it, since a start must already have
@@ -2731,7 +3178,7 @@ a genuine PSX artefact and it is also just a bug that shipped. Reproducing it
 means giving up the depth buffer, and everything in this project — the
 particles, the sprites, the view model over a cleared depth buffer — assumes
 depth works. Sixteen call sites across five files set `GL_DEPTH_TEST`,
-`glDepthMask` or clear the buffer, and `wp_draw_view` in particular draws the
+`glDepthMask` or clear the buffer, and `wpview_draw_view` in particular draws the
 gun over a *deliberately cleared* depth buffer so it never clips a wall. The
 cost is rewriting all of that, and the gain is an artefact most players
 remember as "the graphics were broken".
@@ -3033,9 +3480,15 @@ images are the *result* of a conversion and it is the recipe.
 |---|---|---|
 | `imp` | `POSS` | A, C, F, G, L |
 | `brute` | `BOSS` | A, C, G, H, O |
-| `hound` | `SARG` | A, C, F, H, N |
 | `caster` | `HEAD` | A, B, D, F, L |
 | `gun` | `SHTG` | B, C, D, C |
+
+The `SARG` row was here too, importing the hound's five frames. That row left
+`enemy.c`, so the recipe went with it and the five `hound*.png` it had already
+written were deleted — a drawing whose subject matches no monster is ignored
+rather than painted over somebody else's, so they were dead weight rather than
+a bug. The monster art that ships today is one drawing per creature, not five;
+see `assets/sprites/README.txt`.
 
 Four things the conversion has to get right, and three of them are invisible
 until they are wrong.
@@ -3369,7 +3822,7 @@ each sprite it just encoded and fails the build on any mismatch.
 **A drawing composited over the generated creature instead of replacing it.**
 Sensible for a half-drawn bestiary, wrong for any drawing narrower than the
 SDF version underneath — the generated creature showed around the edges as a
-halo, a green shape standing behind the hound and a horn over the caster. The
+halo, a green shape standing behind the creature and a horn over its head. The
 clear is per *cell*, so the graceful path survives: a frame nobody drew is
 never reached and keeps its generated creature.
 

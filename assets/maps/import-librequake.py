@@ -376,44 +376,57 @@ ITEMS = {
 # `wait` is seconds between releases, `maxalive` the ceiling this spawner holds
 # at once; both are glasstower's numbers. `count 0` is "no limit", which is what
 # an arena wants.
-# THREE SPAWNERS, THREE THREATS, and the third one is why this list changed.
+# THREE SPAWNERS, THREE THREATS, AND ONE OF THEM IS IN THE AIR.
 #
 # It used to be hound, caster, hound -- two of the same rusher and one ranged
-# shooter, and nothing in the air. tools/wavetest.c asks the SHIPPED arena "is
-# at least one of them a flyer's" and then "is something off the ground", and
-# both went red the day an imported map became that arena. The assertions were
-# right and the furniture was wrong: `wraith` carries MON_FLIES and is the only
-# type that does, so a room with no wraith spawner is a room where the flying
-# path is authored, tested elsewhere, and never actually entered in play.
+# shooter, and nothing above the floor. tools/wavetest.c asks the SHIPPED arena
+# "is at least one of them a flyer's" and then "is something off the ground",
+# and both went red the day an imported map became that arena. The assertions
+# were right and the furniture was wrong: a room with no flyer's spawner is a
+# room where the flying path is authored, tested elsewhere, and never actually
+# entered in play.
 #
-# A duplicate rusher was the thing to spend. The boss's air wards already summon
-# flyers, so the arena knew how to be three-dimensional during a boss fight and
-# not for the fifteen waves before it -- which is the shape of an arena that
-# teaches the player the wrong thing about its own ceiling.
+# WHICH SPAWNER CARRIES MON_FLIES HAS MOVED, and this list is one of the two
+# places that had to be told. The `wraith` row left enemy.c and the flag came
+# down onto the caster, so the arena's ranged spawner IS the air now -- it did
+# not gain a fourth entry, it stopped being a floor spawner. The hound went the
+# same way and the water spirit took its place, and the third slot is the brute,
+# because the bestiary's one remaining rusher is the thing the list was short of
+# either way.
 #
-# *스포너 셋, 위협 셋*이며, 이 목록이 바뀐 이유는 그 셋째입니다.
+# The boss's air wards already summon flyers, so before this the arena knew how
+# to be three-dimensional during a boss fight and not for the fifteen waves
+# before it -- which is the shape of an arena that teaches the player the wrong
+# thing about its own ceiling.
 #
-# 이전에는 하운드, 캐스터, 하운드였습니다. 같은 돌격형 둘과 원거리 하나이고, 공중에는 아무것도
-# 없었습니다. tools/wavetest.c가 *출하되는* 아레나에게 "그중 적어도 하나가 비행체의 것인가",
-# 이어서 "무언가가 땅에서 떠 있는가"를 묻는데, 가져온 맵이 그 아레나가 된 날 둘 다 빨개졌습니다.
-# 단언이 옳았고 가구가 틀렸습니다. `wraith`가 MON_FLIES를 지니며 그것을 지닌 유일한 종류이므로,
-# 레이스 스포너가 없는 방은 비행 경로가 저작되고 다른 곳에서 검사되며 정작 플레이에서는 결코
-# 들어가지지 않는 방입니다.
+# *스포너 셋, 위협 셋, 그리고 그중 하나는 공중에 있습니다.*
 #
-# 쓸 것은 중복된 돌격형이었습니다. 보스의 공중 결계핵은 이미 비행체를 소환하므로, 아레나는
-# 보스전 동안에는 3차원일 줄 알면서 그 앞의 열다섯 웨이브 동안에는 아니었습니다.
+# 이전에는 하운드, 캐스터, 하운드였습니다. 같은 돌격형 둘과 원거리 하나이고, 바닥 위에는
+# 아무것도 없었습니다. tools/wavetest.c가 *출하되는* 아레나에게 "그중 적어도 하나가 비행체의
+# 것인가", 이어서 "무언가가 땅에서 떠 있는가"를 묻는데, 가져온 맵이 그 아레나가 된 날 둘 다
+# 빨개졌습니다. 단언이 옳았고 가구가 틀렸습니다. 비행체의 스포너가 없는 방은 비행 경로가
+# 저작되고 다른 곳에서 검사되며 정작 플레이에서는 결코 들어가지지 않는 방입니다.
+#
+# *어느 스포너가 MON_FLIES를 나르는지가 옮겨 갔고*, 이 목록이 그것을 알려야 했던 두 곳 중
+# 하나입니다. `wraith` 행이 enemy.c를 떠나고 플래그가 캐스터로 내려왔으므로, 아레나의 원거리
+# 스포너가 곧 공중입니다. 네 번째 항목이 늘어난 것이 아니라 지상 스포너이기를 그만둔 것입니다.
+# 하운드도 같은 길을 갔고 그 자리를 물의 정령이 차지했으며, 세 번째 칸은 브루트입니다. 도감에
+# 남은 유일한 돌격형이 어느 쪽이든 이 목록에 모자라던 것이기 때문입니다.
+#
+# 보스의 공중 결계핵은 이미 비행체를 소환하므로, 그 전까지 아레나는 보스전 동안에는 3차원일 줄
+# 알면서 그 앞의 열다섯 웨이브 동안에는 아니었습니다.
 # Spawners whose monsters fly, and how far above a floor-level start they go.
 # The set is one name because MON_FLIES is one row in enemy.c's table; a second
 # flyer would be a second line here and nothing else.
 # 몬스터가 나는 스포너들과, 바닥 높이의 시작점보다 얼마나 위로 가는지입니다. 집합이 이름
 # 하나인 이유는 enemy.c의 표에서 MON_FLIES가 한 행이기 때문입니다.
-FLYER_SPAWNERS = {'monster_spawner_wraith'}
+FLYER_SPAWNERS = {'monster_spawner_caster'}
 FLYER_LIFT = 64        # two metres at BRUSH_UNIT 1/32
 
 FURNITURE = [
-    ('monster_spawner_hound',  {'wait': '6', 'count': '0', 'maxalive': '8'}),
+    ('monster_spawner_water_spirit', {'wait': '6', 'count': '0', 'maxalive': '8'}),
     ('monster_spawner_caster', {'wait': '9', 'count': '0', 'maxalive': '6'}),
-    ('monster_spawner_wraith', {'wait': '11', 'count': '0', 'maxalive': '4'}),
+    ('monster_spawner_brute',  {'wait': '11', 'count': '0', 'maxalive': '4'}),
     ('info_altar',             {}),
 ]
 
@@ -915,7 +928,7 @@ def convert(text, report):
         # A FLYER'S SPAWNER NEEDS AIR UNDER IT, and a deathmatch start has
         # none: it is by construction a place a player's feet go.
         # enemy.c is explicit that "a flyer keeps the height it was spawned at
-        # and never asks the floor about it", so a wraith made at a start hovers
+        # and never asks the floor about it", so a caster made at a start hovers
         # at the floor for its whole life -- a flying monster that never flies.
         # tools/wavetest.c measured exactly that on the shipped arena: with the
         # spawner placed, "at least one of them is a flyer's" passed and "and
@@ -931,7 +944,7 @@ def convert(text, report):
         # *비행체의 스포너에는 아래에 공기가 필요하고*, 데스매치 시작점에는 그것이 없습니다.
         # 구조적으로 플레이어의 발이 놓이는 자리이기 때문입니다. enemy.c는 "비행체는 생성된
         # 높이를 유지하며 바닥에 그것을 묻지 않는다"고 분명히 말하므로, 시작점에서 만들어진
-        # 레이스는 평생 바닥 높이에 떠 있습니다. 결코 날지 않는 비행 몬스터입니다.
+        # 캐스터는 평생 바닥 높이에 떠 있습니다. 결코 날지 않는 비행 몬스터입니다.
         # tools/wavetest.c가 출하되는 아레나에서 정확히 그것을 쟀습니다. 스포너를 놓자 "그중
         # 적어도 하나가 비행체의 것"은 통과했고 "무언가가 땅에서 떠 있다"는 여전히
         # 실패했습니다. 엔티티를 가진 것과 동작을 가진 것의 차이입니다.

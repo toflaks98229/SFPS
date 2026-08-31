@@ -143,6 +143,35 @@ static void move_every_door(Level *l, float t) {
     level_grid_build(l);
 }
 
+/* Gives a level a sun if it has none, because the bake is the sun now.
+ *
+ * ::bake_light stopped summing point lamps -- they are per-fragment lights in
+ * the shader beside the grenades, see scene.c's LIGHT_LAMP_POWER -- and every
+ * hand-authored level in this project declares lamps and no sun. So all three
+ * shipped names below would bake NOTHING, the cache would hold nothing, and
+ * every check in this section would compare two identical unlit builds and
+ * pass without touching the code it is about.
+ *
+ * Overhead and bright, which is the least interesting sun there is on purpose:
+ * the subject here is the cache, not the lighting, and a sun that reaches most
+ * vertices is a sun that gives the cache something to hold.
+ *
+ * 레벨에 태양이 없으면 하나 줍니다. 이제 베이크가 곧 태양이기 때문입니다.
+ *
+ * ::bake_light는 점광원을 합하는 일을 그만두었고(셰이더 안에서 유탄 곁의 프래그먼트 광원이
+ * 되었습니다. scene.c의 LIGHT_LAMP_POWER를 참조하십시오), 이 프로젝트의 손으로 만든 레벨은
+ * 전부 등만 선언하고 태양은 선언하지 않습니다. 그래서 아래의 출하 레벨 셋은 아무것도 굽지
+ * 않고, 캐시는 아무것도 담지 않으며, 이 절의 모든 검사가 조명 없는 동일한 두 생성을 비교하며
+ * 대상 코드를 건드리지도 않은 채 통과했을 것입니다.
+ *
+ * 머리 위이고 밝은, 일부러 가장 심심한 태양입니다. 이곳의 주제는 조명이 아니라 캐시이고,
+ * 대부분의 정점에 닿는 태양이 곧 캐시에 담을 것을 주는 태양입니다. */
+static void ensure_sun(Level *l) {
+    if (l->sun_power > 0 || l->sky_power > 0) return;
+    l->sun[0] = 0.0f; l->sun[1] = 1.0f; l->sun[2] = 0.0f;
+    l->sun_power = 200;
+}
+
 /* Does this buffer hold a vertex at exactly this place, facing this way? */
 static int has_vertex_like(const MeshBuf *b, const Vtx *v) {
     for (int i = 0; i < b->count; i++)
@@ -181,6 +210,7 @@ static int has_vertex_like(const MeshBuf *b, const Vtx *v) {
 static void light_cache_one(const char *name) {
     Level a, b;
     if (!level_load(name, &a)) { printf("    (no level '%s')\n", name); return; }
+    ensure_sun(&a);
 
     MeshBuf first, again;
     mb_init(&first, 32768);
@@ -235,8 +265,8 @@ static void light_cache_one(const char *name) {
 
     mb_free(&nocache);
 
-    printf("    %-8s %5d verts, %d unique keys, %d lights, %d doors\n",
-           name, first.count, unique, a.n_lights, a.n_doors);
+    printf("    %-8s %5d verts, %d unique keys, sun %d, %d doors\n",
+           name, first.count, unique, a.sun_power, a.n_doors);
 
     if (a.n_doors < 1) { mb_free(&first); mb_free(&again); return; }
 
@@ -247,6 +277,7 @@ static void light_cache_one(const char *name) {
           readings for vertices that are no longer where they were, the two
           would differ. */
     if (!level_load(name, &b)) { mb_free(&first); mb_free(&again); return; }
+    ensure_sun(&b);
     move_every_door(&b, 0.5f);
 
     MeshBuf warm, cold;
@@ -284,7 +315,7 @@ static void light_cache_one(const char *name) {
        behind it. Reported for the same reason the hit rate is.
        움직이지 않은 정점의 빛은 그것이 가지고 있던 빛입니다. 이것이 이 작업이 하는 거래이며,
        문이 더 이상 뒤쪽 방을 다시 밝히지 않는 이유입니다. 적중률과 같은 이유로 보고합니다. */
-    if (a.n_lights > 0 && warm.count == cold.count) {
+    if (warm.count == cold.count) {
         int frozen = 0;
         for (int i = 0; i < warm.count; i++)
             if (warm.v[i].lr != cold.v[i].lr || warm.v[i].lg != cold.v[i].lg
@@ -322,19 +353,25 @@ static void light_cache_one(const char *name) {
  * 그려야 합니다. 느려도 됩니다. 라이트 캐시가 가득 찼다는 이유로 다르게 렌더링되는 레벨은
  * 큰 맵에서만, 그것도 가끔만 나타나는 결함입니다. */
 static void overflow_checks(void) {
-    /* arena, and not the bigger dm03, because the cache only ever holds
-       vertices a LAMP reached: bake_light returns immediately for a level with
-       no lights, so dm03's 3,222 vertices produce zero entries and could not
-       overflow a table of any size. The level that fills a cache is the lit
-       one, not the large one -- which is worth knowing before sizing the
-       table against a vertex count.
-       더 큰 dm03이 아니라 arena입니다. 캐시가 담는 것은 *등이* 닿은 정점뿐이며,
-       bake_light는 광원이 없는 레벨에서 즉시 반환하므로 dm03의 정점 3,222개는 항목을 하나도
-       만들지 않고 어떤 크기의 테이블도 넘치게 할 수 없습니다. 캐시를 채우는 레벨은 큰
-       레벨이 아니라 *밝은* 레벨이며, 정점 수를 기준으로 테이블 크기를 정하기 전에 알아 둘
-       가치가 있습니다. */
+    /* arena with a sun on it, and the two halves of that are separate facts.
+       ARENA rather than the bigger dm03 because the two are within a few
+       thousand vertices of each other and arena is the one with doors, so it
+       is the level whose rebuilds the cache exists for.
+       WITH A SUN because the cache holds what the bake touched, and the bake
+       is directional light now: a level that declares no sun returns from
+       bake_light immediately and could not overflow a table of any size. The
+       level that fills a cache is the lit one, not the large one -- which is
+       worth knowing before sizing the table against a vertex count.
+       태양을 얹은 arena이며, 그 둘은 서로 다른 사실입니다.
+       *arena*인 이유는 더 큰 dm03과 정점 수가 몇 천 개밖에 차이 나지 않는 데다 문이 있는
+       쪽이 arena이기 때문입니다. 캐시가 존재하는 이유인 재생성을 겪는 레벨이 그것입니다.
+       *태양을 얹는* 이유는 캐시가 담는 것이 베이크가 건드린 정점이고 이제 베이크는 방향성
+       조명이기 때문입니다. 태양을 선언하지 않는 레벨은 bake_light에서 즉시 반환하며 어떤
+       크기의 테이블도 넘치게 할 수 없습니다. 캐시를 채우는 레벨은 큰 레벨이 아니라 *밝은*
+       레벨이며, 정점 수를 기준으로 테이블 크기를 정하기 전에 알아 둘 가치가 있습니다. */
     Level l;
     if (!level_load("arena", &l)) { printf("    (no level 'arena')\n"); return; }
+    ensure_sun(&l);
 
     int before = diag_count(DIAG_LIGHT_CACHE);
 
@@ -380,10 +417,19 @@ static void overflow_checks(void) {
  *
  * That used to be impossible by construction: LVL_MAX_LIGHTS was RD_MAX_LIGHTS
  * and a static assert held them equal, because evaluating a lamp in the
- * shader's loop was the only way a lamp was applied. Since the bake it is not,
- * and the two caps answer different questions -- one is load time, the other is
- * per-fragment. This is the check that the separation is real rather than
- * merely written down: a lamp past the eighth has to light something.
+ * shader's loop was the only way a lamp was applied. The bake separated them,
+ * and then the lamps went BACK to the shader's loop and they stayed separate,
+ * because what reaches the loop is the nearest RD_MAX_LIGHTS of them chosen
+ * per frame. The two caps still answer different questions -- one is load
+ * time, the other is per-fragment.
+ *
+ * WHAT THIS FILE CAN STILL SAY ABOUT THAT, and what it cannot. Which lamps a
+ * frame carries is ::scene_lights' answer and changes as the player walks, so
+ * it is watched in tools/scenetest.c where there is a frame to watch. What is
+ * a level-layer fact is that all sixteen survive the load, and that NONE of
+ * them is baked -- because a lamp applied in both places is applied twice, and
+ * a room lit twice does not look broken, it looks bright. That is the failure
+ * this fixture is placed to catch.
  *
  * Built here rather than authored into a level file, for the reason the rest of
  * this file builds its fixtures: a shipped level is a map somebody edits, and a
@@ -394,9 +440,17 @@ static void overflow_checks(void) {
  *
  * 이전에는 구조적으로 불가능했습니다. LVL_MAX_LIGHTS가 RD_MAX_LIGHTS였고 정적 검사가 둘을
  * 같게 붙들고 있었는데, 셰이더 반복문에서 평가하는 것이 등이 적용되는 유일한 방법이었기
- * 때문입니다. 베이크 이후로는 아니며, 두 상한은 서로 다른 질문에 답합니다. 하나는 로드 시간,
- * 다른 하나는 프래그먼트별 비용입니다. 이 검사는 그 분리가 적어 두기만 한 것이 아니라
- * 실제임을 확인합니다. 여덟 번째를 넘어선 등도 무언가를 밝혀야 합니다.
+ * 때문입니다. 베이크가 둘을 갈라놓았고, 이후 등이 셰이더 반복문으로 *돌아왔지만* 둘은 여전히
+ * 분리되어 있습니다. 반복문에 도달하는 것은 프레임마다 골라진 가장 가까운 RD_MAX_LIGHTS개이기
+ * 때문입니다. 두 상한은 여전히 서로 다른 질문에 답합니다. 하나는 로드 시간, 다른 하나는
+ * 프래그먼트별 비용입니다.
+ *
+ * *이 파일이 그것에 대해 여전히 말할 수 있는 것과 말할 수 없는 것.* 한 프레임이 어느 등을
+ * 나르는지는 ::scene_lights의 답이며 플레이어가 걸으면 달라지므로, 볼 프레임이 있는
+ * tools/scenetest.c에서 지켜봅니다. 레벨 층위의 사실은 열여섯이 모두 로드를 견딘다는 것과,
+ * 그중 *어느 것도 구워지지 않는다*는 것입니다. 두 곳에서 적용된 등은 두 번 적용된 것이고,
+ * 두 번 밝혀진 방은 고장 나 보이지 않고 밝아 보이기 때문입니다. 이 픽스처가 잡으려고 놓인
+ * 실패가 그것입니다.
  *
  * 레벨 파일에 작성하지 않고 이곳에서 만드는 이유는 이 파일의 나머지가 픽스처를 만드는 이유와
  * 같습니다. 출하 레벨은 누군가 편집하는 맵이고, 그것이 등 열여섯 개를 가졌다는 데 의존하는
@@ -500,26 +554,30 @@ static void many_lamp_checks(void) {
         "none of them was dropped on the way in",
         diag_count(DIAG_LIGHT_CAP) - before, 0);
 
-    /* The ninth lamp and beyond have to actually light something. Counted as
-       floor vertices carrying light from the half of the room only the later
-       lamps reach -- if the cap were still eight, that half would be black.
-       아홉 번째 이후의 등도 실제로 무언가를 밝혀야 합니다. 뒤쪽 등들만 닿는 방의 절반에서
-       빛을 지닌 바닥 정점을 셉니다. 상한이 여전히 8이었다면 그 절반은 검을 것입니다. */
-    int lit_far = 0, far_verts = 0;
-    for (int i = 0; i < b.count; i++) {
-        /* Room 8 -- the ninth -- starts at x = 0 in metres, so everything from
-           there on is lit by a lamp the shader could never have held.
-           아홉 번째 방인 8번 방이 미터 단위 x = 0에서 시작하므로, 그 이후는 전부 셰이더가
-           결코 담을 수 없었던 등이 밝히는 것입니다. */
-        if (b.v[i].px < 0.0f) continue;
-        far_verts++;
-        if (b.v[i].lr > 0.0f || b.v[i].lg > 0.0f || b.v[i].lb > 0.0f) lit_far++;
-    }
+    /* NOT ONE VERTEX CARRIES LIGHT, and every lamp is inside a room whose
+       floor corners are well within its radius -- the fixture is built that
+       way, see the note on the rooms above. So this is not "the lamps missed";
+       it is the bake declining to sum them at all, which is what has to be
+       true for the shader's copy to be the only copy.
 
-    printf("      %d of %d vertices past the eighth lamp's reach are lit\n",
-           lit_far, far_verts);
-    ok(far_verts > 0 && lit_far > 0,
-       "a lamp past the shader's eighth still lights the floor");
+       The level declares no sun, so there is no other term that could write a
+       vertex here either: a non-zero reading can only have come from a lamp.
+
+       *정점 하나도 빛을 지니지 않으며*, 모든 등은 바닥 모서리가 자기 반경 안에 넉넉히 들어오는
+       방 안에 있습니다. 픽스처가 그렇게 지어져 있습니다. 위의 방 설명을 참조하십시오. 따라서
+       이것은 "등이 빗나갔다"가 아니라 베이크가 아예 합하기를 거절한다는 뜻이며, 셰이더의
+       사본이 유일한 사본이려면 그것이 참이어야 합니다.
+
+       이 레벨은 태양을 선언하지 않으므로 이곳의 정점에 값을 쓸 수 있는 다른 항도 없습니다.
+       0이 아닌 값은 등에서만 올 수 있습니다. */
+    int baked = 0;
+    for (int i = 0; i < b.count; i++)
+        if (b.v[i].lr > 0.0f || b.v[i].lg > 0.0f || b.v[i].lb > 0.0f) baked++;
+
+    printf("      %d of %d vertices carry baked light (want 0)\n",
+           baked, b.count);
+    ok(b.count > 0 && baked == 0,
+       "and not one of them is baked into a vertex as well");
 
     mb_free(&b);
     level_light_cache_reset();
@@ -1238,49 +1296,69 @@ int main(void) {
             (float)disagreed, 0.0f);
     }
 
-    /* --- point lights parse, and stay inside their cap ---------------------
-       A light is eight integers on one line, and the parser has to consume
-       exactly those eight -- a miscount would leave the reader mid-line and
-       every declaration after it would be read as garbage. That failure is
-       silent: the level still loads, it is just darker or lit wrongly.
+    /* --- no shipped level declares a point light any more ------------------
+       THIS CHECK USED TO READ ARENA'S FOUR, and what it proved was a parser
+       property: a `light` line is eight integers, the reader has to consume
+       exactly those eight, and a miscount leaves it mid-line so every
+       declaration after it is read as garbage -- silently, because the level
+       still loads and is merely lit wrongly.
 
-       The cap matters as much as the parse. LVL_MAX_LIGHTS bounds what a level
-       may declare and RD_MAX_LIGHTS bounds what the shader evaluates; a level
-       between the two would store lights that never appear. level.c asserts
-       the relationship at compile time, and this checks the runtime half.
-       광원은 한 줄에 정수 여덟 개이며, 파서는 정확히 그 여덟 개를 소비해야 합니다. 개수를
-       잘못 세면 읽기 위치가 줄 중간에 남아 이후의 모든 선언이 쓰레기 값으로 읽힙니다. 이
-       실패는 조용합니다. 레벨은 여전히 로드되며 다만 더 어둡거나 잘못 조명될 뿐입니다. */
+       The lamps were deleted from the levels, so that check has no input and
+       cannot be written honestly. What replaces it is the fact that took its
+       place: EVERY SHIPPED LEVEL DECLARES ZERO. That is worth asserting rather
+       than assuming, because "no lamp lights anything" is now a property of
+       the DATA as well as of the engine, and a lamp that came back into a
+       level file by accident would light nothing and say nothing.
+
+       WHAT IS NO LONGER COVERED, said out loud rather than left to be found:
+       the eight-integer parse itself. `light` is still a word this parser
+       reads, and nothing exercises it. tools/tracetest.c still covers the
+       other half -- Quake `light` entities out of a .map, on the atrium
+       fixture -- so the import path is watched and the text path is not. If a
+       lamp is ever wanted again, a fixture for that line is the first thing to
+       write back.
+
+       *이 검사는 arena의 넷을 읽고 있었고*, 증명하던 것은 파서의 성질이었습니다. `light`
+       줄은 정수 여덟 개이고 읽기는 정확히 그 여덟 개를 소비해야 하며, 개수를 잘못 세면 줄
+       중간에 남아 이후의 모든 선언이 쓰레기 값으로 읽힙니다. 조용히 그렇습니다. 레벨은
+       여전히 로드되고 다만 잘못 조명될 뿐이기 때문입니다.
+
+       등이 레벨에서 삭제되었으므로 그 검사에는 입력이 없고 정직하게 쓸 수 없습니다. 그
+       자리를 대신하는 것은 그 자리를 차지한 사실입니다. *출하되는 모든 레벨이 0을
+       선언합니다.* 가정하지 않고 단언할 가치가 있습니다. "어떤 등도 아무것도 밝히지 않는다"는
+       이제 엔진의 성질일 뿐 아니라 *데이터*의 성질이기도 하고, 실수로 레벨 파일에 되돌아온
+       등은 아무것도 밝히지 않으면서 아무 말도 하지 않을 것이기 때문입니다.
+
+       *더 이상 보장되지 않는 것*을, 나중에 발견되도록 두지 않고 밝혀 둡니다. 정수 여덟 개의
+       파싱 그 자체입니다. `light`는 여전히 이 파서가 읽는 단어이고, 그것을 실행하는 것이
+       없습니다. tools/tracetest.c는 나머지 절반(atrium 픽스처의 .map에서 나오는 Quake `light`
+       엔티티)을 여전히 검사하므로 임포트 경로는 지켜지고 텍스트 경로는 지켜지지 않습니다.
+       등이 다시 필요해진다면 그 줄을 위한 픽스처가 가장 먼저 쓰여야 할 것입니다. */
     {
-        Level lit;
-        ok(level_load("arena", &lit), "the arena loads for the light check");
+        static const char *NAMES[] = { "arena", "vault", "dm03" };
+        int declared = 0, loaded = 0, ents = 0;
 
-        okf(lit.n_lights > 0,
-            "and declares at least one point light",
-            (float)lit.n_lights, 1.0f);
-        okf(lit.n_lights <= LVL_MAX_LIGHTS,
-            "never more than the cap, whatever the file says",
-            (float)lit.n_lights, (float)LVL_MAX_LIGHTS);
-
-        /* Every field has to survive the parse. A radius of zero lights
-           nothing and a power of zero is invisible, so either would make the
-           light exist in memory and not on screen -- exactly the kind of
-           silent nothing this suite exists to catch. */
-        int sane = 1;
-        for (int i = 0; i < lit.n_lights; i++) {
-            const Light *L = &lit.lights[i];
-            if (L->radius <= 0) sane = 0;
-            if (L->power  <= 0) sane = 0;
-            if (L->r < 0 || L->g < 0 || L->b < 0) sane = 0;
-            if (L->r > 255 || L->g > 255 || L->b > 255) sane = 0;
+        for (int i = 0; i < (int)(sizeof(NAMES)/sizeof(NAMES[0])); i++) {
+            Level lit;
+            if (!level_load(NAMES[i], &lit)) continue;
+            loaded++;
+            declared += lit.n_lights;
+            ents     += lit.n_ents;
         }
-        ok(sane, "every light has a usable radius, power and colour");
 
-        /* The parser must not have lost its place: entities are declared
-           around the lights in this file, so a light that consumed the wrong
-           number of tokens would eat them. */
-        ok(lit.n_ents > 0,
-           "and the entities around them still parsed -- the reader kept its place");
+        int want = (int)(sizeof(NAMES)/sizeof(NAMES[0]));
+        okd(loaded == want, "every shipped text level loads for the light check",
+            loaded, want);
+        okd(declared == 0, "and none of them declares a point light",
+            declared, 0);
+
+        /* The reader still has to keep its place through the block the lamps
+           used to sit in. Entities are declared around it, so a parse that
+           went wrong where they were would eat them.
+           읽기는 등이 앉아 있던 자리를 지나면서도 위치를 지켜야 합니다. 그 둘레에 엔티티가
+           선언되어 있으므로, 등이 있던 자리에서 잘못된 파싱은 그것들을 먹어 치웁니다. */
+        ok(ents > 0,
+           "and the entities around where they were still parsed");
     }
 
     /* --- hazard floors -----------------------------------------------------

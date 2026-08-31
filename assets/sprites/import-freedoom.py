@@ -148,7 +148,6 @@ PICKUP_SUBJECTS = {
 SUBJECTS = {
     'imp':     ['POSSA1', 'POSSC1', 'POSSF1', 'POSSG1', 'POSSL0'],
     'brute':   ['BOSSA1', 'BOSSC1', 'BOSSG1', 'BOSSH1', 'BOSSO0'],
-    'hound':   ['SARGA1', 'SARGC1', 'SARGF1', 'SARGH1', 'SARGN0'],
     'caster':  ['HEADA1', 'HEADB1', 'HEADD1', 'HEADF1', 'HEADL0'],
     # idle, then the pump: A B C D, and the cycle walks A B C D C B A
     'shotgun': ['SHTGA0', 'SHTGB0', 'SHTGC0', 'SHTGD0'],

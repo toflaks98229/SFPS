@@ -1106,6 +1106,15 @@ static void scene_lights(const World *w, v3 eye) {
    뚫고 내려갑니다. 이것이 수식이 되기 전에 크기를 3배로 했을 때 실제로 벌어진 일입니다. */
 #define PICKUP_LIFT     (PICKUP_SIZE * 0.5f + PICKUP_FLOAT)
 
+/* How far an item is pulled toward the camera so a body it is lying on cannot
+   cut it away. Metres, and small enough that it is a depth decision rather than
+   a position one: at three centimetres an item a metre away moves by three
+   parts in a hundred and the eye reads it as the same place.
+   시체가 아이템을 잘라 낼 수 없도록 아이템을 카메라 쪽으로 얼마나 당기는지입니다. 미터이며,
+   위치에 대한 결정이 아니라 깊이에 대한 결정일 만큼 작습니다. 3센티미터면 1미터 거리의
+   아이템이 100분의 3만큼 움직이고 눈은 같은 자리로 읽습니다. */
+#define PICKUP_NUDGE    0.03f
+
 #define PICKUP_BOB      0.06f   /* bob amplitude, metres */
 #define PICKUP_BOB_RATE 2.2f
 
@@ -1690,7 +1699,46 @@ void scene_draw_pickups(Scene *s, const Pools *pl, mat4 vp, v3 eye, v3 cam_right
         if (!p->active) continue;
         float u0, v0, u1, v1;
         pickup_uv(p->kind, &u0, &v0, &u1, &v1);
-        mb_billboard_uv(&s->pickup_buf, pickup_centre(p), cam_right, v3f(0,1,0),
+        /* NUDGED TOWARD THE EYE, and the reason is a corpse. A monster's drop
+           is tossed straight up from where the body fell -- deliberately, see
+           ::step_drops -- so the item lands at the corpse's own x,z. Both are
+           camera-facing billboards, so their quads are PARALLEL planes at the
+           same distance: identical depth, to the bit.
+           Pickups are drawn after enemies and the depth function is the GL
+           default, ::GL_LESS. A fragment at exactly the depth already written
+           is not LESS than it, so every pixel of the item that overlapped the
+           corpse was discarded -- the reward vanished into the thing that
+           dropped it, which is the one moment it most needs to be seen.
+           TOWARD THE EYE RATHER THAN UP OR ASIDE, because that is where the
+           item actually is: resting ON the body, nearer the viewer than the
+           surface under it. Up would float it and aside would move it off the
+           corpse, which is the spot ::step_drops chose on purpose. A few
+           centimetres is far below what any camera can see as a position and
+           far above what the depth buffer needs to tell them apart.
+           IT IS NOT ONLY CORPSES. A living monster standing over an item cut it
+           the same way; this fixes the case rather than the instance.
+           *눈 쪽으로 밀며, 이유는 시체입니다.* 몬스터의 드롭은 몸이 쓰러진 자리에서 곧장 위로
+           던져집니다(의도적입니다. ::step_drops 참조). 그래서 아이템은 시체와 같은 x,z에
+           내려앉습니다. 둘 다 카메라를 향한 빌보드이므로 두 사각형은 *평행한* 면이고 거리가
+           같습니다. 비트 단위로 같은 깊이입니다.
+           픽업은 몬스터보다 나중에 그려지고 깊이 함수는 GL 기본값 ::GL_LESS입니다. 이미 쓰인
+           깊이와 정확히 같은 조각은 그보다 *작지* 않으므로, 시체와 겹친 아이템의 모든 픽셀이
+           버려졌습니다. 보상이 그것을 떨어뜨린 것 안으로 사라졌습니다. 가장 보여야 할 그
+           순간에 말입니다.
+           *위나 옆이 아니라 눈 쪽인 이유는* 아이템이 실제로 그곳에 있기 때문입니다. 몸 *위에*
+           놓여 있으니 그 아래 표면보다 보는 사람에게 가깝습니다. 위로 올리면 뜨고, 옆으로
+           밀면 시체에서 벗어나는데 그 자리는 ::step_drops가 일부러 고른 것입니다. 몇
+           센티미터는 어떤 카메라도 위치로 알아볼 수 없을 만큼 작고, 깊이 버퍼가 둘을 가르는
+           데는 넉넉합니다.
+           *시체만의 문제가 아닙니다.* 살아 있는 몬스터가 아이템 위에 서 있어도 같은 방식으로
+           잘랐습니다. 이것은 사례가 아니라 그 부류를 고칩니다. */
+        v3 pc = pickup_centre(p);
+        {
+            v3 toward = v3sub(eye, pc);
+            float d = v3len(toward);
+            if (d > 1e-4f) pc = v3add(pc, v3scale(toward, PICKUP_NUDGE / d));
+        }
+        mb_billboard_uv(&s->pickup_buf, pc, cam_right, v3f(0,1,0),
                         PICKUP_SIZE, PICKUP_SIZE, u0, v0, u1, v1);
     }
 

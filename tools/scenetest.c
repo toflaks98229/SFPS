@@ -154,6 +154,27 @@ static unsigned region_hash(int x0, int y0, int x1, int y1) {
    움직입니다. 그 구분이 이것이 봉사하는 검사의 요점 전부입니다. 이 렌더러는 휘도를
    ::LIGHT_BANDS 단계로 양자화하고 햇빛 표면을 포화시키므로 "광원이 밝게 만들었다"는 주장은
    할 수 없을 때가 많습니다. 색조가 살아남는 채널이며, 이것이 그 채널을 잽니다. */
+/* A copy of the last frame, and how many pixels two frames differ by. The
+   hash says WHETHER anything changed; this says HOW MUCH, which is the only
+   question that can tell a sprite being drawn from a sprite being drawn and
+   then cut in half by something in front of it.
+   마지막 프레임의 복사본과, 두 프레임이 몇 픽셀 다른지입니다. 해시는 무언가 *바뀌었는지*를
+   말하고, 이것은 *얼마나*를 말합니다. 그것이 그려진 스프라이트와, 그려졌다가 앞의 무언가에
+   반쯤 잘린 스프라이트를 가를 수 있는 유일한 질문입니다. */
+static unsigned char g_prev[VW * VH * 3];
+
+static void keep_frame(void) {
+    for (int i = 0; i < VW * VH * 3; i++) g_prev[i] = g_px[i];
+}
+
+static int px_changed(void) {
+    int n = 0;
+    for (int i = 0; i < VW * VH; i++)
+        if (g_px[i*3] != g_prev[i*3] || g_px[i*3+1] != g_prev[i*3+1] ||
+            g_px[i*3+2] != g_prev[i*3+2]) n++;
+    return n;
+}
+
 static float lean(int ch) {
     double acc = 0.0;
     for (int i = 0; i < VW * VH; i++) {
@@ -986,6 +1007,110 @@ int main(void) {
         }
         clear_state(&w);
         enemy_reset(&w.pools);
+    }
+    /* --- an item on a corpse is still on the screen ----------------------
+     *
+     * ENGLISH
+     * -------
+     * A MONSTER'S DROP LANDS AT THE MONSTER. ::step_drops tosses it straight up
+     * from where the body fell, on purpose -- "a corpse's drop is one item and
+     * belongs where the body fell" -- so the item and the corpse share an x,z.
+     * Both are camera-facing billboards, which makes their quads parallel
+     * planes at the same distance: identical depth, to the bit.
+     *
+     * PICKUPS ARE DRAWN AFTER ENEMIES and the depth function is the GL default,
+     * GL_LESS. A fragment at exactly the depth already written is not less than
+     * it, so every pixel of the item that overlapped the corpse was discarded.
+     * The reward vanished into the thing that dropped it.
+     *
+     * THE CHECK IS THAT THE FRAME CHANGES. Draw the corpse alone, then the same
+     * corpse with an item at its feet: if the item is being cut away by the
+     * depth test the two frames are identical, and that is exactly what the
+     * bug looked like from the player's side.
+     *
+     * 한국어
+     * ------
+     * *몬스터의 드롭은 몬스터 자리에 내려앉습니다.* ::step_drops가 몸이 쓰러진 자리에서 곧장
+     * 위로 던집니다. 의도적이며 "시체의 드롭은 아이템 하나이고 몸이 쓰러진 자리에 속한다"는
+     * 이유입니다. 그래서 아이템과 시체는 x,z를 공유합니다. 둘 다 카메라를 향한 빌보드이므로 두
+     * 사각형은 평행한 면이고 거리가 같습니다. 비트 단위로 같은 깊이입니다.
+     *
+     * *픽업은 몬스터보다 나중에 그려지고* 깊이 함수는 GL 기본값 GL_LESS입니다. 이미 쓰인 깊이와
+     * 정확히 같은 조각은 그보다 작지 않으므로, 시체와 겹친 아이템의 모든 픽셀이 버려졌습니다.
+     * 보상이 그것을 떨어뜨린 것 안으로 사라졌습니다.
+     *
+     * *검사는 프레임이 바뀌는가입니다.* 시체만 그린 다음, 같은 시체에 아이템을 발치에 두고
+     * 그립니다. 아이템이 깊이 검사에 잘리고 있다면 두 프레임은 동일하며, 그것이 플레이어
+     * 쪽에서 이 버그가 보이던 모습 그대로입니다.
+     */
+    {
+        clear_state(&w);
+        enemy_reset(&w.pools);
+        pickup_reset(&w.pools);
+
+        Level *lv = &w.level;
+        int saved = lv->n_ents;
+        Entity *e = &lv->ents[lv->n_ents++];
+        for (int i = 0; i < (int)sizeof e->kind; i++) e->kind[i] = 0;
+        const char *K = "brute";
+        for (int i = 0; K[i] && i < (int)sizeof e->kind - 1; i++) e->kind[i] = K[i];
+        static const float OFF[4][2] = {
+            { 0.0f, -4.0f }, { 4.0f, 0.0f }, { 0.0f, 4.0f }, { -4.0f, 0.0f }
+        };
+        for (int t = 0; t < 4 && enemy_count(&w.pools) < 1; t++) {
+            e->x = (short)((w.player.pos.x + OFF[t][0]) * 100.0f);
+            e->z = (short)((w.player.pos.z + OFF[t][1]) * 100.0f);
+            enemy_spawn_level(&w.pools, lv);
+        }
+        lv->n_ents = saved;
+
+        if (enemy_count(&w.pools) < 1) { ok(0, "a body to drop on"); }
+        else {
+            Enemy *m = (Enemy *)enemy_at(&w.pools, 0);
+            m->state = E_DEAD;
+            m->timer = 0.0f;
+            m->anim  = 0.0f;
+            /* HOW MANY PIXELS THE ITEM IS WORTH, twice: once with the body
+               behind it and once with the body gone. A hash comparison is not
+               enough and the first cut of this check was exactly that -- it
+               passed with the fix removed, because a brute's corpse does not
+               cover the whole of a medkit and the leftover edge changed the
+               frame either way. What the bug did was cut the OVERLAP, so the
+               overlap is what has to be counted.
+               *아이템이 몇 픽셀 값어치인지를 두 번* 잽니다. 뒤에 몸이 있을 때와 몸이 없을
+               때입니다. 해시 비교로는 부족하고 이 검사의 첫 판이 정확히 그것이었습니다.
+               수정을 빼도 통과했습니다. 브루트의 시체가 메드킷 전체를 덮지 않으므로 남은
+               가장자리가 어느 쪽이든 프레임을 바꾸었기 때문입니다. 버그가 한 일은 *겹친
+               부분*을 잘라 내는 것이었으므로, 세어야 하는 것도 겹친 부분입니다. */
+            frame_hash(&w, &scene, 0);
+            keep_frame();
+            pickup_toss(&w.pools, PK_HEALTH, m->pos, v3f(0, 0, 0));
+            frame_hash(&w, &scene, 0);
+            int over_body = px_changed();
+
+            /* The same item with nothing behind it. */
+            m->active = 0;
+            frame_hash(&w, &scene, 0);
+            keep_frame();
+            m->active = 1;
+            pickup_reset(&w.pools);
+            m->active = 0;
+            frame_hash(&w, &scene, 0);
+            keep_frame();
+            pickup_toss(&w.pools, PK_HEALTH, m->pos, v3f(0, 0, 0));
+            frame_hash(&w, &scene, 0);
+            int in_clear = px_changed();
+            m->active = 1;
+
+            printf("      the item is %d px over the body, %d px in the clear\n",
+                   over_body, in_clear);
+            ok(in_clear > 0, "the item is worth pixels at all");
+            ok(over_body * 4 >= in_clear * 3,
+               "and a corpse behind it does not cut most of it away");
+        }
+        clear_state(&w);
+        enemy_reset(&w.pools);
+        pickup_reset(&w.pools);
     }
 
     clear_state(&w);

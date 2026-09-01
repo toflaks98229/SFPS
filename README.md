@@ -22,7 +22,7 @@ Models, materials, sounds and levels are all authored as text and hot-reload
 into the running game.
 
 ```
-1,285,120 / 1,474,560 bytes   (87.15% used)
+1,286,144 / 1,474,560 bytes   (87.22% used)
 ```
 
 ## Build
@@ -126,6 +126,39 @@ At this polygon count a highlight that travels along an edge as the gun moves
 says "metal" more convincingly than any amount of texture detail, so the view
 model shader adds Blinn-Phong specular and a small upward-facing wear term,
 both scaled by that gloss channel.
+
+### A surface that moves
+
+`flow n` makes a material drift and rock at `n/100`. The lava says it:
+
+```
+t star_lava3
+image star_lava3 2
+flow 70
+```
+
+One world-space wave field drives **both** halves, because they have to agree —
+the texture drifts where the surface tilts, so a crest is a place the crust is
+being carried rather than a place it happens to be brighter. It is keyed on
+world position rather than UV, so a sea assembled from several brushes swells as
+one sea instead of per-face.
+
+**Nothing is displaced, and that is deliberate.** Moving the vertices is the
+obvious way to make a liquid slosh and it is wrong here: a lava brush *is* the
+floor, collision is its flat top, and `LVL_HAZARD_UNDERFOOT` is five
+centimetres — so any displacement honest enough not to lie about where the
+surface is would be too small to see from standing height. What this renderer
+has instead is `LIGHT_BANDS`: five levels, so a normal rocked a couple of
+degrees walks the shading across a band edge and back. **The moving band edge is
+the swell**, and it reads across a whole sea from the far side of the room.
+
+It also breaks up the texture's tiling grid, which was not the point but is most
+of what a before/after shows.
+
+The renderer has no list of which materials are lava — a liquid is a material
+that *says* it is one, so a slime or a river costs one word rather than an entry
+in C. `flow` is read on both the procedural and the textured path, which the
+gloss channel is not.
 
 ### Procedural shader materials
 

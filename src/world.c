@@ -112,6 +112,63 @@
  */
 #define LAVA_SMOKE_LIP       0.05f
 
+/**
+ * @def LAVA_BOIL_PER_TICK
+ * @brief Bubbles attempted per smoke batch.
+ *
+ * ENGLISH
+ * -------
+ * ON THE SMOKE'S CLOCK RATHER THAN ITS OWN, because two timers would drift
+ * apart and there is nothing to be gained by their being independent -- both
+ * are asking the same question, "is there open lava near the player", and the
+ * dart that answers it is the expensive half.
+ *
+ * SEPARATE DARTS THOUGH. Riding the smoke's point would put a bubble and a puff
+ * at the same spot every time, and two effects at one point read as one event
+ * with a shape nobody chose. Thrown again, they scatter.
+ *
+ * WHAT IT COSTS, on the same arithmetic the smoke's note works:
+ *
+ *   (1 / 0.11) * 3 a batch * 0.62s of life  ~=  17 particles resident
+ *
+ * against the smoke's ~150, so the boil is a tenth of what is already there.
+ * Cheap because it is SHORT -- the parameter that makes a bubble read as a
+ * bubble is the same one that keeps it out of the pool.
+ *
+ * 한국어
+ * ------
+ * @brief 연기 묶음당 시도하는 거품의 수.
+ *
+ * *자기 시계가 아니라 연기의 시계 위에* 있습니다. 타이머가 둘이면 서로 어긋나기 마련이고
+ * 독립적이어서 얻을 것이 없기 때문입니다. 둘 다 "플레이어 근처에 열린 용암이 있는가"라는 같은
+ * 질문을 하고 있으며, 그것에 답하는 다트가 비싼 쪽입니다.
+ *
+ * *다만 다트는 따로 던집니다.* 연기의 점을 함께 쓰면 거품과 연기가 매번 같은 자리에 놓이고,
+ * 한 점의 두 효과는 아무도 고르지 않은 모양의 한 사건으로 읽힙니다. 다시 던지면 흩어집니다.
+ *
+ * *비용*은 연기의 설명이 쓰는 것과 같은 계산으로 상주 입자 약 17개이며, 이미 있는 연기의 150개에
+ * 대해 10분의 1입니다. 값싼 이유는 *짧기* 때문입니다. 거품을 거품으로 읽히게 하는 그 매개변수가
+ * 곧 그것을 풀 밖에 두는 매개변수입니다.
+ */
+#define LAVA_BOIL_PER_TICK 3
+
+/**
+ * @def LAVA_BOIL_RANGE
+ * @brief Metres beyond which no bubble spawns.
+ *
+ * ENGLISH: Tighter than ::LAVA_SMOKE_RANGE and for the opposite reason. Smoke
+ * is culled at 22m because a puff that far off is not worth a slot; a bubble is
+ * culled at 13m because at 26 centimetres across it is not worth a PIXEL. The
+ * two numbers are both "past here it does not read", measured against two very
+ * different sizes.
+ *
+ * 한국어: ::LAVA_SMOKE_RANGE보다 좁으며 이유는 반대입니다. 연기가 22m에서 잘리는 것은 그만큼
+ * 먼 연기가 슬롯 값을 못 하기 때문이고, 거품이 13m에서 잘리는 것은 지름 26센티미터짜리가
+ * *픽셀* 값을 못 하기 때문입니다. 두 수 모두 "이 너머로는 읽히지 않는다"이며, 매우 다른 크기에
+ * 대해 잰 것입니다.
+ */
+#define LAVA_BOIL_RANGE 13.0f
+
 /* ------------------------------------------------------- look, move, weapon */
 
 /**
@@ -792,6 +849,29 @@ static void step_smoke(World *w, float dt) {
             if (dx*dx + dz*dz > LAVA_SMOKE_RANGE * LAVA_SMOKE_RANGE) continue;
 
             fx_spawn(&w->pools, "lavasmoke", at, v3f(0.0f, 1.0f, 0.0f));
+            break;
+        }
+    }
+
+    /* THE SURFACE BREAKING, on the same clock and its own darts. The smoke
+       above says the lava is HOT; a smoking floor says that too, and so does
+       a burning corpse. What says LIQUID is a surface that has to open to let
+       something out, which is why the bubble grows instead of shrinking and
+       why it never leaves the half-metre it was born in.
+       *표면이 깨지는 것*이며, 같은 시계와 자기 다트를 씁니다. 위의 연기는 용암이 *뜨겁다*고
+       말합니다. 연기 나는 바닥도, 불타는 시체도 같은 말을 합니다. *액체*라고 말하는 것은
+       무언가를 내보내려고 열려야 하는 표면이며, 그래서 거품은 줄어드는 대신 자라고 태어난
+       반 미터를 결코 벗어나지 않습니다. */
+    for (int s = 0; s < LAVA_BOIL_PER_TICK; s++) {
+        for (int tries = 0; tries < 4; tries++) {
+            v3 at;
+            if (!(w->level.brushes ? smoke_dart_brush(w, &at)
+                                   : smoke_dart_sector(w, &at))) continue;
+
+            float dx = at.x - w->player.pos.x, dz = at.z - w->player.pos.z;
+            if (dx*dx + dz*dz > LAVA_BOIL_RANGE * LAVA_BOIL_RANGE) continue;
+
+            fx_spawn(&w->pools, "lavaboil", at, v3f(0.0f, 1.0f, 0.0f));
             break;
         }
     }

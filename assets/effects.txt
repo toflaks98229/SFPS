@@ -486,6 +486,43 @@ e lavasmoke
   blend alpha            # must be able to be darker than the lava behind it
   face camera
 
+# --- what the lava is doing, as opposed to what it is giving off -------------
+#
+# THE SMOKE ABOVE ALREADY SAYS "HOT". It does not say LIQUID -- smoke rises off
+# a fire, a corpse and a wrecked machine just as readily, and a sea of it reads
+# as a burning floor rather than as something you would sink into. What says
+# liquid is a surface that BREAKS: a bubble swells at one point, holds, and
+# goes, and the eye reads depth and motion from the fact that the surface had
+# to open to let it out.
+#
+# So this is deliberately the opposite of `lavasmoke` in every parameter that
+# matters. Smoke is long, big, faint, grey, and climbs out of frame. A boil is
+# SHORT, small, bright, orange, and never leaves the surface it came from --
+# the whole event happens within half a metre of the lava.
+#
+# ADDITIVE AND HOT, where the smoke is alpha and cool. A bubble is the lava's
+# own interior seen through a thin skin, so it is brighter than the crust
+# around it, and additive is the only blend that can say brighter.
+e lavaboil
+  count 1                # one at a time; world.c paces them like the smoke
+  life 620               # SHORT. A bubble that lingers is a floating ball --
+                         # what makes it read as a bubble is that it goes
+  size 7 26              # GROWS, which is the whole gesture: it swells and
+                         # bursts. Every other particle in this file shrinks,
+                         # and the two directions are what separates a thing
+                         # that is dissipating from a thing that is building
+  rgb 255 214 96         # the interior: hotter and yellower than the crust
+  rgb2 226 96 24         # cooling to the surface colour as it opens
+  alpha 85 0             # bright at birth, gone at the burst -- not a fade so
+                         # much as the skin finally letting go
+  speed 16 12            # barely rises. It is not thrown, it is surfacing
+  spawn 4                # nearly a point: a bubble is ONE hole in the surface
+  drag 82                # kills the rise almost at once, so it swells in place
+  spin 0                 # a bubble does not tumble; only the random start angle
+  gravity -8             # a whisper of lift, enough to clear its own hole
+  blend add              # brighter than the lava, never darker
+  face camera
+
 # --- the grenade, before it goes off -----------------------------------------
 #
 # A grenade left the muzzle and arrived at the wall with NOTHING BETWEEN THOSE

@@ -99,7 +99,7 @@ typedef struct {
     float  rgb[3];     /**< Base colour the shader tints with. / 셰이더가 색조로 사용하는 기본 색상. */
     float  scale;      /**< Pattern cells per UV unit. / UV 단위당 패턴 셀의 수. */
     /**
-     * @brief x = gloss, y = normal-map strength, z spare.
+     * @brief x = gloss, y = normal-map strength, z = flow speed.
      *
      * ENGLISH
      * -------
@@ -110,9 +110,14 @@ typedef struct {
      * Zero leaves the surface flat, which is what every material that does not
      * mention `bump` gets.
      *
+     * `z` is set by the `flow` op and read on BOTH paths, unlike `y`. It makes
+     * the surface move: the UV drifts and the shading normal rocks, so a liquid
+     * is a material that says it is one rather than a texture name the renderer
+     * has to recognise. Zero is a surface that holds still.
+     *
      * 한국어
      * ------
-     * @brief x는 광택, y는 노멀 맵 강도, z는 예비 값입니다.
+     * @brief x는 광택, y는 노멀 맵 강도, z는 흐름 속도입니다.
      *
      * `y`는 `bump` 명령이 설정하며 절차적 경로에서만 읽습니다. 셰이더가 재질 자신의
      * 휘도를 텍셀 간격으로 차분해 표면 기울기를 구하고 그만큼 셰이딩 법선을 기울이므로,

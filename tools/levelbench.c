@@ -403,7 +403,17 @@ int main(int argc, char **argv) {
     {
         MeshBuf  gb;
         MdlRange ranges[LVL_MAX_RANGES];
-        mb_init(&gb, 8192);
+        /* BIG ENOUGH FOR THE LEVEL BEING TIMED, which 8192 was not: the
+           default here is `lqdm4` and it wants 42,267 vertices, so this
+           benchmark was reporting the cost of building a fifth of the
+           arena and calling it the honest cold number. mb_vtx drops what
+           does not fit and raises DIAG_VERTEX_BUF, so nothing said so.
+           *재고 있는 레벨에 충분한 크기*이며, 8192는 그렇지 못했습니다. 이곳의 기본값은
+           `lqdm4`이고 정점 42,267개를 원하므로, 이 벤치마크는 투기장의 5분의 1을 짓는
+           비용을 보고하면서 그것을 정직한 콜드 수치라고 불렀습니다. mb_vtx는 들어가지
+           않는 것을 버리고 DIAG_VERTEX_BUF를 올리므로 아무도 그렇다고 말하지
+           않았습니다. */
+        mb_init(&gb, 1 << 17);
 
         const int REPS = 40;
         LARGE_INTEGER t0, t1;

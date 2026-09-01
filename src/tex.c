@@ -54,7 +54,7 @@ enum {
     OP_BASE, OP_BRICK, OP_TINT, OP_GRAIN, OP_BEVEL, OP_MORTAR,
     OP_BRUSH, OP_BLOTCH, OP_SCRATCH, OP_SEAM,
     OP_WOOD, OP_CHECK, OP_RIBS, OP_BLUE, OP_GLOSS, OP_PROC, OP_BUMP,
-    OP_IMAGE, OP_COUNT
+    OP_FLOW, OP_IMAGE, OP_COUNT
 };
 
 /* `takes_name` is a NAME operand before the integers, and only `image` has
@@ -78,7 +78,7 @@ static const struct {
     {"bevel",   3, 0}, {"mortar",  4, 0}, {"brush",   3, 0}, {"blotch",  2, 0},
     {"scratch", 2, 0}, {"seam",    3, 0}, {"wood",    4, 0}, {"check",   2, 0},
     {"ribs",    2, 0}, {"blue",    1, 0}, {"gloss",   1, 0}, {"proc",    2, 0},
-    {"bump",    1, 0}, {"image",   1, 1}
+    {"bump",    1, 0}, {"flow",    1, 0}, {"image",   1, 1}
 };
 
 #define OP_NAME_MAX 16
@@ -359,6 +359,7 @@ static void run_op(const Op *o, Px *px, int x, int y, unsigned seed) {
        OP_BUMP도 마찬가지입니다. 그릴 픽셀이 아니라 셰이더가 사용하는 강도입니다. */
     case OP_PROC:
     case OP_BUMP:
+    case OP_FLOW:
         break;
     }
 }
@@ -615,6 +616,18 @@ static Mat mat_make(const char *name) {
            노멀 맵 강도입니다. 절차적 경로만 이 값을 읽습니다. 픽셀 재질의 요철은
            이미 이미지에 칠해져 있습니다. */
         case OP_BUMP:  m.params[1] = a[0] / 100.0f; break;
+        /* HOW FAST THE SURFACE MOVES, and the reason it is a material property
+           rather than a rule about lava is that the shader should not have to
+           know what lava IS. A recipe that says it flows, flows; `plava` and
+           the imported `star_lava3` both say so, and a future slime or a river
+           says so by typing one word rather than by being added to a list in
+           C. Zero -- every material that does not mention it -- is still.
+           *표면이 얼마나 빠르게 움직이는가*이며, 이것이 용암에 대한 규칙이 아니라 재질
+           속성인 이유는 셰이더가 용암이 *무엇인지* 알 필요가 없어야 하기 때문입니다.
+           흐른다고 적힌 레시피는 흐릅니다. `plava`와 가져온 `star_lava3`이 둘 다 그렇게
+           말하며, 앞으로의 슬라임이나 강은 C의 목록에 추가되는 것이 아니라 단어 하나를
+           적어서 그렇게 말합니다. 0(이것을 언급하지 않는 모든 재질)은 정지해 있습니다. */
+        case OP_FLOW:  m.params[2] = a[0] / 100.0f; break;
         case OP_PROC:
             m.proc  = a[0];
             m.scale = a[1] / 100.0f;

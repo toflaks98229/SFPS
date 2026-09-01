@@ -449,7 +449,20 @@ def main():
     for n in sorted(names):
         if resolve(n, have) is None:
             continue
-        print('t %s\nimage %s %d\n' % (legal_name(n), legal_name(n), tiles))
+        # A LIQUID SAYS SO IN ITS RECIPE, so the line has to come out here
+        # rather than be added by hand afterwards -- these rows are pasted
+        # into textures.txt by a person, and a `flow` that only exists in the
+        # file is a `flow` the next import silently drops. The same rule the
+        # lamps taught: a recipe that stops reproducing its own output has
+        # stopped being a recipe.
+        # 액체는 자기 레시피에서 그렇다고 말하므로, 그 줄은 나중에 손으로 더하는 것이 아니라
+        # 이곳에서 나와야 합니다. 이 행들은 사람이 textures.txt에 붙여 넣으며, 파일에만 있는
+        # `flow`는 다음 가져오기가 조용히 떨어뜨리는 `flow`입니다. 램프가 가르친 것과 같은
+        # 규칙입니다. 자기 출력을 재현하지 못하게 된 레시피는 레시피이기를 그만둔 것입니다.
+        flow = ('\nflow 70' if legal_name(n).startswith('star_lava')
+                else '')
+        print('t %s\nimage %s %d%s\n'
+              % (legal_name(n), legal_name(n), tiles, flow))
 
     if not a.emit:
         print('(nothing written -- pass --emit)')

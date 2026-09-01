@@ -1416,12 +1416,77 @@ static const char *FS_FOG =
 "}\n";
 
 static const char *FS_MAIN =
+/* --- a surface that moves ------------------------------------------------
+ *
+ * ENGLISH
+ * -------
+ * TWO EFFECTS OFF ONE WAVE FIELD, and they are one function because they must
+ * agree: the texture drifts where the surface tilts, so a crest is a place the
+ * crust is being carried rather than a place it is merely brighter. Driven by
+ * WORLD POSITION rather than by UV, so the field is continuous across faces
+ * that were mapped independently and does not stretch with the texture scale --
+ * a lava sea assembled from several brushes swells as one sea.
+ *
+ * THE NORMAL IS THE HALF THAT SHOWS. Displacing the geometry is the obvious
+ * way to make a liquid slosh and it is the wrong one here: the lava brush IS
+ * the floor, collision is its flat top, and ::LVL_HAZARD_UNDERFOOT is five
+ * centimetres -- so any displacement honest enough not to lie about where the
+ * surface is would be too small to see from standing height. What this renderer
+ * has instead is ::LIGHT_BANDS: five levels, so a normal rocked by a couple of
+ * degrees walks the shading across a band edge and back. The band boundary
+ * moving IS the swell, and it is visible across a whole sea from the far side
+ * of the room -- which four centimetres of real geometry would not have been.
+ *
+ * @note Gated on RD_WORLD as well as on the material, because `uPParam`
+ *       persists: ::rd_proc is called from ::tex_use and nothing clears it
+ *       between passes, so a sprite drawn after the lava would inherit its
+ *       flow and ripple.
+ *
+ * 한국어
+ * ------
+ * *하나의 파동장에서 두 효과가 나오며*, 둘이 한 함수인 이유는 서로 일치해야 하기 때문입니다.
+ * 표면이 기우는 곳에서 텍스처가 흐르므로, 마루는 단지 더 밝은 곳이 아니라 껍질이 실려 가는
+ * 곳입니다. UV가 아니라 *월드 좌표*로 구동되므로 독립적으로 매핑된 면들을 가로질러 장이
+ * 연속이고 텍스처 배율에 따라 늘어나지 않습니다. 여러 브러시로 이루어진 용암 바다가 하나의
+ * 바다로 출렁입니다.
+ *
+ * *보이는 쪽은 노멀입니다.* 지오메트리를 변위시키는 것이 액체를 출렁이게 하는 뻔한 방법이지만
+ * 이곳에서는 틀린 방법입니다. 용암 브러시가 *곧 바닥*이고 충돌은 그 평평한 윗면이며
+ * ::LVL_HAZARD_UNDERFOOT는 5센티미터입니다. 표면이 어디인지에 대해 거짓말하지 않을 만큼
+ * 정직한 변위는 서 있는 눈높이에서 보이기에는 너무 작습니다. 대신 이 렌더러가 가진 것은
+ * ::LIGHT_BANDS입니다. 다섯 단계이므로 몇 도 흔들린 노멀이 음영을 밴드 경계 너머로 걸어
+ * 보냈다가 되돌립니다. *밴드 경계가 움직이는 것이 곧 출렁임*이며, 방 반대편에서 바다 전체에
+ * 걸쳐 보입니다. 실제 지오메트리 4센티미터로는 그러지 못했을 것입니다.
+ *
+ * @note 재질뿐 아니라 RD_WORLD에도 게이트가 걸려 있습니다. `uPParam`이 남기 때문입니다.
+ *       ::rd_proc는 ::tex_use에서 호출되고 패스 사이에 아무도 지우지 않으므로, 용암 뒤에
+ *       그려지는 스프라이트가 그 흐름을 물려받아 일렁이게 됩니다. */
+"vec2 flowField(vec3 p, float t){\n"
+/* Two crossing waves at frequencies that do not divide each other, so the
+   pattern does not repeat on a grid the eye can find. Returned as the GRADIENT
+   rather than as a height -- the height is never wanted, only which way the
+   surface leans. */
+"  float a = cos(p.x*0.85 + t*1.30)*0.85 + cos((p.x+p.z)*0.42 + t*0.70)*0.42;\n"
+"  float b = cos(p.z*0.73 - t*1.10)*0.73 + cos((p.x+p.z)*0.42 + t*0.70)*0.42;\n"
+"  return vec2(a,b);\n"
+"}\n"
 "void main(){\n"
 "  if(uMode==2){ oCol=uColor; return; }\n"
 /* Text: one white atlas serves every colour, because the glyph lives in
    alpha and the colour comes from the uniform. */
 "  if(uMode==3){ oCol=vec4(uColor.rgb, uColor.a*texture(uTex,vUV).a); return; }\n"
 "  vec3 n=normalize(vNrm);\n"
+/* The swell, applied before anything reads `n`. uPParam.z is the material's
+   flow speed and doubles as the switch: every material that never says
+   `flow` leaves this untouched. The 0.06 is the tilt in radians-ish -- small
+   enough that a face still reads as flat, large enough to cross a band.
+   출렁임이며, `n`을 읽는 그 무엇보다도 먼저 적용됩니다. uPParam.z는 재질의 흐름 속도이자
+   스위치를 겸합니다. `flow`를 말하지 않는 모든 재질은 이것을 건드리지 않습니다. 0.06은
+   기울기이며, 면이 여전히 평평하게 읽힐 만큼 작고 밴드 하나를 넘을 만큼 큽니다. */
+"  if(uMode==0 && uPParam.z>0.0){\n"
+"    vec2 g=flowField(vPos, uTime*uPParam.z);\n"
+"    n=normalize(n+vec3(g.x,0.0,g.y)*0.060);\n"
+"  }\n"
 /* UVs now arrive per vertex, so extruded silhouettes can carry a real
    parameterisation instead of everything being guessed from world position. */
 /* WORLD GEOMETRY ONLY, and the gate is here rather than left to the caller
@@ -1455,6 +1520,17 @@ static const char *FS_MAIN =
 "  vec2 dUV = vUVa - vUV;\n"
 "  dUV *= AFF_LIMIT / (AFF_LIMIT + abs(dUV));\n"
 "  vec2 uv = vUV + dUV * ((uMode==0) ? uAffine : 0.0);\n"
+/* The flow. A straight scroll alone reads as a conveyor belt, so most of the
+   motion is the WARP: the same field that tilts the normal also pushes the
+   lookup sideways, which turns the crust over instead of sliding it. The
+   scroll is kept small and diagonal so the sea still has a direction.
+   흐름입니다. 곧은 스크롤만으로는 컨베이어 벨트로 읽히므로 움직임의 대부분은 *뒤틀림*입니다.
+   노멀을 기울이는 것과 같은 장이 조회 위치를 옆으로 밀며, 그것이 껍질을 미끄러뜨리는 대신
+   뒤집습니다. 스크롤은 작고 대각선으로 유지되어 바다가 방향을 갖습니다. */
+"  if(uMode==0 && uPParam.z>0.0){\n"
+"    float ft=uTime*uPParam.z;\n"
+"    uv += vec2(ft*0.035, ft*0.021) + flowField(vPos, ft)*0.030;\n"
+"  }\n"
 /* One lookup either way: sampled from a texture, or computed from the UV.
    Alpha carries gloss in both, so the lighting below does not care which. */
 "  vec4 s = (uProc==0) ? texture(uTex,uv)\n"
@@ -2062,10 +2138,28 @@ void rd_init(void) {
    parameter uploads entirely when the shader is off. */
 void rd_proc(int proc, const float rgb[3], float scale, const float params[3]) {
     glUniform1i(g_u_proc, proc);
+
+    /* ABOVE THE EARLY RETURN, unlike the other three, because `flow`
+       (params.z) is read on the TEXTURED path too -- `star_lava3` is an
+       image and it is the lava the arena is named for. Below the return
+       it was never uploaded for such a material, so the shader saw
+       whatever the last procedural material had left behind and no
+       imported texture could ever move.
+       Uploading it always also makes the staleness harmless in the other
+       direction: a still material now actively says it is still, rather
+       than inheriting the last thing that flowed.
+       *다른 셋과 달리 이른 반환보다 위입니다.* `flow`(params.z)는 *텍스처* 경로에서도
+       읽히기 때문입니다. `star_lava3`은 이미지이며 이 투기장의 이름이 된 바로 그
+       용암입니다. 반환 아래에 있으면 그런 재질에 대해서는 결코 업로드되지 않았고,
+       셰이더는 마지막 절차적 재질이 남긴 값을 보았으며 가져온 텍스처는 어느 것도
+       움직일 수 없었습니다.
+       항상 올리는 것은 반대 방향의 잔류도 무해하게 만듭니다. 정지한 재질이 마지막으로
+       흐른 것을 물려받는 대신 스스로 정지해 있다고 말하게 됩니다. */
+    glUniform3fv(g_u_pparam, 1, params);
+
     if (proc == PROC_TEXTURE) return;
     glUniform3fv(g_u_pcol, 1, rgb);
     glUniform1f (g_u_pscale, scale);
-    glUniform3fv(g_u_pparam, 1, params);
 }
 
 void rd_use  (void)      { glUseProgram(g_prog); }

@@ -27,6 +27,7 @@
 #include "post.h"
 #include "render.h"
 #include "level.h"
+#include "diag.h"   /* diag_count -- a truncated level must not be silent */
 #include "model.h"
 #include "tex.h"
 #include "player.h"
@@ -228,18 +229,58 @@ int main(int argc, char **argv) {
         printf("  %d door(s) opened to %.0f%%\n", nd, door_t * 100.0f);
     }
 
-    MeshBuf  mb;  mb_init(&mb, 16384);
+    /* 16384 WAS NOT ENOUGH FOR THE ARENA, and nothing said so. lqdm4 is
+       ~7000 brush faces and wants north of forty thousand vertices;
+       mb_vtx drops what will not fit and raises DIAG_VERTEX_BUF, so the
+       tool has been rendering a PARTIAL level -- two materials out of
+       twenty, the lava among the missing -- and every shot taken with it
+       was of a building with most of its walls absent. The count landing
+       exactly on 16384 is what gave it away.
+       *투기장에는 16384로 충분하지 않았고, 아무도 그렇다고 말하지 않았습니다.* lqdm4는
+       브러시 면이 약 7000개이며 정점 4만 개 이상을 원합니다. mb_vtx는 들어가지 않는
+       것을 버리고 DIAG_VERTEX_BUF를 올리므로, 이 도구는 *부분적인* 레벨을 그려 왔습니다.
+       재질 스무 개 중 두 개뿐이고 용암은 없는 쪽에 있었으며, 이것으로 찍은 모든 사진은
+       벽 대부분이 빠진 건물의 사진이었습니다. 개수가 정확히 16384에 떨어진 것이
+       실마리였습니다. */
+    MeshBuf  mb;  mb_init(&mb, 1 << 17);
     Mesh     mesh = {0};
     MdlRange ranges[LVL_MAX_RANGES];
     Mat      mats[LVL_MAX_RANGES];
     int nr = level_geometry(&mb, &lv, ranges, LVL_MAX_RANGES);
     mesh_upload(&mesh, &mb, 0);
     for (int i = 0; i < nr; i++) mats[i] = tex_mat(ranges[i].mat);
+    /* SAY SO IF THE LEVEL DID NOT FIT. This is the whole reason the tool
+       could photograph two materials out of twenty and look fine doing
+       it: mb_vtx drops silently and raises a diagnostic nobody read.
+       *레벨이 들어가지 않았다면 그렇다고 말합니다.* 이 도구가 재질 스무 개 중 두 개만
+       찍고도 멀쩡해 보일 수 있었던 이유 전부입니다. mb_vtx는 조용히 버리고, 아무도 읽지
+       않는 진단을 올립니다. */
+    if (diag_count(DIAG_VERTEX_BUF))
+        printf("  WARNING: %d vertices did not fit; this shot is of a partial level\n", diag_count(DIAG_VERTEX_BUF));
+    printf("  %d vertices, %d material ranges\n", mb.count, nr);
 
     /* Stand where the level says the player spawns, looking along its yaw, so
        the shot frames whatever the author pointed the start at. */
     Player p = {0};
     float yaw = player_spawn(&p, &lv);
+
+    /* `-at <x> <y> <z>` in metres puts the camera anywhere, because a spawn
+       is ONE point and a level is not. Everything that is not framed by the
+       author's start heading was, until now, unphotographable: lqdm4's lava
+       sea sits six metres below its spawn and thirty pixels of it reach the
+       frame, which is why an effect painted across the whole sea measured as
+       forty changed pixels and read as 'the shader does nothing'.
+       `-at <x> <y> <z>`(미터)는 카메라를 어디로든 보냅니다. 스폰은 *한* 점이고 레벨은
+       그렇지 않기 때문입니다. 제작자의 시작 방향이 잡아 주지 않는 모든 것은 지금까지 찍을 수
+       없었습니다. lqdm4의 용암 바다는 스폰보다 6미터 아래에 있고 그중 서른 픽셀만 화면에
+       닿습니다. 바다 전체에 칠해진 효과가 바뀐 픽셀 마흔 개로 측정되어 '셰이더가 아무 일도
+       하지 않는다'로 읽힌 이유가 그것입니다. */
+    for (int i = 2; i + 3 < argc; i++)
+        if (argv[i][0] == '-' && argv[i][1] == 'a' && argv[i][2] == 't') {
+            p.pos = v3f((float)atoi(argv[i + 1]), (float)atoi(argv[i + 2]),
+                        (float)atoi(argv[i + 3]));
+            break;
+        }
 
     /* `-yaw <degrees>` turns off the spawn heading. The author points a start
        at whatever the level opens with, which is rarely the door somebody
@@ -283,6 +324,19 @@ int main(int argc, char **argv) {
 
     v3    eye_pos   = p.pos;
     float cam_pitch = 0.0f, cam_roll = 0.0f;
+    /* `-p <degrees>` tilts the camera, positive being DOWN. The companion
+       to -y, and it exists for the same reason -t does: a floor cannot be
+       photographed from a camera that only ever looks at the horizon, and
+       every effect that lives on one -- the lava's flow, its swell, the
+       boil -- was unphotographable until this. The spawn heading looks
+       across the arena; the lava is beneath it.
+       `-p <도>`는 카메라를 기울이며 양수가 *아래*입니다. -y의 짝이고, -t와 같은 이유로
+       존재합니다. 지평선만 보는 카메라로는 바닥을 찍을 수 없으며, 바닥에 사는 모든
+       효과(용암의 흐름, 출렁임, 끓어오름)는 이것이 있기 전까지 찍을 수 없었습니다.
+       스폰 방향은 투기장을 가로질러 보고, 용암은 그 아래에 있습니다. */
+    for (int i = 2; i + 1 < argc; i++)
+        if (argv[i][0] == '-' && argv[i][1] == 'p' && argv[i][2] == 0)
+            cam_pitch -= (float)atoi(argv[i + 1]) * 0.0174533f;
     if (death_k > 0.0f) {
         if (death_k > 1.0f) death_k = 1.0f;
         float e = 1.0f - (1.0f - death_k) * (1.0f - death_k);

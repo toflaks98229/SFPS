@@ -27,6 +27,17 @@
 #   bump   n              relief: tilt the shading normal by the material's own
 #                         brightness gradient, n/100. Procedural materials only
 #                         -- see the relief note in the procedural section
+#   flow   n              the surface MOVES at n/100: the texture drifts and the
+#                         shading normal rocks, off one world-space wave field.
+#                         BOTH paths, unlike bump. A liquid is a material that
+#                         says it is one -- the renderer has no list of which
+#                         names are lava. Omit it and the surface holds still.
+#                         What you SEE is mostly the normal: five light bands
+#                         mean a small tilt walks the shading across a band
+#                         edge, and that moving edge is the swell. Nothing is
+#                         displaced -- a lava brush IS the floor and collision
+#                         is its flat top, so the picture must not claim the
+#                         surface is somewhere it is not.
 #
 # Ops that follow `brick` know which pixels are mortar, which is how a flat
 # op list expresses "only inside a brick".
@@ -264,6 +275,7 @@ proc 8 150
 t plava
 base 235 96 22
 proc 9 60
+flow 100              # it is molten rock; it moves
 
 # --- a lit building facade -------------------------------------------------
 # Glazed curtain wall. `base` is the colour of a LIT ROOM behind the glass, not
@@ -594,5 +606,6 @@ t sky_orng
 image sky_orng 2
 t star_lava3
 image star_lava3 2
+flow 70               # slower than plava: this crust is thicker
 t med_tmpl_lit3
 image med_tmpl_lit3 2

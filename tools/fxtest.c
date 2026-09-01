@@ -783,6 +783,73 @@ int main(void) {
         ok(fx_live_count(&g_pools) > 0, "a tinted spawn spawns");
     }
 
+    /* --- the lava boils, and boiling is not smoking -----------------------
+     *
+     * ENGLISH
+     * -------
+     * A LAVA SEA HAD ONE EFFECT ON IT AND IT SAID THE WRONG THING. Smoke says
+     * HOT: a fire smokes, a corpse smokes, a wrecked machine smokes. What says
+     * LIQUID is a surface that has to open to let something out, and `lavaboil`
+     * is that -- so the claim worth a check is not that it spawns, it is that
+     * it is a DIFFERENT effect from the smoke rather than the same one twice
+     * under a second name.
+     *
+     * The difference that matters is where each one ENDS UP. A puff is thrown
+     * up and out and leaves; a bubble surfaces, swells and goes, and never
+     * leaves the half-metre it was born in. That is the whole reason the boil
+     * reads as the lava doing something rather than as the lava emitting
+     * something, and it is one number: distance travelled from the spawn point
+     * over the bubble's own lifetime.
+     *
+     * Measured one at a time, because ::fx_radius_spread answers for every live
+     * particle at once and two effects in the pool would average into a number
+     * that describes neither.
+     *
+     * 한국어
+     * ------
+     * *용암 바다에는 효과가 하나 있었고 그것은 틀린 말을 하고 있었습니다.* 연기는 *뜨겁다*고
+     * 말합니다. 불도 시체도 부서진 기계도 연기를 냅니다. *액체*라고 말하는 것은 무언가를
+     * 내보내려고 열려야 하는 표면이며 `lavaboil`이 그것입니다. 그래서 검사할 값어치가 있는
+     * 주장은 그것이 생성된다는 것이 아니라, 두 번째 이름을 쓴 같은 효과가 아니라 연기와 *다른*
+     * 효과라는 것입니다.
+     *
+     * 중요한 차이는 각자가 *어디에서 끝나는가*입니다. 연기는 위로 바깥으로 던져져 떠나고,
+     * 거품은 표면에 올라와 부풀고 사라지며 태어난 반 미터를 결코 벗어나지 않습니다. 그것이
+     * 끓어오름이 용암이 무언가를 *내보내는* 것이 아니라 무언가를 *하는* 것으로 읽히는 이유
+     * 전부이며, 수 하나입니다. 거품 자신의 수명 동안 생성 지점에서 이동한 거리입니다.
+     *
+     * 한 번에 하나씩 잽니다. ::fx_radius_spread는 살아 있는 모든 입자에 대해 한 번에 답하므로,
+     * 풀에 두 효과가 있으면 어느 쪽도 서술하지 않는 수로 평균됩니다.
+     */
+    {
+        const v3 AT = { 1.0f, -18.0f, 2.0f };
+        static const char *WHICH[2] = { "lavaboil", "lavasmoke" };
+        float went[2] = {0}, wide[2] = {0};
+
+        for (int k = 0; k < 2; k++) {
+            fx_reload(&g_pools);
+            fx_spawn(&g_pools, WHICH[k], AT, v3f(0, 1, 0));
+            ok(fx_live_count(&g_pools) > 0,
+               k ? "lavasmoke is a recipe this file defines"
+                 : "lavaboil is a recipe this file defines");
+
+            /* The bubble's own life, 620ms, for both -- the comparison is
+               "where is each one when the bubble is done", not "where does
+               each one finish".
+               둘 다 거품 자신의 수명 620ms입니다. 비교는 "각자가 끝나는 곳"이 아니라
+               "거품이 끝났을 때 각자가 어디 있는가"입니다. */
+            for (int i = 0; i < 37; i++) fx_update(&g_pools, DT);
+            fx_radius_spread(&g_pools, AT, &went[k], &wide[k]);
+        }
+
+        okf(went[0] < 0.5f,
+            "a bubble is still within half a metre of the hole it came from",
+            went[0], 0.5f);
+        okf(went[1] > went[0] * 2.0f,
+            "and the smoke in the same time has gone much further",
+            went[1], went[0] * 2.0f);
+    }
+
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall effect checks passed\n", fails);
     return fails != 0;
 }

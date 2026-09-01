@@ -462,13 +462,25 @@ static void digest_print(const Digest *d) {
    두었고 데모의 기록된 사격이 그것을 5까지 깎았습니다. 공격이 오래 걸린다는 이유로 죽이기
    쉬워진 몬스터는 아무도 내리지 않은 밸런스 결정입니다. 사격 시간이 더한 만큼 경직을
    내렸고, 그 행은 다시 손대지 않은 상태로 돌아왔습니다. */
+/* THE SEVENTH MOVED ONE FIELD AND THAT IS THE WHOLE REPORT. `srng` and
+   nothing else: the lava now boils as well as smokes, and the bubbles throw
+   their own darts from the same generator the puffs do, so the smoke stream
+   advances further per tick. Everything a player would feel is bit-for-bit
+   unchanged -- `px`, `health`, `erng`, `enemies hp`, `world_time` -- which is
+   the claim this line exists to make. A surface effect that moved `erng`
+   would have been a surface effect that changed a fight.
+   *일곱 번째는 필드 하나를 움직였고 그것이 보고의 전부입니다.* `srng`뿐입니다. 용암이 이제
+   연기를 낼 뿐 아니라 끓으며, 거품은 연기와 같은 생성기에서 자기 다트를 던지므로 연기 흐름이
+   틱마다 더 나아갑니다. 플레이어가 느낄 모든 것은 비트 단위로 그대로입니다. `px`, `health`,
+   `erng`, `enemies hp`, `world_time`이며, 그것이 이 줄이 존재하는 이유인 주장입니다. `erng`를
+   움직인 표면 효과였다면 그것은 전투를 바꾼 표면 효과였을 것입니다. */
 static const Digest GOLDEN = {
     /* px py pz */ -12.2013168f, 2.84367466f, -14.8857975f,
     /* vx vy vz */ -0.312936455f, 1.9998908f, 0.38904506f,
     /* yaw pitch */ 0.382800102f, 0.534599602f,
     /* health keys grounded */ 73, 0, 0,
     /* cur ammo */ 0, 0,
-    /* wrng srng erng frng */ 2972006077u, 522628529u, 3081125676u, 1913620148u,
+    /* wrng srng erng frng */ 2972006077u, 3888997821u, 3081125676u, 1913620148u,
     /* enemies hp */ 1, 40,
     /* proj marks */ 0, 0,
     /* world_time */ 29.9002438f

@@ -277,6 +277,53 @@ int main(void) {
 
     fails += check_imported();
 
+    /* --- `flow` reaches the material, on both paths ------------------------
+     *
+     * ENGLISH
+     * -------
+     * THE WHOLE OF THE LAVA'S MOTION HANGS ON ONE FLOAT getting from a line of
+     * textures.txt to `Mat::params[2]`, and every way it can fail is silent.
+     * The op could be missing from the table, the enum could be out of step
+     * with it -- OPS is indexed BY the opcode, so one misordered entry makes
+     * `flow` set something else and `image` take the wrong arity -- or the
+     * recipe could simply not say it. In all three the lava renders perfectly
+     * and stands perfectly still, which looks like a shader that does not work.
+     *
+     * BOTH KINDS, deliberately. `plava` is procedural and `star_lava3` is an
+     * imported image, and they reach the shader by different roads: for a
+     * while the textured one could not carry params at all, because ::rd_proc
+     * returned early on PROC_TEXTURE and never uploaded them. A test that
+     * checked only the procedural material would have passed throughout.
+     *
+     * 한국어
+     * ------
+     * *용암의 움직임 전부가 실수 하나가* textures.txt의 한 줄에서 `Mat::params[2]`까지
+     * 도달하는 것에 달려 있으며, 실패하는 모든 방식이 조용합니다. 표에서 op가 빠질 수도 있고,
+     * 열거형이 표와 어긋날 수도 있으며(OPS는 opcode로 색인되므로 항목 하나가 잘못 배열되면
+     * `flow`가 다른 것을 설정하고 `image`가 틀린 인자 수를 취합니다), 레시피가 그냥 말하지
+     * 않을 수도 있습니다. 셋 다 용암은 완벽하게 렌더링되고 완벽하게 가만히 있으며, 그것은
+     * 동작하지 않는 셰이더처럼 보입니다.
+     *
+     * *두 종류 모두*이며 의도적입니다. `plava`는 절차적이고 `star_lava3`은 가져온 이미지이며,
+     * 서로 다른 길로 셰이더에 닿습니다. 한동안 텍스처 쪽은 params를 아예 나를 수 없었습니다.
+     * ::rd_proc가 PROC_TEXTURE에서 일찍 반환하고 결코 업로드하지 않았기 때문입니다. 절차적
+     * 재질만 검사하는 테스트는 그동안 내내 통과했을 것입니다.
+     */
+    {
+        Mat lava_proc = tex_mat("plava");
+        Mat lava_img  = tex_mat("star_lava3");
+        Mat still     = tex_mat("brick");
+
+        ok(lava_proc.params[2] > 0.0f,
+           "the procedural lava says it flows");
+        ok(lava_img.params[2] > 0.0f,
+           "and so does the imported one, which is an image and not a proc");
+        ok(lava_img.proc == PROC_TEXTURE,
+           "-- an image, so it carries flow down the path that once dropped it");
+        ok(still.params[2] == 0.0f,
+           "and a wall does not, because it never mentions flow");
+    }
+
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall texture cache checks passed\n", fails);
     return fails != 0;
 }

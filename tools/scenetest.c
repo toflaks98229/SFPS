@@ -847,6 +847,146 @@ int main(void) {
     ok(quad_b - base_b > 1.0f,  "the quad turns the whole frame blue");
     ok(aegis_g - base_g > 0.5f, "the aegis turns it green, and less hard");
     ok(shadow_hud != bare_hud,  "and the ring of shadows greys it");
+    /* --- the floaters float, and the walkers do not ----------------------
+     *
+     * ENGLISH
+     * -------
+     * A BILLBOARD NAILED TO A FIXED HEIGHT reads as a cardboard cutout, which
+     * is what a water spirit and a caster were: one is water and the other is
+     * off the floor entirely, and both hung at exactly the height a brute
+     * stands at.
+     *
+     * TWO FRAMES OF THE SAME SCENE, differing only in ::Enemy::anim. That is
+     * the phase the bob is driven from, so the picture must move -- and for a
+     * creature that does NOT float it must not, which is the half that makes
+     * this a test rather than a proof that something somewhere changed.
+     *
+     * The state is ::E_IDLE on purpose. ::E_CHASE picks its frame off the same
+     * clock, so a chasing monster's picture would differ between the two
+     * hashes because the WALK CYCLE moved, and the check would pass with the
+     * bob deleted.
+     *
+     * 한국어
+     * ------
+     * *고정된 높이에 못 박힌 빌보드는 판지 조각으로 읽히며*, 물 정령과 캐스터가 바로 그랬습니다.
+     * 하나는 물이고 다른 하나는 바닥에서 아예 떨어져 있는데, 둘 다 브루트가 서 있는 바로 그
+     * 높이에 걸려 있었습니다.
+     *
+     * *같은 장면의 두 프레임*이며 ::Enemy::anim만 다릅니다. 그것이 떠 있음을 구동하는 위상이므로
+     * 그림이 움직여야 합니다. 그리고 *떠 있지 않은* 생물에 대해서는 움직이지 않아야 하며, 그
+     * 절반이 이것을 "어딘가에서 무언가 바뀌었다"의 증명이 아니라 테스트로 만듭니다.
+     *
+     * 상태가 ::E_IDLE인 것은 의도적입니다. ::E_CHASE는 같은 시계에서 프레임을 고르므로, 쫓고
+     * 있는 몬스터의 그림은 *걷기 주기*가 움직였기 때문에 두 해시 사이에서 달라지고, 떠 있음을
+     * 지워도 검사가 통과합니다. */
+    {
+        /* Asked of the table rather than spelled here, so the check follows
+           the flag if a second creature ever earns it.
+           이곳에 적는 대신 표에 물으므로, 두 번째 생물이 이 플래그를 얻으면 검사가 따라갑니다. */
+        #define S_UNFLINCHING(k) (mon_stats(mon_type_for(k))->flags & MON_UNFLINCHING)
+        static const struct { const char *kind; int floats; } WHO[] = {
+            { "water_spirit", 1 },
+            { "caster",       1 },
+            { "brute",        0 },
+        };
+        for (int k = 0; k < 3; k++) {
+            clear_state(&w);
+            enemy_reset(&w.pools);
+
+            Level *lv = &w.level;
+            int saved = lv->n_ents;
+            Entity *e = &lv->ents[lv->n_ents++];
+            for (int i = 0; i < (int)sizeof e->kind; i++) e->kind[i] = 0;
+            for (int i = 0; WHO[k].kind[i] && i < (int)sizeof e->kind - 1; i++)
+                e->kind[i] = WHO[k].kind[i];
+            /* PLACED WHERE THE PLAYER IS STANDING, offset by a few metres and
+               retried outward. ::make_monster refuses ground it cannot stand
+               on -- a wall, a drop, the arena's lava -- so a fixed offset from
+               a spawn point is a coin toss on whichever map this test loads.
+               The player's own footing is the one square this scene guarantees.
+               *플레이어가 서 있는 자리에 놓고* 몇 미터씩 밀어내며 다시 시도합니다.
+               ::make_monster는 설 수 없는 지면을 거절합니다. 벽, 낭떠러지, 투기장의 용암이
+               그렇습니다. 그러므로 스폰 지점에서 고정된 거리는 이 테스트가 어느 맵을 여느냐에
+               걸린 동전 던지기입니다. 플레이어 자신의 발밑이 이 장면이 보장하는 한 칸입니다. */
+            static const float OFF[4][2] = {
+                { 0.0f, -4.0f }, { 4.0f, 0.0f }, { 0.0f, 4.0f }, { -4.0f, 0.0f }
+            };
+            for (int t = 0; t < 4 && enemy_count(&w.pools) < 1; t++) {
+                e->x = (short)((w.player.pos.x + OFF[t][0]) * 100.0f);
+                e->z = (short)((w.player.pos.z + OFF[t][1]) * 100.0f);
+                enemy_spawn_level(&w.pools, lv);
+            }
+            lv->n_ents = saved;
+
+            if (enemy_count(&w.pools) < 1) { ok(0, "the monster spawned"); continue; }
+            Enemy *m = (Enemy *)enemy_at(&w.pools, 0);
+            m->state = E_IDLE;
+
+            m->anim = 0.0f;
+            unsigned a = frame_hash(&w, &scene, 0);
+            m->anim = 1.0f;                    /* a quarter of a bob cycle */
+            unsigned b = frame_hash(&w, &scene, 0);
+
+            printf("      %-13s %s between two phases\n", WHO[k].kind,
+                   a == b ? "identical" : "moves");
+            if (WHO[k].floats)
+                ok(a != b, "a floating creature rises and falls");
+            else
+                ok(a == b, "and one that walks stays where it is put");
+            /* --- and the flinch, which is a flash and a shudder ---------
+               ::E_HURT used to pick ::SPR_HURT and no creature has a drawing
+               for it, so being shot turned a monster back into the generated
+               fallback for a quarter of a second. What replaces it has to be
+               visible -- and for the brute, visible WITHOUT the shudder: its
+               own stats say it cannot be stun-locked, and a wall that rocks
+               when you shoot it is not a wall.
+               ::Enemy::anim is held still across the two hashes, so the only
+               thing that can move the picture is the flinch.
+               *그리고 경직은 점멸과 떨림입니다.* ::E_HURT은 ::SPR_HURT를 골랐고 어느 생물에도
+               그 그림이 없으므로, 맞는 것은 몬스터를 0.25초 동안 생성된 폴백으로 되돌리는
+               일이었습니다. 그것을 대신하는 것은 보여야 하고, 브루트에 대해서는 *떨림 없이*
+               보여야 합니다. 자기 수치가 스턴 락에 걸리지 않는다고 말하며, 쏘면 흔들리는 벽은
+               벽이 아닙니다.
+               두 해시 사이에서 ::Enemy::anim을 고정하므로 그림을 움직일 수 있는 것은
+               경직뿐입니다. */
+            m->anim  = 0.0f;
+            m->flash = 0.0f;
+            unsigned calm = frame_hash(&w, &scene, 0);
+            m->flash = 1.0f;
+            unsigned hit  = frame_hash(&w, &scene, 0);
+            printf("      %-13s %s when hit\n", WHO[k].kind,
+                   calm == hit ? "does not change" : "changes");
+            ok(calm != hit, "a hit changes the picture");
+
+            /* AND WHETHER IT SHUDDERS, which the check above cannot tell: the
+               flash alone changes the frame, so every creature passes it.
+               Isolated by holding ::Enemy::flash ON and moving the phase. For
+               the brute that is the shake and nothing else -- it does not
+               float -- so an identical frame is the exemption, proven.
+               For a floater the bob moves with the same clock, so a difference
+               here would not be evidence of the shudder. That half is left
+               unclaimed rather than asserted badly.
+               *그리고 떨리는지*이며, 위의 검사는 그것을 가를 수 없습니다. 점멸만으로 프레임이
+               바뀌므로 모든 생물이 통과합니다. ::Enemy::flash를 *켠 채로* 위상만 움직여
+               떼어 냅니다. 브루트에게 그것은 흔들림뿐입니다. 떠 있지 않으니까요. 그러므로
+               같은 프레임이 곧 증명된 면제입니다.
+               떠 있는 것에 대해서는 떠 있음이 같은 시계로 움직이므로, 이곳의 차이는 떨림의
+               증거가 되지 못합니다. 그 절반은 엉성하게 단언하는 대신 주장하지 않고 둡니다. */
+            if (S_UNFLINCHING(WHO[k].kind)) {
+                m->flash = 1.0f; m->anim = 0.0f;
+                unsigned s0 = frame_hash(&w, &scene, 0);
+                m->anim = 0.7f;
+                unsigned s1 = frame_hash(&w, &scene, 0);
+                printf("      %-13s %s while the flash is lit\n", WHO[k].kind,
+                       s0 == s1 ? "holds still" : "moves");
+                ok(s0 == s1, "and the brute takes it without rocking");
+            }
+            m->flash = 0.0f;
+
+        }
+        clear_state(&w);
+        enemy_reset(&w.pools);
+    }
 
     clear_state(&w);
     proj_reset(&w.pools);

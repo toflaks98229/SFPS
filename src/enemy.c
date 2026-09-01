@@ -191,7 +191,7 @@ static const MonType TYPES[MON_TYPES] = {
        기준선. 도감에서 가장 빠르고 갈지자가 가장 큽니다. ::PLAYER_WALK의 65%이며,
        따라잡지는 못하지만 돌아섰을 때 거기 있을 수는 있습니다. 근접 샷건 한 방에
        죽습니다. */
-    { "water_spirit", AI_CASTER,   40, 7.0f, 0.62f, 0.52f, 1.70f, 1.30f, 34.0f,  7.5f,   3, 0.30f, 0.50f, 0.70f,  9.0f,   10,  5, 0.13f, 0.07f, 260.0f, 0.6f, 8, 0         },
+    { "water_spirit", AI_CASTER,   40, 7.0f, 0.62f, 0.52f, 1.70f, 1.30f, 34.0f,  7.5f,   3, 0.30f, 0.50f, 0.70f,  9.0f,   10,  5, 0.13f, 0.07f, 260.0f, 0.6f, 8, MON_FLOATS },
     /* a wall with health -- hits hard, cannot be stun-locked, and closes at
        half your walking speed on the straightest line in the bestiary. Heavy
        is the small weave, not the speed: it commits to a direction and comes,
@@ -199,7 +199,7 @@ static const MonType TYPES[MON_TYPES] = {
        체력이 높은 벽. 강하게 때리고, 스턴 락에 걸리지 않으며, 도감에서 가장 곧은 선으로
        걷기 속도의 절반으로 다가옵니다. 무거움은 속도가 아니라 작은 갈지자입니다. 방향을
        정하고 오며, 살아남을 수 있게 하는 것은 그것이 어디로 올지 읽을 수 있다는 점입니다. */
-    { "brute",        AI_BRAWLER, 120, 5.6f, 0.30f, 0.806f, 2.35f, 1.80f, 34.0f,  2.3f,  24, 0.55f, 1.50f, 0.85f,  0.0f,    1,  1,  0.0f, 0.0f, 130.0f, 2.2f, 3, 0         },
+    { "brute",        AI_BRAWLER, 120, 5.6f, 0.30f, 0.806f, 2.35f, 1.80f, 34.0f,  2.3f,  24, 0.55f, 1.50f, 0.85f,  0.0f,    1,  1,  0.0f, 0.0f, 130.0f, 2.2f, 3, MON_UNFLINCHING },
     /* holds its range instead of closing, and holds it in the AIR -- so cover
        and angles matter, and so does the ceiling. Nothing about the numbers
        changed when MON_FLIES arrived: this is the same creature, no longer
@@ -209,7 +209,7 @@ static const MonType TYPES[MON_TYPES] = {
        천장의 문제이기도 합니다. MON_FLIES가 붙을 때 수치는 하나도 바뀌지 않았습니다. 아무것도
        딛고 있지 않게 되었을 뿐 같은 생물입니다. 이것이 대신한 행("wraith")은 여기서 체력 4점과
        사거리 1미터를 뺀 것이었고, 그것은 별개의 몬스터가 아닙니다. */
-    { "caster",       AI_CASTER,   26, 5.8f, 0.46f, 0.546f, 1.90f, 1.45f, 40.0f, 13.0f,  12, 0.85f, 1.40f, 0.80f, 11.0f,    1,  1,  0.0f, 0.0f, 180.0f, 0.9f, 4, MON_FLIES },
+    { "caster",       AI_CASTER,   26, 5.8f, 0.46f, 0.546f, 1.90f, 1.45f, 40.0f, 13.0f,  12, 0.85f, 1.40f, 0.80f, 11.0f,    1,  1,  0.0f, 0.0f, 180.0f, 0.9f, 4, MON_FLIES | MON_FLOATS },
     /* the boss: a caster with the footwork taken away. Its hp is spent in
        BOSS_CYCLES equal thirds and must divide by it -- types_check says so.
        The pain lock is effectively infinite because a boss that flinches is a

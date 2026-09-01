@@ -711,11 +711,85 @@ enum {
      * 없습니다. 훅의 도달 피해, 유탄의 폭발, 샷건의 펠릿이 전부, 들어 본 적도 없는 규칙을
      * 따르게 되는 이유가 그것입니다.
      */
-    MON_GUARD = 1 << 3
+    MON_GUARD = 1 << 3,
+
+    /**
+     * @brief Drawn bobbing rather than standing still. Costs nothing but pixels.
+     *
+     * ENGLISH
+     * -------
+     * A LOOK, NOT A BEHAVIOUR, and the only flag here that is. ::MON_FLIES
+     * changes where a monster may go; this changes only where its picture is
+     * drawn, and ::Enemy::pos is untouched so collision, aim and every distance
+     * in enemy.c are measured against the same point they always were.
+     *
+     * WHY A FLAG AND NOT A TYPE TEST. scene.c wanted `type == MON_WATER_SPIRIT
+     * || (flags & MON_FLIES)`, which is the reading ::MonBehaviour's own note
+     * calls out: three `shot_speed > 0` tests each meant "is this a caster" and
+     * each had to be hunted down when a third archetype arrived. A water spirit
+     * floats because it is water and a caster floats because it is off the
+     * floor -- two reasons, one appearance, and the table is where a row says
+     * which appearance it has.
+     *
+     * 한국어
+     * ------
+     * @brief 가만히 서 있는 대신 떠 있는 것으로 그립니다. 픽셀 말고는 아무 비용이 없습니다.
+     *
+     * *행동이 아니라 겉모습*이며, 이곳에서 그런 유일한 플래그입니다. ::MON_FLIES는 몬스터가
+     * 어디로 갈 수 있는지를 바꿉니다. 이것은 그 그림이 어디에 그려지는지만 바꾸며,
+     * ::Enemy::pos는 손대지 않으므로 충돌과 조준과 enemy.c의 모든 거리는 늘 재던 같은 점에
+     * 대해 재집니다.
+     *
+     * *왜 종류 검사가 아니라 플래그인가.* scene.c는 `type == MON_WATER_SPIRIT ||
+     * (flags & MON_FLIES)`를 원했는데, 그것은 ::MonBehaviour의 주석 자신이 지목하는 읽기입니다.
+     * 세 개의 `shot_speed > 0` 검사가 각각 "이것은 캐스터인가"를 뜻했고 세 번째 아키타입이
+     * 왔을 때 각각을 찾아내야 했습니다. 물 정령이 떠 있는 것은 물이기 때문이고 캐스터가 떠
+     * 있는 것은 바닥에서 떨어져 있기 때문입니다. 이유는 둘, 겉모습은 하나이며, 어떤 겉모습을
+     * 지니는지는 표의 행이 말합니다.
+     */
+    MON_FLOATS = 1 << 4,
+
+    /**
+     * @brief Takes a hit without showing it: the flash, but no flinch shake.
+     *
+     * ENGLISH
+     * -------
+     * THE ONE ROW THAT CARRIES IT IS THE BRUTE, and it is the same fact its
+     * own stats already state twice -- ::MonType::pain_lock is 2.2 seconds
+     * against everything else's fraction, and the comment above the row says
+     * it "cannot be stun-locked". A wall that rocks when you shoot it is not a
+     * wall. This is that character reaching the picture.
+     *
+     * NEGATIVE, WHICH IS UNUSUAL HERE AND DELIBERATE. Every other flag says
+     * what a monster DOES; a positive `MON_SHAKES` would sit on four rows out
+     * of five and the table would read as though shaking were the exception.
+     * One row is the exception, so one row carries the flag.
+     *
+     * @note The flash is NOT exempted. A hit that shows nothing at all is a
+     *       hit the player cannot tell from a miss, which is a different
+     *       complaint from "it does not stagger".
+     *
+     * 한국어
+     * ------
+     * @brief 맞아도 티를 내지 않습니다. 점멸은 하되 경직 흔들림은 없습니다.
+     *
+     * *이것을 지닌 유일한 행은 브루트*이며, 자기 수치가 이미 두 번 말하는 것과 같은 사실입니다.
+     * ::MonType::pain_lock이 나머지 전부의 소수점 아래에 대해 2.2초이고, 행 위의 주석이 "스턴
+     * 락에 걸리지 않는다"고 적습니다. 쏘면 흔들리는 벽은 벽이 아닙니다. 이것은 그 성격이 그림에
+     * 닿는 것입니다.
+     *
+     * *부정형이며, 이곳에서는 드물고 의도적입니다.* 다른 모든 플래그는 몬스터가 *하는* 일을
+     * 말합니다. 긍정형 `MON_SHAKES`는 다섯 행 중 넷에 붙고, 표는 흔들리는 것이 예외인 것처럼
+     * 읽힙니다. 예외는 한 행이므로 플래그도 한 행이 집니다.
+     *
+     * @note 점멸은 면제되지 않습니다. 아무것도 보여 주지 않는 타격은 플레이어가 빗나감과
+     *       구별할 수 없는 타격이며, 그것은 "휘청이지 않는다"와는 다른 불만입니다.
+     */
+    MON_UNFLINCHING = 1 << 5
 };
 
 /** @brief Every bit above, for ::types_check to object to anything else. / 위의 모든 비트. ::types_check가 그 외의 것에 이의를 제기하기 위한 것입니다. */
-#define MON_FLAGS_ALL (MON_FLIES | MON_ANCHORED | MON_BOSS | MON_GUARD)
+#define MON_FLAGS_ALL (MON_FLIES | MON_ANCHORED | MON_BOSS | MON_GUARD | MON_FLOATS | MON_UNFLINCHING)
 
 /**
  * @struct MonType

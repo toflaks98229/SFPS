@@ -1068,6 +1068,51 @@ typedef struct {
  * @param[out] body_len 주제. 프레임 숫자를 뗀 이름입니다.
  * @return 프레임 번호. "이 주제의 모든 프레임"이면 -1.
  */
+/* A NAME MAY END IN A STATE INSTEAD OF A DIGIT, which is what the art is
+   actually authored as: `brute_idle`, `caster_attack`, `water_spirit_down`.
+   Returns the frame it fills and trims `body_len` back to the subject, or
+   leaves both alone when the name carries no state.
+   WHY NOT JUST NUMBER THE FILES. `brute0` says which CELL a drawing lands in
+   and nothing about what it depicts, so the numbering has to be memorised
+   against ::SPR_WALK0's order and a file renamed by hand lands somewhere
+   arbitrary. A state name says what the drawing IS, and this function is the
+   one place that has to know which cell that means -- the same argument
+   ::mon_type_for_prefix makes for names over indices.
+   ::SPR_WALK_BOTH IS FOR THE SINGLE `_idle`. A creature with one idle drawing
+   and a two-frame walk cycle must fill both, or the cycle alternates between
+   the drawing and the generated creature underneath and reads as a flicker.
+   `_idle1`/`_idle2` name the two halves for anything that has them.
+   *이름이 숫자가 아니라 상태로 끝날 수 있으며*, 아트가 실제로 저작된 방식이 그것입니다.
+   `brute_idle`, `caster_attack`, `water_spirit_down`입니다. 채울 프레임을 반환하고
+   `body_len`을 주제까지 줄이며, 이름에 상태가 없으면 둘 다 그대로 둡니다.
+   *왜 파일에 번호를 붙이지 않는가.* `brute0`은 그림이 어느 *칸*에 놓이는지를 말할 뿐 그것이
+   무엇을 그린 것인지는 말하지 않습니다. 그래서 번호를 ::SPR_WALK0의 순서에 맞춰 외워야 하고,
+   손으로 이름을 바꾼 파일은 아무 데나 놓입니다. 상태 이름은 그림이 *무엇인지* 말하며, 그것이
+   어느 칸을 뜻하는지 알아야 하는 곳은 이 함수 하나입니다. ::mon_type_for_prefix가 색인보다
+   이름을 택한 것과 같은 논거입니다.
+   *::SPR_WALK_BOTH는 홑 `_idle`을 위한 것입니다.* 대기 그림이 하나이고 걷기가 2프레임인
+   생물은 둘 다 채워야 합니다. 그러지 않으면 주기가 그림과 그 아래의 생성된 생물 사이를
+   오가며 깜박임으로 읽힙니다. 둘을 가진 것은 `_idle1`/`_idle2`로 각 절반을 지목합니다. */
+static int name_state(const char *nm, int nm_len, int *body_len) {
+    static const struct { const char *tail; int frame; } ST[] = {
+        { "_idle1",  SPR_WALK0     },
+        { "_idle2",  SPR_WALK1     },
+        { "_idle",   SPR_WALK_BOTH },
+        { "_attack", SPR_ATTACK    },
+        { "_hurt",   SPR_HURT      },
+        { "_down",   SPR_DEAD      },
+    };
+    for (int i = 0; i < (int)(sizeof ST / sizeof ST[0]); i++) {
+        int tl = 0;
+        while (ST[i].tail[tl]) tl++;
+        if (nm_len <= tl) continue;
+        int at = nm_len - tl, j = 0;
+        while (j < tl && nm[at + j] == ST[i].tail[j]) j++;
+        if (j == tl) { *body_len = at; return ST[i].frame; }
+    }
+    return -1;
+}
+
 static int name_frame(const char *nm, int nm_len, int *body_len) {
     char last = (nm_len > 0) ? nm[nm_len - 1] : 0;
     if (last >= '0' && last <= '9') {
@@ -1172,7 +1217,8 @@ static int sprite_slot_for(int dest, const char *nm, int nm_len,
            프레임을 채우는지입니다. 글자로 끝나는 이름은 `*frame`을 -1로 남기며,
            ::decode_sprites가 그것을 "전부"로 읽습니다. */
         int blen;
-        int f = name_frame(nm, nm_len, &blen);
+        int f = name_state(nm, nm_len, &blen);
+        if (f < 0) f = name_frame(nm, nm_len, &blen);
         type  = (dest == SPR_DEST_WEAPON) ? weapon_type_for_prefix(nm, blen)
                                           : mon_type_for_prefix(nm, blen);
         /* A digit past the end of the atlas is frame 0 rather than a refusal:
@@ -1180,7 +1226,7 @@ static int sprite_slot_for(int dest, const char *nm, int nm_len,
            answer than showing nothing while saying nothing.
            아틀라스 끝을 넘는 숫자는 거부가 아니라 프레임 0입니다. `imp7`은 이름 실수이며,
            아무 말 없이 아무것도 보여 주지 않는 것보다 생물을 보여 주는 편이 낫습니다. */
-        if (f >= frames_in(dest)) f = 0;
+        if (f != SPR_WALK_BOTH && f >= frames_in(dest)) f = 0;
         *frame = f;
     }
     return type;
@@ -1446,6 +1492,12 @@ static int decode_sprites(const char *p, unsigned char *buf, int W, int H,
            말입니다. ::name_frame을 참조하십시오. */
         int f0 = (frame < 0) ? 0 : frame;
         int f1 = (frame < 0) ? frames_in(dest) : frame + 1;
+        /* ::SPR_WALK_BOTH is the one negative that is not "everything": a
+           single `_idle` drawing fills the walk cycle and leaves the attack
+           and the corpse to whatever else claims them.
+           ::SPR_WALK_BOTH는 "전부"가 아닌 유일한 음수입니다. 홑 `_idle` 그림은 걷기 주기를
+           채우고 공격과 시체는 그것을 차지하는 다른 것에 맡깁니다. */
+        if (frame == SPR_WALK_BOTH) { f0 = SPR_WALK0; f1 = SPR_WALK1 + 1; }
         placed++;
 
         for (int f = f0; f < f1; f++) {

@@ -194,7 +194,20 @@ enum {
     SPR_ATTACK,             /**< Lunge / maw open. / 돌진 또는 입을 벌린 상태. */
     SPR_HURT,               /**< Flinch. / 피격 경직. */
     SPR_DEAD,               /**< Corpse. / 시체. */
-    SPR_FRAMES              /**< Total number of frames. / 프레임의 총 개수. */
+    SPR_FRAMES,             /**< Total number of frames. / 프레임의 총 개수. */
+
+    /**
+     * @brief Not a frame: "fill the walk cycle", for a creature with one idle
+     *        drawing and two frames to put it in.
+     *
+     * ENGLISH: Negative so it cannot be mistaken for a cell, and distinct from
+     * the -1 that means "every frame" -- a single idle must not overwrite the
+     * attack and the corpse with a standing pose.
+     *
+     * 한국어: 칸으로 오인될 수 없도록 음수이며, "모든 프레임"을 뜻하는 -1과 다릅니다. 홑
+     * 대기 그림이 공격과 시체를 서 있는 자세로 덮어써서는 안 되기 때문입니다.
+     */
+    SPR_WALK_BOTH = -2
 };
 
 /* --- Public function prototypes: atlases / 공개 함수 프로토타입: 아틀라스 --- */

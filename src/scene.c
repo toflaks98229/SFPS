@@ -1126,6 +1126,30 @@ static v3 pickup_centre(const Pickup *p) {
    뷰포트 가장자리로부터의 픽셀 거리와 글리프 배율입니다. 각각 두 곳에서 반복되던
    리터럴이므로 이름을 붙였습니다. 체력과 탄약 표시는 기준선이 일치해야 하며, 그렇지
    않으면 눈에 띄게 어긋납니다. */
+/* How far a floating creature rises and falls, in pixels of its OWN drawing,
+   and how fast. Pixels rather than metres so the motion stays proportioned to
+   the art if a creature is ever redrawn taller; ::SPR_CH converts.
+   1.7 radians a second is a little under four seconds a cycle -- slow enough to
+   read as buoyancy rather than as a bounce, which is the difference between
+   something floating and something being animated at.
+   떠 있는 생물이 얼마나 오르내리는지를 *자기 그림의 픽셀*로, 그리고 얼마나 빠르게인지입니다.
+   미터가 아니라 픽셀인 것은 생물을 더 크게 다시 그려도 움직임이 아트에 비례해 남게 하기
+   위해서이며, ::SPR_CH가 환산합니다.
+   초당 1.7라디안은 한 주기가 4초에 조금 못 미칩니다. 튀어 오름이 아니라 부력으로 읽힐 만큼
+   느리며, 그것이 떠 있는 것과 애니메이션이 걸린 것의 차이입니다. */
+/* How far a hit knocks the picture sideways, in pixels of the creature's own
+   drawing, and how fast it shudders. Six against the bob's ten: a flinch is a
+   jolt and a float is a drift, and the one that lasts a quarter of a second
+   does not need the range of the one that never stops.
+   타격이 그림을 옆으로 얼마나 밀어내는지를 그 생물 자신의 그림 픽셀로, 그리고 얼마나 빠르게
+   떠는지입니다. 떠 있음의 10에 대해 6입니다. 경직은 충격이고 떠 있음은 표류이며, 0.25초 만에
+   끝나는 쪽은 결코 멈추지 않는 쪽만큼의 진폭이 필요하지 않습니다. */
+#define HURT_SHAKE_PIXELS  6.0f
+#define HURT_SHAKE_RATE   38.0f
+
+#define BOB_PIXELS      10.0f
+#define BOB_RATE         1.7f
+
 #define HUD_MARGIN      18.0f
 #define HUD_BASELINE    40.0f   /* up from the bottom edge */
 #define HUD_TEXT_SIZE   3.5f
@@ -1507,9 +1531,54 @@ void scene_draw_enemies(Scene *s, const Pools *pl, mat4 vp, v3 eye, v3 cam_right
         /* Frame from state, walk cycle from the animation clock. */
         int fr = SPR_WALK0;
         if (m->state == E_DEAD)        fr = SPR_DEAD;
-        else if (m->state == E_HURT)   fr = SPR_HURT;
-        else if (m->state == E_ATTACK) fr = (m->timer < S->windup)
-                                            ? SPR_ATTACK : SPR_WALK0;
+        /* ::E_HURT NO LONGER PICKS A FRAME. It used to select ::SPR_HURT, and
+           no creature has a drawing for it -- so the one moment a monster is
+           most worth looking at was the one moment it turned back into the
+           generated SDF fallback underneath its art. A water spirit became a
+           brown quadruped for a quarter of a second every time it was shot.
+           The flinch is drawn instead: the white flash that was already there,
+           and a shake below. The state itself is untouched -- it still stops
+           the monster for ::MonType::pain_lock, which is what makes a flinch
+           mean anything.
+           ::SPR_HURT AND THE `_hurt` NAME BOTH STAY. The cell is generated
+           either way and costs nothing, and restoring the pose when somebody
+           draws one is this line coming back.
+           *::E_HURT은 더 이상 프레임을 고르지 않습니다.* ::SPR_HURT를 골랐는데 어느 생물에도
+           그 그림이 없습니다. 그래서 몬스터를 가장 볼 값어치가 있는 그 한 순간이, 자기 아트
+           아래의 생성된 SDF 폴백으로 되돌아가는 유일한 순간이었습니다. 물 정령은 맞을 때마다
+           0.25초 동안 갈색 네발짐승이 되었습니다.
+           경직은 대신 이렇게 그립니다. 이미 있던 흰 점멸과, 아래의 흔들림입니다. 상태 자체는
+           그대로입니다. 여전히 ::MonType::pain_lock 동안 몬스터를 멈추며, 그것이 경직에 뜻을
+           주는 것입니다.
+           *::SPR_HURT와 `_hurt` 이름은 둘 다 남습니다.* 칸은 어느 쪽이든 생성되고 아무 비용이
+           없으며, 누군가 그 자세를 그렸을 때 되살리는 방법은 이 줄이 돌아오는 것입니다. */
+        /* WHEN THE ATTACK POSE SHOWS DEPENDS ON WHAT THE POSE IS OF, and the
+           two archetypes want opposite halves of the same state.
+           A CASTER'S is a firing stance: it is what the creature looks like
+           while it is winding up to shoot, so it belongs to `timer < windup`
+           and the bolt leaves at the end of it. That is where this line
+           already was.
+           A BRAWLER'S is the blow itself. `release_swing` fires at
+           `timer >= windup`, so showing the strike before then is showing it
+           before it happens -- the pose and the damage disagreed by the whole
+           length of the wind-up. It runs from the strike for as long as the
+           wind-up took: a swing takes about as long to finish as to raise, and
+           tying it to `windup` means the follow-through is proportioned by the
+           same number that already tunes how heavy the monster feels.
+           *공격 자세가 언제 나오는지는 그 자세가 무엇을 그린 것인지에 달려 있고*, 두
+           아키타입은 같은 상태의 반대쪽 절반을 원합니다.
+           *캐스터의 것은 사격 준비자세입니다.* 쏘려고 힘을 모으는 동안의 모습이므로
+           `timer < windup`에 속하며 탄환은 그 끝에서 떠납니다. 이 줄이 이미 있던 자리입니다.
+           *근접형의 것은 일격 그 자체입니다.* `release_swing`이 `timer >= windup`에
+           터지므로, 그 전에 타격을 보여 주는 것은 일어나기 전에 보여 주는 것입니다. 자세와
+           피해가 준비동작 길이만큼 어긋나 있었습니다. 타격 시점부터 준비동작과 같은 길이만큼
+           갑니다. 휘두름은 들어 올린 만큼 마무리에 걸리고, `windup`에 묶으면 마무리가 그
+           몬스터의 무게감을 이미 조율하는 같은 수로 비례합니다. */
+        else if (m->state == E_ATTACK)
+            fr = (S->behaviour == AI_BRAWLER)
+                 ? ((m->timer >= S->windup && m->timer < S->windup * 2.0f)
+                    ? SPR_ATTACK : SPR_WALK0)
+                 : ((m->timer < S->windup) ? SPR_ATTACK : SPR_WALK0);
         else if (m->state == E_CHASE)
             fr = (sinf(m->anim * WALK_CYCLE_RATE) > 0.0f) ? SPR_WALK0 : SPR_WALK1;
 
@@ -1518,7 +1587,62 @@ void scene_draw_enemies(Scene *s, const Pools *pl, mat4 vp, v3 eye, v3 cam_right
 
         float h = S->height;
         float w = h * S->aspect;
-        v3 centre = v3f(m->pos.x, m->pos.y + h * 0.5f, m->pos.z);
+        /* THE FLOAT, AND IT IS DRAWN ONLY. A water spirit and a caster do not
+           stand on the floor -- one is water and the other is off it entirely
+           (::MON_FLIES) -- and a billboard nailed to a fixed height reads as a
+           cardboard cutout no matter what is painted on it.
+           NOT ON ::Enemy::pos, deliberately. That point is what collision,
+           aim, the bolt's line and every distance in enemy.c are measured
+           against; bobbing it would make a monster that can be shot where it
+           is not and that shoots from a muzzle nobody can see. The picture
+           moves and the body does not, which is the same bargain the walk
+           cycle already strikes.
+           TEN PIXELS OF ITS OWN ART, converted rather than guessed: the cell
+           is ::SPR_CH tall and stands ::MonType::height metres, so ten pixels
+           is that fraction of its own height. A number in metres would drift
+           from the drawing the moment somebody redrew a taller creature.
+           Phase from ::Enemy::anim, which is already randomised per monster at
+           spawn, so a row of them does not rise and fall as one.
+           *떠 있음이며, 그리기 전용입니다.* 물 정령과 캐스터는 바닥에 서 있지 않습니다. 하나는
+           물이고 다른 하나는 아예 떠 있습니다(::MON_FLIES). 고정된 높이에 못 박힌 빌보드는
+           무엇을 그려 넣든 판지 조각으로 읽힙니다.
+           *::Enemy::pos에는 하지 않으며* 의도적입니다. 그 점은 충돌과 조준과 탄환의 선과
+           enemy.c의 모든 거리가 재는 기준입니다. 그것을 흔들면 있지 않은 자리에서 맞을 수 있고
+           아무도 볼 수 없는 총구에서 쏘는 몬스터가 됩니다. 그림이 움직이고 몸은 움직이지
+           않으며, 걷기 주기가 이미 맺고 있는 것과 같은 거래입니다.
+           *자기 아트의 10픽셀*이며 짐작이 아니라 환산입니다. 셀은 ::SPR_CH 픽셀 높이이고
+           ::MonType::height 미터로 서므로, 10픽셀은 자기 신장의 그 비율입니다. 미터로 적은 수는
+           누군가 더 큰 생물을 다시 그리는 순간 그림에서 어긋납니다.
+           위상은 ::Enemy::anim에서 오며, 그것은 스폰 시 몬스터마다 이미 무작위입니다. 그래서
+           한 줄로 늘어선 것들이 한꺼번에 오르내리지 않습니다. */
+        float bob = 0.0f;
+        if (S->flags & MON_FLOATS)
+            bob = sinf(m->anim * BOB_RATE) * (BOB_PIXELS / (float)SPR_CH) * h;
+
+        /* THE FLINCH, AS A SHUDDER RATHER THAN A POSE. Driven by
+           ::Enemy::flash, which already decays from 1 over a quarter second
+           and already drives the white overlay -- so the shake and the flash
+           are one event rather than two that can disagree about when a hit
+           happened. Phase from ::Enemy::anim, a free-running clock, because
+           taking it from `flash` would make the wobble SLOW as it faded
+           instead of shrinking.
+           ACROSS THE VIEW, not up: a billboard that jumps vertically reads as
+           the creature hopping, and one that jitters sideways reads as it
+           being hit. `cam_right` is the axis the sprite is already built on.
+           *경직을 자세가 아니라 떨림으로.* ::Enemy::flash가 구동하며, 그것은 이미 0.25초에
+           걸쳐 1에서 줄어들고 이미 흰 덧칠을 구동합니다. 그래서 흔들림과 점멸은 타격이 언제
+           있었는지에 대해 서로 어긋날 수 있는 둘이 아니라 하나의 사건입니다. 위상은 자유
+           진행 시계인 ::Enemy::anim에서 옵니다. `flash`에서 가져오면 흔들림이 잦아들면서
+           작아지는 대신 *느려지기* 때문입니다.
+           *위가 아니라 시야를 가로질러서*입니다. 수직으로 뛰는 빌보드는 생물이 깡충거리는
+           것으로 읽히고, 옆으로 떠는 것은 맞은 것으로 읽힙니다. `cam_right`는 스프라이트가
+           이미 세워져 있는 축입니다. */
+        v3 centre = v3f(m->pos.x, m->pos.y + h * 0.5f + bob, m->pos.z);
+        if (!(S->flags & MON_UNFLINCHING) && m->flash > 0.0f) {
+            float k = sinf(m->anim * HURT_SHAKE_RATE) * m->flash
+                    * (HURT_SHAKE_PIXELS / (float)SPR_CW) * w;
+            centre = v3add(centre, v3scale(cam_right, k));
+        }
         mb_billboard_uv(&s->enemy_buf, centre, cam_right, v3f(0,1,0),
                         w, h, u0, v0, u1, v1);
     }

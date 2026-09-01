@@ -1761,7 +1761,6 @@ static const char *FS_MAIN =
    가로지르면 두 동적 광원과 똑같이 섞입니다. */
 "    float bl=dot(vLit,vec3(0.299,0.587,0.114));\n"
 "    if(bl>0.0){\n"
-"      lum+=bl;\n"
 "      lit+=bl;\n"
 "      tint=mix(tint,vLit/max(bl,0.001),clamp(bl,0.0,1.0));\n"
 "    }\n"
@@ -1904,7 +1903,71 @@ static const char *FS_MAIN =
    아래에 머무릅니다. +0.5로 반올림하고 (N-1)로 나누면 최상위 단계가 정확히 1.0이 됩니다.
    디더 자신의 주석이 경고하는 것과 같은 off-by-one입니다. */
 "    lum=clamp(lum,0.0,1.0);\n"
+/* --- and the daylight goes on AFTER the bands ------------------------------
+ *
+ * ENGLISH
+ * -------
+ * THE BANDING IS A STYLE AND THE SUN IS A FACT, and that is the whole of why
+ * this one term is exempt. Everything above the quantiser is invented light:
+ * AMBIENT is a constant, `key` is a hardcoded direction that exists so a wall
+ * is not flat, and the dynamic lights are events. Banding invented light into
+ * five levels is the era's look. `vLit` is not invented -- it is what
+ * level.c's bake_light measured by tracing the map's own `_sunlight` and
+ * `_sunlight2` against the map's own geometry, which is why 11% of the arena
+ * is lit and 38% is in shadow.
+ *
+ * WHAT QUANTISING IT COST: a shaft of daylight through a hole in the ceiling
+ * arrives as a gradient and is the one thing in the frame whose SHAPE carries
+ * information -- where the opening is, how far in the light reaches, which
+ * part of the floor is safe to stand on and be seen. Rounded to a quarter of
+ * the range it stops being a shaft and becomes a polygon: two or three flat
+ * plateaux with hard edges that follow the quantiser rather than the opening.
+ * The noise then breaks those edges up, which is exactly right for a band
+ * boundary in stylised shading and exactly wrong for the edge of a sunbeam --
+ * it reads as the sunlight itself being ragged.
+ *
+ * SO THE TWO ARE SUMMED IN DIFFERENT PLACES rather than given different
+ * curves. `lit` still counts the daylight, so a sunlit surface still gets the
+ * fuller noise weight on its BANDED half; `tint` is still mixed toward it, so
+ * a warm sun still warms the room. Only the quantiser is stepped around, and
+ * the clamp after the add is what keeps a bright shaft from running past 1.0
+ * into the post pass's bloom knee.
+ *
+ * @note This is the ONE exemption. A second one turns the banding into a
+ *       suggestion, and the look stops being a look -- the relief slopes and
+ *       NOISE_AMOUNT are both amplified specifically to survive five levels,
+ *       so every term that leaves the quantiser makes those two wrong for the
+ *       terms that stay.
+ *
+ * 한국어
+ * ------
+ * *밴딩은 양식이고 태양은 사실이며*, 그것이 이 항 하나만 면제되는 이유의 전부입니다.
+ * 양자화기 위의 모든 것은 지어낸 빛입니다. AMBIENT는 상수이고, `key`는 벽이 평평해 보이지
+ * 않게 하려고 존재하는 고정 방향이며, 동적 광원은 사건입니다. 지어낸 빛을 다섯 단계로
+ * 나누는 것이 그 시대의 외양입니다. `vLit`는 지어낸 것이 아닙니다. level.c의 bake_light가
+ * 맵 자신의 `_sunlight`와 `_sunlight2`를 맵 자신의 지오메트리에 대고 추적해 *측정한* 값이며,
+ * 그래서 아레나의 11%가 밝고 38%가 그림자입니다.
+ *
+ * *양자화가 치르게 한 값:* 천장 구멍으로 들어오는 햇살은 그러데이션으로 도착하며, 프레임에서
+ * 그 *모양*이 정보를 나르는 유일한 것입니다. 구멍이 어디인지, 빛이 얼마나 안쪽까지 닿는지,
+ * 바닥의 어느 부분에 서면 보이는지입니다. 범위의 4분의 1로 반올림되면 그것은 햇살이기를
+ * 그만두고 다각형이 됩니다. 구멍이 아니라 양자화기를 따라가는 딱딱한 모서리를 가진 평평한
+ * 고원 두셋입니다. 그다음 노이즈가 그 모서리를 부수는데, 그것은 양식화된 음영의 밴드
+ * 경계에는 정확히 옳고 햇살의 가장자리에는 정확히 틀립니다. 햇빛 자체가 너덜너덜한 것으로
+ * 읽히기 때문입니다.
+ *
+ * *그래서 둘에게 다른 곡선을 주는 대신 다른 자리에서 더합니다.* `lit`는 여전히 자연광을
+ * 세므로 햇빛이 든 표면은 자기 *밴딩된* 절반에 대해 여전히 더 큰 노이즈 가중치를 받고,
+ * `tint`도 여전히 그쪽으로 섞이므로 따뜻한 태양은 여전히 방을 따뜻하게 합니다. 오직
+ * 양자화기만 비켜 갑니다. 더한 뒤의 clamp는 밝은 햇살이 1.0을 넘어 후처리의 블룸 문턱으로
+ * 달려가지 않게 붙듭니다.
+ *
+ * @note *면제는 이것 하나입니다.* 두 번째가 생기면 밴딩은 권고가 되고 외양은 외양이기를
+ *       그만둡니다. 부조 기울기와 NOISE_AMOUNT는 둘 다 다섯 단계를 견디도록 특별히
+ *       증폭되어 있으므로, 양자화기를 떠나는 항이 생길 때마다 남아 있는 항들에 대해 그 둘이
+ *       틀린 값이 됩니다. */
 "    lum=floor(lum*(LIGHT_BANDS-1.0)+0.5)/(LIGHT_BANDS-1.0);\n"
+"    lum=clamp(lum+bl,0.0,1.0);\n"
 
 "    c*=lum*tint;\n"
 "    oCol=vec4(fogged(c, vPos, uEye),1.0);\n"

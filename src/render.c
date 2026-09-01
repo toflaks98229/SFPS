@@ -1806,7 +1806,84 @@ static const char *FS_MAIN =
    점광원입니다. 거리 감쇠는 물리적인 역제곱이 아니라 (1 - d/r)^2입니다. 역제곱은 결코
    0에 도달하지 않으므로 모든 광원이 레벨의 모든 표면에 닿고 단계가 닫히지 않습니다.
    실제로 끝나는 반경이 있어야 횃불 하나가 벽감 하나를 비출 수 있습니다. */
+/* THE SUN IS THE BACKGROUND AND A DYNAMIC LIGHT IS AN EVENT, so the sun's hue
+   is laid down FIRST and the lights mix over it. It was the other way round,
+   with `clamp(bl)` reaching 1 on a sunlit surface -- so the last thing written
+   to `tint` in daylight was the sun, every time, and every dynamic light in the
+   game came out the colour of the sky.
+   THAT IS A LEGEND BEING ERASED rather than a shade being lost. proj.h calls
+   the colour table "A LEGEND, NOT DECORATION": a grenade is orange, a bolt is
+   green, every caster has its own row, and the player is meant to read what is
+   coming at them off the colour of the light it throws. In shadow they always
+   did. In the open they were all daylight-coloured.
+   `lum` IS UNTOUCHED BY THIS. The sun still lands after the quantiser and a
+   sunlit surface still saturates, so this is not the second exemption the note
+   above forbids -- it changes only who owns the HUE there. That is also what a
+   real light does: at noon a flare is not brighter than the sky, it is a
+   different colour from it.
+   *태양은 배경이고 동적 광원은 사건*이므로 태양의 색조를 *먼저* 깔고 광원들이 그 위에
+   섞입니다. 반대였고 `clamp(bl)`이 햇빛 표면에서 1에 닿았습니다. 낮에 `tint`에 마지막으로
+   쓰이는 것은 언제나 태양이었고, 게임의 모든 동적 광원이 하늘색으로 나왔습니다.
+   *색조를 잃은 것이 아니라 범례가 지워진 것입니다.* proj.h는 그 색표를 "장식이 아니라
+   범례"라고 부릅니다. 유탄은 주황, 탄환은 녹색, 캐스터마다 자기 행이 있으며, 플레이어는
+   자기에게 오는 것을 그 빛의 색으로 읽게 되어 있습니다. 그늘에서는 늘 그랬고 트인 곳에서는
+   전부 햇빛색이었습니다.
+   *`lum`은 이것에 손대지 않습니다.* 태양은 여전히 양자화 뒤에 오고 햇빛 표면은 여전히
+   포화하므로, 위의 주석이 금하는 두 번째 예외가 아닙니다. 바뀌는 것은 그곳에서 누가
+   *색조*를 소유하는가뿐입니다. 그것은 실제 빛이 하는 일이기도 합니다. 정오의 조명탄은
+   하늘보다 밝은 것이 아니라 하늘과 다른 색입니다. */
 "    float lit=0.0;\n"
+"    float bl=dot(vLit,vec3(0.299,0.587,0.114));\n"
+"    if(bl>0.0){\n"
+"      lit+=bl;\n"
+"      tint=mix(tint,vLit/max(bl,0.001),clamp(bl,0.0,1.0));\n"
+"    }\n"
+/* WHAT THE LIGHT IS COMPETING WITH, measured once before the loop. A light's
+   BRIGHTNESS falls off with distance; its COLOUR does not -- every part of the
+   pool is lit by the same lamp. What decides how coloured a spot LOOKS is the
+   light's SHARE of everything landing there, so that is the weight the tint is
+   mixed by -- taken BEFORE `lum` grows by this light's own contribution, so
+   "everything else" means the ambient, the key, the sun and every light already
+   mixed. Two lamps over one spot then argue with each other rather than each
+   arguing only with the dark.
+   It was mixed by `e` itself, which IS the share only when the rest of the room
+   is dark. Everywhere else the hue collapsed onto the hot centre and the pool
+   read as a bright patch of whatever colour the floor already was: a grenade
+   and a monster's bolt lighting the same corridor were the same event with
+   different radii.
+   *광원이 무엇과 겨루는지*를 루프 앞에서 한 번 잽니다. 광원의 *밝기*는 거리에 따라 떨어지지만
+   *색*은 그렇지 않습니다. 웅덩이의 모든 곳이 같은 등불로 밝혀집니다. 어떤 자리가 얼마나
+   물들어 *보이는지*를 정하는 것은 그곳에 닿는 모든 빛 중 이 광원의 *몫*이며, 그것이 색조를
+   섞는 가중치입니다.
+   `e` 자체로 섞고 있었는데, 그것이 몫이 되는 것은 방의 나머지가 어두울 때뿐입니다. 그 밖의
+   모든 곳에서 색조는 뜨거운 중심으로 오그라들었고, 웅덩이는 바닥이 원래 지니던 색의 밝은
+   얼룩으로 읽혔습니다. 같은 복도를 밝히는 유탄과 몬스터의 탄환이 반지름만 다른 같은
+   사건이었습니다. */
+/* HOW HARD A LIGHT ARGUES FOR ITS OWN COLOUR, above the share it has earned.
+   Four, and it is deliberately an EXAGGERATION rather than the physical 1.0.
+   ::LIGHT_BANDS is why. Luminance in this renderer is five levels, so a light
+   that is merely brighter has almost nowhere to say so -- and none at all on a
+   sunlit surface, which saturates. Hue is the channel that survives the
+   quantiser intact, so the event is given more of it than its share of the
+   photons would earn. Compensating for a limitation the look chose on purpose,
+   in the one channel that limitation does not touch.
+   At 1.0 a grenade and a monster's bolt lighting the same corridor differ by
+   about five parts in 255 and read as the same event with different radii; at
+   four they differ by twelve and read as two things. Past about six the pool
+   stops having an edge -- everything inside the radius goes to the light's own
+   colour and the falloff, which is most of what says WHERE the thing is, goes
+   with it.
+   *광원이 자기 색을 주장하는 세기*이며, 그것이 벌어들인 몫 위에 얹힙니다. 4이고, 물리적인
+   1.0이 아니라 의도적인 *과장*입니다.
+   ::LIGHT_BANDS가 이유입니다. 이 렌더러의 휘도는 다섯 단계이므로, 그저 더 밝은 광원은 그렇다고
+   말할 자리가 거의 없습니다. 포화하는 햇빛 표면에서는 아예 없습니다. 색조는 양자화를 온전히
+   지나는 채널이므로, 사건에게 광자의 몫이 벌어들일 것보다 더 많이 줍니다. look이 일부러 고른
+   제약을, 그 제약이 건드리지 않는 유일한 채널에서 보상하는 것입니다.
+   1.0에서는 같은 복도를 밝히는 유탄과 몬스터의 탄환이 255분의 5쯤 차이 나며 반지름만 다른 같은
+   사건으로 읽힙니다. 4에서는 12만큼 차이 나고 두 가지로 읽힙니다. 6쯤을 넘어가면 웅덩이에
+   가장자리가 없어집니다. 반지름 안의 모든 것이 광원 자신의 색이 되고, 그것이 어디에 있는지를
+   말하는 것의 대부분인 감쇠가 함께 사라집니다. */
+"    const float HUE_GAIN = 4.0;\n"
 "    for(int i=0;i<uNumLights;i++){\n"
 "      vec3  d=uLightPos[i].xyz-vPos;\n"
 "      float dist=length(d);\n"
@@ -1815,9 +1892,10 @@ static const char *FS_MAIN =
 "      float att=1.0-dist/rad; att*=att;\n"
 "      float lam=max(dot(n,d/max(dist,0.001)),0.0);\n"
 "      float e=att*lam*uLightCol[i].a;\n"
+"      float w=e*HUE_GAIN;\n"
+"      tint=mix(tint,uLightCol[i].rgb,w/(w+max(lum+bl,0.001)));\n"
 "      lum+=e;\n"
 "      lit+=e;\n"
-"      tint=mix(tint,uLightCol[i].rgb,clamp(e,0.0,1.0));\n"
 "    }\n"
 
 /* The baked light, folded in the same way a dynamic one is. It arrives already
@@ -1835,11 +1913,6 @@ static const char *FS_MAIN =
    외에는 없습니다. 레벨의 점광원은 구워지지도 않고 위의 반복문에 있지도 않습니다. level.c의
    bake_light와 scene.c의 ::MoveLight 위 설명을 참조하십시오. 자기 휘도가 색조를 이끌므로, 태양으로 따뜻하게 밝은 방을 흰 총구 섬광이
    가로지르면 두 동적 광원과 똑같이 섞입니다. */
-"    float bl=dot(vLit,vec3(0.299,0.587,0.114));\n"
-"    if(bl>0.0){\n"
-"      lit+=bl;\n"
-"      tint=mix(tint,vLit/max(bl,0.001),clamp(bl,0.0,1.0));\n"
-"    }\n"
 
 /* Break the band edges up with noise, BEFORE the quantisation.
  *

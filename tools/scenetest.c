@@ -142,6 +142,28 @@ static unsigned region_hash(int x0, int y0, int x1, int y1) {
     return h;
 }
 
+/* How far the whole frame leans toward one channel, in 0-255. Signed against
+   the mean of the other two, so a scene that simply got BRIGHTER scores zero
+   and only a scene that got more RED, or more GREEN, moves it.
+   That distinction is the whole point of the check it serves: this renderer
+   quantises luminance into ::LIGHT_BANDS levels and saturates a sunlit
+   surface, so "the light made things brighter" is a claim it often cannot
+   make. Hue is the channel that survives, and this measures that channel.
+   프레임 전체가 한 채널로 얼마나 기우는지를 0-255로 잽니다. 나머지 두 채널의 평균에 대해
+   부호가 있으므로, 그저 *밝아진* 장면은 0점이고 더 *붉어지거나* 더 *푸르러진* 장면만
+   움직입니다. 그 구분이 이것이 봉사하는 검사의 요점 전부입니다. 이 렌더러는 휘도를
+   ::LIGHT_BANDS 단계로 양자화하고 햇빛 표면을 포화시키므로 "광원이 밝게 만들었다"는 주장은
+   할 수 없을 때가 많습니다. 색조가 살아남는 채널이며, 이것이 그 채널을 잽니다. */
+static float lean(int ch) {
+    double acc = 0.0;
+    for (int i = 0; i < VW * VH; i++) {
+        int r = g_px[i * 3], g = g_px[i * 3 + 1], b = g_px[i * 3 + 2];
+        int v[3] = { r, g, b };
+        acc += v[ch] - (v[(ch + 1) % 3] + v[(ch + 2) % 3]) * 0.5;
+    }
+    return (float)(acc / (VW * VH));
+}
+
 /* ------------------------------------------------------------- fixtures */
 
 /* Every run state is set on the World directly rather than reached by playing.
@@ -671,6 +693,98 @@ int main(void) {
     printf("      with one projectile in the air the shader was given %d\n",
            rd_light_count());
     ok(rd_light_count() == 1, "a projectile in flight does occupy one");
+
+    /* --- and the light it occupies the slot with is ITS OWN COLOUR --------
+     *
+     * ENGLISH
+     * -------
+     * THE CHECK ABOVE PASSES FOR A WHITE LIGHT, and for a light that lands on
+     * nothing. It asks whether a slot was filled. proj.h's colour table is a
+     * LEGEND -- "A LEGEND, NOT DECORATION" is its own phrase -- and a legend
+     * that reaches the screen as the same pale wash for every entry has
+     * stopped being one: a grenade is orange, a monster's bolt is green, and
+     * the player is meant to read what is coming at them off the light.
+     *
+     * It stopped being one. `tint` mixed the dynamic lights first and the
+     * baked sun over the top of them at a weight that reaches 1 on a sunlit
+     * surface, so in daylight the last word on hue was always the sky, and
+     * every projectile in the game lit the room the colour of the sky.
+     *
+     * MEASURED AS A LEAN, not as brightness. Luminance is quantised into five
+     * levels and a sunlit surface saturates, so "the light made things
+     * brighter" is a claim the renderer often cannot make -- the light is
+     * there, and the band it lands in was already the top one. The channel
+     * that survives is hue, so that is the channel this asks about.
+     *
+     * 한국어
+     * ------
+     * *위의 검사는 흰 광원에 대해서도 통과하고*, 아무 데도 닿지 않는 광원에 대해서도
+     * 통과합니다. 슬롯이 채워졌는지를 물을 뿐입니다. proj.h의 색표는 *범례*이며 "장식이
+     * 아니라 범례"가 그 파일 자신의 표현입니다. 모든 항목이 같은 희끄무레한 얼룩으로 화면에
+     * 닿는 범례는 범례이기를 그만둔 것입니다. 유탄은 주황이고 몬스터의 탄환은 녹색이며,
+     * 플레이어는 자기에게 오는 것을 그 빛으로 읽게 되어 있습니다.
+     *
+     * 그것은 범례이기를 그만두었습니다. `tint`가 동적 광원을 먼저 섞고 구워진 태양을 그 위에,
+     * 햇빛 표면에서 1에 닿는 가중치로 덮었습니다. 그래서 낮에 색조에 대한 마지막 말은 언제나
+     * 하늘이었고, 게임의 모든 투사체가 방을 하늘색으로 밝혔습니다.
+     *
+     * *밝기가 아니라 기울기로 잽니다.* 휘도는 다섯 단계로 양자화되고 햇빛 표면은 포화하므로
+     * "광원이 밝게 만들었다"는 것은 렌더러가 자주 할 수 없는 주장입니다. 광원은 거기 있고,
+     * 그것이 닿은 밴드는 이미 맨 위였습니다. 살아남는 채널은 색조이며, 그래서 이 검사는 그
+     * 채널에 대해 묻습니다. */
+    clear_state(&w);
+    proj_reset(&w.pools);
+    frame_hash(&w, &scene, 0);
+    float dark_r = lean(0), dark_b = lean(2);
+
+    proj_fire(&w.pools, w.player.pos, v3f(0.0f, 0.0f, -1.0f),
+              12.0f, 0.0f, 20, 2.0f, 3.0f);
+    /* FLOWN OUT IN FRONT before the frame is taken. A grenade fired from
+       the eye is AT the eye, and its own sprite then fills the near plane
+       -- the first cut of this measured that sprite rather than the light
+       it throws, and read the frame as five parts cooler. Half a second
+       puts it six metres down the room, lighting a wall the camera can
+       see.
+       *프레임을 찍기 전에 앞으로 날려 보냅니다.* 눈에서 발사된 유탄은 눈에 있고, 그
+       스프라이트가 근평면을 채웁니다. 이 검사의 첫 판은 그것이 던지는 빛이 아니라 그
+       스프라이트를 쟀고, 프레임을 다섯 만큼 차가워진 것으로 읽었습니다. 0.5초면
+       방 안쪽 6미터에 놓여 카메라가 보는 벽을 밝힙니다. */
+    for (int i = 0; i < 30; i++) proj_update(&w.pools, &w.level, 1.0f / 60.0f);
+    frame_hash(&w, &scene, 0);
+    float lit_r = lean(0), lit_b = lean(2);
+
+    printf("      red lean %.2f -> %.2f, blue lean %.2f -> %.2f\n",
+           dark_r, lit_r, dark_b, lit_b);
+    float hue_shift = (lit_r - dark_r) - (lit_b - dark_b);
+    printf("      hue shift %.2f (a colourless light scores 0)\n", hue_shift);
+    ok(lit_r > dark_r, "a grenade's light leaves the room warmer");
+
+    /* HALF A UNIT, and the number is calibrated rather than picked: on the
+       shader this replaced the same grenade in the same fixture scored
+       0.30, and it scores 0.67 now. A colourless light of any brightness
+       scores 0 by construction, because `lean` is signed against the other
+       two channels.
+       WHAT THIS FIXTURE DOES NOT TEST, and it is worth saying: it has no
+       sun to speak of, so almost all of the difference here is HUE_GAIN.
+       The other half of the fix -- laying the sun's hue down BEFORE the
+       lights instead of over them -- only shows where `vLit` is large, and
+       that is a lit map rather than a box. Measured there instead: on
+       lqdm4 a green light and an orange one at the same point differed by
+       4.6 parts in 255 before and 12.4 after.
+       *0.5이며, 그 수는 고른 것이 아니라 보정된 것입니다.* 이것이 대체한 셰이더에서 같은
+       픽스처의 같은 유탄이 0.30을 기록했고 지금은 0.67입니다. 색 없는 광원은 아무리
+       밝아도 구조적으로 0점입니다. `lean`이 나머지 두 채널에 대해 부호를 갖기
+       때문입니다.
+       *이 픽스처가 검사하지 *못하는* 것*도 적어 둘 값어치가 있습니다. 이곳에는 이렇다 할
+       태양이 없으므로 여기 차이의 거의 전부는 HUE_GAIN입니다. 수정의 나머지 절반(태양의
+       색조를 광원들 위가 아니라 *앞에* 까는 것)은 `vLit`이 큰 곳에서만 드러나며, 그것은
+       상자가 아니라 밝혀진 맵입니다. 그곳에서 따로 쟀습니다. lqdm4에서 같은 지점의 녹색
+       광원과 주황 광원이 이전에는 255분의 4.6, 이후에는 12.4만큼 달랐습니다. */
+    ok(hue_shift > 0.5f,
+       "and warmer the way its own colour says, not merely brighter");
+
+    clear_state(&w);
+    proj_reset(&w.pools);
 
     /* Back to rest, so the passes after this one are not lit by a leftover.
        proj_reset AS WELL AS clear_state, because they clear different things:

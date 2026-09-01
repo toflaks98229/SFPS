@@ -22,7 +22,7 @@ Models, materials, sounds and levels are all authored as text and hot-reload
 into the running game.
 
 ```
-1,034,752 / 1,474,560 bytes   (70.17% used)
+1,035,264 / 1,474,560 bytes   (70.21% used)
 ```
 
 ## Build
@@ -1966,6 +1966,36 @@ level, eight of them can overlap, and `lum` clamps at 1.0 before it bands. It
 is also a *bigger* light than it was — the bake missed most of what it aimed at
 and the fragment loop misses none of it — so keeping the old effective power of
 1.0 would have made every lamp roughly twice the light the author placed.
+
+**A light's colour is its identity, and the shader has to protect it.** `proj.h`
+calls the colour table *"a legend, not decoration"* — a grenade throws orange, a
+monster's bolt green, each caster its own row — and the player is meant to read
+what is coming before they can see it. Two things were erasing that:
+
+- **The sun had the last word on hue.** The baked sunlight was mixed into `tint`
+  *after* the dynamic lights, at a weight that reaches 1 on a sunlit surface, so
+  in daylight every projectile lit the room the colour of the sky. The sun is the
+  background and a dynamic light is an event, so the sun's hue goes down first
+  now and the lights mix over it. `lum` is untouched — the sun still lands after
+  the quantiser and still saturates, so this is not a second exemption from the
+  banding, only a change of who owns the hue.
+- **The weight was brightness, not share.** A light's brightness falls off with
+  distance; its colour does not. Mixing by the raw contribution collapsed the
+  hue onto the hot centre. It is mixed by the light's *share* of everything
+  landing there now, so the pool has a coloured area instead of a coloured dot.
+
+`HUE_GAIN` is **4**, deliberately an exaggeration of that share. `LIGHT_BANDS` is
+why: luminance is five levels, so a light that is merely *brighter* has almost
+nowhere to say so and none at all where the sun has saturated the surface. Hue is
+the one channel the quantiser leaves intact, so the event is given more of it
+than the photons earn. Past about 6 the pool stops having an edge, and the
+falloff is most of what says *where* the thing is.
+
+Measured rather than judged: a green light and an orange one at the same point in
+`lqdm4` differed by **4.6 parts in 255 before and 12.4 after**. `scenetest` holds
+the floor — it puts a grenade in the air and asks whether the room got warmer
+*the way the colour says*, scored against the other two channels so a light that
+only brightened counts zero.
 
 **The check that guarded this inverted rather than went away.** `scenetest`
 asserted that a level's lamps occupy *no* dynamic slot, because a lamp applied

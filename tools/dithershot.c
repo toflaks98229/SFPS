@@ -369,7 +369,42 @@ int main(int argc, char **argv) {
        판단하려고 존재하고, 휴지 상태의 룩이 정확히 이것입니다. 가정하지 않고 설정하는 이유는
        유니폼이 마지막 호출자가 남긴 것을 담고 있기 때문이며, 남은 값으로 조명된 촬영은 게임이
        결코 그리지 않는 프레임의 사진입니다. */
-    rd_lights(0, 0, 0);
+    /* `-lit <x> <y> <z> <r> <g> <b> <radius>` puts ONE dynamic light in the
+       shot: metres, then 0-255, then metres. The default above is still no
+       lights and still what the game looks like between shots -- this is
+       for the frame DURING one.
+       The colours are not taken from scene.c's legend on purpose. That table
+       is static and reaching into it would couple this tool to the header it
+       is meant to photograph the OUTPUT of; giving the numbers on the command
+       line means a shot says what colour it was lit in.
+       `-lit <x> <y> <z> <r> <g> <b> <반지름>`은 동적 광원 *하나*를 화면에 놓습니다.
+       미터, 0-255, 미터 순입니다. 위의 기본값은 여전히 광원 없음이며 여전히 사격 사이의
+       게임 모습입니다. 이것은 사격 *중인* 프레임을 위한 것입니다.
+       색을 scene.c의 범례에서 가져오지 않는 것은 의도적입니다. 그 표는 static이며, 그것에
+       손을 뻗는 것은 이 도구를 자신이 찍으려는 결과물의 헤더에 결합시키는 일입니다. 명령줄로
+       숫자를 주면 사진이 어떤 색으로 밝혀졌는지 스스로 말합니다. */
+    {
+        float lp[4], lc[4];
+        int have = 0;
+        for (int i = 2; i + 7 < argc; i++)
+            if (argv[i][0] == '-' && argv[i][1] == 'l' &&
+                argv[i][2] == 'i' && argv[i][3] == 't') {
+                lp[0] = (float)atoi(argv[i + 1]);
+                lp[1] = (float)atoi(argv[i + 2]);
+                lp[2] = (float)atoi(argv[i + 3]);
+                lp[3] = (float)atoi(argv[i + 7]);
+                lc[0] = (float)atoi(argv[i + 4]) / 255.0f;
+                lc[1] = (float)atoi(argv[i + 5]) / 255.0f;
+                lc[2] = (float)atoi(argv[i + 6]) / 255.0f;
+                lc[3] = 1.0f;
+                have = 1;
+                break;
+            }
+        rd_lights(have ? lp : 0, have ? lc : 0, have);
+        if (have)
+            printf("  one light at %.0f,%.0f,%.0f  rgb %.2f,%.2f,%.2f  r=%.0fm\n",
+                   lp[0], lp[1], lp[2], lc[0], lc[1], lc[2], lp[3]);
+    }
     printf("  %d lamp(s) declared, none of which lights anything\n",
            lv.n_lights);
 

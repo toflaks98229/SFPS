@@ -1083,7 +1083,7 @@ typedef struct {
      * 한국어: ::MON_FLIES와 이후에 합류할 것들입니다. 0은 평범한 몬스터입니다. 0은 코드가 하는
      * 모든 가정이 적용된다는 뜻이며, 지금까지 배포된 모든 종류가 원하는 바입니다. 따라서 이 열이
      * 생기기 전에 작성된 행은 그것이 뜻하던 바를 정확히 그대로 뜻합니다.
-     */
+     */
     /**
      * @brief How many of this kind may be alive at once. 0 is no limit.
      *

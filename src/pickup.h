@@ -29,6 +29,7 @@
    WP_TYPES와 WP_* 순서가 필요합니다. 아이템 종류를 무기 인덱스에서 유도하므로, 무기를
    추가하면 별도의 표를 맞출 필요 없이 탄약 상자와 월드 아이템이 함께 추가됩니다. */
 #include "weapon.h"
+#include "player.h"  /* PowerKind and PLAYER_POWER_TIME: an artifact is a clock */
 
 /* --- Macros and constants / 매크로 및 상수 --- */
 
@@ -94,6 +95,17 @@ enum {
        시프트입니다. 네 번째 열쇠는 level.h의 비트 하나와 이곳의 색 하나가 전부입니다. */
     PK_KEY0,
     PK_KEY_LAST = PK_KEY0 + KEY_KINDS - 1,
+
+    /* One per ::PowerKind, in the same order, so a kind converts to a
+       ::PowerKind by subtracting rather than by a table -- the arrangement
+       ::PK_KEY0 already uses for the keys. A fourth artifact is a value in
+       ::PowerKind, a name below and a drawing in sprite.c.
+       ::PowerKind마다 하나이며 순서도 같으므로, 종류를 ::PowerKind로 바꾸는 것이
+       표가 아니라 뺄셈입니다. ::PK_KEY0이 열쇠에 대해 이미 쓰는 배치입니다. 네
+       번째 아티팩트는 ::PowerKind의 값 하나, 아래의 이름 하나, 그리고 sprite.c의
+       그림 하나가 전부입니다. */
+    PK_POWER0,
+    PK_POWER_LAST = PK_POWER0 + PW_KINDS - 1,
 
     PK_KINDS    /**< Total number of pickup kinds. / 아이템 종류의 총 수. */
 };
@@ -400,7 +412,7 @@ const Pickup *pickup_at(const Pools *pl, int i);
  */
 void pickup_update(Pools *pl, const Level *l, v3 player_eye,
                    int *health, int health_max,
-                   Weapon *w, int *keys, float dt);
+                   Weapon *w, int *keys, float *power, float dt);
 
 /**
  * @brief Throws an item into the air from a point, to land and be collected.

@@ -477,6 +477,28 @@ typedef struct {
     int   leaping;
     /** @brief Seconds the current leap has been airborne. / 현재 도약이 공중에 있던 시간(초). */
     float leap_timer;
+    /**
+     * @brief What every damage number this weapon deals is multiplied by. 1 is normal.
+     *
+     * ENGLISH: ::PW_QUAD, arriving as a number rather than as a question. This
+     * module has no idea what a powerup is and does not need one -- ::world_step
+     * sets this from the player's clock every frame, so the multiplier is simply
+     * what the weapon does now. An INT, because the damage it scales is an int and
+     * this way there is no rounding to choose.
+     * @note Applied where the damage LEAVES the weapon, not where it lands. A
+     *       grenade already in the air was thrown by an armed player and should
+     *       still be quadded when it goes off after the clock runs out.
+     *
+     * 한국어: ::PW_QUAD가 질문이 아니라 수로 도착한 것입니다. 이 모듈은 파워업이 무엇인지
+     * 모르고 알 필요도 없습니다. ::world_step이 매 프레임 플레이어의 시계로부터 이것을
+     * 설정하므로, 배율은 그저 *지금 이 무기가 하는 일*입니다. 배율을 적용하는 피해가
+     * 정수이므로 이것도 정수이며, 그래야 고를 반올림이 없습니다.
+     * @note 피해가 *닿는* 곳이 아니라 무기를 *떠나는* 곳에서 적용합니다. 이미 공중에 있는
+     *       유탄은 강화된 플레이어가 던진 것이며, 시계가 끝난 뒤에 터져도 여전히 쿼드여야
+     *       합니다.
+     */
+    int   damage_mul;
+
     float cooldown;      /**< Seconds until the next shot is allowed. / 다음 사격이 허용되기까지의 시간 (초). */
     float recoil;        /**< Extra camera pitch in radians, springs back to 0. / 카메라에 추가되는 피치 (라디안). 0으로 복원됩니다. */
     float punch;         /**< View model kickback in metres, springs back to 0. / 뷰 모델의 후퇴 거리 (미터). 0으로 복원됩니다. */

@@ -533,6 +533,64 @@ static int pickup_pixel(int kind, float nx, float ny, unsigned char *rgb) {
             if (d < 0.11f * 0.11f) { a = 1.0f; r = 0.90f; g = 0.72f; b = 0.22f; }
             if (d < 0.05f * 0.05f) { r = 0.30f; g = 0.16f; b = 0.10f; }  /* primer */
         }
+    } else if (kind >= PK_POWER0 && kind <= PK_POWER_LAST) {
+        /* AN ARTIFACT IS A FLOATING SIGIL, and all three share the shape on
+           purpose: a ring with a glyph inside it, differing only in colour and
+           in the glyph. A player who has learned that a hovering ring is worth
+           crossing the room for should not have to learn it three times, and
+           the thing they then need to read at a glance is WHICH one -- which is
+           what colour does faster than silhouette.
+           Drawn rather than lit. There is no emissive term in the world pass
+           (see render.c's window facade note), so "glowing" here means a bright
+           core and a rim that falls off, composited by the same additive rules
+           every other sprite uses.
+           *아티팩트는 떠 있는 인장이며*, 셋이 형태를 공유하는 것은 의도적입니다. 고리 하나에
+           그 안의 문양이며, 색과 문양만 다릅니다. 떠 있는 고리가 방을 가로지를 값어치가
+           있다는 것을 익힌 플레이어가 그것을 세 번 익힐 필요는 없고, 그다음 한눈에 읽어야 할
+           것은 *어느 것인가*입니다. 그것은 실루엣보다 색이 빠르게 답합니다.
+           빛나는 것이 아니라 그려집니다. 월드 패스에는 발광 항이 없으므로(render.c의 창 파사드
+           설명 참조) 이곳의 "빛남"은 밝은 중심과 떨어지는 테두리이며, 다른 모든 스프라이트가
+           쓰는 것과 같은 가산 규칙으로 합성됩니다. */
+        int which = kind - PK_POWER0;
+        float d    = sqrtf(nx * nx + ny * ny);
+        float ring = 0.72f;
+        float band = fabsf(d - ring);
+
+        /* The ring itself. */
+        if (band < 0.16f) {
+            float k = 1.0f - band / 0.16f;
+            a = 1.0f;
+            if (which == PW_QUAD)        { r = 0.35f; g = 0.55f; b = 1.00f; }
+            else if (which == PW_SHADOW) { r = 0.55f; g = 0.35f; b = 0.85f; }
+            else                         { r = 0.95f; g = 0.72f; b = 0.25f; }
+            r *= 0.45f + 0.55f * k;
+            g *= 0.45f + 0.55f * k;
+            b *= 0.45f + 0.55f * k;
+        }
+
+        /* The glyph: a bolt for the quad, a hollow for the ring of shadows, a
+           chevron for the aegis. Each is the cheapest mark that reads at the
+           size a pickup is actually seen at, which is a few dozen pixels.
+           문양입니다. 쿼드는 번개, 그림자 반지는 빈 구멍, 아이기스는 갈매기표입니다. 각각은
+           획득물이 실제로 보이는 크기(수십 픽셀)에서 읽히는 가장 값싼 표식입니다. */
+        if (d < 0.52f) {
+            int on = 0;
+            if (which == PW_QUAD) {
+                float t = nx - ny * 0.45f;
+                on = fabsf(t) < 0.14f && fabsf(ny) < 0.46f;
+            } else if (which == PW_SHADOW) {
+                on = d > 0.26f;             /* a hollow: the mark IS the absence */
+            } else {
+                on = fabsf(fabsf(nx) - (0.34f - ny * 0.30f)) < 0.13f && ny > -0.42f;
+            }
+            if (on) {
+                a = 1.0f;
+                r = 0.98f; g = 0.98f; b = 0.98f;
+                if (which == PW_QUAD)        { r = 0.72f; g = 0.88f; }
+                else if (which == PW_SHADOW) { r = 0.80f; b = 0.98f; g = 0.66f; }
+                else                         { b = 0.66f; }
+            }
+        }
     } else if (kind == PK_HEALTH) {
         float box = rbox(nx, ny, 0.60f, 0.52f, 0.12f);
         if (box > 0.0f) {

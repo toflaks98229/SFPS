@@ -168,6 +168,21 @@ const WeaponType *wp_stats(int type) {
     return &WEAPONS[type];
 }
 
+/* The damage multiplier, defended against a Weapon nobody set it on.
+   ::wp_init zeroes the struct and ::world_step writes this every frame, but a
+   test that builds a Weapon on the stack and fires it does neither -- and a
+   multiplier of zero is a gun that does nothing, which is a far worse failure
+   than a gun that does normal damage. pools.h makes the same promise about a
+   zeroed pool being a valid one.
+   피해 배율이며, 아무도 이것을 설정하지 않은 Weapon에 대해 방어합니다. ::wp_init이 구조체를
+   0으로 만들고 ::world_step이 매 프레임 이것을 쓰지만, 스택에 Weapon을 만들어 쏘는 검사는
+   둘 다 하지 않습니다. 그리고 배율 0은 아무것도 하지 않는 총이며, 그것은 평범한 피해를 주는
+   총보다 훨씬 나쁜 실패입니다. pools.h가 0으로 채워진 풀이 유효한 풀이라는 것에 대해 같은
+   약속을 합니다. */
+static int wp_mul(const Weapon *w) {
+    return (w && w->damage_mul > 0) ? w->damage_mul : 1;
+}
+
 int wp_type_for(const char *name) {
     for (int i = 0; i < WP_TYPES; i++) {
         const char *a = WEAPONS[i].name, *b = name;
@@ -554,7 +569,7 @@ static void fire_hitscan(Weapon *w, Pools *pl, const Level *l,
         int blood = enemy_hitscan(pl, eye, dir, hit ? t : RANGE, &et, &eidx);
 
         if (blood) {
-            enemy_hurt(pl, eidx, PELLET_DAMAGE, dir);
+            enemy_hurt(pl, eidx, PELLET_DAMAGE * wp_mul(w), dir);
             t = et;
             hit = 1;
         }
@@ -714,7 +729,8 @@ static void fire_projectile(Weapon *w, Pools *pl, const WeaponType *S,
        유탄은 도화선과 폭발 반경을 가지고, 탄은 둘 다 없이 닿은 것만 정확히 상하게
        합니다. 표의 한 행이 차이의 전부입니다. */
     int arcs = S->proj_gravity > 0.0f;
-    proj_fire(pl, eye, dir, S->proj_speed, S->proj_gravity, S->damage,
+    proj_fire(pl, eye, dir, S->proj_speed, S->proj_gravity,
+              S->damage * wp_mul(w),
               arcs ? PROJ_BLAST_RADIUS : 0.0f,
               arcs ? PROJ_FUSE : 0.0f);
 
@@ -794,7 +810,7 @@ static void fire_melee(Weapon *w, Pools *pl, const WeaponType *S,
     fx_spawn(pl, "sawspark", reach, fwd);
 
     if (enemy_hitscan(pl, eye, fwd, S->melee_range, &et, &eidx)) {
-        enemy_hurt(pl, eidx, S->damage, fwd);
+        enemy_hurt(pl, eidx, S->damage * wp_mul(w), fwd);
         v3 bite = v3add(eye, v3scale(fwd, et));
         /* Sparks back ALONG the blade rather than away from it: steel grinding
            into something throws them at the person holding it, and thrown
@@ -1118,6 +1134,7 @@ int wp_sprite_frame(const Weapon *w) {
 /* ------------------------------------------------------------- the axe leap */
 
 int wp_axe_leaping(const Weapon *w) { return w->leaping; }
+
 
 int wp_axe_leap(Weapon *w, float yaw, float pitch, v3 *player_vel) {
     if (w->cur != WP_AXE) return 0;

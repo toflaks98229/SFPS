@@ -383,6 +383,158 @@ static void check_shake(void) {
  * 그것은 애니메이션 재질을 구동하기에 ::WORLD_TIME_WRAP에서 순환합니다. 그 시계를 함께 쓰면
  * 5분을 버틴 플레이어에게 20초를 버텼다고 말하게 되며, 그런 일은 가장 잘한 플레이어에게만
  * 일어납니다. */
+/* --- a monster the level put there, four metres in front of the player --- */
+static void put_monster(World *w, short x, short z) {
+    Entity *e = &w->level.ents[w->level.n_ents++];
+    e->kind[0]='s'; e->kind[1]='p'; e->kind[2]='a'; e->kind[3]='w';
+    e->kind[4]='n'; e->kind[5]=0;
+    e->x = x; e->z = z;
+    enemy_spawn_level(&w->pools, &w->level);
+}
+
+/* --- the three artifacts actually do their three things -------------------
+ *
+ * ENGLISH
+ * -------
+ * EACH IS A CLOCK AND A READER, and both halves fail silently. A clock that
+ * runs with nothing reading it is a HUD number attached to nothing; a reader
+ * wired to a knob ::world_step never sets is a powerup that is always on, or
+ * never. Neither shows up in a compile, and neither showed up in the other 38
+ * checks -- the suite went green the first time with all three effects
+ * untested, which is the whole reason this function exists.
+ *
+ * So each is driven END TO END, from `Player::power` through the knob to
+ * something a player would see: damage landing on a monster, damage landing on
+ * the player, and a monster's own decision about whether to walk over.
+ *
+ * 한국어
+ * ------
+ * *각각은 시계와 그것을 읽는 무언가*이고, 두 쪽 다 조용히 실패합니다. 아무도 읽지 않는 시계는
+ * 아무것에도 붙어 있지 않은 HUD 숫자이고, ::world_step이 설정하지 않는 손잡이에 연결된 독자는
+ * 항상 켜져 있거나 절대 켜지지 않는 파워업입니다. 어느 쪽도 컴파일에 나타나지 않으며 나머지 38개
+ * 검사에도 나타나지 않았습니다. 이 suite는 세 효과가 전혀 검사되지 않은 채로 처음에 초록이었고,
+ * 그것이 이 함수가 존재하는 이유 전부입니다.
+ *
+ * 그래서 각각은 `Player::power`에서 손잡이를 거쳐 플레이어가 볼 무언가까지 *끝에서 끝까지*
+ * 구동됩니다. 몬스터에게 꽂히는 피해, 플레이어에게 꽂히는 피해, 그리고 걸어올지에 대한 몬스터
+ * 자신의 결정입니다.
+ */
+static void check_power(void) {
+    printf("\nthe three artifacts\n");
+
+    World w;
+    Input in;
+
+    /* --- the clocks, and the knobs that follow them ----------------------
+       The knobs are set every frame from the clock rather than once on pickup,
+       so the half worth checking is not that a fresh pickup turns one ON. It is
+       that a clock reaching zero turns it OFF with nobody having been told.
+       손잡이는 획득 시점에 한 번이 아니라 매 프레임 시계로부터 설정되므로, 검사할 값어치가 있는
+       쪽은 갓 주운 것이 하나를 *켠다*는 것이 아닙니다. 0에 닿은 시계가 아무도 듣지 않은 채로
+       그것을 *끈다*는 것입니다. */
+    fixture(&w, 0);
+    in = idle();
+    world_step(&w, &in, ASPECT, DT);
+    ok(w.weapon.damage_mul == 1 && w.pools.enemy.blinded == 0,
+       "nothing runs on a fresh player, and both knobs say so");
+
+    w.player.power[PW_QUAD]   = 3.0f * DT;
+    w.player.power[PW_SHADOW] = 3.0f * DT;
+    world_step(&w, &in, ASPECT, DT);
+    ok(w.weapon.damage_mul == PLAYER_QUAD_MUL && w.pools.enemy.blinded == 1,
+       "a running clock reaches the weapon and the monsters");
+
+    for (int i = 0; i < 4; i++) world_step(&w, &in, ASPECT, DT);
+    okf(w.player.power[PW_QUAD] == 0.0f,
+        "the clock runs out and does not go negative",
+        w.player.power[PW_QUAD], 0.0f);
+    ok(w.weapon.damage_mul == 1 && w.pools.enemy.blinded == 0,
+       "and both knobs let go by themselves");
+
+    /* --- PW_QUAD: the same shot, four times ------------------------------
+       Two fresh worlds fired identically. They are comparable because a fresh
+       World seeds the same way, so the shotgun throws its pellets along the
+       same spread in both -- the only difference between the runs is the clock.
+       동일하게 발사된 새 월드 둘입니다. 새 World는 같은 방식으로 시드되므로 샷건이 두 경우 모두
+       같은 산포로 펠릿을 던집니다. 두 실행의 유일한 차이는 시계입니다. */
+    int hp_plain, hp_quad;
+    for (int quad = 0; quad < 2; quad++) {
+        fixture(&w, 0);
+        put_monster(&w, 0, -400);
+        if (quad) w.player.power[PW_QUAD] = PLAYER_POWER_TIME;
+
+        in = idle();
+        in.fire = 1;
+        for (int i = 0; i < 12; i++) world_step(&w, &in, ASPECT, DT);
+
+        int hp = enemy_alive(&w.pools) ? enemy_at(&w.pools, 0)->health : 0;
+        if (quad) hp_quad = hp; else hp_plain = hp;
+    }
+    ok(hp_plain > 0, "one blast leaves the monster standing");
+    okf(hp_quad < hp_plain, "and the same blast under the quad does not",
+        (float)hp_quad, (float)hp_plain);
+
+    /* --- PW_AEGIS: the same hazard, cut ----------------------------------
+       A hazard floor rather than a monster, because a hazard charges the same
+       number every frame -- a monster's damage depends on whether it chose to
+       swing, and this needs the two runs to differ in one thing only.
+       몬스터가 아니라 유해 바닥인 이유는, 유해 지형이 매 프레임 같은 수를 물리기 때문입니다.
+       몬스터의 피해는 그것이 휘두르기로 했는지에 달려 있고, 이 검사는 두 실행이 한 가지에서만
+       달라야 합니다. */
+    int lost_plain, lost_aegis;
+    for (int aegis = 0; aegis < 2; aegis++) {
+        fixture(&w, 40);
+        if (aegis) w.player.power[PW_AEGIS] = PLAYER_POWER_TIME;
+
+        int before = w.player.health;
+        in = idle();
+        for (int i = 0; i < 30; i++) world_step(&w, &in, ASPECT, DT);
+
+        int lost = before - w.player.health;
+        if (aegis) lost_aegis = lost; else lost_plain = lost;
+    }
+    ok(lost_plain > 0, "standing in a hazard costs health");
+    okf(lost_aegis < lost_plain, "and standing in it under the aegis costs less",
+        (float)lost_aegis, (float)lost_plain);
+    ok(lost_aegis > 0,
+       "but still costs some -- a cut is not an immunity");
+
+    /* --- PW_SHADOW: the monster does not shoot ---------------------------
+       DAMAGE TAKEN rather than distance closed, because the fixture's monster
+       is a water spirit and a water spirit is a CASTER: seeing the player, it
+       holds its range and opens fire, and the ground it gives up is a metre of
+       repositioning that a threshold could not tell from idling. What it does
+       instead is unmistakable at the player's end -- the health bar moves.
+
+       Nor `Enemy::seen`, which is the CACHE: a blinded monster is answered
+       before the cache is ever consulted, so the field it leaves behind is the
+       same 0 that a monster which has simply not looked yet leaves.
+       거리가 아니라 *받은 피해*인 이유는, 픽스처의 몬스터가 물 정령이고 물 정령은 *캐스터*이기
+       때문입니다. 플레이어를 보면 사거리를 지키며 사격을 시작하고, 내주는 땅은 1미터의 자리
+       고쳐잡기라서 어떤 문턱값으로도 가만히 있는 것과 구별할 수 없습니다. 대신 그것이 하는 일은
+       플레이어 쪽 끝에서 명백합니다. 체력 막대가 움직입니다.
+
+       `Enemy::seen`도 아닙니다. 그것은 *캐시*이고, 눈먼 몬스터는 캐시를 보기도 전에 답을
+       받으므로 남기는 필드는 아직 보지 않았을 뿐인 몬스터가 남기는 것과 같은 0입니다. */
+    int shot_plain, shot_shadow;
+    for (int shadow = 0; shadow < 2; shadow++) {
+        fixture(&w, 0);
+        put_monster(&w, 0, -800);
+        if (shadow) w.player.power[PW_SHADOW] = PLAYER_POWER_TIME;
+
+        int before = w.player.health;
+        in = idle();
+        for (int i = 0; i < 300; i++) world_step(&w, &in, ASPECT, DT);
+
+        int lost = before - w.player.health;
+        if (shadow) shot_shadow = lost; else shot_plain = lost;
+    }
+    okf(shot_plain > 0, "a monster that can see the player shoots it",
+        (float)shot_plain, 1.0f);
+    okf(shot_shadow == 0, "and one that cannot does not",
+        (float)shot_shadow, 0.0f);
+}
+
 static void check_score(void) {
     printf("\nthe run's own score\n");
 
@@ -1897,6 +2049,7 @@ int main(void) {
     check_teleport();
     check_lava();
     check_score();
+    check_power();
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall frame-order checks passed\n", fails);
     return fails != 0;

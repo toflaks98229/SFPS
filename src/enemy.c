@@ -259,7 +259,7 @@ static void change_yaw(Enemy *m, float yaw_speed_deg, float dt);
 static void ai_run_slide(Pools *pl, const Level *l, const MonType *S, Enemy *m, float dt);
 
 static int can_see(const Level *l, const Enemy *m, v3 player_eye);
-static int sees_player(const Level *l, Enemy *m, v3 player_eye);
+static int sees_player(const Pools *pl, const Level *l, Enemy *m, v3 player_eye);
 static int check_attack(Pools *pl, const MonType *S, Enemy *m, float dist);
 
 static void chase_brawler(Pools *pl, const Level *l, const MonType *S, Enemy *m, v3 to, float dist, float dt);
@@ -745,7 +745,7 @@ int enemy_update(Pools *pl, const Level *l, v3 player_eye, float dt)
                캐시를 씁니다. 플레이어를 한두 프레임 늦게 알아채는 것은 지각되지 않으며,
                앞의 거리 검사 덕분에 시야 거리 밖의 몬스터는 판정 비용을 아예 치르지
                않습니다. */
-            if (dist < S->sight && sees_player(l, m, player_eye))
+            if (dist < S->sight && sees_player(pl, l, m, player_eye))
             {
                 m->state = E_CHASE;
                 play_at(m->pos, "sight", 80);
@@ -3109,8 +3109,23 @@ static int can_see(const Level *l, const Enemy *m, v3 player_eye)
  * 지어낸 값으로 행동하는 대신 첫 실제 측정이 나올 때까지 대기합니다. 한 갱신 주기 동안
  * 틀린다면 아무것도 하지 않는 쪽으로 틀려야 합니다.
  */
-static int sees_player(const Level *l, Enemy *m, v3 player_eye)
+static int sees_player(const Pools *pl, const Level *l, Enemy *m, v3 player_eye)
 {
+    /* BLINDED IS ANSWERED HERE AND NOT CACHED, which is the whole of what
+       makes ::PW_SHADOW feel like shadow. The cache is a frame or two stale
+       by design -- noticing late is imperceptible -- but a powerup that took
+       ::SIGHT_PERIOD to switch off would let a monster fire one more time at
+       somebody who had already vanished, and take just as long to notice them
+       coming back. So the cached answer is what the eye WOULD see and this is
+       whether there is anything to see.
+       *가려짐은 이곳에서 답하고 캐시하지 않으며*, 그것이 ::PW_SHADOW를 그림자처럼
+       느끼게 하는 전부입니다. 캐시는 설계상 한두 프레임 낡아 있습니다. 늦게
+       알아채는 것은 지각되지 않기 때문입니다. 그러나 꺼지는 데 ::SIGHT_PERIOD가
+       걸리는 파워업은 이미 사라진 사람에게 몬스터가 한 번 더 쏘게 하고, 돌아온
+       것을 알아채는 데도 꼭 그만큼 걸립니다. 그래서 캐시된 답은 눈이 *보게 될*
+       것이고, 이것은 볼 것이 *있는가*입니다. */
+    if (pl->enemy.blinded) return 0;
+
     if (m->sight_age <= 0)
     {
         m->sight_age = SIGHT_PERIOD;
@@ -3317,7 +3332,7 @@ static void chase_caster(Pools *pl, const Level *l, const MonType *S, Enemy *m,
        캐시를 씁니다. 이것은 자리를 잡고 시전을 *시작할지*를 결정하며, 시전 시간이 충분히
        길어 한두 프레임의 지연은 문제가 될 수 없습니다. ::release_bolt가 실시간으로 다시
        검사하며, 벽을 실제로 지키는 것은 그 검사입니다. */
-    if (!sees_player(l, m, player_eye))
+    if (!sees_player(pl, l, m, player_eye))
     {
         move_toward(l, S, m, to.x * inv * step, to.z * inv * step);
         return;

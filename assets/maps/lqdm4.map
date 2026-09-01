@@ -9308,6 +9308,10 @@
 }
 }
 {
+"classname" "quad"
+"origin" "-0 -288 -424"
+}
+{
 "classname" "trigger_teleport"
 "target" "tp1"
 {
@@ -9336,6 +9340,10 @@
 {
 "classname" "item_grenade"
 "origin" "-0 -80 -448"
+}
+{
+"classname" "aegis"
+"origin" "-0 -0 -64"
 }
 {
 "classname" "info_teleport_destination"
@@ -9472,8 +9480,8 @@
 "origin" "320 224 -320"
 }
 {
-"classname" "item_artifact_invulnerability"
-"origin" "224 736 -116"
+"classname" "shadow"
+"origin" "-192 640 -552"
 }
 {
 "classname" "monster_spawner_water_spirit"

@@ -1866,6 +1866,46 @@ void scene_draw_hud(Scene *s, int vw, int vh, const Level *l,
     text_run(s, HUD_MARGIN, vh - HUD_BASELINE, HUD_TEXT_SIZE, hp,
              1.0f - lo * 0.6f, 0.25f + lo * 0.7f, 0.25f, 1.0f);
 
+    /* THE ARTIFACT CLOCKS, above the health and in their own colours, so the
+       thing on the floor and the number on the bar are recognisably one
+       object. The same three HUES as sprite.c's rings, lifted in value: a ring
+       is lit against the room and this is text against a dark bar, and
+       matching the literal triples would have made the shadow clock the least
+       legible thing on screen.
+       SECONDS, ROUNDED UP, and shown only while running. A powerup whose
+       remaining time the player cannot see is one they cannot plan around,
+       and planning around it is the whole of what a thirty-second window is
+       for: a quad is not "more damage", it is "get to the brutes NOW".
+       Rounded UP so the last second is shown as 1 rather than as 0 -- a bar
+       reading zero while the effect is still on is a bar that lies at the one
+       moment the player is reading it hardest.
+       *아티팩트 시계이며*, 체력 위에 각자의 색으로 표시됩니다. 획득물이 그려지는 것과 같은
+       세 색이라, 바닥의 물건과 막대의 표시가 하나의 물건으로 알아보입니다.
+       *초 단위로 올림하며*, 도는 동안에만 보입니다. 남은 시간을 볼 수 없는 파워업은 그것을
+       두고 계획할 수 없는 파워업이고, 계획하는 것이 30초짜리 창의 전부입니다. 쿼드는 "피해
+       증가"가 아니라 "지금 브루트에게 가라"입니다.
+       *올림*하는 이유는 마지막 1초가 0이 아니라 1로 보이게 하기 위함입니다. 효과가 아직
+       도는데 0을 읽는 막대는 플레이어가 가장 열심히 읽는 바로 그 순간에 거짓말하는
+       막대입니다. */
+    {
+        static const float PW_COL[PW_KINDS][3] = {
+            { 0.45f, 0.65f, 1.00f },   /* PW_QUAD   */
+            { 0.65f, 0.45f, 0.95f },   /* PW_SHADOW */
+            { 1.00f, 0.80f, 0.35f },   /* PW_AEGIS  */
+        };
+        int row = 0;
+        for (int i = 0; i < PW_KINDS; i++) {
+            if (p->power[i] <= 0.0f) continue;
+            char t[16];
+            t[txt_append_int(t, sizeof(t), 0, (int)(p->power[i] + 0.999f))] = 0;
+            text_run(s, HUD_MARGIN,
+                     vh - HUD_BASELINE - (float)(row + 1) * HUD_TEXT_SIZE * 1.15f,
+                     HUD_TEXT_SIZE, t,
+                     PW_COL[i][0], PW_COL[i][1], PW_COL[i][2], 1.0f);
+            row++;
+        }
+    }
+
     /* Ammo, bottom-right, and red when the gun is empty. */
     char am[16];
     am[txt_append_int(am, sizeof(am), 0, w->ammo[w->cur])] = 0;

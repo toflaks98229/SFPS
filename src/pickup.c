@@ -271,7 +271,7 @@ static int fly(Pools *pl, Pickup *p, const Level *l, float dt) {
 
 void pickup_update(Pools *pl, const Level *l, v3 player_eye,
                    int *health, int health_max,
-                   Weapon *w, int *keys, float dt) {
+                   Weapon *w, int *keys, float *power, float dt) {
     /* The player's feet, so a pickup at floor level is compared like with
        like rather than against the eye 1.7 m up. */
     float feet_y = player_eye.y - PLAYER_EYE;
@@ -323,7 +323,30 @@ void pickup_update(Pools *pl, const Level *l, v3 player_eye,
         if (fabsf(feet_y - p->pos.y) > 1.6f) continue;     /* different floor */
 
         /* Only take it if it helps -- otherwise leave it to come back for. */
-        if (p->kind == PK_HEALTH) {
+        if (power && p->kind >= PK_POWER0 && p->kind <= PK_POWER_LAST) {
+            /* SET, NOT ADDED. Picking a second quad up while the first is
+               still running restarts the clock; it does not bank sixty
+               seconds. An author who placed two of an artifact laid out a
+               route that can be kept topped up, not a pair that stacks --
+               and stacking is how a room with three of them becomes a room
+               with a minute and a half of one.
+               Taken unconditionally, unlike a medkit. A quad at full health
+               is still worth having, so there is no "only if it helps" test
+               to write -- and one that refused a pickup already running
+               would strand the player next to an artifact they could see and
+               not collect.
+               *더하지 않고 설정합니다.* 첫 번째가 도는 동안 두 번째 쿼드를 주우면
+               시계가 다시 시작되지 60초가 적립되지 않습니다. 아티팩트를 둘 놓은
+               제작자는 계속 채워 갈 수 있는 경로를 깐 것이지 쌓이는 한 쌍을 놓은
+               것이 아니며, 쌓기는 셋 있는 방을 1분 30초짜리 하나가 있는 방으로
+               만드는 방식입니다.
+               구급상자와 달리 조건 없이 가져갑니다. 체력이 가득해도 쿼드는 여전히
+               가질 값어치가 있으므로 "도움이 될 때만" 검사를 쓸 것이 없고, 이미
+               도는 것을 거절하는 검사는 플레이어를 보이지만 주울 수 없는 아티팩트
+               곁에 붙들어 둡니다. */
+            power[p->kind - PK_POWER0] = PLAYER_POWER_TIME;
+            audio_play("part", 88);
+        } else if (p->kind == PK_HEALTH) {
             if (*health >= health_max) continue;
             *health += PICKUP_HEALTH;
             /* Clamp after adding: a partial top-up still consumes the whole
@@ -484,6 +507,9 @@ static int name_eq_n(const char *a, int n, const char *b) {
 int pickup_kind_for_n(const char *k, int len) {
     if (name_eq_n(k, len, "health")) return PK_HEALTH;
     if (name_eq_n(k, len, "ammo"))   return PK_AMMO;
+    if (name_eq_n(k, len, "quad"))   return PK_POWER0 + PW_QUAD;
+    if (name_eq_n(k, len, "shadow")) return PK_POWER0 + PW_SHADOW;
+    if (name_eq_n(k, len, "aegis"))  return PK_POWER0 + PW_AEGIS;
 
     for (int w = 0; w < WP_TYPES; w++) {
         const char *n = wp_stats(w)->name;

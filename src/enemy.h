@@ -1866,6 +1866,24 @@ typedef struct {
      * 억제 해제의 전부입니다. main.c가 사운드트랙과 맺는 것과 같은 약속입니다. 그것을 전환하는
      * 사건이 아니라 무엇이 재생되어야 하는지에 대한 매 프레임의 진술입니다.
      */
+    /**
+     * @brief Non-zero while nothing in this pool can see the player.
+     *
+     * ENGLISH: ::PW_SHADOW, and it is a pool knob for ::spawn_slow's reason --
+     * the run owns it and sets it beside the ::enemy_update call, so this module
+     * never learns what a ::Player is. What it suppresses is NOTICING and
+     * TRACKING, not memory: a monster already in ::E_CHASE keeps walking to where
+     * it last had you, which is what makes invisibility a way to break contact
+     * rather than a way to stop time.
+     *
+     * 한국어: ::PW_SHADOW이며, ::spawn_slow와 같은 이유로 풀의 손잡이입니다. 플레이가 그것을
+     * 소유하고 ::enemy_update 호출 곁에서 설정하므로, 이 모듈은 ::Player가 무엇인지 끝내
+     * 배우지 않습니다. 억제하는 것은 *알아채기*와 *추적하기*이지 기억이 아닙니다. 이미
+     * ::E_CHASE에 있는 몬스터는 당신이 마지막으로 있던 곳으로 계속 걸어가며, 그것이 투명을
+     * 시간을 멈추는 방법이 아니라 *접촉을 끊는* 방법으로 만듭니다.
+     */
+    int      blinded;
+
     float    spawn_slow;
 
     Spawner spawner[ENEMY_MAX_SPAWNERS]; /**< Markers that keep making monsters. / 몬스터를 계속 만들어 내는 표식. */

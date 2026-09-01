@@ -365,6 +365,96 @@ static void step_drops(World *w) {
 }
 
 /**
+ * @brief Count the powerup clocks down, and set the knobs that read them.
+ *
+ * ENGLISH
+ * -------
+ * BEFORE ANYTHING THAT READS A KNOB, which is the whole reason this is its own
+ * function called from its own line rather than a block inside ::step_damage.
+ * It began there, beside `enemy_update` -- one of the two readers -- and the
+ * comment claimed the knobs sat "right beside the calls that read them". The
+ * other reader is `wp_update`, and ::step_look_move runs BEFORE ::step_damage:
+ * the weapon was multiplying by a number set on the PREVIOUS frame. A player
+ * who grabbed a quad and fired in the same breath fired an ordinary shot, and
+ * nothing anywhere would have said so.
+ *
+ * ::PW_QUAD is a field on ::Weapon and ::PW_SHADOW one on ::EnemyPool, because
+ * neither module knows what a ::Player is and neither should learn: weapon.c is
+ * handed a number to multiply by, enemy.c a bit saying whether it can see
+ * anything. Set every frame rather than once on pickup, so a clock running out
+ * needs no second place to notice it -- the knob follows the timer by
+ * construction.
+ *
+ * @note Inside the `!frozen` arm at the call site, so a powerup does not burn
+ *       down behind the pause menu.
+ *
+ * 한국어
+ * ------
+ * @brief 파워업 시계를 세어 내리고, 그것을 읽는 손잡이들을 설정합니다.
+ *
+ * *손잡이를 읽는 그 무엇보다도 먼저입니다.* 이것이 ::step_damage 안의 블록이 아니라 자기
+ * 함수이자 자기 줄에서 호출되는 이유 전부입니다. 이것은 두 독자 중 하나인 `enemy_update` 곁,
+ * 그곳에서 시작했고 주석은 손잡이가 "그것을 읽는 호출 바로 곁"에 있다고 주장했습니다. 다른
+ * 독자는 `wp_update`이며 ::step_look_move는 ::step_damage보다 *먼저* 돕니다. 무기는 *이전*
+ * 프레임에 설정된 수를 곱하고 있었습니다. 쿼드를 집어 그 숨결에 발사한 플레이어는 평범한 탄을
+ * 쏜 것이고, 어디에서도 그렇다고 말해 주지 않았을 것입니다.
+ *
+ * ::PW_QUAD는 ::Weapon의 필드이고 ::PW_SHADOW는 ::EnemyPool의 것입니다. 두 모듈 다 ::Player가
+ * 무엇인지 모르고 알게 되어서도 안 되기 때문입니다. weapon.c는 곱할 수를, enemy.c는 무언가를
+ * 볼 수 있는지에 대한 비트를 건네받습니다. 획득 시점에 한 번이 아니라 매 프레임 설정하므로,
+ * 시계가 다 되는 것을 알아챌 두 번째 자리가 필요 없습니다. 손잡이는 구조적으로 타이머를
+ * 따라갑니다.
+ *
+ * @note 호출 지점의 `!frozen` 갈래 안에 있으므로, 일시정지 메뉴 뒤에서 파워업이 타 내려가지
+ *       않습니다.
+ */
+static void step_powers(World *w, float dt) {
+    for (int i = 0; i < PW_KINDS; i++) {
+        w->player.power[i] -= dt;
+        if (w->player.power[i] < 0.0f) w->player.power[i] = 0.0f;
+    }
+    w->weapon.damage_mul   = w->player.power[PW_QUAD]   > 0.0f ? PLAYER_QUAD_MUL : 1;
+    w->pools.enemy.blinded = w->player.power[PW_SHADOW] > 0.0f;
+}
+
+/**
+ * @brief What percentage of incoming damage survives ::PW_AEGIS. 100 when none.
+ *
+ * ENGLISH
+ * -------
+ * ONE PLACE THAT KNOWS THE RULE, two call sites that apply it in the unit they
+ * happen to hold -- because the first version applied it at one of them only.
+ * The aegis cut the integer hit from `enemy_update` and never touched the
+ * hazard rate a few lines below it, so an artifact whose whole point is
+ * surviving the arena's lava sea did nothing at all in the lava.
+ *
+ * THE TWO SITES ROUND DIFFERENTLY AND SHOULD. An integer hit needs a floor of
+ * one: a one-point blow scaled to 30% is zero, and damage that stops counting
+ * while a clock runs is a pentagram, not a coat of armour. A rate does NOT need
+ * one -- `hazard_accum` carries the fraction across frames, so 40 a second
+ * scaled to 12 a second still arrives, just slower. Clamping the rate would
+ * make a weak hazard hurt MORE under the aegis than without it.
+ *
+ * 한국어
+ * ------
+ * @brief 들어오는 피해 중 ::PW_AEGIS를 지나 남는 비율입니다. 없으면 100입니다.
+ *
+ * *규칙을 아는 한 자리*와, 각자 쥐고 있는 단위로 그것을 적용하는 두 호출 지점입니다. 첫 판이
+ * 둘 중 하나에만 적용했기 때문입니다. 아이기스는 `enemy_update`가 준 정수 피해를 깎았고 그
+ * 몇 줄 아래의 유해 지형 비율은 건드리지 않았으므로, 요점 전부가 이 투기장의 용암 바다에서
+ * 살아남는 것인 아티팩트가 용암 속에서 아무 일도 하지 않았습니다.
+ *
+ * *두 지점은 반올림이 다르며 그래야 합니다.* 정수 피해에는 1의 하한이 필요합니다. 1점짜리
+ * 일격을 30%로 줄이면 0이고, 시계가 도는 동안 세기를 멈추는 피해는 갑옷이 아니라 펜타그램입니다.
+ * 비율에는 하한이 *필요 없습니다*. `hazard_accum`이 프레임을 가로질러 소수를 나르므로 초당
+ * 40이 초당 12로 줄어도 여전히 도착하며, 다만 느릴 뿐입니다. 비율에 하한을 두면 약한 유해
+ * 지형이 아이기스가 있을 때 *없을 때보다 더* 아프게 됩니다.
+ */
+static int aegis_pct(const World *w) {
+    return w->player.power[PW_AEGIS] > 0.0f ? PLAYER_AEGIS_PCT : 100;
+}
+
+/**
  * @brief Monsters, hazard floors, and the one place death is noticed.
  *
  * ENGLISH
@@ -402,6 +492,26 @@ static void step_damage(World *w, float dt) {
        아이템을 남깁니다. ::world_step이 아니라 이곳인 이유는 몬스터를 방금 움직인 함수가
        이것 하나이기 때문이며, 다른 어디에서 알아챈 드롭은 한 프레임 늦게 알아챈 드롭입니다. */
     step_drops(w);
+
+    /* AEGIS FIRST, because everything below this reads `dmg` -- the health,
+       the flash and the shake all describe the hit that actually landed. Cut
+       it here and the whole frame agrees; cut it at the subtraction alone and
+       a protected player is thrown around by a blow they barely felt.
+       Integer percent, and the max() is what stops a cut from becoming an
+       immunity: a one-point hit scaled to 30% is zero, and a hazard that
+       stopped counting while a clock ran would be a pentagram rather than a
+       coat of armour.
+       *아이기스가 먼저입니다.* 이 아래의 모든 것이 `dmg`를 읽기 때문입니다. 체력도
+       섬광도 흔들림도 *실제로 들어온* 타격을 서술합니다. 이곳에서 깎으면 프레임
+       전체가 일치하고, 뺄셈에서만 깎으면 보호받는 플레이어가 거의 느끼지 못한
+       일격에 내던져집니다.
+       정수 퍼센트이며, max()가 경감이 면역이 되는 것을 막습니다. 1점짜리 타격을
+       30%로 줄이면 0이고, 시계가 도는 동안 아예 세지 않는 위험은 갑옷이 아니라
+       펜타그램입니다. */
+    if (dmg > 0) {
+        dmg = dmg * aegis_pct(w) / 100;
+        if (dmg < 1) dmg = 1;
+    }
 
     if (dmg > 0 && w->player.health > 0) {
         w->player.health -= dmg;
@@ -448,7 +558,14 @@ static void step_damage(World *w, float dt) {
                               w->player.pos.y - PLAYER_EYE, w->player.pos.z)
             : 0;
     if (dps > 0 && w->player.health > 0) {
-        w->run.hazard_accum += dps * dt;
+        /* THE CUT IS APPLIED HERE, into the float, rather than to `dps`
+           above -- `dps` is an int, and 30% of a 3-a-second hazard rounds
+           to nothing. The accumulator carries the fraction, so a weak
+           hazard under the aegis stays slow instead of becoming harmless.
+           *깎기는 위의 `dps`가 아니라 이곳의 실수에 적용됩니다.* `dps`는 정수이고, 초당 3인
+           유해 지형의 30%는 0으로 반올림됩니다. 누산기가 소수를 나르므로, 아이기스 아래의
+           약한 유해 지형은 무해해지는 대신 느려질 뿐입니다. */
+        w->run.hazard_accum += dps * dt * (float)aegis_pct(w) / 100.0f;
         int whole = (int)w->run.hazard_accum;
         if (whole > 0) {
             w->run.hazard_accum -= (float)whole;
@@ -2465,6 +2582,7 @@ int world_step(World *w, const Input *in, float aspect, float dt) {
     /* Look, move, fire and the AI all stop. The last frame keeps being drawn
        under the overlay, which is what the caller does with the return value. */
     if (!frozen) {
+        step_powers(w, dt);
         step_look_move(w, in, aspect, dt);
         step_damage(w, dt);
     }
@@ -2575,7 +2693,7 @@ int world_step(World *w, const Input *in, float aspect, float dt) {
     if (!frozen)
         pickup_update(&w->pools, &w->level, w->player.pos,
                       &w->player.health, PLAYER_MAX_HP,
-                      &w->weapon, &w->player.keys, dt);
+                      &w->weapon, &w->player.keys, w->player.power, dt);
 
     /* Before the exit, because a pad and an exit on the same tile is a level
        bug either way and this order makes it an obvious one: the player is

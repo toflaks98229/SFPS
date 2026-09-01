@@ -167,7 +167,7 @@ static const char *PLAYED[] = {
     "blast",                                  /* proj.c -- was "impact" */
     "hook", "hreel", "hland", "hbite", "hbiteb",  /* hook.c */
     "phurt", "pdie", "win", "exit",           /* main.c */
-    "pammo", "pmed",                          /* pickup.c */
+    "pammo", "pmed", "part",                 /* pickup.c -- part is the artifact */
     /* AND THE LIST HAD NEVER COVERED THE MONSTERS. Every voice enemy.c plays
        -- the whole roster's sight, attack, pain and death -- was absent, which
        made the one module with the most sound names the one module this check

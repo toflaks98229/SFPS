@@ -102,7 +102,10 @@ conversion is not lossless and does not pretend to be:
     survive, and the route they make survives with them. What still does NOT
     cross is a teleporter driven by a relay rather than by walking into it;
     trigger_relay is in DROP and nothing here fires a tag at a teleporter.
-  * ARMOUR BECOMES HEALTH. There is no second damage pool in this game.
+  * ARMOUR BECOMES HEALTH, except the red suit, which becomes a timed cut to
+    the damage taken. There is still no second damage pool in this game --
+    that is the point: the pool became a clock rather than a second bar.
+    See player.h's PowerKind.
   * EIGHT WEAPONS BECOME FOUR. The mapping below is by ROLE -- hitscan spread,
     sustained fire, splash -- not by name.
   * SKY BECOMES A CEILING. Quake sky brushes are solid and drawn as sky; this
@@ -367,9 +370,6 @@ DROP = {
     'info_intermission':          'a camera for a scoreboard this game has none of',
     'trigger_relay':              'fires a target; nothing here has targets',
     'trigger_once':               'likewise, and its brush would be a dead volume',
-    'item_artifact_invisibility': 'no powerups',
-    'item_artifact_super_damage': 'no powerups',
-    'item_armorInv':              'no armour pool; the other two become health',
 
     # A LAMP LIGHTS NOTHING, so carrying one is bytes for nothing.
     #
@@ -410,11 +410,33 @@ DROP = {
     # 실행하면 되돌아왔을 것이고, 레시피는 자기가 만든 맵을 재현하기를 그만둔 상태였습니다.
     # `lqdm4`가 쉰둘을 데리고 도착한 것이 그것을 찾아냈습니다.
     'light':                      'a lamp lights nothing; see scene_lights',
+    # THE FOURTH ARTIFACT, and the one that does not cross. The other three
+    # became clocks; invulnerability cannot, because a clock that sets damage
+    # taken to zero is not a powerup this arena survives -- the lava sea is
+    # the floor, and thirty seconds of walking through it unharmed is a
+    # different level. It was not in this table before and it was not in any
+    # other either, so it fell through UNMAPPED AND UNREPORTED and shipped
+    # into lqdm4.map as an entity the engine has no name for.
+    'item_artifact_invulnerability': 'no invulnerability; see player.h',
 }
 
 # Quake's roster against ours. By role: shells are the spread weapon's, spikes
 # and cells feed sustained fire, rockets are splash.
 ITEMS = {
+    # THE THREE ARTIFACTS, and one of them is an adaptation. Quake's quad and
+    # its ring of shadows are timers already and cross as themselves. Red armour
+    # is a second damage POOL, which the note below still says this game does not
+    # have -- so it crosses as what a suit of armour does for a while rather than
+    # as a pool: PW_AEGIS, damage taken cut while a clock runs. See player.h.
+    # *아티팩트 셋이며, 그중 하나는 각색입니다.* Quake의 쿼드와 그림자 반지는 이미
+    # 타이머이므로 자기 자신으로 건너옵니다. 붉은 갑옷은 두 번째 피해 *풀*이고, 아래의
+    # 문장이 이 게임에 그런 것이 없다고 여전히 말합니다. 그래서 풀이 아니라 *갑옷이 한동안
+    # 해 주는 일*로 건너옵니다. PW_AEGIS이며, 시계가 도는 동안 받는 피해가 줄어듭니다.
+    # player.h를 참조하십시오.
+    'item_artifact_super_damage': 'quad',
+    'item_artifact_invisibility': 'shadow',
+    'item_armorInv':              'aegis',
+
     'item_health':           'item_health',
     'item_shells':           'item_shotgunammo',
     'item_spikes':           'item_rapidammo',

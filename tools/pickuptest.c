@@ -89,7 +89,7 @@ int main(void) {
     /* --- standing away from anything collects nothing --- */
     {
         int hp = 50, keys = KEY_NONE; Weapon w = armed(5);
-        pickup_update(&g_pools, &L, eye_at(50.0f, 50.0f), &hp, PLAYER_MAX_HP, &w, &keys, DT);
+        pickup_update(&g_pools, &L, eye_at(50.0f, 50.0f), &hp, PLAYER_MAX_HP, &w, &keys, 0, DT);
         ok(hp == 50 && w.ammo[WP_SHOTGUN] == 5, "far from every pickup, nothing is taken");
         ok(pickup_count(&g_pools) == 2, "and none are consumed");
     }
@@ -97,14 +97,14 @@ int main(void) {
     /* --- walking onto the ammo box adds shells and consumes it --- */
     {
         int hp = 50, keys = KEY_NONE; Weapon w = armed(5);
-        pickup_update(&g_pools, &L, eye_at(0.0f, 0.0f), &hp, PLAYER_MAX_HP, &w, &keys, DT);
+        pickup_update(&g_pools, &L, eye_at(0.0f, 0.0f), &hp, PLAYER_MAX_HP, &w, &keys, 0, DT);
         okf(w.ammo[WP_SHOTGUN] == 5 + wp_stats(WP_SHOTGUN)->pickup_ammo,
             "ammo box gives shells", (float)w.ammo[WP_SHOTGUN],
             (float)(5 + wp_stats(WP_SHOTGUN)->pickup_ammo));
         ok(hp == 50, "and does not touch health");
         /* Standing on the now-empty spot gives nothing more. */
         int a2 = w.ammo[WP_SHOTGUN];
-        pickup_update(&g_pools, &L, eye_at(0.0f, 0.0f), &hp, PLAYER_MAX_HP, &w, &keys, DT);
+        pickup_update(&g_pools, &L, eye_at(0.0f, 0.0f), &hp, PLAYER_MAX_HP, &w, &keys, 0, DT);
         ok(w.ammo[WP_SHOTGUN] == a2, "the collected box gives nothing the second time");
     }
 
@@ -114,7 +114,7 @@ int main(void) {
         int hp = PLAYER_MAX_HP, keys = KEY_NONE; Weapon w = armed(5);
 
         /* At full health, the medkit must be ignored and remain. */
-        pickup_update(&g_pools, &L, eye_at(5.0f, 0.0f), &hp, PLAYER_MAX_HP, &w, &keys, DT);
+        pickup_update(&g_pools, &L, eye_at(5.0f, 0.0f), &hp, PLAYER_MAX_HP, &w, &keys, 0, DT);
         ok(hp == PLAYER_MAX_HP, "a medkit at full health heals nothing");
         int live = 0; for (int i = 0; i < pickup_count(&g_pools); i++)
             if (pickup_at(&g_pools, i)->active) live++;
@@ -122,7 +122,7 @@ int main(void) {
 
         /* Hurt, then walk over it: it heals, capped at max. */
         hp = PLAYER_MAX_HP - 10;
-        pickup_update(&g_pools, &L, eye_at(5.0f, 0.0f), &hp, PLAYER_MAX_HP, &w, &keys, DT);
+        pickup_update(&g_pools, &L, eye_at(5.0f, 0.0f), &hp, PLAYER_MAX_HP, &w, &keys, 0, DT);
         ok(hp == PLAYER_MAX_HP, "hurt, the medkit heals but does not overfill");
     }
 
@@ -130,7 +130,7 @@ int main(void) {
     {
         pickup_spawn_level(&g_pools, &L);
         int hp = 50, keys = KEY_NONE; Weapon w = armed(wp_stats(WP_SHOTGUN)->max_ammo);
-        pickup_update(&g_pools, &L, eye_at(0.0f, 0.0f), &hp, PLAYER_MAX_HP, &w, &keys, DT);
+        pickup_update(&g_pools, &L, eye_at(0.0f, 0.0f), &hp, PLAYER_MAX_HP, &w, &keys, 0, DT);
         ok(w.ammo[WP_SHOTGUN] == wp_stats(WP_SHOTGUN)->max_ammo,
            "a full belt ignores the ammo box");
         int live = 0; for (int i = 0; i < pickup_count(&g_pools); i++)
@@ -192,6 +192,76 @@ int main(void) {
            "a name is matched by its length, not by a terminator");
         ok(pickup_kind_for_n("health", 3) < 0,
            "and a prefix of a name is not that name");
+    }
+
+
+    /* --- an artifact starts a clock, and a second one restarts it ---------
+       THE RULE WORTH A CHECK IS THE SECOND HALF. That a pickup sets a clock is
+       hard to get wrong and obvious the moment it is played; that a second one
+       RESTARTS rather than ADDS is one character of difference, invisible in a
+       single playthrough, and it is the rule player.h states outright -- adding
+       turns a room with two artifacts into a room with one that lasts twice as
+       long, which is not what an author placing two of them meant.
+
+       All three are walked over rather than one, because the kinds are looked
+       up by name and a table with two rows pointing at the same entry is
+       exactly the kind of mistake that passes when only one row is tried.
+       *검사할 값어치가 있는 규칙은 뒤쪽 절반입니다.* 획득물이 시계를 시작한다는 것은 틀리기
+       어렵고 플레이하는 순간 명백합니다. 두 번째 것이 더하는 것이 아니라 *다시 시작한다*는 것은
+       한 글자 차이이고 한 번의 플레이로는 보이지 않으며, player.h가 명시하는 규칙입니다.
+       더하기는 아티팩트 둘이 있는 방을 두 배로 오래가는 하나가 있는 방으로 만들고, 그것은 둘을
+       놓은 제작자가 뜻한 바가 아닙니다.
+
+       하나가 아니라 셋 모두를 밟아 보는 이유는, 종류가 이름으로 조회되고 두 행이 같은 항목을
+       가리키는 표는 한 행만 시험할 때 정확히 통과해 버리는 종류의 실수이기 때문입니다. */
+    {
+        static const struct { const char *name; int which; } ART[] = {
+            { "quad", PW_QUAD }, { "shadow", PW_SHADOW }, { "aegis", PW_AEGIS },
+        };
+        for (int a = 0; a < 3; a++) {
+            Level z = {0}; L = z;
+            Sector *s = &L.sectors[L.n_sectors++];
+            short p[8] = { -1000,-1000, 1000,-1000, 1000,1000, -1000,1000 };
+            for (int i = 0; i < 8; i++) s->pts[i] = p[i];
+            s->n = 4; s->floor = 0; s->ceil = 600;
+
+            for (int n = 0; n < 2; n++) {          /* two of the same artifact */
+                Entity *e = &L.ents[L.n_ents++];
+                int c = 0;
+                while (ART[a].name[c]) { e->kind[c] = ART[a].name[c]; c++; }
+                e->kind[c] = 0;
+                e->x = (short)(n * 400); e->z = 0;
+            }
+            pickup_reset(&g_pools);
+            pickup_spawn_level(&g_pools, &L);
+
+            int hp = 50, keys = KEY_NONE; Weapon w = armed(5);
+            float power[PW_KINDS] = {0};
+            char label[80];
+
+            pickup_update(&g_pools, &L, eye_at(0.0f, 0.0f), &hp, PLAYER_MAX_HP,
+                          &w, &keys, power, DT);
+            snprintf(label, sizeof label,
+                     "the %s starts its own clock and no other", ART[a].name);
+            okf(power[ART[a].which] == PLAYER_POWER_TIME, label,
+                power[ART[a].which], PLAYER_POWER_TIME);
+
+            int others = 0;
+            for (int k = 0; k < PW_KINDS; k++)
+                if (k != ART[a].which && power[k] != 0.0f) others++;
+            snprintf(label, sizeof label,
+                     "and the %s leaves the other two alone", ART[a].name);
+            ok(others == 0, label);
+
+            /* Half spent, then the twin is walked over. */
+            power[ART[a].which] = PLAYER_POWER_TIME * 0.5f;
+            pickup_update(&g_pools, &L, eye_at(4.0f, 0.0f), &hp, PLAYER_MAX_HP,
+                          &w, &keys, power, DT);
+            snprintf(label, sizeof label,
+                     "and a second %s restarts rather than adds", ART[a].name);
+            okf(power[ART[a].which] == PLAYER_POWER_TIME, label,
+                power[ART[a].which], PLAYER_POWER_TIME);
+        }
     }
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall pickup checks passed\n", fails);

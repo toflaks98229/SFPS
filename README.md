@@ -22,7 +22,7 @@ Models, materials, sounds and levels are all authored as text and hot-reload
 into the running game.
 
 ```
-1,283,584 / 1,474,560 bytes   (87.05% used)
+1,285,120 / 1,474,560 bytes   (87.15% used)
 ```
 
 ## Build
@@ -1589,6 +1589,41 @@ bottom-right, red at zero.
 
 Collection runs every frame against the player's feet, so a pickup is taken
 *in transit* — you grab it walking through, you do not have to stop on it.
+
+### The three artifacts
+
+`quad`, `shadow` and `aegis` are the exception to *collect only if it helps* —
+an artifact is always taken, because what it gives is time and there is no
+"full" to check against. Each is thirty seconds
+(`PLAYER_POWER_TIME` in [src/player.h](src/player.h)), and picking up a second
+one **restarts** the clock rather than adding to it: adding would turn a room
+with two artifacts into a room with one that lasts twice as long, which is not
+what an author placing two of them meant.
+
+| | what it does | who reads the clock |
+|---|---|---|
+| **quad** | damage dealt ×4 | `Weapon::damage_mul` |
+| **shadow** | monsters cannot see you | `EnemyPool::blinded` |
+| **aegis** | damage taken cut to 30% | `aegis_pct` in [src/world.c](src/world.c) |
+
+All three are one enum for one reason: **each is a clock and a thing that reads
+it**. `step_powers` counts them down once a frame and sets the two knobs; there
+is no dispatch and no table of function pointers, because three effects that
+share nothing but a timer are three `if`s in three modules. `weapon.c` is handed
+a number to multiply by and `enemy.c` a bit saying whether it can see anything —
+neither learns what a `Player` is.
+
+`aegis` is an adaptation. It comes from Quake's red armour, which is a second
+damage *pool*, and this game has no second pool — so the item becomes what a
+suit of armour **does** for a while instead of becoming a bar. Quake absorbs
+80% and this leaves 30%, deliberately weaker: red armour also had 200 points
+that ran out, and a flat 80% for thirty seconds with nothing to deplete is
+closer to invulnerability than to armour.
+
+Remaining seconds show above the health, in the colour of the ring on the floor,
+**rounded up** so the last second reads `1` rather than `0`. They have their own
+sound (`part` in [assets/sounds.txt](assets/sounds.txt)) rather than the ammo
+box's — a thirty-second window should not be announced like a shell pickup.
 
 ## Level transitions
 

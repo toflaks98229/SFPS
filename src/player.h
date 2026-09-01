@@ -60,6 +60,132 @@
 
 #define PLAYER_MAX_HP  100     ///< @brief Health at spawn and the cap pickups top up to. / 스폰 시 체력이자 아이템으로 회복 가능한 상한값.
 
+/**
+ * @brief The three things a Quake artifact does, as this game can do them.
+ *
+ * ENGLISH
+ * -------
+ * ALL THREE ARE A CLOCK, and that is the whole reason they are one enum. A
+ * powerup here is a number of seconds and a thing that reads it: nothing is
+ * consumed, nothing stacks, and picking one up while it is running sets the
+ * clock back to full rather than adding to it. That rule is worth stating
+ * because the alternative -- adding -- turns a room with two of an artifact
+ * into a room with one that lasts twice as long, which is not what an author
+ * placing two of them meant.
+ *
+ * ::PW_AEGIS IS AN ADAPTATION AND THE OTHER TWO ARE NOT. Quake's
+ * `item_artifact_super_damage` and `item_artifact_invisibility` are timers
+ * already. `item_armorInv` is RED ARMOUR -- a second damage pool with its own
+ * number and its own absorption rate -- and this engine says in three places
+ * that it does not have one: the importer's own note is "ARMOUR BECOMES HEALTH.
+ * There is no second damage pool in this game". Rather than contradict that to
+ * bring one item across, the item becomes what a suit of armour DOES for a
+ * while: damage taken is cut. No pool, no second bar, and the same clock the
+ * other two run on.
+ *
+ * WHAT THEY COST TO ADD, one each: a field in this array, a name in pickup.c, a
+ * drawing in sprite.c, and the one place that reads the clock. There is no
+ * dispatch and no table of function pointers, for ::MonBehaviour's reason --
+ * three effects that share nothing but a timer are three `if`s in three
+ * modules, and a table would put them in one place that none of them belongs.
+ *
+ * 한국어
+ * ------
+ * @brief Quake 아티팩트 셋이 하는 일을, 이 게임이 할 수 있는 방식으로.
+ *
+ * *셋 다 시계이며*, 그것이 이들이 하나의 열거형인 이유의 전부입니다. 이곳의 파워업은 몇 초와
+ * 그것을 읽는 무언가입니다. 소모되는 것도 중첩되는 것도 없고, 켜져 있는 동안 하나를 더 주우면
+ * 더해지는 것이 아니라 시계가 다시 가득 찹니다. 그 규칙을 적어 두는 이유는, 대안(더하기)이
+ * 아티팩트 둘이 있는 방을 두 배로 오래가는 하나가 있는 방으로 만들기 때문입니다. 그것은 둘을
+ * 놓은 제작자가 뜻한 바가 아닙니다.
+ *
+ * *::PW_AEGIS는 각색이고 나머지 둘은 아닙니다.* Quake의 `item_artifact_super_damage`와
+ * `item_artifact_invisibility`는 이미 타이머입니다. `item_armorInv`는 *붉은 갑옷*이며 자기
+ * 수치와 흡수율을 가진 두 번째 피해 풀인데, 이 엔진은 그런 것이 없다고 세 곳에서 말합니다.
+ * 임포터 자신의 문장이 "방어구는 체력이 된다. 이 게임에 두 번째 피해 풀은 없다"입니다. 항목
+ * 하나를 건너오게 하려고 그것을 뒤집는 대신, 항목이 *갑옷이 한동안 해 주는 일*이 됩니다. 받는
+ * 피해가 줄어듭니다. 풀도 두 번째 막대도 없고, 나머지 둘과 같은 시계를 씁니다.
+ *
+ * *하나를 더하는 비용은 각각* 이 배열의 칸 하나, pickup.c의 이름 하나, sprite.c의 그림 하나,
+ * 그리고 그 시계를 읽는 한 곳입니다. 디스패치도 함수 포인터 표도 없으며, 이유는
+ * ::MonBehaviour의 것과 같습니다. 타이머 말고는 공유하는 것이 없는 효과 셋은 세 모듈의 `if`
+ * 셋이고, 표는 그것들을 어느 쪽도 속하지 않는 한 자리에 모아 둘 뿐입니다.
+ */
+typedef enum {
+    PW_QUAD,    /**< Damage dealt is multiplied. / 주는 피해가 곱해집니다. */
+    PW_SHADOW,  /**< Monsters cannot see the player. / 몬스터가 플레이어를 보지 못합니다. */
+    PW_AEGIS,   /**< Damage taken is cut. / 받는 피해가 줄어듭니다. */
+    PW_KINDS    /**< How many. / 개수. */
+} PowerKind;
+
+/**
+ * @brief Seconds a powerup runs for.
+ *
+ * ENGLISH: Quake's thirty for the quad and the ring, and the same number here
+ * for all three because the artifacts in a map are placed against each other:
+ * an author who puts a quad at one end and a ring at the other is measuring the
+ * walk between them in powerup-seconds, and giving them different clocks
+ * rewrites that spacing without touching the map.
+ *
+ * 한국어: 쿼드와 반지에 대한 Quake의 30초이며, 이곳에서는 셋 모두 같은 수입니다. 맵의
+ * 아티팩트들은 서로에 대해 배치되기 때문입니다. 한쪽 끝에 쿼드를, 반대쪽에 반지를 놓은
+ * 제작자는 그 사이의 걸음을 *파워업 초*로 재고 있으며, 서로 다른 시계를 주는 것은 맵을
+ * 건드리지 않고 그 간격을 다시 쓰는 일입니다.
+ */
+#define PLAYER_POWER_TIME 30.0f
+
+/**
+ * @brief What ::PW_QUAD multiplies damage by.
+ *
+ * ENGLISH: Quake's four, and it is worth keeping the number rather than tuning
+ * it down: the quad is not a damage tweak, it is a window in which the fight
+ * changes shape, and a player who cannot feel the difference has been handed a
+ * pickup that lies. A brute is 120 hit points and the shotgun does 9 a pellet;
+ * quadded, the wall stops being a wall.
+ *
+ * 한국어: Quake의 4이며, 낮춰 조율하는 대신 그 수를 지킬 값어치가 있습니다. 쿼드는 피해
+ * 조정이 아니라 *전투의 모양이 바뀌는 창*이고, 차이를 느낄 수 없는 플레이어는 거짓말하는
+ * 획득물을 받은 것입니다. 브루트는 체력 120이고 샷건은 펠릿당 9입니다. 쿼드가 걸리면 그 벽은
+ * 벽이기를 그만둡니다.
+ */
+#define PLAYER_QUAD_MUL 4
+
+/**
+ * @brief What ::PW_AEGIS leaves of the damage taken, as a percentage.
+ *
+ * ENGLISH: Quake's red armour absorbs 80%, and this leaves 30% -- deliberately
+ * weaker, because red armour also had 200 points that ran out and this does
+ * not. A flat 80% cut for thirty seconds with no pool to deplete is closer to
+ * invulnerability than to armour. The map DOES carry a pentagram --
+ * `item_artifact_invulnerability`, which was crossing UNMAPPED AND UNREPORTED
+ * until these three were written and now sits in the importer's DROP table. It
+ * stays out: a clock that zeroes damage taken is not something this arena
+ * survives, whose floor is a lava sea.
+ *
+ * INTEGER PERCENT, not a float, because the value it names is a ratio and the
+ * two places that apply it hold different units. A monster's blow is an integer
+ * and takes `dmg * PCT / 100` with a floor of one, or a one-point hit vanishes.
+ * A hazard floor is a RATE and takes it in float, into the accumulator that
+ * already carries fractions across frames -- scaling the hazard's own integer
+ * `dps` would round a three-a-second pool to nothing. Same ratio, two roundings,
+ * and world.c's `aegis_pct` is where the reasoning for that lives.
+ *
+ * 한국어: Quake의 붉은 갑옷은 80%를 흡수하며, 이것은 30%를 남깁니다. 의도적으로 더 약합니다.
+ * 붉은 갑옷에는 소진되는 200점이 함께 있었고 이것에는 없기 때문입니다. 소진될 풀 없이 30초
+ * 동안 80%를 깎는 것은 갑옷보다 무적에 가깝습니다. 이 맵에는 펜타그램이 *있습니다*.
+ * `item_artifact_invulnerability`이며, 이 셋을 쓰기 전까지 *매핑되지도 보고되지도 않은 채로*
+ * 건너오고 있었고 이제 임포터의 DROP 표에 있습니다. 그것은 계속 빠집니다. 받는 피해를 0으로
+ * 만드는 시계는 바닥이 용암 바다인 이 투기장이 견딜 수 있는 것이 아닙니다.
+ *
+ * *실수가 아니라 정수 퍼센트*인 이유는 이것이 가리키는 값이 비율이고, 이를 적용하는 두 자리가
+ * 서로 다른 단위를 쥐고 있기 때문입니다. 몬스터의 일격은 정수이며 1의 하한과 함께
+ * `dmg * PCT / 100`을 취합니다. 그렇지 않으면 1점짜리 타격이 사라집니다. 유해 지형 바닥은
+ * *비율*이며, 이미 프레임을 가로질러 소수를 나르는 누산기 안에서 실수로 취합니다. 유해 지형
+ * 자신의 정수 `dps`에 배율을 적용하면 초당 3인 웅덩이가 0으로 반올림됩니다. 같은 비율, 두 가지
+ * 반올림이며, 그 논거가 사는 곳은 world.c의 `aegis_pct`입니다.
+ */
+#define PLAYER_AEGIS_PCT 30
+
 /* ==========================================================================
  * DEATH COLLAPSE -- the camera falling to the floor when the player dies.
  *
@@ -223,6 +349,22 @@ typedef struct {
     int   grounded;     /**< Non-zero while standing on a floor. Recomputed every player_move. / 바닥에 서 있으면 0이 아닙니다. player_move마다 재계산됩니다. */
     int   health;       /**< 0 = dead; set by player_spawn, drained by monsters. / 0이면 사망. player_spawn이 설정하고 몬스터가 감소시킵니다. */
     float hurt;         /**< Red screen flash on taking a hit, decays to 0. / 피격 시 붉은 화면 점멸 효과. 0으로 감쇠합니다. */
+
+    /**
+     * @brief Seconds left on each ::PowerKind. 0 is off.
+     *
+     * ENGLISH: On the PLAYER and not in the run, for ::Player::keys' reason: it
+     * is something carried between rooms, and a level transition that took a
+     * quad away would be spending the player's find on a doorway. ::world_step
+     * counts them down; the three things that read them are in three modules and
+     * are named in ::PowerKind.
+     *
+     * 한국어: 플레이가 아니라 *플레이어*에 있으며, 이유는 ::Player::keys와 같습니다. 방 사이로
+     * 들고 다니는 것이고, 쿼드를 앗아가는 레벨 전환은 플레이어가 찾아낸 것을 문간에 쓰는
+     * 일입니다. ::world_step이 세어 내리며, 이것을 읽는 셋은 세 모듈에 있고 ::PowerKind에
+     * 이름이 적혀 있습니다.
+     */
+    float power[PW_KINDS];
 
     /**
      * @brief Keycards held, a KEY_* mask from level.h.

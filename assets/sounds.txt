@@ -131,6 +131,16 @@ s pmed
 l 2 220 660  990   4 210  55     # a warm ascending chime
 l 2 180 990 1320  10 170  40
 
+# AN ARTIFACT IS NOT A SHELL BOX. Both were pammo until the three powerups were
+# written, which made a thirty-second window sound exactly like topping up ammo
+# -- and this file already differentiates, pmed being its own chime. Long, rising
+# and harmonically thicker than either: the pickup that changes the next half
+# minute should be the one the player hears from across the room.
+s part
+l 2 320 330  990   8 300  60     # the swell -- a fifth and an octave up
+l 2 300 494 1480  40 280  38     # a fifth above that, entering late
+l 1 180 165  330  12 170  22     # a saw body, so it is not a pure tone
+
 s dry
 l 0 40  180  150   0  38  45     # a small dead click, no body
 l 3 30  600  300   0  28  25

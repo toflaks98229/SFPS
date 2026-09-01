@@ -12,7 +12,9 @@
 #include "brush.h"   /* brush_point_in -- a teleport destination must not sit in its own volume */
 #include "txt.h"    /* txt_is, and txt_to_int, which every number below goes through */
 #include <limits.h> /* INT_MAX / INT_MIN, the two values the saturation lands on */
+#include <string.h>   /* strlen -- an entity kind is a plain C string */
 #include "player.h"
+#include "pickup.h"  /* pickup_kind_for_n -- is the artifact IN the level */
 /* Builds real geometry to check winding and spans, so it needs the renderer's
    CPU-side half and MdlRange by value. level.h forward-declares both rather
    than including them, keeping the GL stack out of the simulation headers.
@@ -1752,6 +1754,100 @@ int main(void) {
                 "and none of them lands you back inside itself", self, 0);
             okd(at_origin == 0,
                 "and none of them resolved to the world origin", at_origin, 0);
+
+            /* --- the artifacts are IN the level ------------------------
+             *
+             * ENGLISH
+             * -------
+             * THE THREE POWERUPS SHIPPED WITHOUT SPAWNING. Their sprites drew,
+             * pickuptest walked each one twice, steptest proved all three
+             * effects end to end, and the map carried an entity for each --
+             * and none of them ever reached a level, because the importer
+             * wrote `"classname" "quad"` and level.c takes a classname apart
+             * by ALIAS or by a `monster_`/`item_` PREFIX and ignores anything
+             * that is neither. A bare `quad` parsed to no kind and was
+             * dropped, in a loop whose own comment says it "cannot check that
+             * this one is real".
+             *
+             * Every test that existed was of a part. This is the one that
+             * asks the whole question -- is the thing in the game -- and it
+             * is asked of the SHIPPED map rather than a fixture, because the
+             * bug lived in the file the fixtures do not use.
+             *
+             * 한국어
+             * ------
+             * *파워업 셋이 스폰되지 않은 채로 출하되었습니다.* 스프라이트는 그려졌고,
+             * pickuptest는 각각을 두 번 밟았고, steptest는 세 효과를 끝에서 끝까지
+             * 증명했으며, 맵은 각각에 대한 엔티티를 실었습니다. 그런데 어느 것도 레벨에
+             * 닿은 적이 없습니다. 임포터가 `"classname" "quad"`를 썼고, level.c는
+             * classname을 ALIAS나 `monster_`/`item_` *접두사*로 해체하며 둘 다 아닌
+             * 것은 무시하기 때문입니다. 맨이름 `quad`는 아무 kind로도 파싱되지 않고
+             * 버려졌습니다. 그 루프 자신의 주석이 "이것이 진짜인지 검사할 수 없다"고
+             * 말하는 바로 그곳에서입니다.
+             *
+             * 존재하던 모든 테스트는 *부분*에 대한 것이었습니다. 이것은 전체 질문을 하는
+             * 하나입니다. 그것이 게임 안에 있는가. 그리고 픽스처가 아니라 *출하되는* 맵에
+             * 대해 묻습니다. 버그가 픽스처는 쓰지 않는 파일에 살았기 때문입니다. */
+            int found[PW_KINDS] = {0};
+            for (int i = 0; i < tl.n_ents; i++) {
+                int k = pickup_kind_for_n(tl.ents[i].kind,
+                                          (int)strlen(tl.ents[i].kind));
+                if (k >= PK_POWER0 && k <= PK_POWER_LAST) found[k - PK_POWER0]++;
+            }
+            okd(found[PW_QUAD] == 1 && found[PW_SHADOW] == 1 &&
+                found[PW_AEGIS] == 1,
+                "the arena's three artifacts all reached it as pickups",
+                found[PW_QUAD] + found[PW_SHADOW] + found[PW_AEGIS], 3);
+
+            /* --- and no entity in it is a kind nobody claims ------------
+             *
+             * ENGLISH
+             * -------
+             * THE GENERAL FORM OF THE BUG ABOVE. level.c turns `item_x` into
+             * kind `x` for ANY x -- its own comment says it "cannot check that
+             * this one is real" -- so a classname can survive the parse, take a
+             * slot in Level::ents, and mean nothing to any module. That is how
+             * `item_artifact_invulnerability` sat in the shipped map looking
+             * like an item.
+             *
+             * The check level.c cannot make, made here instead: every kind the
+             * arena carries must be claimed by pickup.c, by enemy.c, or be one
+             * of the handful world.c and level.c read by name. A kind nobody
+             * claims is an author's intent that silently does nothing.
+             *
+             * 한국어
+             * ------
+             * *위 버그의 일반형입니다.* level.c는 어떤 x에 대해서든 `item_x`를 kind `x`로
+             * 만들며, 그 주석 스스로 "이것이 진짜인지 검사할 수 없다"고 말합니다. 그래서
+             * classname이 파싱을 살아남아 Level::ents의 자리를 차지하고도 어느 모듈에게도
+             * 아무 의미가 없을 수 있습니다. `item_artifact_invulnerability`가 출하 맵에서
+             * 아이템처럼 보이며 앉아 있던 방식이 그것입니다.
+             *
+             * level.c가 할 수 없는 검사를 대신 이곳에서 합니다. 투기장이 지닌 모든 kind는
+             * pickup.c나 enemy.c가 주장하거나, world.c와 level.c가 이름으로 읽는 몇 안 되는
+             * 것 중 하나여야 합니다. 아무도 주장하지 않는 kind는 조용히 아무 일도 하지 않는
+             * 제작자의 의도입니다. */
+            static const char *const INFO_KINDS[] = {
+                "exit", "push", "altar", "wardair", "wardground",
+                "spawner_brute", "spawner_caster", "spawner_water_spirit",
+            };
+            int unclaimed = 0;
+            for (int i = 0; i < tl.n_ents; i++) {
+                const char *k = tl.ents[i].kind;
+                int len = (int)strlen(k);
+                if (pickup_kind_for_n(k, len) >= 0) continue;
+                if (mon_type_for(k) >= 0) continue;
+                int info = 0;
+                for (int j = 0; j < (int)(sizeof(INFO_KINDS)/sizeof(INFO_KINDS[0])); j++)
+                    if (txt_eq(k, INFO_KINDS[j])) { info = 1; break; }
+                if (info) continue;
+                if (!unclaimed) printf("\n  kinds nothing claims:\n");
+                printf("    %s\n", k);
+                unclaimed++;
+            }
+            okd(unclaimed == 0,
+                "and every kind in it is claimed by some module",
+                unclaimed, 0);
             level_release(&tl);
         }
     }

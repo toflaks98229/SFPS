@@ -365,6 +365,71 @@ LIGHTS = {
     'light_flame_large_yellow': {'light': '350', '_color': '255 220 140'},
 }
 
+
+# --- what the ENGINE can do with a classname --------------------------------
+#
+# THE DISPATCH ABOVE HAS A SILENT ARM. An entity that matches no table falls
+# through to `kept` unchanged, and that reads as "crosses as itself" -- which is
+# true of `worldspawn` and a lie about everything else. level.c takes a
+# classname apart by ALIAS or by a `monster_`/`item_` PREFIX and IGNORES what is
+# neither, in a loop whose own comment admits it "cannot check that this one is
+# real". So an unmapped name is not carried across; it is DELETED, at load, with
+# nothing said, in a different repository from the one that wrote it.
+#
+# Two things went out that way before this existed. `item_artifact_invulnerability`
+# rode into the shipped map as an entity the engine has no name for. And the
+# three artifacts THIS script converts were emitted as bare `quad`, `shadow` and
+# `aegis` -- no prefix, so no kind, so no pickup: drawn, tested, documented and
+# absent from the level.
+#
+# The rule is level.c's, restated here rather than guessed at, and the checker
+# below is the only thing in either repository that compares the two.
+#
+# 한국어
+# ------
+# *위의 디스패치에는 조용한 갈래가 있습니다.* 어느 표에도 걸리지 않은 엔티티는 그대로 `kept`로
+# 떨어지며, 그것은 "자기 자신으로 건너간다"로 읽힙니다. `worldspawn`에 대해서는 참이고 그 밖의
+# 모든 것에 대해서는 거짓말입니다. level.c는 classname을 ALIAS나 `monster_`/`item_` *접두사*로
+# 해체하고 둘 다 아닌 것은 *무시*하며, 그 루프의 주석은 "이것이 진짜인지 검사할 수 없다"고
+# 스스로 인정합니다. 그러므로 매핑되지 않은 이름은 건너오는 것이 아니라 *삭제됩니다*. 로드
+# 시점에, 아무 말 없이, 그것을 쓴 저장소가 아닌 다른 저장소에서 말입니다.
+#
+# 이것이 있기 전에 그렇게 나간 것이 둘입니다. `item_artifact_invulnerability`는 엔진이 이름을
+# 모르는 엔티티로 출하 맵에 실려 갔습니다. 그리고 이 스크립트가 변환하는 아티팩트 셋은 접두사
+# 없는 맨 `quad`, `shadow`, `aegis`로 나갔습니다. 접두사가 없으니 kind가 없고, kind가 없으니
+# 획득물이 없습니다. 그려지고, 검사되고, 문서화되고, 레벨에는 없었습니다.
+#
+# 규칙은 level.c의 것이며 짐작이 아니라 이곳에 다시 적었습니다. 아래의 검사기는 두 저장소를
+# 통틀어 그 둘을 비교하는 유일한 것입니다.
+ENGINE_ALIASES = (
+    'info_exit', 'info_push', 'info_altar', 'info_ward_air', 'info_ward_ground',
+)
+ENGINE_HANDLES = (
+    'worldspawn', 'light', 'info_player_start', 'info_player_deathmatch',
+    'trigger_teleport', 'info_teleport_destination', 'trigger_hurt', 'func_door',
+)
+
+def engine_understands(cn):
+    """Whether this name reaching the .map means anything in the game.
+
+    NOT just level.c's parse. That accepts ANY `item_x` and turns it into
+    kind `x`, real or not -- which is how item_artifact_invulnerability rode
+    in looking valid. The question worth asking is stricter: did this name
+    come out of one of OUR tables, or is it one of the handful the engine
+    handles by itself? Anything else is a name the source map had and this
+    conversion never made a decision about.
+
+    *level.c의 파싱만이 아닙니다.* 그것은 어떤 `item_x`든 받아 kind `x`로 만들며, 진짜인지는
+    묻지 않습니다. item_artifact_invulnerability가 멀쩡해 보이며 실려 온 방식이 그것입니다.
+    물을 값어치가 있는 질문은 더 엄격합니다. 이 이름이 *우리* 표에서 나왔는가, 아니면 엔진이
+    스스로 처리하는 몇 안 되는 것 중 하나인가. 그 밖의 모든 것은 원본 맵에 있었고 이 변환이
+    아무 결정도 내리지 않은 이름입니다."""
+    return (cn in ENGINE_ALIASES or cn in ENGINE_HANDLES
+            or cn.startswith('trigger_')
+            or cn in set(ITEMS.values())
+            or cn in set(cn2 for cn2, _ in FURNITURE)
+            or cn == MAW)
+
 DROP = {
     'ambient_drip':               'a looping sound with no counterpart here',
     'info_intermission':          'a camera for a scoreboard this game has none of',
@@ -423,6 +488,15 @@ DROP = {
 # Quake's roster against ours. By role: shells are the spread weapon's, spikes
 # and cells feed sustained fire, rockets are splash.
 ITEMS = {
+    # `item_` IS NOT DECORATION. level.c takes a classname apart by ALIAS or by
+    # a `monster_`/`item_` prefix and IGNORES everything else, so a bare `quad`
+    # parsed to no kind at all and the artifact never reached the level. The
+    # prefix is what makes the remainder the pickup name -- exactly how
+    # `item_health` has always worked.
+    # `item_`은 장식이 아닙니다. level.c는 classname을 ALIAS나 `monster_`/`item_` 접두사로
+    # 해체하고 그 밖의 모든 것을 *무시*하므로, 맨이름 `quad`는 아무 kind로도 파싱되지 않았고
+    # 아티팩트는 레벨에 닿은 적이 없습니다. 접두사가 나머지를 획득물 이름으로 만듭니다.
+    # `item_health`가 늘 동작해 온 방식 그대로입니다.
     # THE THREE ARTIFACTS, and one of them is an adaptation. Quake's quad and
     # its ring of shadows are timers already and cross as themselves. Red armour
     # is a second damage POOL, which the note below still says this game does not
@@ -433,9 +507,9 @@ ITEMS = {
     # 문장이 이 게임에 그런 것이 없다고 여전히 말합니다. 그래서 풀이 아니라 *갑옷이 한동안
     # 해 주는 일*로 건너옵니다. PW_AEGIS이며, 시계가 도는 동안 받는 피해가 줄어듭니다.
     # player.h를 참조하십시오.
-    'item_artifact_super_damage': 'quad',
-    'item_artifact_invisibility': 'shadow',
-    'item_armorInv':              'aegis',
+    'item_artifact_super_damage': 'item_quad',
+    'item_artifact_invisibility': 'item_shadow',
+    'item_armorInv':              'item_aegis',
 
     'item_health':           'item_health',
     'item_shells':           'item_shotgunammo',
@@ -998,6 +1072,17 @@ def convert(text, report):
             report.setdefault('remapped', {}).setdefault(cn, 0)
             report['remapped'][cn] += 1
 
+        # THE SILENT ARM, MADE LOUD. Everything that reached here without
+        # matching a table is about to cross as itself, so this is the last
+        # place the conversion can notice that the engine will throw it away.
+        # *조용한 갈래를 시끄럽게 만듭니다.* 어느 표에도 걸리지 않고 이곳에 닿은 모든 것이
+        # 곧 자기 자신으로 건너갑니다. 그러므로 이곳이 엔진이 그것을 버릴 것임을 변환이
+        # 알아챌 수 있는 마지막 자리입니다.
+        if not engine_understands(keys.get('classname', '')):
+            cn2 = keys.get('classname', '(no classname)')
+            report.setdefault('unknown', {}).setdefault(cn2, 0)
+            report['unknown'][cn2] += 1
+
         kept.append((keys, [retexture(b, report)
                             for b in solid_only(brushes, report)]))
 
@@ -1305,6 +1390,23 @@ def main():
             # KeyError가 났습니다. 보고하려는 바로 그것에 대해 죽는 보고입니다.
             to = ITEMS.get(k) or ('light' if k in LIGHTS else '?')
             print('    %-26s -> %-20s x%d' % (k, to, v))
+    # LOUDER THAN THE REST OF THE REPORT, because every other line here
+    # describes a decision somebody made and this one describes a hole.
+    # A name printed here reaches the .map and is deleted at load: the
+    # entity is in the file, absent from the game, and nothing at either
+    # end says so. Put it in DROP if it should not cross, or give it a
+    # `monster_`/`item_` name in ITEMS if it should.
+    # *보고서의 나머지보다 시끄럽습니다.* 이곳의 다른 모든 줄은 누군가 내린 결정을
+    # 서술하고, 이 줄은 구멍을 서술하기 때문입니다. 이곳에 찍힌 이름은 .map에 닿았다가
+    # 로드 시점에 삭제됩니다. 엔티티는 파일에 있고 게임에는 없으며, 양쪽 끝 어디에서도
+    # 그렇다고 말하지 않습니다. 건너오지 말아야 한다면 DROP에, 건너와야 한다면 ITEMS에서
+    # `monster_`/`item_` 이름을 주십시오.
+    if report.get('unknown'):
+        print('  !! THE ENGINE HAS NO NAME FOR THESE. They are written to the'
+              ' .map and dropped at load:')
+        for k, v in sorted(report['unknown'].items()):
+            print('    %-30s x%d' % (k, v))
+
     if report.get('dropped'):
         print('  dropped:')
         for k, v in sorted(report['dropped'].items()):

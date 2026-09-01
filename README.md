@@ -1625,9 +1625,16 @@ Collection runs every frame against the player's feet, so a pickup is taken
 
 ### The three artifacts
 
-`quad`, `shadow` and `aegis` are the exception to *collect only if it helps* —
-an artifact is always taken, because what it gives is time and there is no
-"full" to check against. Each is thirty seconds
+`item_quad`, `item_shadow` and `item_aegis` are the exception to *collect only
+if it helps* — an artifact is always taken, because what it gives is time and
+there is no "full" to check against.
+
+**The `item_` prefix is load-bearing.** `level.c` takes a classname apart by
+alias or by a `monster_`/`item_` prefix and ignores what is neither, so a bare
+`quad` parses to no kind and is dropped at load — which is what these three
+did for one commit. The prefix is why the engine sees the pickup name.
+
+Each is thirty seconds
 (`PLAYER_POWER_TIME` in [src/player.h](src/player.h)), and picking up a second
 one **restarts** the clock rather than adding to it: adding would turn a room
 with two artifacts into a room with one that lasts twice as long, which is not

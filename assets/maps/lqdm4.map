@@ -9308,7 +9308,7 @@
 }
 }
 {
-"classname" "quad"
+"classname" "item_quad"
 "origin" "-0 -288 -424"
 }
 {
@@ -9342,7 +9342,7 @@
 "origin" "-0 -80 -448"
 }
 {
-"classname" "aegis"
+"classname" "item_aegis"
 "origin" "-0 -0 -64"
 }
 {
@@ -9480,7 +9480,7 @@
 "origin" "320 224 -320"
 }
 {
-"classname" "shadow"
+"classname" "item_shadow"
 "origin" "-192 640 -552"
 }
 {

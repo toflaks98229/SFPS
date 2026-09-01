@@ -22,11 +22,11 @@
 // topped up, not a minute of one. All three are taken unconditionally: a quad
 // at full health is still worth having.
 
-@PointClass size(-14 -14 -14, 14 14 14) color(90 160 255) = quad : "Quad damage. Everything you deal is multiplied by 4 for 30s. A 120hp brute stops being a wall."[]
+@PointClass size(-14 -14 -14, 14 14 14) color(90 160 255) = item_quad : "Quad damage. Everything you deal is multiplied by 4 for 30s. A 120hp brute stops being a wall."[]
 
-@PointClass size(-14 -14 -14, 14 14 14) color(150 90 220) = shadow : "Ring of shadows. Monsters stop noticing and tracking you for 30s. Ones already chasing keep walking to where you were."[]
+@PointClass size(-14 -14 -14, 14 14 14) color(150 90 220) = item_shadow : "Ring of shadows. Monsters stop noticing and tracking you for 30s. Ones already chasing keep walking to where you were."[]
 
-@PointClass size(-14 -14 -14, 14 14 14) color(255 200 90) = aegis : "Aegis. Damage you take is cut to 30% for 30s -- lava and monsters both. Quake red armour, as a clock rather than a second health bar."[]
+@PointClass size(-14 -14 -14, 14 14 14) color(255 200 90) = item_aegis : "Aegis. Damage you take is cut to 30% for 30s -- lava and monsters both. Quake red armour, as a clock rather than a second health bar."[]
 
 @PointClass size(-12 -12 -12, 12 12 12) color(120 255 120) = info_exit : "Standing here ends the level. Where it goes is worldspawn's `next`."[]
 

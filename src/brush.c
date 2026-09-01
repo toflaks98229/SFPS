@@ -1550,6 +1550,49 @@ static const char *const NODRAW[] = { "__TB_empty", "clip", "skip", "trigger" };
  * 패스가 없으므로 물리적으로 그것인 고체로 그려지며, import-librequake.py가 건너오면서
  * 살아남지 못하는 네 가지 중 하나로 기록해 둔 것입니다. 하늘이 아닌 것은 *빛에 대해
  * 불투명한 것*이며, 그것은 다른 곳에서 묻는 다른 질문입니다. */
+/* Quake writes a liquid with a leading `*` and LibreQuake spells the files
+   `star_*`, which is the name a face carries by the time it reaches here --
+   see assets/sprites/import-librequake-textures.py. `star_lava3` and
+   `star_lava1` are the same substance at different brightnesses, so the test is
+   the prefix and not the whole name.
+   NOT `star_` ALONE: `star_water0` and `star_slime1` are liquids too and only
+   one of them is meant to kill you. Water in this engine is a floor you can see
+   through, and a rule that burned everything with a `*` in Quake would burn it.
+   Quake는 액체를 앞의 `*`로 적고 LibreQuake는 그 파일을 `star_*`로 적으며, 그것이 이곳에
+   도착할 무렵 면이 지니고 있는 이름입니다. assets/sprites/import-librequake-textures.py를
+   참조하십시오. `star_lava3`과 `star_lava1`은 밝기만 다른 같은 물질이므로, 검사는 이름 전체가
+   아니라 접두사입니다.
+   *`star_` 하나로는 안 됩니다.* `star_water0`과 `star_slime1`도 액체이고 그중 죽이려는 것은
+   하나뿐입니다. 이 엔진에서 물은 들여다보이는 바닥이며, Quake에서 `*`가 붙은 모든 것을 태우는
+   규칙은 그것도 태울 것입니다. */
+int brush_tex_lava(const char *tex) {
+    if (!tex) return 0;
+    return tex[0] == 's' && tex[1] == 't' && tex[2] == 'a' && tex[3] == 'r' &&
+           tex[4] == '_' && tex[5] == 'l' && tex[6] == 'a' && tex[7] == 'v' &&
+           tex[8] == 'a';
+}
+
+/* Whether any drawn face of this brush is lava, which is the opposite rule to
+   ::brush_is_sky's ALL. A brush with one sky face is a wall that happens to
+   touch the ceiling and light must not pass it; a brush with one lava face is a
+   pool, because the other five are the sides and the bottom nobody ever sees.
+   Asking for `all` here would find no lava in any map ever drawn.
+   이 브러시의 *그려지는 면 중 하나라도* 용암인지이며, ::brush_is_sky의 *전부*와 반대되는
+   규칙입니다. 하늘 면이 하나인 브러시는 어쩌다 천장에 닿은 벽이므로 빛이 지나가서는 안
+   됩니다. 용암 면이 하나인 브러시는 웅덩이입니다. 나머지 다섯은 아무도 보지 않는 옆면과
+   바닥이기 때문입니다. 이곳에서 *전부*를 요구하면 지금껏 그려진 어떤 맵에서도 용암을 찾지
+   못합니다. */
+int brush_is_lava(const BrushMap *m, int bi) {
+    if (!m || bi < 0 || bi >= m->n_brushes) return 0;
+    const Brush *b = &m->brushes[bi];
+    for (int i = 0; i < b->n_faces; i++) {
+        int fi = b->first_face + i;
+        if (fi < 0 || fi >= m->n_faces) continue;
+        if (brush_tex_lava(m->faces[fi].tex)) return 1;
+    }
+    return 0;
+}
+
 int brush_tex_sky(const char *tex) {
     if (!tex) return 0;
     return tex[0] == 's' && tex[1] == 'k' && tex[2] == 'y';

@@ -249,6 +249,7 @@ static void shot_fire(Pools *pl, v3 from, v3 at, float speed, int damage,
 static int shots_update(Pools *pl, const Level *l, v3 player_eye, float dt);
 
 static float mon_step(const MonType *S);
+static int floor_safe(const Level *l, float x, float f, float z);
 static int foot_ok(const Level *l, const MonType *S, float x, float z, float feet, float *floor);
 static int air_ok(const Level *l, const MonType *S, float x, float z, float y);
 static int holds_height(const MonType *S, const Enemy *m);
@@ -1689,6 +1690,29 @@ static int make_monster(Pools *pl, const Level *l, int type,
     float f, c;
     if (!level_ground(l, x, z, from_y, 1e9f, &f, &c)) return 0;
 
+    /* AND NOT ONTO LAVA. ::foot_ok refuses to walk a monster onto a hazard
+       floor, and a spawn that ignored the same rule would put one where it
+       could never have walked -- standing in a sea it will not step out of,
+       burning, because every column around it is refused too. The arena
+       makes this reachable rather than theoretical: `lqdm4` stands a brute
+       spawner 0.48m above its lava and a ground ward slot 0.24m above it.
+       Refused rather than nudged. Moving the spawn to the nearest safe
+       column would be this function guessing at level layout, and a monster
+       that appears somewhere the author did not mark is harder to explain
+       than one that does not appear -- ::enemy_ward_place already treats a
+       candidate it cannot use as one to skip.
+       *그리고 용암 위로는 아닙니다.* ::foot_ok는 몬스터를 위험한 바닥으로 걷게
+       하기를 거절하며, 같은 규칙을 무시하는 스폰은 걸어서는 결코 갈 수 없었을
+       자리에 몬스터를 놓습니다. 빠져나오지 않을 바다에 서서 타는 것이며, 주위의
+       모든 기둥도 함께 거절되기 때문입니다. 아레나가 이것을 이론이 아니라 도달
+       가능한 일로 만듭니다. `lqdm4`는 브루트 스포너를 자기 용암 위 0.48m에,
+       지상 결계핵 자리를 0.24m에 세웁니다.
+       옮기지 않고 거절합니다. 가장 가까운 안전한 기둥으로 스폰을 옮기는 것은 이
+       함수가 레벨 배치를 짐작하는 일이며, 제작자가 표시하지 않은 곳에 나타나는
+       몬스터는 나타나지 않는 몬스터보다 설명하기 어렵습니다.
+       ::enemy_ward_place는 쓸 수 없는 후보를 이미 건너뛰는 것으로 다룹니다. */
+    if (!floor_safe(l, x, f, z)) return 0;
+
     /* WHICH SLOT, and until this existed the answer was always "the next one".
      *
      * A corpse keeps its slot: nothing ever clears ::Enemy::active once a
@@ -2438,6 +2462,63 @@ static float mon_step(const MonType *S)
 
 
 /**
+ * @brief Whether a monster may put its feet on the floor found at this column.
+ *
+ * ENGLISH
+ * -------
+ * @param[in] l   The level.
+ * @param[in] x,z Where.
+ * @param[in] f   The floor height ::level_ground found there.
+ * @return 1 if standing there is survivable, 0 if it is lava.
+ *
+ * ONE RULE, TWO CALLERS, and that is why it is a function rather than a line.
+ * ::foot_ok asks it before a monster STEPS somewhere and ::make_monster asks it
+ * before one is PUT somewhere; the two answering differently is a monster that
+ * spawns into a lava sea it would never have walked into. Psychofuge makes that
+ * a real risk rather than a hypothetical -- its brute spawner stands 0.48m above
+ * the lava and one ground ward slot 0.24m above it, so the room genuinely does
+ * put furniture at the water's edge.
+ *
+ * ASKED AT THE FLOOR, not at the monster's middle. ::level_hazard_at takes a
+ * point, and the lava brush is SOLID, so the point that is inside it is the one
+ * on its surface -- which is exactly where a monster standing there would have
+ * its feet. Asking at the eye finds nothing and reports a lava sea as walkable.
+ *
+ * @note ::air_ok DELIBERATELY DOES NOT CALL THIS. A flyer is not standing on
+ *       anything, so lava underneath it is scenery -- and that asymmetry is the
+ *       whole gameplay consequence of a lava floor: the caster crosses the sea
+ *       and nothing else can. ::MON_FLIES's own note promised exactly this
+ *       ("floating platforms and a chasm are only a threat if something can be
+ *       out over them"), and until there was a floor worth fearing it was a
+ *       promise nothing had collected on.
+ *
+ * 한국어
+ * ------
+ * @brief 몬스터가 이 기둥에서 찾은 바닥에 발을 놓아도 되는지.
+ *
+ * *하나의 규칙, 두 호출자*이며, 그것이 이것이 한 줄이 아니라 함수인 이유입니다. ::foot_ok는
+ * 몬스터가 어딘가로 *딛기* 전에 묻고 ::make_monster는 어딘가에 *놓이기* 전에 묻습니다. 둘이
+ * 다르게 답하는 것은 걸어 들어가지도 않았을 용암 바다에 스폰되는 몬스터입니다. Psychofuge는
+ * 그것을 가정이 아니라 실제 위험으로 만듭니다. 브루트 스포너가 용암 위 0.48m, 지상 결계핵
+ * 자리 하나가 0.24m에 있어, 이 방은 정말로 물가에 가구를 놓습니다.
+ *
+ * *몬스터의 한가운데가 아니라 바닥에서 묻습니다.* ::level_hazard_at은 점을 받고 용암 브러시는
+ * *고체*이므로, 그 안에 있는 점은 그 표면 위의 점입니다. 그리고 그것이 바로 그곳에 선 몬스터의
+ * 발이 놓일 자리입니다. 눈에서 물으면 아무것도 찾지 못하고 용암 바다를 걸을 수 있다고
+ * 보고합니다.
+ *
+ * @note *::air_ok는 의도적으로 이것을 부르지 않습니다.* 비행체는 아무것도 딛고 있지 않으므로
+ *       그 아래의 용암은 배경입니다. 그리고 그 비대칭이 용암 바닥이 낳는 게임플레이 결과의
+ *       전부입니다. 캐스터는 바다를 건너고 다른 무엇도 건너지 못합니다. ::MON_FLIES 자신의
+ *       주석이 정확히 이것을 약속했고("떠 있는 발판과 협곡은 그 위로 나올 수 있는 무언가가
+ *       있어야만 위협이 됩니다"), 두려워할 만한 바닥이 생기기 전까지 그것은 아무도 현금화하지
+ *       않은 약속이었습니다.
+ */
+static int floor_safe(const Level *l, float x, float f, float z) {
+    return level_hazard_at(l, x, f, z) <= 0;
+}
+
+/**
  * @brief Whether this kind of monster can stand at a column.
  *
  * ENGLISH
@@ -2510,6 +2591,8 @@ static int foot_ok(const Level *l, const MonType *S, float x, float z,
                           feet, step, &f, &c))
             return 0;
         if (c - f < S->height)
+            return 0;
+        if (!floor_safe(l, x + OX[i] * S->radius, f, z + OZ[i] * S->radius))
             return 0;
         if (f > highest)
             highest = f;

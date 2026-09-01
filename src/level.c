@@ -1528,6 +1528,72 @@ static void brush_hazards_of(Level *out, BrushMap *bm) {
  * brush.c의 NODRAW 목록에 있어 그려진 적이 없지만, "그려지지 않음"과 "충돌하지 않음"은 서로
  * 다른 비트이며, 튕겨 나오는 텔레포터는 그럴듯한 핑계를 가진 벽입니다.
  */
+/**
+ * @brief Registers every lava brush as a hazard, without making it walkable.
+ *
+ * ENGLISH
+ * -------
+ * @param[out] out The level being filled.
+ * @param[in]  bm  The parsed brush map. Nothing in it is modified.
+ *
+ * QUAKE HAS NO `trigger_hurt` OVER ITS LAVA and neither does the map this game
+ * ships. `*lava` is a CONTENT TYPE there -- the brush's own texture is what
+ * burns you, decided by the engine, with no entity anywhere. So a conversion
+ * that only reads entities brings the lava across as a pool of paint: `lqdm4`
+ * shipped with a lava sea under the whole arena and a hazard count of zero.
+ *
+ * THE BRUSH STAYS SOLID, which is the one thing that separates this from
+ * ::brush_hazards_of. A `trigger_hurt` volume is drawn by nobody and walked
+ * into; this lava is drawn, and it is the floor -- the arena is a structure
+ * standing in a lava sea, and a player who fell THROUGH it would be falling
+ * through the bottom of the world. So `solid` is left alone and the hazard is
+ * registered over geometry you stand on top of.
+ *
+ * WHICH NEEDS ::LVL_HAZARD_UNDERFOOT TO BE FELT AT ALL, and the first version
+ * of this comment got that wrong in a way worth leaving on the record. It
+ * argued that no probe was needed because ::brush_point_in counts its boundary
+ * as inside, so a grounded player's feet -- exactly the floor height -- would
+ * test as inside the lava. The first half is true of the function. The second
+ * is false of the situation: collision seats a body a hair ABOVE the surface,
+ * one centimetre here, so the feet are never on the boundary and the sea read
+ * as harmless while the player stood in it. ::level_hazard_at probes just under
+ * the point it is given, which is the question ::step_damage was always asking.
+ *
+ * 한국어
+ * ------
+ * @brief 모든 용암 브러시를 위험으로 등록하되, 걸어 들어갈 수 있게 만들지는 않습니다.
+ *
+ * *Quake는 자기 용암 위에 `trigger_hurt`를 두지 않으며* 이 게임이 출하하는 맵도 그렇습니다.
+ * 그곳에서 `*lava`는 *content type*입니다. 브러시 자신의 텍스처가 태우는 것이고 엔진이 그것을
+ * 정하며 엔티티는 어디에도 없습니다. 그래서 엔티티만 읽는 변환은 용암을 물감 웅덩이로
+ * 데려옵니다. `lqdm4`는 아레나 전체 아래에 용암 바다를 두고 위험 개수 0으로 출하되었습니다.
+ *
+ * *브러시는 고체로 남으며*, 그것이 ::brush_hazards_of와 갈리는 유일한 지점입니다.
+ * `trigger_hurt` 부피는 아무도 그리지 않고 걸어 들어가는 것입니다. 이 용암은 그려지고, 그것이
+ * 바닥입니다. 아레나는 용암 바다에 서 있는 구조물이고, 그것을 *통과해* 떨어지는 플레이어는
+ * 세계의 바닥을 뚫고 떨어지는 것입니다. 그래서 `solid`는 그대로 두고, 위에 올라서는
+ * 지오메트리에 대해 위험을 등록합니다.
+ *
+ * *이것이 느껴지려면 ::LVL_HAZARD_UNDERFOOT가 필요하며*, 이 주석의 첫 판본은 그것을 기록에
+ * 남길 값어치가 있는 방식으로 틀렸습니다. ::brush_point_in이 경계를 안쪽으로 세므로 접지한
+ * 플레이어의 발은 정확히 바닥 높이이고 따라서 용암 안으로 검사된다, 그러니 탐침이 필요 없다고
+ * 주장했습니다. 앞의 절반은 그 *함수*에 대해 참입니다. 뒤의 절반은 이 *상황*에 대해
+ * 거짓입니다. 충돌은 몸을 표면보다 아주 조금 위에(이곳에서는 1센티미터) 앉히므로 발은 결코
+ * 경계 위에 있지 않고, 플레이어가 그 안에 서 있는 동안 바다는 무해한 것으로 읽혔습니다.
+ * ::level_hazard_at은 받은 점의 바로 아래를 함께 탐침하며, 그것이 ::step_damage가 줄곧
+ * 묻던 질문입니다.
+ */
+static void brush_lava_of(Level *out, const BrushMap *bm) {
+    for (int i = 0; i < bm->n_brushes; i++) {
+        if (!brush_is_lava(bm, i)) continue;
+        if (out->n_hazards >= LVL_MAX_HAZARDS) { DIAG(DIAG_ENT_CAP); continue; }
+        HazardDef *h = &out->hazards[out->n_hazards++];
+        h->first_brush = (short)i;
+        h->n_brushes   = 1;
+        h->dps         = (short)LVL_HURT_LAVA;
+    }
+}
+
 static void brush_teleports_of(Level *out, BrushMap *bm) {
     for (int i = 0; i < bm->n_ents; i++) {
         const BrushEnt *e = &bm->ents[i];
@@ -1865,6 +1931,7 @@ static int load_brush_level(BrushStore *bs, const char *name, Level *out) {
     TagPool tags = {0};
     brush_triggers_of(out, bm, &tags);
     brush_hazards_of(out, bm);
+    brush_lava_of(out, bm);
     brush_teleports_of(out, bm);
     brush_doors_of(out, bm, &tags);
     brush_ents_of(out, bm);
@@ -3552,7 +3619,16 @@ int level_hazard_at(const Level *l, float x, float y, float z) {
         for (int i = 0; i < l->n_hazards; i++) {
             const HazardDef *h = &l->hazards[i];
             if (h->dps <= worst) continue;
-            if (brush_point_in(l->brushes, h->first_brush, h->n_brushes, p))
+            /* The point, and just under it. A body standing ON a hazard is
+               seated a hair above its surface and is not inside it -- see
+               ::LVL_HAZARD_UNDERFOOT for the measurement and for why this is
+               the question the module was always asking.
+               점과, 그 바로 아래입니다. 위험을 *밟고* 선 몸은 그 표면보다 아주 조금
+               위에 앉아 있어 안에 있지 않습니다. 측정값과, 이것이 왜 이 모듈이
+               줄곧 묻던 질문인지는 ::LVL_HAZARD_UNDERFOOT를 참조하십시오. */
+            v3 under = v3f(p.x, p.y - LVL_HAZARD_UNDERFOOT, p.z);
+            if (brush_point_in(l->brushes, h->first_brush, h->n_brushes, p) ||
+                brush_point_in(l->brushes, h->first_brush, h->n_brushes, under))
                 worst = h->dps;
         }
         return worst;

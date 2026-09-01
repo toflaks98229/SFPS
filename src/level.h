@@ -1369,6 +1369,99 @@ typedef struct {
 #define LVL_HURT_DEFAULT 5
 
 /**
+ * @def LVL_HURT_LAVA
+ * @brief Damage per second for a lava brush, which nobody authors a `dmg` for.
+ *
+ * ENGLISH
+ * -------
+ * SEPARATE FROM ::LVL_HURT_DEFAULT, and the two must not be merged. That one is
+ * Quake's number and it is right for what it covers: an author who drew a
+ * volume, typed `trigger_hurt` and typed nothing else gets a pool that hurts.
+ * Lava is not authored -- ::brush_lava_of finds it by its TEXTURE, so there is
+ * no `dmg` key to read and no author to have chosen one. The engine is picking,
+ * and a number the engine picks should say so rather than borrow a default that
+ * means "unspecified".
+ *
+ * FORTY, AGAINST ::PLAYER_MAX_HP OF A HUNDRED. Two and a half seconds of
+ * standing still is death, which is what makes a lava sea a wall you respect.
+ * Clipping a corner for a fifth of a second costs eight and is survivable, and
+ * that gap is the whole design: ::step_damage's own note says a lava channel
+ * has to stay crossable by jumping or by being pulled over it with the hook,
+ * "otherwise the room is a wall rather than an obstacle, and the momentum
+ * systems this game is built on have nothing to do there".
+ *
+ * At ::LVL_HURT_DEFAULT this sea would take twenty seconds to kill, which is
+ * not an obstacle -- it is a floor with a rumour attached.
+ *
+ * 한국어
+ * ------
+ * @brief 용암 브러시의 초당 피해량. 아무도 이것에 `dmg`를 적지 않습니다.
+ *
+ * *::LVL_HURT_DEFAULT와 별개이며, 둘을 합쳐서는 안 됩니다.* 그쪽은 Quake의 수이고 자기가
+ * 덮는 것에 대해 옳습니다. 부피를 그리고 `trigger_hurt`라고 적고 그 밖에 아무것도 적지 않은
+ * 제작자는 아프게 하는 웅덩이를 얻습니다. 용암은 저작되지 않습니다. ::brush_lava_of가 그것을
+ * *텍스처*로 찾으므로 읽을 `dmg` 키도, 그것을 고른 제작자도 없습니다. 고르는 것은 엔진이며,
+ * 엔진이 고르는 수는 "지정되지 않음"을 뜻하는 기본값을 빌리는 대신 그렇다고 말해야 합니다.
+ *
+ * *::PLAYER_MAX_HP 100에 대해 40입니다.* 가만히 서 있는 2.5초가 죽음이며, 그것이 용암 바다를
+ * 존중받는 벽으로 만듭니다. 모서리를 0.2초 스치는 것은 8이고 살아남을 수 있으며, 그 간격이
+ * 설계의 전부입니다. ::step_damage 자신의 주석이 용암 수로는 뛰어넘거나 갈고리에 끌려 건널 수
+ * 있어야 한다고 말합니다. "그러지 않으면 방은 장애물이 아니라 벽이고, 이 게임이 그 위에 세워진
+ * 운동량 체계는 그곳에서 할 일이 없습니다."
+ *
+ * ::LVL_HURT_DEFAULT였다면 이 바다는 죽이는 데 20초가 걸립니다. 그것은 장애물이 아니라
+ * 소문이 붙은 바닥입니다.
+ */
+#define LVL_HURT_LAVA 40
+
+/**
+ * @def LVL_HAZARD_UNDERFOOT
+ * @brief How far below a query point ::level_hazard_at also looks, metres.
+ *
+ * ENGLISH
+ * -------
+ * BECAUSE A BODY NEVER RESTS EXACTLY ON THE FLOOR. Collision seats it a hair
+ * above -- measured at one centimetre on `lqdm4`'s lava, whose surface is at
+ * -18.75 and whose standing player has their feet at -18.74. A hazard you are
+ * STANDING ON is therefore never a hazard you are inside, and asking only at
+ * the feet reports a lava sea as harmless while the player stands in it.
+ *
+ * THIS IS NOT A FUDGE, IT IS THE MODEL THE MODULE ALREADY DESCRIBES.
+ * ::step_damage charges a hazard "only while GROUNDED" and its own note says "a
+ * hazard is the floor" -- so the question being asked has always been what am I
+ * standing ON, and a point test at the feet was the wrong instrument for it.
+ * Five centimetres is comfortably more than the seating gap and far less than
+ * ::PLAYER_STEP, so it cannot reach through a floor into something below one.
+ *
+ * @note An earlier version of ::brush_lava_of claimed this worked without any
+ *       probe, on the grounds that ::brush_point_in counts its boundary as
+ *       inside. That is true of the function and false of the situation: the
+ *       feet are not ON the boundary, they are just above it. The comment was
+ *       wrong and tools/steptest.c is what said so.
+ *
+ * 한국어
+ * ------
+ * @brief ::level_hazard_at이 질의 점보다 얼마나 아래까지 함께 보는지(미터).
+ *
+ * *몸은 결코 바닥에 정확히 놓이지 않기 때문입니다.* 충돌은 몸을 아주 조금 위에 앉히며,
+ * `lqdm4`의 용암에서 1센티미터로 측정되었습니다. 표면이 -18.75이고 그 위에 선 플레이어의 발이
+ * -18.74입니다. 따라서 *밟고 서 있는* 위험은 결코 *안에 있는* 위험이 아니며, 발에서만 물으면
+ * 플레이어가 그 안에 서 있는 동안 용암 바다를 무해하다고 보고합니다.
+ *
+ * *이것은 임시방편이 아니라 이 모듈이 이미 서술하는 모델입니다.* ::step_damage는 위험을
+ * "접지한 동안에만" 물리고 자기 주석이 "위험은 곧 바닥"이라고 말합니다. 그러므로 묻고 있던
+ * 질문은 언제나 *무엇을 밟고 있는가*였고, 발에서의 점 검사는 그것에 맞지 않는 도구였습니다.
+ * 5센티미터는 앉힘 간격보다 넉넉히 크고 ::PLAYER_STEP보다 훨씬 작으므로, 바닥을 뚫고 그 아래의
+ * 무언가에 닿을 수 없습니다.
+ *
+ * @note 이전 판본의 ::brush_lava_of는 ::brush_point_in이 경계를 안쪽으로 센다는 근거로 이런
+ *       탐침 없이도 동작한다고 주장했습니다. 그것은 그 *함수*에 대해서는 참이고 이 *상황*에
+ *       대해서는 거짓입니다. 발은 경계 *위에* 있지 않고 그 조금 위에 있습니다. 주석이
+ *       틀렸고, 그렇다고 말해 준 것은 tools/steptest.c입니다.
+ */
+#define LVL_HAZARD_UNDERFOOT 0.05f
+
+/**
  * @struct HazardDef
  * @brief A volume that burns whatever stands in it.
  *

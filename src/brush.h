@@ -1059,6 +1059,12 @@ int brush_tex_sky(const char *tex);
 /** @brief Is every drawn face of this brush sky? / 이 브러시의 그려지는 모든 면이 하늘인가. */
 int brush_is_sky(const BrushMap *m, int bi);
 
+/** @brief Whether a face name is lava. `star_lava*`, the liquid that kills. / 면 이름이 용암인지. `star_lava*`이며, 죽이는 액체입니다. */
+int brush_tex_lava(const char *tex);
+
+/** @brief Whether ANY drawn face of this brush is lava -- one face makes a pool. / 이 브러시의 그려지는 면 중 *하나라도* 용암인지. 면 하나면 웅덩이입니다. */
+int brush_is_lava(const BrushMap *m, int bi);
+
 /* --- Collision / 충돌 ------------------------------------------------------ */
 
 /**

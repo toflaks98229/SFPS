@@ -29,6 +29,7 @@
 #include "pickup.h"   /* pickup_spawn_level -- also takes the World's pool now */
 #include "proj.h"     /* proj_reset -- now takes the World's own pool */
 #include "door.h"     /* door_reset, and the DOOR_* axes */
+#include "brush.h"    /* Brush::min/max and brush_point_in -- standing on a hazard */
 #include "brush.h"    /* Brush::min/max and brush_point_in -- standing inside a teleport volume */
 #include "diag.h"     /* diag_count -- a stale door is counted, not printed */
 #include "story.h"    /* STORY_DEFEAT -- the screen that is now in front of the death one */
@@ -552,8 +553,200 @@ static void check_teleport(void) {
     okf(v3len(v3sub(w.player.pos, after)) < 1.0f,
         "and the frame after is an ordinary one",
         v3len(v3sub(w.player.pos, after)), 0.0f);
+
+    /* THE SLOT BACK. LVL_BRUSH_SLOTS is small and a brush level holds one
+       for as long as it is loaded; leaking it here made the NEXT test that
+       wanted the arena fail to load it, and load_brush_level reports that by
+       falling through to the text loader -- so the symptom was "the shipped
+       arena loads" going red in a function that had not touched it.
+       *칸을 돌려줍니다.* LVL_BRUSH_SLOTS는 작고 브러시 레벨은 로드되어 있는 동안
+       하나를 붙듭니다. 이곳에서 흘리면 아레나를 원하는 *다음* 검사가 그것을 로드하지
+       못했고, load_brush_level은 그것을 텍스트 로더로 떨어뜨려 보고하므로, 증상은
+       그것을 건드리지도 않은 함수에서 "출하 아레나가 로드된다"가 빨개지는 것이었습니다. */
+    level_release(&w.level);
 }
 
+
+/* --- the lava sea burns what stands on it --------------------------------
+ *
+ * THREE CLAIMS, AND THE FIRST IS A DEPENDENCY RATHER THAN A FEATURE.
+ * ::brush_lava_of leaves the lava brush SOLID -- you stand on this lava, you do
+ * not sink into it -- so a player on its surface is not inside the volume in
+ * any ordinary sense. It works because ::brush_point_in rejects on
+ * `dot(n,p) - dist > 0` and therefore counts a point exactly ON a face as in.
+ * That is a real thing to lean on and an easy thing to change by accident, so
+ * it is asserted directly.
+ *
+ * The second is that the sea is REACHABLE. A hazard nothing can walk onto is a
+ * texture with a rule attached, and `lqdm4`'s lava spans the whole footprint --
+ * most of it under the building. The scan below is not test scaffolding, it is
+ * the claim: of the columns that are over lava, most of them are places a body
+ * could actually stand.
+ *
+ * The third is that ::world_step charges it. A hazard that reads correctly and
+ * is never applied is the shape ::step_blast and ::step_teleport could both
+ * have had, and the only way to tell is to run frames and look at the health.
+ *
+ * THE SCAN IS ALSO WHY THIS TEST EXISTS IN THIS FORM. Its first draft stood the
+ * player at the centre of the lava brush's bounding box, which for a slab that
+ * spans the map is inside the central structure -- `level_ground` reported no
+ * floor, the player fell through the world, and the failure looked exactly like
+ * "solid lava does not collide". The bug was in the test. A map-wide AABB has
+ * no meaningful centre, and anything that wants a point ON such a brush has to
+ * go and find one.
+ *
+ * 세 가지 주장이며, 첫 번째는 기능이 아니라 *의존*입니다. ::brush_lava_of는 용암 브러시를
+ * *고체*로 둡니다. 이 용암은 밟고 서는 것이지 잠기는 것이 아니므로, 표면 위의 플레이어는
+ * 평범한 의미에서 부피 안에 있지 않습니다. 이것이 통하는 이유는 ::brush_point_in이
+ * `dot(n,p) - dist > 0`으로 거절하여 면 위에 정확히 놓인 점을 안쪽으로 세기 때문입니다.
+ * 기대는 실제 성질이면서 실수로 바꾸기 쉬운 것이므로 직접 단언합니다.
+ *
+ * 두 번째는 그 바다에 *닿을 수 있다*는 것입니다. 아무도 걸어 들어갈 수 없는 위험은 규칙이
+ * 붙은 텍스처이며, `lqdm4`의 용암은 전체 footprint에 걸쳐 있고 그 대부분은 건물 아래입니다.
+ * 아래의 훑기는 검사용 발판이 아니라 주장 그 자체입니다. 용암 위에 있는 기둥들 중 대부분이
+ * 실제로 몸이 설 수 있는 자리라는 것입니다.
+ *
+ * 세 번째는 ::world_step이 그것을 물린다는 것입니다. 올바르게 읽히면서 결코 적용되지 않는
+ * 위험은 ::step_blast와 ::step_teleport가 둘 다 가질 수 있었던 모양이며, 알아내는 유일한
+ * 방법은 프레임을 돌리고 체력을 보는 것입니다.
+ *
+ * *그리고 이 훑기가 이 검사가 이런 형태인 이유이기도 합니다.* 초안은 플레이어를 용암 브러시
+ * 바운딩 박스의 *중심*에 세웠는데, 맵 전체에 걸친 슬래브에게 그곳은 중앙 구조물 *안*입니다.
+ * `level_ground`가 바닥 없음을 보고했고, 플레이어는 세계를 뚫고 떨어졌으며, 실패는 정확히
+ * "고체 용암이 충돌하지 않는다"처럼 보였습니다. 버그는 검사에 있었습니다. 맵 크기의 AABB에는
+ * 의미 있는 중심이 없고, 그런 브러시 *위의* 한 점을 원하는 것은 그것을 찾아 나서야 합니다. */
+static void check_lava(void) {
+    printf("\nthe lava sea\n");
+
+    static World w;
+    world_init(&w);
+    w.run.title = 0;
+
+    if (!world_load_level(&w, "lqdm4", WORLD_ENTER_NEW)) {
+        ok(0, "the shipped arena loads into a world");
+        return;
+    }
+    if (w.level.n_hazards < 1 || !w.level.brushes) {
+        ok(0, "and its lava was found by texture");
+        level_release(&w.level);
+        return;
+    }
+    ok(1, "the arena's lava was found by texture, with no trigger_hurt in the map");
+
+    const HazardDef *h = &w.level.hazards[0];
+    const Brush *b = &w.level.brushes->brushes[h->first_brush];
+    float top = b->max.y;
+
+    /* A column that is over the lava AND has it as its floor. */
+    int cols = 0, standable = 0;
+    float sx = 0.0f, sz = 0.0f;
+    for (int ix = -30; ix <= 30; ix++)
+        for (int iz = -30; iz <= 30; iz++) {
+            float px = (float)ix * 2.0f, pz = (float)iz * 2.0f;
+            float gf, gc;
+            if (level_hazard_at(&w.level, px, top, pz) <= 0) continue;
+            cols++;
+            if (level_ground(&w.level, px, pz, top + 0.5f, 2.0f, &gf, &gc) &&
+                gf > top - 0.2f && gf < top + 0.2f) {
+                if (!standable) { sx = px; sz = pz; }
+                standable++;
+            }
+        }
+    printf("      %d columns over lava, %d of them standable\n", cols, standable);
+    ok(cols > 0, "the sea covers ground the level actually has");
+    ok(standable * 2 > cols,
+       "and most of it is a floor a body could be standing on");
+
+    okf(level_hazard_at(&w.level, sx, top, sz) == LVL_HURT_LAVA,
+        "its surface reports lava damage, felt through LVL_HAZARD_UNDERFOOT",
+        (float)level_hazard_at(&w.level, sx, top, sz), (float)LVL_HURT_LAVA);
+    ok(level_hazard_at(&w.level, sx, top + 4.0f, sz) == 0,
+       "and four metres above it is clear air");
+
+    /* Stand in it for a second. */
+    Input in; memset(&in, 0, sizeof in);
+    w.player.pos      = v3f(sx, top + PLAYER_EYE, sz);
+    w.player.vel      = v3f(0.0f, 0.0f, 0.0f);
+    w.player.grounded = 1;
+    w.player.health   = PLAYER_MAX_HP;
+    w.run.hazard_accum = 0.0f;
+
+    for (int i = 0; i < 62; i++) world_step(&w, &in, 1.777f, 0.016f);
+    int lost = PLAYER_MAX_HP - w.player.health;
+    printf("      a second of standing in it cost %d health\n", lost);
+    ok(lost >= 30 && lost <= 50, "a second in it is most of half the bar");
+
+    /* AND CLIPPING A CORNER IS SURVIVABLE, which is the other half of the rate.
+       ::step_damage's own note says a lava channel has to stay crossable by
+       jumping or by the hook, "otherwise the room is a wall rather than an
+       obstacle, and the momentum systems this game is built on have nothing to
+       do there".
+       *그리고 모서리를 스치는 것은 살아남을 수 있으며*, 그것이 이 비율의 나머지 절반입니다.
+       ::step_damage 자신의 주석이 용암 수로는 뛰어넘거나 갈고리로 건널 수 있어야 한다고
+       말합니다. "그러지 않으면 방은 장애물이 아니라 벽이고, 이 게임이 그 위에 세워진 운동량
+       체계는 그곳에서 할 일이 없습니다." */
+    w.player.pos       = v3f(sx, top + PLAYER_EYE, sz);
+    w.player.grounded  = 1;
+    w.player.health    = PLAYER_MAX_HP;
+    w.run.hazard_accum = 0.0f;
+    for (int i = 0; i < 12; i++) world_step(&w, &in, 1.777f, 0.016f);
+    int clipped = PLAYER_MAX_HP - w.player.health;
+    printf("      a fifth of a second cost %d\n", clipped);
+    ok(clipped > 0 && clipped < PLAYER_MAX_HP / 2,
+       "and clipping a corner of it is survivable");
+
+    /* EVERY PLACE THE ARENA PUTS A GROUND MONSTER IS GROUND A GROUND MONSTER
+       MAY USE. ::make_monster refuses a hazard floor now, so a spawner or a
+       ground ward slot standing over the sea is furniture that silently stops
+       producing -- a wave that never arrives, which reads as the wave clock
+       being broken rather than as a marker being in the wrong place.
+       Psychofuge puts its brute spawner 1.5m above the lava and its lowest
+       ground ward 0.75m above it, so this is close enough to be worth pinning:
+       what makes those safe is that their column's FLOOR is the ledge they sit
+       on and not the sea underneath it.
+       The air slots are deliberately not checked. A flyer never asks
+       ::floor_safe -- that asymmetry is the whole gameplay consequence of a
+       lava floor -- so a ward slot hanging over the sea is exactly what an air
+       slot is for.
+       *아레나가 지상 몬스터를 놓는 모든 자리는 지상 몬스터가 쓸 수 있는 땅입니다.*
+       ::make_monster는 이제 위험한 바닥을 거절하므로, 바다 위에 선 스포너나 지상 결계핵
+       자리는 조용히 생산을 멈추는 가구입니다. 오지 않는 웨이브이며, 그것은 표식이 잘못된
+       자리에 있는 것이 아니라 웨이브 시계가 고장 난 것처럼 읽힙니다.
+       Psychofuge는 브루트 스포너를 용암 위 1.5m에, 가장 낮은 지상 결계핵을 0.75m에 둡니다.
+       못 박아 둘 값어치가 있을 만큼 가깝습니다. 그것들을 안전하게 만드는 것은 그 기둥의
+       *바닥*이 그 아래의 바다가 아니라 그것들이 앉은 턱이라는 사실입니다.
+       공중 자리는 의도적으로 검사하지 않습니다. 비행체는 ::floor_safe를 묻지 않으며 그
+       비대칭이 용암 바닥이 낳는 게임플레이 결과의 전부이므로, 바다 위에 걸린 결계핵 자리는
+       정확히 공중 자리가 존재하는 이유입니다. */
+    {
+        int checked = 0, over_lava = 0;
+        for (int i = 0; i < w.level.n_ents; i++) {
+            const Entity *e = &w.level.ents[i];
+            int ground = txt_eq(e->kind, "wardground") ||
+                         txt_eq(e->kind, "altar") ||
+                         (e->kind[0] == 's' && e->kind[1] == 'p'); /* spawner* */
+            if (!ground) continue;
+
+            float ex = e->x * 0.01f, ey = e->y * 0.01f, ez = e->z * 0.01f;
+            float gf, gc;
+            if (!level_ground(&w.level, ex, ez, ey, 1e9f, &gf, &gc)) continue;
+            checked++;
+            if (level_hazard_at(&w.level, ex, gf, ez) > 0) over_lava++;
+        }
+        printf("      %d ground markers, %d of them standing on lava\n",
+               checked, over_lava);
+        ok(checked > 0, "the arena has ground markers to check");
+        okf(over_lava == 0,
+            "and none of them stands a monster on the sea",
+            (float)over_lava, 0.0f);
+    }
+
+    /* THE SLOT BACK. LVL_BRUSH_SLOTS is small and a brush level holds one for
+       as long as it is loaded.
+       *칸을 돌려줍니다.* LVL_BRUSH_SLOTS는 작고 브러시 레벨은 로드되어 있는 동안 하나를
+       붙듭니다. */
+    level_release(&w.level);
+}
 
 int main(void) {
     printf("steptest\n\n");
@@ -1702,6 +1895,7 @@ int main(void) {
 
     check_shake();
     check_teleport();
+    check_lava();
     check_score();
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall frame-order checks passed\n", fails);

@@ -508,7 +508,7 @@ static const Digest GOLDEN = {
     /* yaw pitch */ 0.382800102f, 0.534599602f,
     /* health keys grounded */ 100, 0, 0,
     /* cur ammo */ 0, 0,
-    /* wrng srng erng frng */ 2972006077u, 3888997821u, 4174342929u, 98971687u,
+    /* wrng srng erng frng */ 2972006077u, 3888997821u, 4174342929u, 1885663930u,
     /* enemies hp */ 1, -2,
     /* proj marks */ 0, 0,
     /* world_time */ 29.9002438f

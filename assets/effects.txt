@@ -523,6 +523,56 @@ e lavaboil
   blend add              # brighter than the lava, never darker
   face camera
 
+# --- what a caster does before it fires --------------------------------------
+#
+# THE WIND-UP HAD A POSE AND NOTHING ELSE. `caster_attack` and
+# `water_spirit_attack` are drawings of a creature gathering itself to cast --
+# the caster's has a magic circle in it -- and for the length of the wind-up
+# that drawing simply stood there. A pose is a still; what says a thing is
+# CHARGING is something arriving.
+#
+# INWARD, WHICH IS THE WHOLE EFFECT. Every other burst in this file leaves a
+# point; this one arrives at one, and the difference is what separates a cast
+# from an explosion. `gather 1` takes each particle's direction from where
+# `spawn` scattered it, reversed, and its speed from that distance over its own
+# life, so the cloud lands on the circle together rather than trickling in.
+#
+# THE COLOUR FOLLOWS THE PROJECTILE, which is `bolttrail` above -- the same
+# 150 200 255 the bolt already leaves behind it. It is the same energy seen a
+# moment earlier, so it cannot be a colour of its own: a gather that arrives
+# blue and fires green would read as two events that happened to line up.
+#
+# THAT MEANS ONE COLOUR FOR EVERY CASTER, and that is a fact about the bolt
+# rather than a decision made here. Nothing tints a monster's bolt particles
+# per creature -- only its LIGHT is per-row, through scene.c's LIGHT_COL_SHOT.
+# The day the trails become per-creature this recipe follows them, and the way
+# it follows is ::fx_spawn_tinted at the spawn site rather than three near
+# identical blocks in this file.
+e castgather
+  count 3                # a few per tick -- world.c paces the rest
+  life 380               # under half a second: the wind-up is short and the
+                         # motes must land before the bolt leaves, or the
+                         # gathering reads as debris rather than as a cause
+  size 9 3               # SHRINKS as it converges, so the cloud tightens twice
+                         # over: in position and in the size of what is left
+  rgb 150 200 255        # the bolt's own blue -- see `bolttrail`
+  rgb2 210 240 255       # BRIGHTENS as it lands, where the trail cools
+  alpha 0 95             # BACKWARDS from every other effect here, and that is
+                         # the point: this one FADES IN as it arrives. A mote
+                         # that is brightest where it is born draws the eye to
+                         # the edge of the room; brightest where it lands draws
+                         # it to the circle
+  spawn 95               # just under a metre out -- the reach of the gesture
+  gather 1               # inward, at whatever speed reaches the middle in time
+  drag 0                 # no drag: `gather` already set the speed that lands
+                         # exactly on the beat, and bleeding it off would leave
+                         # the cloud short
+  spin 140               # fast roll, so a mote reads as a spark rather than a
+                         # square being slid across the screen
+  gravity 0              # weightless. It is being pulled, not falling
+  blend add              # brighter than the room, like everything a caster does
+  face camera
+
 # --- the grenade, before it goes off -----------------------------------------
 #
 # A grenade left the muzzle and arrived at the wall with NOTHING BETWEEN THOSE

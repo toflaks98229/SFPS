@@ -831,6 +831,40 @@ int enemy_update(Pools *pl, const Level *l, v3 player_eye, float dt)
                    나옵니다. */
                 int shots = m->volley_n > 0 ? m->volley_n : 1;
 
+                /* THE CHARGE, WHILE THE POSE IS UP. `caster_attack` and
+                   `water_spirit_attack` are drawings of a creature gathering
+                   itself -- the caster's has a magic circle in it -- and for
+                   the whole of the wind-up that drawing simply stood there. A
+                   pose is a still; what says CHARGING is something arriving.
+                   BEFORE THE FIRST BOLT AND NOT AFTER. `swung` counts what has
+                   left, so `!m->swung` is exactly the window the pose occupies
+                   -- the same test scene.c uses to decide the frame, from the
+                   other side of the line. Once the volley starts the motes
+                   would be arriving at a circle that has already fired.
+                   AT THE CHEST, not the feet: ::MonType::eye is where the bolt
+                   is released from, so the gather lands where the bolt leaves.
+                   *자세가 올라와 있는 동안의 충전입니다.* `caster_attack`과
+                   `water_spirit_attack`은 생물이 힘을 모으는 그림이고(캐스터의 것에는 마법진이
+                   있습니다), 준비동작 내내 그 그림은 그냥 서 있었습니다. 자세는 정지 화면이며,
+                   *충전 중*이라고 말하는 것은 무언가가 도착하는 일입니다.
+                   *첫 탄환 전이고 후가 아닙니다.* `swung`은 이미 떠난 것을 세므로 `!m->swung`은
+                   정확히 그 자세가 차지하는 창입니다. scene.c가 프레임을 정할 때 쓰는 것과 같은
+                   검사를 선 반대편에서 하는 것입니다. 일제사격이 시작되면 그 알갱이들은 이미
+                   발사한 마법진에 도착하게 됩니다.
+                   *발이 아니라 가슴에서*입니다. ::MonType::eye가 탄환이 떠나는 높이이므로,
+                   모임은 탄환이 떠나는 자리에 내려앉습니다. */
+                if (S->behaviour == AI_CASTER && !m->swung)
+                {
+                    m->cast_timer -= dt;
+                    if (m->cast_timer <= 0.0f)
+                    {
+                        m->cast_timer = CAST_GATHER_INTERVAL;
+                        fx_spawn(pl, "castgather",
+                                 v3f(m->pos.x, m->pos.y + S->eye, m->pos.z),
+                                 v3f(0.0f, 1.0f, 0.0f));
+                    }
+                }
+
                 if (S->behaviour == AI_CASTER)
                 {
                     while (m->swung < shots &&

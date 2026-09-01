@@ -453,6 +453,16 @@ enum MonTypeID {
  */
 #define INFIGHT_TIME 8.0f
 
+/* Seconds between one charge mote and the next while a caster winds up. Paced
+   here rather than by the recipe's `count` for the reason the lava smoke is:
+   a burst that arrives all at once is a puff, and what reads as GATHERING is a
+   stream that keeps coming for as long as the pose is held. Against the
+   caster's 0.85s wind-up this is about ten motes, three at a time.
+   캐스터가 준비동작을 하는 동안 충전 알갱이 사이의 간격(초)입니다. 레시피의 `count`가 아니라
+   이곳에서 속도를 정하는 이유는 용암 연기와 같습니다. 한꺼번에 도착하는 다발은 연기 한 모금이고,
+   *모이는 중*으로 읽히는 것은 자세가 유지되는 동안 계속 오는 흐름입니다. 캐스터의 0.85초
+   준비동작에 대해 세 개씩 열 번쯤입니다. */
+#define CAST_GATHER_INTERVAL 0.085f
 #define MON_SLIDE_LEG     2.5f
 
 /* AND WHY THAT IS A DISTANCE RATHER THAN THE TIME IT USED TO BE. It was 1.1
@@ -1465,6 +1475,7 @@ typedef struct {
      */
     short  foe;
     float  foe_time;    /**< Seconds the grudge has left. / 원한에 남은 시간(초). */
+    float  cast_timer;  /**< Seconds to the next charge mote. / 다음 충전 알갱이까지의 초. */
 
     /**
      * @brief Where the monster WANTS to face. Its actual yaw turns towards it.

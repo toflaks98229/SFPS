@@ -73,6 +73,22 @@ typedef struct {
         a burst that smears. / 0이 아니면 반구에 균일하게, 정확히 하나의 속력으로
         퍼뜨려 가장자리가 읽히는 팽창하는 껍질을 만듭니다. */
     int   dome;
+    /** Non-zero to fly INWARD instead of out: a particle placed by `spawn`
+        takes its direction from its own offset, reversed, and its speed from
+        how far out it landed divided by its own life -- so the whole cloud
+        arrives at the origin as it expires, whatever radius each one drew.
+        A fixed speed cannot do that. `spawn` scatters into a box, so the far
+        corners are `sqrt(3)` further out than the near faces; one speed means
+        the near ones sit at the middle waiting while the far ones are still
+        coming, and the gather reads as a drift rather than as an inrush.
+        / 0이 아니면 바깥이 아니라 *안쪽으로* 날아갑니다. `spawn`이 배치한 입자는 자기
+        오프셋을 뒤집어 방향으로 삼고, 얼마나 멀리 놓였는지를 자기 수명으로 나눈 것을 속력으로
+        삼습니다. 그래서 각자가 어느 반지름을 뽑았든 구름 전체가 사라지는 순간 원점에
+        도착합니다.
+        고정 속력으로는 그럴 수 없습니다. `spawn`은 상자 안에 흩뿌리므로 먼 모서리는 가까운
+        면보다 `sqrt(3)`배 멀고, 하나의 속력은 가까운 것들이 한가운데서 기다리는 동안 먼 것들이
+        아직 오고 있게 만듭니다. 그러면 모임이 밀려듦이 아니라 표류로 읽힙니다. */
+    int   gather;
     /** Non-zero to spread evenly around the RING perpendicular to the normal,
         at one exact speed. `dome` is a shell and this is its equator: with
         `face normal` the quads lie in that same plane, so a disc spawned
@@ -256,7 +272,7 @@ static void parse_defs(void) {
             cur->alpha0 = 100; cur->alpha1 = 0;
             cur->speed = 0;   cur->spread = 0;
             cur->spawn_r = 0; cur->drag = 0; cur->spin = 0;
-            cur->dome = 0; cur->disc = 0;
+            cur->dome = 0; cur->disc = 0; cur->gather = 0;
             cur->gravity = 0; cur->blend = FX_BLEND_ALPHA;
             cur->face = FX_FACE_CAMERA;
             /* No streak and no wake unless the definition asks. Both are read
@@ -297,6 +313,8 @@ static void parse_defs(void) {
             p = txt_read_int(p, &cur->dome, &ok);
         else if (txt_is(t, len, "disc"))
             p = txt_read_int(p, &cur->disc, &ok);
+        else if (txt_is(t, len, "gather"))
+            p = txt_read_int(p, &cur->gather, &ok);
         else if (txt_is(t, len, "drag"))
             { p = txt_read_int(p, &v[0], &ok); if (ok) cur->drag = (short)v[0]; }
         else if (txt_is(t, len, "spin"))
@@ -545,6 +563,28 @@ static void spawn_def(Pools *pl, int di, v3 pos, v3 normal, float scale, int wak
             at = v3add(at, v3f(frand_signed(&pl->fx) * rr,
                                frand_signed(&pl->fx) * rr,
                                frand_signed(&pl->fx) * rr));
+        }
+
+        /* THE INRUSH, and it has to be computed HERE rather than up with the
+           other directions because it is the only one that depends on where
+           the particle LANDED. `dome` and `disc` decide a direction and then
+           the offset happens; this reads the offset back.
+           A zero offset -- a particle that drew the centre -- has no direction
+           to reverse, so it is left with whatever the normal gave it and its
+           own speed. It is already where the others are going.
+           *밀려듦이며*, 다른 방향들과 함께 위에서 계산할 수 없고 이곳이어야 합니다. 입자가
+           *어디에 놓였는지*에 의존하는 유일한 것이기 때문입니다. `dome`과 `disc`는 방향을
+           정하고 그다음 오프셋이 일어납니다. 이것은 그 오프셋을 되읽습니다.
+           오프셋이 0인 입자(한가운데를 뽑은 것)는 뒤집을 방향이 없으므로 법선이 준 것과 자기
+           속력을 그대로 지닙니다. 그것은 이미 다른 것들이 가는 자리에 있습니다. */
+        if (d->gather) {
+            v3    off = v3sub(at, pos);
+            float r   = v3len(off);
+            float lf  = d->life_ms * 0.001f;
+            if (r > 1e-4f && lf > 1e-4f) {
+                dir = v3scale(off, -1.0f / r);
+                sp  = r / lf;
+            }
         }
 
         q->pos      = at;

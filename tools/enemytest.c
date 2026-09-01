@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <math.h>
 #include "enemy.h"
+#include "fx.h"   /* fx_live_count -- what a wind-up puts in the air */
 #include "level.h"
 #include "pools.h"
 /* The pools this file drives, owned here the way a ::World owns its own. The
@@ -438,6 +439,77 @@ static void check_infight(void) {
                -to_foe, -to_player);
         ok(to_foe < to_player,
            "a monster with a grudge closes on the monster, not on the player");
+    }
+}
+
+/* --- a caster gathers before it fires --------------------------------------
+ *
+ * ENGLISH
+ * -------
+ * THE WIND-UP WAS A STILL. `caster_attack` is a drawing of a creature pulling
+ * a cast together and it stood there for the whole of ::MonType::windup with
+ * nothing happening in front of it. What says CHARGING is something arriving.
+ *
+ * MEASURED IN THE WINDOW THAT MATTERS, which is the wind-up and not the shot.
+ * A bolt leaves particles of its own -- `bolttrail` fires every few
+ * centimetres of flight -- so counting live particles at any old moment would
+ * pass with the gather deleted. The count is taken while the monster is in
+ * ::E_ATTACK and ::Enemy::swung is still zero: the exact window the pose
+ * occupies, before anything has left.
+ *
+ * AND A BRAWLER MUST NOT, which is the half that makes this a test. It winds up
+ * too, out of the same state and the same field, so a check that only watched
+ * a caster would pass for "every attack throws sparks".
+ *
+ * 한국어
+ * ------
+ * *준비동작은 정지 화면이었습니다.* `caster_attack`은 주문을 끌어모으는 생물의 그림이고,
+ * ::MonType::windup 내내 그 앞에서는 아무 일도 일어나지 않은 채 서 있었습니다. *충전 중*이라고
+ * 말하는 것은 무언가가 도착하는 일입니다.
+ *
+ * *중요한 창 안에서 잽니다.* 사격이 아니라 준비동작입니다. 탄환은 자기 입자를 남깁니다.
+ * `bolttrail`이 비행 몇 센티미터마다 터지므로, 아무 때나 살아 있는 입자를 세면 모임을 지워도
+ * 통과합니다. 몬스터가 ::E_ATTACK이고 ::Enemy::swung이 아직 0일 때 셉니다. 그 자세가 차지하는
+ * 정확한 창이며, 아직 아무것도 떠나지 않은 때입니다.
+ *
+ * *그리고 근접형은 그러면 안 되며*, 그 절반이 이것을 테스트로 만듭니다. 근접형도 같은 상태와
+ * 같은 필드로 준비동작을 하므로, 캐스터만 보는 검사는 "모든 공격이 불꽃을 뿌린다"에 대해서도
+ * 통과합니다.
+ */
+static void check_cast_gather(void) {
+    printf("\na caster gathers before it fires\n");
+
+    static const struct { const char *kind; int gathers; } WHO[] = {
+        { "caster", 1 },
+        { "brute",  0 },
+    };
+    for (int k = 0; k < 2; k++) {
+        build();
+        put_kind(&L.ents[0], WHO[k].kind);
+        L.ents[0].x = 0; L.ents[0].z = -600;
+
+        enemy_reset(&g_pools);
+        fx_reload(&g_pools);
+        enemy_spawn_level(&g_pools, &L);
+        if (enemy_count(&g_pools) != 1) { ok(0, "the kind spawned"); continue; }
+
+        v3 player = v3f(0.0f, PLAYER_EYE, 0.0f);
+        int during = 0, frames = 0;
+        for (int i = 0; i < 60 * 12; i++) {
+            enemy_update(&g_pools, &L, player, DT);
+            const Enemy *m = enemy_at(&g_pools, 0);
+            if (m->state == E_ATTACK && m->swung == 0) {
+                frames++;
+                if (fx_live_count(&g_pools) > during)
+                    during = fx_live_count(&g_pools);
+            }
+            if (frames > 0 && m->swung > 0) break;
+        }
+        printf("      %-7s %d frame(s) of wind-up, %d particle(s) in the air\n",
+               WHO[k].kind, frames, during);
+        ok(frames > 0, "the monster reached its wind-up");
+        if (WHO[k].gathers) ok(during > 0, "and something gathered in front of it");
+        else                ok(during == 0, "and a brawler's wind-up throws nothing");
     }
 }
 
@@ -1339,6 +1411,7 @@ int main(void) {
 
     check_weave();
     check_infight();
+    check_cast_gather();
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall enemy checks passed\n", fails);
     return fails != 0;

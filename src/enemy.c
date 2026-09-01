@@ -2349,7 +2349,7 @@ static int shots_update(Pools *pl, const Level *l, v3 player_eye, float dt)
                전까지 두 착탄은 같은 두 줄을 재생했고, 맞은 것과 맞을 뻔한 것의 차이는 화면
                어디에도 없었습니다. */
             proj_flash(pl, s->pos, PROJ_HIT_RADIUS, PROJ_HIT_POWER,
-                       FLASH_SHOT, s->type);
+                       FLASH_SHOT, s->type, 0);
             continue;
         }
 
@@ -2378,7 +2378,7 @@ static int shots_update(Pools *pl, const Level *l, v3 player_eye, float dt)
             fx_spawn(pl, "scorch",    s->pos, n);
             fx_spawn(pl, "smokepuff", s->pos, n);
             proj_flash(pl, s->pos, PROJ_HIT_RADIUS, PROJ_HIT_POWER,
-                       FLASH_SHOT, s->type);
+                       FLASH_SHOT, s->type, 0);
             continue;
         }
 

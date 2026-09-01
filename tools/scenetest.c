@@ -895,7 +895,7 @@ int main(void) {
        묻습니다. ::scene_lights가 그 기록을 셰이더에 건네는가. */
     clear_state(&w);
     proj_reset(&w.pools);
-    proj_flash(&w.pools, w.player.pos, PROJ_BLAST_RADIUS, 1.0f, FLASH_BLAST, -1);
+    proj_flash(&w.pools, w.player.pos, PROJ_BLAST_RADIUS, 1.0f, FLASH_BLAST, -1, 0);
     frame_hash(&w, &scene, 0);
     printf("      with one detonation and no projectile the shader was given %d\n",
            rd_light_count());

@@ -1215,7 +1215,7 @@ int wp_axe_land(Weapon *w, Pools *pl, v3 feet, int grounded, float dt) {
        그리고 유탄이 남기는 것과 같은 기록에서 나오는 빛과 충격이며, 세기는 그 3분의 1입니다.
        왜 전부가 아니라 3분의 1인지, 그리고 왜 그 수를 반경에서 그냥 읽어 낼 수 없는지는
        ::AXE_SLAM_FLASH에 있습니다. */
-    proj_flash(pl, feet, AXE_SLAM_RADIUS, AXE_SLAM_FLASH, FLASH_BLAST, -1);
+    proj_flash(pl, feet, AXE_SLAM_RADIUS, AXE_SLAM_FLASH, FLASH_BLAST, -1, 0);
 
     /* Still `impact` and not `blast`. The picture is a detonation and the sound
        is a landing, because that is what happened: a body came down on a floor.

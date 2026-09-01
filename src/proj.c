@@ -39,7 +39,8 @@ void proj_reset(Pools *pl) {
    함수 넷이며 분기라 할 만한 것이 없습니다. 설계 전체는 proj.h에 있고, 이곳은 그 아래의
    산술입니다. */
 
-void proj_flash(Pools *pl, v3 at, float radius, float power, int kind, int type) {
+void proj_flash(Pools *pl, v3 at, float radius, float power,
+                int kind, int type, int hurt) {
     /* Nothing to light and nothing to shake. Refused here rather than left for
        every reader to test, which is where the muzzle flash's own rule already
        lives -- ::light_offer ignores a power of zero so a caller may hand over
@@ -58,6 +59,8 @@ void proj_flash(Pools *pl, v3 at, float radius, float power, int kind, int type)
     f->life   = PROJ_FLASH_TIME;
     f->kind   = (short)kind;
     f->type   = (short)type;
+    f->hurt   = (short)hurt;
+    f->taken  = 0;
 }
 
 void proj_flash_update(Pools *pl, float dt) {
@@ -70,6 +73,11 @@ void proj_flash_update(Pools *pl, float dt) {
 }
 
 int proj_flash_count(const Pools *pl) { (void)pl; return PROJ_MAX_FLASHES; }
+
+void proj_flash_taken(Pools *pl, int i) {
+    if (!pl || i < 0 || i >= PROJ_MAX_FLASHES) return;
+    pl->flash.f[i].taken = 1;
+}
 
 const Flash *proj_flash_at(const Pools *pl, int i) {
     return (i >= 0 && i < PROJ_MAX_FLASHES) ? &pl->flash.f[i] : 0;
@@ -330,7 +338,7 @@ static void detonate(Pools *pl, Proj *p, v3 at, v3 normal, int flesh) {
            사건은 그 모든 것이 오히려 어두워지는 한 프레임이었습니다. 유탄이 존재하기를
            그만두기 직전까지 그것을 밝히고 있었기 때문입니다. 세기는 최대입니다. 장약이
            터지는 것이 도끼의 내려찍기를 재는 기준입니다. ::Flash를 참조하십시오. */
-        proj_flash(pl, at, p->blast, 1.0f, FLASH_BLAST, -1);
+        proj_flash(pl, at, p->blast, 1.0f, FLASH_BLAST, -1, p->damage);
 
         /* ITS OWN SOUND, AND FROM WHERE IT HAPPENED. This was `impact`, which
            is DSPUNCH -- a punch -- at a flat gain of 100 wherever in the level
@@ -414,7 +422,7 @@ static void detonate(Pools *pl, Proj *p, v3 at, v3 normal, int flesh) {
            벽을 녹색으로 밝히고 있었고, 이것이 없으면 피탄에서 가장 밝은 것은 벽이 다시
            어두워지는 프레임입니다. 작고 어둡습니다(::PROJ_HIT_RADIUS 참조). 연사가 85ms마다
            하나씩 이곳에 놓기 때문입니다. */
-        proj_flash(pl, at, PROJ_HIT_RADIUS, PROJ_HIT_POWER, FLASH_BOLT, -1);
+        proj_flash(pl, at, PROJ_HIT_RADIUS, PROJ_HIT_POWER, FLASH_BOLT, -1, 0);
         audio_play_at("impact", 45, at);
     }
     p->active = 0;

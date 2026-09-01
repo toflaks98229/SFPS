@@ -290,14 +290,14 @@ static void check_shake(void) {
        가져도 되는 연출입니다. */
     fixture(&w, 0);
     proj_flash(&w.pools, v3f(0.0f, 0.0f, -2.0f),
-               PROJ_BLAST_RADIUS, 1.0f, FLASH_BLAST, -1);
+               PROJ_BLAST_RADIUS, 1.0f, FLASH_BLAST, -1, 0);
     world_step(&w, &idle, 1.777f, 0.016f);
     float from_near = w.run.shake;
     ok(from_near > 0.0f, "a blast beside the player shakes the view");
 
     fixture(&w, 0);
     proj_flash(&w.pools, v3f(0.0f, 0.0f, -8.0f),
-               PROJ_BLAST_RADIUS, 1.0f, FLASH_BLAST, -1);
+               PROJ_BLAST_RADIUS, 1.0f, FLASH_BLAST, -1, 0);
     world_step(&w, &idle, 1.777f, 0.016f);
     ok(w.run.shake > 0.0f && w.run.shake < from_near,
        "one twice as far away shakes, and shakes less");
@@ -311,7 +311,7 @@ static void check_shake(void) {
     proj_flash(&w.pools,
                v3f(0.0f, 0.0f,
                    -(PROJ_BLAST_RADIUS * WORLD_SHAKE_BLAST_REACH + 1.0f)),
-               PROJ_BLAST_RADIUS, 1.0f, FLASH_BLAST, -1);
+               PROJ_BLAST_RADIUS, 1.0f, FLASH_BLAST, -1, 0);
     world_step(&w, &idle, 1.777f, 0.016f);
     ok(w.run.shake == 0.0f, "and one past the reach does not shake at all");
 
@@ -325,7 +325,7 @@ static void check_shake(void) {
        충격과 두 번째로 센 충격을 구별하는 데 범위의 꼭대기를 쓰는 것은 정확히 그것을
        희생합니다. */
     fixture(&w, 0);
-    proj_flash(&w.pools, w.player.pos, PROJ_BLAST_RADIUS, 1.0f, FLASH_BLAST, -1);
+    proj_flash(&w.pools, w.player.pos, PROJ_BLAST_RADIUS, 1.0f, FLASH_BLAST, -1, 0);
     world_step(&w, &idle, 1.777f, 0.016f);
     ok(w.run.shake == WORLD_SHAKE_MAX,
        "and one at the player's feet reaches the cap");
@@ -341,7 +341,7 @@ static void check_shake(void) {
        천장에 머물다 떨어질 텐데, 그것은 첫 프레임이 같은 다른 버그입니다. */
     fixture(&w, 0);
     proj_flash(&w.pools, v3f(0.0f, 0.0f, -2.0f),
-               PROJ_BLAST_RADIUS, 1.0f, FLASH_BLAST, -1);
+               PROJ_BLAST_RADIUS, 1.0f, FLASH_BLAST, -1, 0);
     for (int i = 0; i < 40; i++) world_step(&w, &idle, 1.777f, 0.016f);
     ok(w.run.shake == 0.0f, "and one blast is one jolt, not one per frame");
 
@@ -419,6 +419,91 @@ static void put_monster(World *w, short x, short z) {
  * 구동됩니다. 몬스터에게 꽂히는 피해, 플레이어에게 꽂히는 피해, 그리고 걸어올지에 대한 몬스터
  * 자신의 결정입니다.
  */
+/* --- a grenade you threw is still yours -----------------------------------
+ *
+ * ENGLISH
+ * -------
+ * THE GAME SHIPPED WITHOUT THIS AND NOTHING SAID SO. A splash weapon that
+ * cannot hurt the thrower is not a splash weapon, it is a hitscan with a
+ * delay: the arc, the fuse and the radius are all questions about WHERE, and
+ * none of them is a question while the answer is free.
+ *
+ * THREE CLAIMS, and the second is the one that is easy to get wrong. A ::Flash
+ * outlives the instant it describes -- it has to, so the light can fade -- so
+ * the loop that reads it sees the same blast on every frame of that life. The
+ * shake wants exactly that and decays with it. Damage must not: a grenade that
+ * charged per frame would bill sixty times for going off once, and it would
+ * read as an instant death rather than as a mistake.
+ *
+ * The third is the reason ::Flash::hurt is zero almost everywhere. A monster's
+ * bolt bursting is a flash too, and the player has already been charged for it
+ * by `enemy_update`; if this path charged as well, one hit would be billed
+ * twice and the second bill would arrive without a monster attached.
+ *
+ * 한국어
+ * ------
+ * *게임이 이것 없이 출하되었고 아무도 그렇다고 말하지 않았습니다.* 던진 자를 다치게 할 수 없는
+ * 폭발 무기는 폭발 무기가 아니라 지연이 붙은 히트스캔입니다. 포물선도 도화선도 반경도 전부
+ * *어디에* 대한 질문이며, 답이 공짜인 동안에는 그중 어느 것도 질문이 아닙니다.
+ *
+ * *주장 셋이며 틀리기 쉬운 것은 두 번째입니다.* ::Flash는 자신이 서술하는 순간보다 오래
+ * 삽니다. 빛이 잦아들 수 있어야 하므로 그래야 합니다. 그래서 그것을 읽는 루프는 그 수명의 모든
+ * 프레임에서 같은 폭발을 봅니다. 흔들림은 바로 그것을 원하고 함께 감쇠합니다. 피해는 그러면
+ * 안 됩니다. 프레임마다 값을 물리는 유탄은 한 번 터지고 예순 번 청구하며, 실수가 아니라 즉사로
+ * 읽힙니다.
+ *
+ * 세 번째는 ::Flash::hurt가 거의 모든 곳에서 0인 이유입니다. 몬스터의 탄환이 터지는 것도
+ * 섬광이고, 플레이어는 `enemy_update`로 이미 값을 치렀습니다. 이 경로가 또 물리면 한 번의
+ * 타격이 두 번 청구되고, 두 번째 청구서에는 몬스터가 붙어 있지 않습니다.
+ */
+static void check_self_damage(void) {
+    printf("\na grenade you threw is still yours\n");
+
+    World w;
+    Input in = idle();
+
+    /* --- at your feet -------------------------------------------------- */
+    fixture(&w, 0);
+    int before = w.player.health;
+    /* At the FEET, which is where a grenade that lands beside you is, and
+       what ::step_blast measures the damage against.
+       *발밑*이며, 곁에 떨어진 유탄이 있는 곳이자 ::step_blast가 피해를 재는 기준입니다. */
+    v3 feet = v3f(w.player.pos.x, w.player.pos.y - PLAYER_EYE, w.player.pos.z);
+    proj_flash(&w.pools, feet, PROJ_BLAST_RADIUS, 1.0f, FLASH_BLAST, -1, 55);
+    world_step(&w, &in, ASPECT, DT);
+    int at_feet = before - w.player.health;
+    okf(at_feet > 0, "a blast at your feet costs health", (float)(at_feet), (float)(1));
+
+    /* Quake's half, against a 55-point charge at the centre. */
+    okf(at_feet == (int)(55 * PROJ_SELF_DAMAGE),
+        "and costs half of it, which is Quake's number",
+        at_feet, (int)(55 * PROJ_SELF_DAMAGE));
+
+    /* --- once, not once a frame ---------------------------------------- */
+    int after_one = w.player.health;
+    for (int i = 0; i < 30; i++) world_step(&w, &in, ASPECT, DT);
+    okf(w.player.health == after_one,
+        "and only once, however long the flash is lit", (float)(after_one - w.player.health), (float)(0));
+
+    /* --- and it falls off with distance -------------------------------- */
+    fixture(&w, 0);
+    before = w.player.health;
+    proj_flash(&w.pools, v3f(0.0f, 0.0f, -PROJ_BLAST_RADIUS * 0.5f),
+               PROJ_BLAST_RADIUS, 1.0f, FLASH_BLAST, -1, 55);
+    world_step(&w, &in, ASPECT, DT);
+    int half_out = before - w.player.health;
+    okf(half_out > 0 && half_out < at_feet,
+        "half a radius away costs less, and still costs", (float)(half_out), (float)(at_feet));
+
+    /* --- a monster's burst is not yours --------------------------------- */
+    fixture(&w, 0);
+    before = w.player.health;
+    proj_flash(&w.pools, w.player.pos, PROJ_HIT_RADIUS, 1.0f, FLASH_BOLT, -1, 0);
+    world_step(&w, &in, ASPECT, DT);
+    okf(w.player.health == before,
+        "a monster's bolt bursting on you is not billed here", (float)(before - w.player.health), (float)(0));
+}
+
 static void check_power(void) {
     printf("\nthe three artifacts\n");
 
@@ -2050,6 +2135,7 @@ int main(void) {
     check_lava();
     check_score();
     check_power();
+    check_self_damage();
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall frame-order checks passed\n", fails);
     return fails != 0;

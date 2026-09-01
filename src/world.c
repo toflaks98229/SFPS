@@ -512,6 +512,53 @@ static int aegis_pct(const World *w) {
 }
 
 /**
+ * @brief One blow landing on the player: cut, subtracted, felt and heard.
+ *
+ * ENGLISH
+ * -------
+ * FACTORED WHEN IT GOT A SECOND CALLER, which is the grenade the player threw
+ * at their own feet. Before that it was the tail of ::step_damage and had no
+ * reason to be anything else.
+ *
+ * WHY SELF-DAMAGE HAD TO COME THROUGH HERE rather than subtract health where
+ * it is discovered: everything in this function is something a blow OWES the
+ * player. ::aegis_pct is the one they are wearing, `hurt` is the red wash that
+ * says a hit landed, the shake is scaled by what the hit was worth, and the
+ * sound is how a hit reads when it comes from behind. A second damage path
+ * that skipped any of them would be a hit the player takes and does not feel,
+ * and an artifact that protects against monsters and not against your own
+ * mistakes would be a rule nobody could state.
+ *
+ * 한국어
+ * ------
+ * @brief 플레이어에게 꽂히는 일격 하나. 깎이고, 빠지고, 느껴지고, 들립니다.
+ *
+ * *두 번째 호출자가 생겼을 때 분리했습니다.* 플레이어가 자기 발밑에 던진 유탄입니다. 그전까지는
+ * ::step_damage의 꼬리였고 그 밖의 무엇일 이유가 없었습니다.
+ *
+ * *자폭 피해가 발견된 자리에서 체력을 빼지 않고 이곳을 거쳐야 하는 이유:* 이 함수 안의 모든
+ * 것이 일격이 플레이어에게 *빚진* 것입니다. ::aegis_pct는 그가 걸치고 있는 것이고, `hurt`는
+ * 타격이 꽂혔다고 말하는 붉은 물듦이며, 흔들림은 그 타격의 값어치로 조정되고, 소리는 뒤에서
+ * 온 타격이 읽히는 방식입니다. 그중 어느 하나라도 건너뛴 두 번째 피해 경로는 플레이어가 받고도
+ * *느끼지 못하는* 타격이며, 몬스터에게는 지켜 주고 자기 실수에는 지켜 주지 않는 아티팩트는
+ * 아무도 말로 옮길 수 없는 규칙입니다.
+ */
+static void player_take(World *w, int dmg)
+{
+    if (dmg > 0) {
+        dmg = dmg * aegis_pct(w) / 100;
+        if (dmg < 1) dmg = 1;
+    }
+    if (dmg <= 0 || w->player.health <= 0) return;
+
+    w->player.health -= dmg;
+    if (w->player.health < 0) w->player.health = 0;
+    w->player.hurt = 1.0f;
+    audio_play("phurt", 90);
+    world_shake(w, WORLD_SHAKE_HURT * (float)dmg / (float)PLAYER_MAX_HP);
+}
+
+/**
  * @brief Monsters, hazard floors, and the one place death is noticed.
  *
  * ENGLISH
@@ -565,26 +612,7 @@ static void step_damage(World *w, float dt) {
        정수 퍼센트이며, max()가 경감이 면역이 되는 것을 막습니다. 1점짜리 타격을
        30%로 줄이면 0이고, 시계가 도는 동안 아예 세지 않는 위험은 갑옷이 아니라
        펜타그램입니다. */
-    if (dmg > 0) {
-        dmg = dmg * aegis_pct(w) / 100;
-        if (dmg < 1) dmg = 1;
-    }
-
-    if (dmg > 0 && w->player.health > 0) {
-        w->player.health -= dmg;
-        if (w->player.health < 0) w->player.health = 0;
-        w->player.hurt = 1.0f;
-        audio_play("phurt", 90);
-
-        /* Scaled by what the hit was worth against a full bar, so a scratch
-           registers and a mauling is unmistakable. The health figure the player
-           is already watching is what drives it, which is why this needs no
-           tuning table of its own.
-           그 피격이 가득 찬 체력 바에 대해 얼마짜리였는지로 조정하므로, 스치는 상처도
-           등록되고 크게 물어뜯긴 것은 착각할 수 없습니다. 플레이어가 이미 지켜보고 있는
-           체력 수치가 이것을 구동하며, 그래서 자체 조율 표가 필요 없습니다. */
-        world_shake(w, WORLD_SHAKE_HURT * (float)dmg / (float)PLAYER_MAX_HP);
-    }
+    player_take(w, dmg);
 
     /* --- hazard floors: lava, acid ---------------------------------------
        Charged only while GROUNDED. A hazard is the floor, so jumping over a
@@ -918,8 +946,10 @@ static void step_smoke(World *w, float dt) {
  *       큰* 쪽을 취하므로, 섬광이 사는 매 프레임에 같은 감쇠 곡선을 건네는 것은 멱등입니다.
  *       게다가 ::WORLD_SHAKE_DECAY가 두 프레임 안에 섬광 자신의 곡선을 앞지르므로, 결과는
  *       누구든 틀릴 수 있는 플래그 없이 최댓값을 한 번 설정한 것과 같습니다.
- * @note 플레이어의 *발*까지 잽니다. 폭발이 지나온 바닥에 서 있는 것이 발이며, 눈까지의 0.5m는
- *       10미터의 도달 거리 곁에서는 아무것도 아닙니다.
+ * @note *흔들림은 눈까지 잽니다.* 이 주석은 발까지 잰다고 적혀 있었고 차이를 0.5m라고
+ *       불렀는데, 코드는 `Player::pos`(눈)를 쓰고 ::PLAYER_EYE는 1.7미터입니다. 10.5m
+ *       도달 거리에 대해서는 6분의 1이라 넘어갈 수 있고 그래서 그대로 둡니다. 자폭
+ *       피해는 반경이 4.2m뿐이라 그럴 수 없으며, 아래에서 따로 발까지 잽니다.
  */
 static void step_blast(World *w) {
     for (int i = 0, n = proj_flash_count(&w->pools); i < n; i++) {
@@ -939,6 +969,62 @@ static void step_blast(World *w) {
            방식은 하나의 형태이며, 약해지는 대상이 피해든 카메라든 마찬가지입니다. */
         float t = 1.0f - dist / reach;
         world_shake(w, WORLD_SHAKE_BLAST * f->power * t * proj_flash_fade(f));
+
+        /* AND THE SAME BLAST CAN HURT THE THROWER, once. `taken` is the
+           latch: a ::Flash lives ::PROJ_FLASH_TIME so that the light can
+           fade, and this loop sees it on every frame of that -- the shake
+           above WANTS that, because it is scaled by the fade and is meant
+           to decay, and damage that decayed would be a grenade billing the
+           player sixty times for going off once.
+           WITHIN THE DAMAGE RADIUS, not the shake's. WORLD_SHAKE_BLAST_REACH
+           widens the felt one past the harmful one on purpose -- its own
+           note says "a blast you cannot be hurt by is still a blast" -- so
+           the two ranges are asked separately and the falloff is measured
+           against the radius that decides damage.
+           *그리고 같은 폭발이 던진 자를 다치게 할 수 있습니다. 한 번만.* `taken`이
+           걸쇠입니다. ::Flash는 빛이 잦아들 수 있도록 ::PROJ_FLASH_TIME 동안 살아
+           있고 이 루프는 그 모든 프레임에서 그것을 봅니다. 위의 흔들림은 그것을
+           *원합니다*. 잦아듦으로 조정되고 감쇠하도록 되어 있기 때문입니다. 감쇠하는
+           피해는 한 번 터진 유탄이 플레이어에게 예순 번 청구하는 일입니다.
+           *흔들림의 반경이 아니라 피해 반경 안에서*입니다. WORLD_SHAKE_BLAST_REACH는
+           의도적으로 느껴지는 범위를 해로운 범위 너머로 넓힙니다. 그 주석 자신이
+           "다칠 수 없는 폭발도 여전히 폭발"이라고 말합니다. 그래서 두 범위를 따로
+           묻고, 감쇠는 피해를 정하는 반경에 대해 잽니다. */
+        /* MEASURED TO THE FEET, unlike the shake above, and the difference
+           is 1.7 metres of ::PLAYER_EYE against a 4.2m damage radius --
+           forty per cent of it. A grenade that lands beside you is on the
+           FLOOR, so measuring from the eye would make standing on your own
+           charge cost 60% of what the centre is worth and there would be no
+           way to take the full amount at all. The shake can afford the eye
+           because its reach is 10.5m and the error is a sixth of it; the
+           damage cannot.
+           *위의 흔들림과 달리 발까지 잽니다.* 차이는 4.2m 피해 반경에 대한
+           ::PLAYER_EYE 1.7미터이며, 그 40%입니다. 곁에 떨어진 유탄은 *바닥*에
+           있으므로, 눈에서 재면 자기 폭탄을 밟고 선 것이 중심 값의 60%가 되고 최대치를
+           받을 방법이 아예 없어집니다. 흔들림은 도달 거리가 10.5m이고 오차가 그 6분의
+           1이라 눈을 감당할 수 있지만, 피해는 그럴 수 없습니다. */
+        if (f->hurt <= 0 || f->taken) continue;
+
+        v3 feet = v3f(w->player.pos.x, w->player.pos.y - PLAYER_EYE,
+                      w->player.pos.z);
+        float fdist = v3len(v3sub(f->pos, feet));
+        if (fdist < f->radius) {
+            float k = 1.0f - fdist / f->radius;
+            int   d = (int)(f->hurt * k * PROJ_SELF_DAMAGE);
+            if (d < 1) d = 1;
+            player_take(w, d);
+        }
+
+        /* LATCHED EVEN WHEN IT MISSED, because the blast happened at an
+           instant and whether the player was in it was decided then. A
+           flash that stayed chargeable would bill somebody who walked into
+           where a grenade HAD been, two tenths of a second after it went
+           off and with nothing there to see.
+           *빗나갔을 때도 걸쇠를 겁니다.* 폭발은 한 순간에 일어났고 플레이어가 그 안에
+           있었는지는 그때 정해졌기 때문입니다. 계속 청구 가능한 채로 남은 섬광은, 유탄이
+           *있었던* 자리로 0.2초 뒤에 걸어 들어온 사람에게 값을 물립니다. 그곳에는 볼
+           것이 아무것도 없는데 말입니다. */
+        proj_flash_taken(&w->pools, i);
     }
 }
 

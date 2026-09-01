@@ -22,7 +22,7 @@ Models, materials, sounds and levels are all authored as text and hot-reload
 into the running game.
 
 ```
-1,035,776 / 1,474,560 bytes   (70.24% used)
+1,036,288 / 1,474,560 bytes   (70.28% used)
 ```
 
 ## Build
@@ -415,7 +415,26 @@ lives 900ms; the light that made it is over in a third of that.
 | shake — `WORLD_SHAKE_BLAST_REACH` | 2.5 | 10.5m |
 
 A blast you cannot be hurt by can still light you, and one too far away to light
-you can still be felt through the floor. Collapsing them onto one number means
+you can still be felt through the floor.
+
+**And the thrower is inside the first of those reaches like anyone else.** A
+grenade takes `PROJ_SELF_DAMAGE` — Quake's half, from `T_RadiusDamage`'s
+`if (head == attacker) points = points * 0.5` — off the same linear falloff,
+measured against the **damage** radius rather than the shake's wider one. A
+splash weapon that cannot hurt the thrower is not a splash weapon, it is a
+hitscan with a delay: the arc, the fuse and the radius are all questions about
+*where*, and none of them is a question while the answer is free.
+
+It arrives through the same `player_take` as a monster's blow, so `PW_AEGIS`
+cuts it and the red wash, the shake and the sound all happen — an artifact that
+protected against monsters and not against your own grenade would be a rule
+nobody could state. The quad multiplies it too, which is also Quake.
+
+The axe's slam does **not** self-damage: it is 70 points in 5.5m centred on
+your own feet by design, and a ground pound that hurt the grounder is a weapon
+with a cost nobody chose. A monster's bolt bursting does not either — the
+player has already been charged for it by `enemy_update`, and billing it here
+as well would collect twice for one hit. Collapsing them onto one number means
 picking which two to get wrong. **The dome is the exception that proves the
 rule:** `blastdome` is scaled to the damage radius *exactly*, because it is a
 claim with a gameplay number in it and a claim drawn at the wrong distance is a

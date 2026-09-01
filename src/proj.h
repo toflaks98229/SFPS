@@ -534,6 +534,45 @@ typedef struct {
      * 걸립니다.
      */
     short type;
+
+    /**
+     * @brief Damage this blast does to the PLAYER at its centre, 0 for none.
+     *
+     * ENGLISH
+     * -------
+     * THE ONE FIELD THAT IS NOT ABOUT LIGHT. A ::Flash is otherwise a record
+     * of something bright happening somewhere, read by the renderer for the
+     * light and by ::step_blast for the camera. This makes it the record of
+     * something bright that can also HURT, which is the same event seen by a
+     * third reader rather than a second list to keep in step with the first.
+     *
+     * ZERO FOR ALMOST EVERYTHING, and the exceptions are the argument. A
+     * monster's bolt bursting is not the player's doing and the player has
+     * already been charged for it by `enemy_update`; charging again here
+     * would bill one hit twice. The axe's slam goes off at the player's own
+     * feet by design -- a ground pound that hurt the grounder is a weapon
+     * with a cost nobody chose. What is left is the grenade: a thing you
+     * throw, which is the only blast in the game that can arrive somewhere
+     * you did not intend and still be yours.
+     *
+     * 한국어
+     * ------
+     * @brief 이 폭발이 중심에서 *플레이어*에게 주는 피해. 없으면 0입니다.
+     *
+     * *빛에 대한 것이 아닌 유일한 필드입니다.* ::Flash는 그 밖에는 어딘가에서 밝은 일이
+     * 일어났다는 기록이며, 렌더러가 빛을 위해 읽고 ::step_blast가 카메라를 위해 읽습니다.
+     * 이것은 그것을 *다치게 할 수도 있는* 밝은 일의 기록으로 만듭니다. 첫 목록과 보조를
+     * 맞춰야 하는 두 번째 목록이 아니라, 같은 사건을 보는 세 번째 독자입니다.
+     *
+     * *거의 모든 것에 0이며*, 예외가 곧 논거입니다. 몬스터의 탄환이 터지는 것은 플레이어가
+     * 한 일이 아니고 `enemy_update`가 이미 값을 물렸습니다. 이곳에서 또 물리면 한 번의
+     * 타격을 두 번 청구하는 것입니다. 도끼의 내려찍기는 설계상 플레이어 자신의 발밑에서
+     * 터집니다. 내려찍는 자를 다치게 하는 지면 강타는 아무도 고르지 않은 비용을 지닌
+     * 무기입니다. 남는 것은 유탄입니다. *던지는* 것이며, 의도하지 않은 곳에 도착하고도
+     * 여전히 자기 것인 이 게임의 유일한 폭발입니다.
+     */
+    short hurt;
+    char  taken;        /**< Whether ::hurt has already been charged. / ::hurt를 이미 물렸는지 여부. */
 } Flash;
 
 /**
@@ -718,7 +757,69 @@ void proj_boom_fx(Pools *pl, v3 at, v3 normal, float radius, FxTint tint);
  *       내어줍니다.
  * @note GL을 건드리지 않고 ::Level도 읽지 않습니다.
  */
-void proj_flash(Pools *pl, v3 at, float radius, float power, int kind, int type);
+void proj_flash(Pools *pl, v3 at, float radius, float power,
+                int kind, int type, int hurt);
+
+/**
+ * @def PROJ_SELF_DAMAGE
+ * @brief What fraction of its own blast the thrower takes.
+ *
+ * ENGLISH
+ * -------
+ * QUAKE'S HALF, and taken from it for the reason ::check_attack takes fight.qc's
+ * odds: `T_RadiusDamage` in combat.qc computes the points for everyone inside
+ * the radius and then writes `if (head == attacker) points = points * 0.5`. It
+ * is the number that makes a rocket jump a decision rather than a suicide.
+ *
+ * WHY THERE IS SELF-DAMAGE AT ALL, since the game ran without it: a splash
+ * weapon with no cost to the thrower is not a splash weapon, it is a better
+ * hitscan. The grenade's whole shape -- an arc, a fuse, a radius -- is a set of
+ * questions about WHERE, and none of them is a question if the answer never
+ * costs anything. Firing into a corridor you are standing in should be a thing
+ * you decide to do.
+ *
+ * @note Cut further by ::PW_AEGIS like any other damage, because it arrives
+ *       through the same ::player_take as a monster's blow. An artifact that
+ *       protected against monsters and not against your own grenade would be a
+ *       rule nobody could state.
+ *
+ * 한국어
+ * ------
+ * @brief 던진 자가 자기 폭발에서 받는 비율.
+ *
+ * *퀘이크의 절반*이며, ::check_attack이 fight.qc의 확률을 가져오는 이유로 가져왔습니다.
+ * combat.qc의 `T_RadiusDamage`가 반경 안의 모두에 대해 점수를 계산한 뒤
+ * `if (head == attacker) points = points * 0.5`라고 적습니다. 로켓 점프를 자살이 아니라
+ * *결정*으로 만드는 수입니다.
+ *
+ * *애초에 왜 자폭 피해가 있는가.* 게임은 그것 없이도 돌아갔습니다. 던진 자에게 아무 비용이
+ * 없는 폭발 무기는 폭발 무기가 아니라 더 좋은 히트스캔입니다. 유탄의 형태 전부(포물선, 도화선,
+ * 반경)가 *어디에* 대한 질문들이며, 답이 아무 값도 치르지 않는다면 그중 어느 것도 질문이
+ * 아닙니다. 자기가 서 있는 복도로 쏘는 것은 *하기로 정하는* 일이어야 합니다.
+ *
+ * @note 다른 모든 피해와 마찬가지로 ::PW_AEGIS가 더 깎습니다. 몬스터의 일격과 같은
+ *       ::player_take를 거쳐 도착하기 때문입니다. 몬스터에게는 지켜 주고 자기 유탄에는
+ *       지켜 주지 않는 아티팩트는 아무도 말로 옮길 수 없는 규칙입니다.
+ */
+#define PROJ_SELF_DAMAGE 0.5f
+
+/**
+ * @brief Mark flash `i` as having charged its ::Flash::hurt, so it cannot again.
+ *
+ * ENGLISH: A flash outlives the instant it describes -- ::PROJ_FLASH_TIME, so
+ * the light can fade -- and everything that reads it therefore sees it many
+ * times. That is right for a light and for a shake and wrong for a debt. The
+ * latch lives on the flash rather than in the reader because the flash is what
+ * is shared: a second reader that also charged would need its own memory of
+ * which ones it had seen, and the two would drift.
+ *
+ * 한국어: 섬광은 자신이 서술하는 순간보다 오래 삽니다. 빛이 잦아들 수 있도록
+ * ::PROJ_FLASH_TIME 동안이며, 따라서 그것을 읽는 모든 것이 여러 번 봅니다. 빛과 흔들림에는
+ * 옳고 *빚*에는 그릅니다. 걸쇠가 독자가 아니라 섬광에 사는 이유는 공유되는 것이 섬광이기
+ * 때문입니다. 값을 물리는 두 번째 독자가 생기면 자기가 본 것들에 대한 기억을 따로 가져야
+ * 하고, 둘은 어긋나게 됩니다.
+ */
+void proj_flash_taken(Pools *pl, int i);
 
 /**
  * @brief Ages every flash and retires the dead ones.

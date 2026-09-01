@@ -1269,7 +1269,35 @@ static void brush_lights_of(Level *out, const BrushMap *bm) {
            `light_torch_small`을 비롯한 Quake 등 계열 전부를 이곳의 필드를 가진 점광원으로
            받아들였습니다. 가져온 맵들이 아직 그것을 나르지 않았을 뿐이며, 하나라도 나르는
            순간 그렇게 됩니다. 아홉 곳이 그 형태였습니다. ::txt_eq의 설명을 참조하십시오. */
-        if (!cn || !txt_eq(cn, "light")) continue;
+        /* `light` OR `light_<anything>`, which is how a preset gets to exist.
+           Every lamp is the same three numbers -- a point, a reach and a colour
+           -- so a "daylight" lamp is not a second kind of light, it is a light
+           whose keys the editor filled in already. An FGD cannot give two
+           classes the same classname, so the presets need names of their own,
+           and this is what makes those names arrive as lights.
+           Quake does exactly this and for exactly this reason: `light_fluoro`,
+           `light_torch_small_walltorch` and a dozen others are all lights that
+           differ only in what the editor typed for you.
+           `light_` AND NOT A BARE PREFIX. A prefix test would swallow anything
+           that merely begins with those five letters -- `lightning_bolt` is the
+           obvious one -- and a classname turning into a lamp because of its
+           first syllable is the kind of surprise that gets found in a dark
+           room six months later.
+           *`light` 또는 `light_<무엇이든>`이며*, 프리셋이 존재할 수 있게 하는 것이 그것입니다.
+           모든 등은 같은 수 셋(점, 도달 거리, 색)이므로 "주광" 등은 두 번째 종류의 빛이 아니라
+           에디터가 키를 미리 채워 준 빛입니다. FGD는 두 클래스에 같은 classname을 줄 수
+           없으므로 프리셋에는 자기 이름이 필요하고, 이 줄이 그 이름들을 빛으로 도착하게 합니다.
+           Quake가 정확히 이렇게 하며 이유도 같습니다. `light_fluoro`,
+           `light_torch_small_walltorch`를 비롯한 십여 개가 전부 빛이며, 에디터가 대신 입력해
+           주는 값만 다릅니다.
+           *맨 접두사가 아니라 `light_`입니다.* 접두사 검사는 그 다섯 글자로 시작하기만 하면
+           무엇이든 삼킵니다. `lightning_bolt`이 뻔한 예이고, 첫 음절 때문에 등이 되어 버리는
+           classname은 여섯 달 뒤 어두운 방에서 발견되는 종류의 놀라움입니다. */
+        if (!cn) continue;
+        if (!txt_eq(cn, "light") &&
+            !(cn[0] == 'l' && cn[1] == 'i' && cn[2] == 'g' && cn[3] == 'h' &&
+              cn[4] == 't' && cn[5] == '_' && cn[6]))
+            continue;
 
         v3 o;
         if (!brush_ent_point(e, "origin", &o)) continue;
@@ -1297,7 +1325,19 @@ static void brush_lights_of(Level *out, const BrushMap *bm) {
         L->g = (short)clampf(c[1] * s, 0.0f, 255.0f);
         L->b = (short)clampf(c[2] * s, 0.0f, 255.0f);
 
-        L->power = 100;
+        L->power = (short)clampf(brush_ent_num(e, "power", 100.0f), 0.0f, 1000.0f);
+
+        /* LIT ONLY IF THE NAME SAYS SO. `light` is what the importer writes for
+           every Quake lamp -- thirty-two in one room on the map this engine
+           learned the lesson from -- and it stays the inert thing it has been.
+           A `light_*` preset is typed by hand into a map that knows it has a
+           budget, and ::LVL_LAMP_MAX bounds it even then.
+           *이름이 그렇다고 할 때만 켜집니다.* `light`는 임포터가 모든 Quake 등에 대해 쓰는
+           것이고(이 엔진이 교훈을 얻은 그 맵에서는 한 방에 서른둘이었습니다) 지금까지 그래 온
+           불활성인 것으로 남습니다. `light_*` 프리셋은 자기에게 예산이 있다는 것을 아는 맵에
+           손으로 타이핑되며, 그때조차 ::LVL_LAMP_MAX가 그것을 묶습니다. */
+        L->lit     = (short)(cn[5] == '_');
+        L->flicker = (short)clampf(brush_ent_num(e, "flicker", 0.0f), 0.0f, 100.0f);
     }
 }
 

@@ -426,6 +426,7 @@ def engine_understands(cn):
     아무 결정도 내리지 않은 이름입니다."""
     return (cn in ENGINE_ALIASES or cn in ENGINE_HANDLES
             or cn.startswith('trigger_')
+            or cn == 'light' or cn.startswith('light_')
             or cn in set(ITEMS.values())
             or cn in set(cn2 for cn2, _ in FURNITURE)
             or cn == MAW)

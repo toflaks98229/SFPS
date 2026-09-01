@@ -489,6 +489,25 @@ static const float LIGHT_COL_BLAST[3] = { 1.00f, 0.94f, 0.80f };
  *   *금색은 보상이고*, 아프게 하는 무엇도 그것을 쓸 수 없습니다. */
 
 /** @brief Warm white: burnt powder, not a torch. / 따뜻한 백색. 횃불이 아니라 연소한 화약입니다. */
+/* WHAT A PLACED LAMP IS WORTH against an event, and it is deliberately under
+   both of them. The muzzle is 0.85 and a monster's bolt 0.55; a lamp is on for
+   the whole level where those are on for a moment, eight can overlap where two
+   events rarely do, and `lum` clamps at 1 before it bands -- so a lamp lit like
+   an event flattens the room it is meant to shape.
+   *놓인 등이 사건에 대해 얼마짜리인가*이며, 의도적으로 둘 다보다 낮습니다. 총구가 0.85이고
+   몬스터의 탄환이 0.55입니다. 등은 레벨 내내 켜져 있는데 그것들은 한순간이고, 여덟이 겹칠 수
+   있는데 사건 둘은 좀처럼 그러지 않으며, `lum`은 밴딩 전에 1에서 잘립니다. 그래서 사건처럼
+   밝혀진 등은 자기가 빚어야 할 방을 납작하게 만듭니다. */
+#define LIGHT_LAMP_POWER 0.45f
+
+/* How fast a wavering lamp breathes, radians a second. Under two, so a full
+   swing takes about three and a half seconds: slow enough to read as a flame
+   rather than as a fault, and slower than anything the player is doing.
+   일렁이는 등이 얼마나 빠르게 숨쉬는지, 초당 라디안입니다. 2보다 작아서 한 번 왕복에 3.5초쯤
+   걸립니다. 고장이 아니라 불꽃으로 읽힐 만큼 느리고, 플레이어가 하고 있는 그 무엇보다도
+   느립니다. */
+#define LAMP_WAVER_RATE  1.8f
+
 static const float LIGHT_COL_MUZZLE[3] = { 1.00f, 0.86f, 0.62f };
 /** @brief The grenade's own hot orange, pushed further from the muzzle's white than it was. / 유탄 자신의 뜨거운 주황색. 예전보다 총구의 백색에서 더 멀어졌습니다. */
 static const float LIGHT_COL_PROJ[3]   = { 1.00f, 0.55f, 0.18f };
@@ -989,6 +1008,102 @@ static void scene_lights(const World *w, v3 eye) {
        건네는 집합은 정확히 플레이어와 몬스터가 공중에 띄운 것들입니다. 그것이 무엇인지는
        LIGHT_MUZZLE_RADIUS 위의 설명을, 등이 여전히 파싱되고 보관되는 이유는 ::MoveLight
        위의 설명을 참조하십시오. */
+
+    /* --- the level's own lamps, LAST and CAPPED -------------------------
+     *
+     * ENGLISH
+     * -------
+     * ::Level::lights was parsed and read by nothing, and that was a decision
+     * rather than an omission: thirty-two lamps against eight slots made a big
+     * room re-light itself as the player walked through it, because the nearest
+     * eight kept changing -- and nothing in the fragment loop casts a shadow,
+     * so a lamp behind a wall lit the far side of it.
+     *
+     * WHAT CHANGES IS THE COUNT, NOT THE MECHANISM. Only a `light_*` preset is
+     * ::Light::lit, so the thirty-two a Quake import writes stay inert, and
+     * ::LVL_LAMP_MAX takes the nearest three of whatever is left. Three cannot
+     * churn: a lamp leaves the set when the player has walked past it, which is
+     * when its own falloff had taken it out anyway.
+     *
+     * LAST, so the muzzle, the grenades and the blast are already placed. A
+     * lamp can still evict one -- ::light_offer keeps the nearest and that is
+     * right -- but it cannot take a seat an event has not been offered.
+     *
+     * THE SHADOW PROBLEM IS NOT SOLVED, and this does not pretend to solve it.
+     * What it does is make the case small enough that a mapper can see it: three
+     * lamps placed by hand, in a room they chose, rather than thirty-two
+     * arriving with a conversion.
+     *
+     * 한국어
+     * ------
+     * *::Level::lights는 파싱되고 아무도 읽지 않았으며*, 그것은 누락이 아니라 결정이었습니다.
+     * 여덟 슬롯에 대한 서른두 개의 등은 플레이어가 걸을 때마다 큰 방이 스스로 다시 밝혀지게
+     * 했습니다. 가장 가까운 여덟이 계속 바뀌었기 때문입니다. 그리고 프래그먼트 루프의 무엇도
+     * 그림자를 드리우지 않으므로 벽 뒤의 등이 벽 반대편을 밝혔습니다.
+     *
+     * *바뀌는 것은 기구가 아니라 개수입니다.* `light_*` 프리셋만 ::Light::lit이므로 Quake
+     * 가져오기가 쓰는 서른둘은 불활성으로 남고, ::LVL_LAMP_MAX가 남은 것 중 가장 가까운 셋을
+     * 취합니다. 셋은 요동칠 수 없습니다. 등이 그 집합에서 빠지는 것은 플레이어가 지나쳤을
+     * 때이고, 그때는 자기 감쇠가 어차피 그것을 걷어낸 때입니다.
+     *
+     * *마지막인 이유는* 총구와 유탄과 폭발이 이미 자리를 잡은 뒤이기 때문입니다. 등이 그중
+     * 하나를 밀어낼 수는 있습니다. ::light_offer가 가까운 쪽을 지키고 그것이 옳습니다. 다만
+     * 제안받지 못한 사건의 자리를 빼앗을 수는 없습니다.
+     *
+     * *그림자 문제는 풀리지 않았고* 이것은 푼 척하지 않습니다. 이것이 하는 일은 그 사례를
+     * 제작자가 볼 수 있을 만큼 작게 만드는 것입니다. 변환과 함께 도착한 서른둘이 아니라, 고른
+     * 방에 손으로 놓은 셋입니다. */
+    {
+        int pick[LVL_LAMP_MAX];
+        float pd2[LVL_LAMP_MAX];
+        int np = 0;
+
+        for (int i = 0; i < w->level.n_lights; i++) {
+            const Light *L = &w->level.lights[i];
+            if (!L->lit || L->radius <= 0 || L->power <= 0) continue;
+
+            float lx = L->x * 0.01f, ly = L->y * 0.01f, lz = L->z * 0.01f;
+            float dx = lx - eye.x, dy = ly - eye.y, dz = lz - eye.z;
+            float d2 = dx*dx + dy*dy + dz*dz;
+
+            int at = np;
+            if (np < LVL_LAMP_MAX) np++;
+            else {
+                int worst = 0;
+                for (int k = 1; k < LVL_LAMP_MAX; k++)
+                    if (pd2[k] > pd2[worst]) worst = k;
+                if (pd2[worst] <= d2) continue;
+                at = worst;
+            }
+            pick[at] = i;
+            pd2[at]  = d2;
+        }
+
+        for (int k = 0; k < np; k++) {
+            const Light *L = &w->level.lights[pick[k]];
+            float col[3] = { L->r / 255.0f, L->g / 255.0f, L->b / 255.0f };
+            float pw = L->power * 0.01f * LIGHT_LAMP_POWER;
+
+            /* THE WAVER. Phase from the lamp's own position so a row of them
+               does not breathe in unison, and a sine rather than a step because
+               a flicker that snaps reads as a fault in the light rather than as
+               a quality of it. At `flicker` 100 the lamp swings between half
+               brightness and full; it never goes out, because a lamp that
+               blinks off is a lamp the player thinks they broke.
+               *일렁임입니다.* 위상은 등 자신의 위치에서 오므로 줄지어 놓인 것들이 한 호흡으로
+               숨쉬지 않고, 계단이 아니라 사인인 것은 딱딱 끊기는 깜박임이 빛의 성질이 아니라
+               고장으로 읽히기 때문입니다. `flicker`가 100이면 등은 절반 밝기와 최대 사이를
+               오갑니다. 결코 꺼지지는 않습니다. 꺼지는 등은 플레이어가 자기가 고장 냈다고
+               생각하는 등입니다. */
+            if (L->flicker > 0) {
+                float amp = L->flicker * 0.01f * 0.5f;
+                float ph  = (float)(L->x + L->z) * 0.01f;
+                pw *= 1.0f - amp + amp * sinf(w->run.world_time * LAMP_WAVER_RATE + ph);
+            }
+            light_offer(ls, &n, v3f(L->x * 0.01f, L->y * 0.01f, L->z * 0.01f),
+                        L->radius * 0.01f, col, pw, eye);
+        }
+    }
 
     lights_upload(ls, n);
 }

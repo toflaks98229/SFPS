@@ -131,11 +131,50 @@
 
 // A point light. `light` is Quake's brightness and this engine reads it as
 // reach, because it separates reach from brightness and Quake does not.
-// Baked into the vertices when the level loads, shadowed against the brushes.
-@PointClass size(-8 -8 -8, 8 8 8) color(255 255 128) = light : "A static light, baked at load."
+//
+// PLACING ONE OF THESE CHANGES NOTHING YOU CAN SEE, and that is on purpose. It
+// is the classname the Quake importer writes for every lamp it converts -- the
+// map this engine learned from declared thirty-two in one room -- and eight
+// dynamic slots against thirty-two candidates made the room re-light itself as
+// the player walked through it. Nothing casts a shadow in the light loop
+// either, so a lamp behind a wall lit the far side. They are parsed, stored and
+// left dark.
+//
+// To place a lamp that LIGHTS, use one of the `light_*` presets below. The
+// difference is not the light -- it is the same three numbers -- it is that a
+// preset is typed by hand, one at a time, and the engine caps how many of them
+// may hold a slot at once.
+@PointClass size(-8 -8 -8, 8 8 8) color(128 128 96) = light : "A light the importer writes. Parsed, and dark -- see light_day."
 [
     light(integer) : "Reach in units" : 300
     _color(color255) : "Colour" : "255 255 255"
+]
+
+// The one you place by hand.
+//
+// A ROUND POOL, LIKE THE ONE A PROJECTILE MAKES. It is the same light: the
+// fragment loop's (1 - d/r)^2 falloff, the same eight slots a grenade competes
+// for, the same absence of shadow. What makes it a lamp rather than an event is
+// that it is still there when you look back.
+//
+// `flicker` is how far it wavers, in percent. The phase comes from the lamp's
+// own position so a row of them does not breathe together, and the curve is a
+// sine: a light that snaps reads as a fault rather than as a flame. At 100 it
+// swings between half brightness and full and never goes out.
+//
+// `power` is brightness against the reference 100. A lamp is worth less than an
+// event on purpose -- it is on for the whole level where a muzzle flash is on
+// for a moment -- so 100 here is already under what a gun throws.
+//
+// AT MOST THREE OF THESE LIGHT AT ONCE, nearest to the camera. Place more if the
+// room wants them; the far ones wait, and the three that are lit are the three
+// close enough to matter.
+@PointClass size(-8 -8 -8, 8 8 8) color(255 236 170) = light_day : "A daylight lamp: round, warm, and wavering."
+[
+    light(integer) : "Reach in units" : 400
+    _color(color255) : "Colour" : "255 236 170"
+    power(integer) : "Brightness, percent of the reference" : 100
+    flicker(integer) : "How far it wavers, percent" : 35
 ]
 
 // --- Monsters ------------------------------------------------------------

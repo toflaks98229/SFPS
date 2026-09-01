@@ -653,6 +653,27 @@ typedef struct {
  * @note 이를 넘는 등은 파싱되되 버려지며 ::DIAG_LIGHT_CAP으로 보고됩니다. 제작자의 의도보다
  *       어두운 방은 상한이 원인이라는 단서를 주지 않기 때문입니다.
  */
+/**
+ * @def LVL_LAMP_MAX
+ * @brief How many lamps may hold a dynamic slot at once, nearest first.
+ *
+ * ENGLISH: Three against ::RD_MAX_LIGHTS's eight, so a room's lamps can never
+ * take more than a third of what the frame has and the muzzle, the grenades and
+ * the blast always have somewhere to go. The number that broke this before was
+ * not eight, it was thirty-two candidates for eight seats -- the nearest set
+ * kept changing and the room re-lit itself as the player walked. Three cannot
+ * churn like that: a lamp leaves the set only when the player has walked past
+ * it, which is also when its own falloff has taken it out.
+ *
+ * 한국어: ::RD_MAX_LIGHTS의 여덟에 대해 셋입니다. 그래서 한 방의 등이 프레임이 가진 것의
+ * 3분의 1을 결코 넘을 수 없고 총구와 유탄과 폭발은 언제나 갈 자리가 있습니다. 이것을 전에
+ * 망가뜨린 수는 여덟이 아니라 여덟 자리에 대한 서른두 후보였습니다. 가장 가까운 집합이 계속
+ * 바뀌었고 플레이어가 걸을 때마다 방이 스스로 다시 밝혀졌습니다. 셋은 그렇게 요동칠 수
+ * 없습니다. 등이 그 집합에서 빠지는 것은 플레이어가 그것을 지나쳤을 때뿐이고, 그때는 자기
+ * 감쇠가 이미 그것을 걷어낸 때이기도 합니다.
+ */
+#define LVL_LAMP_MAX 3
+
 #define LVL_MAX_LIGHTS  64
 
 /**
@@ -1712,6 +1733,54 @@ typedef struct {
     short radius;                 /**< Reach in 1/100 units; nothing past this is lit. / 도달 거리 (1/100 단위). 이를 넘으면 비추지 않습니다. */
     short r, g, b;                /**< Colour, 0..255. / 색상 (0..255). */
     short power;                  /**< Brightness, percent. 100 is the reference. / 밝기 (퍼센트). 100이 기준입니다. */
+
+    /**
+     * @brief Whether this lamp takes a dynamic slot. Only a `light_*` preset does.
+     *
+     * ENGLISH
+     * -------
+     * A BARE `light` STILL LIGHTS NOTHING, and that is not an oversight. Thirty-two
+     * of them in one room against eight slots is what made lamps come out of this
+     * engine in the first place: the room re-lights itself as the player walks
+     * through it, because the nearest eight keep changing, and nothing in the
+     * fragment loop casts a shadow so a lamp behind a wall lights the far side.
+     * The importer turns every Quake light into a bare `light`, so a re-imported
+     * map brings its thirty-two back as the inert things they were.
+     *
+     * A `light_*` PRESET IS A DELIBERATE PLACEMENT. It is typed by hand, one at a
+     * time, into a map that already knows it has a budget -- and ::LVL_LAMP_MAX
+     * bounds how many of them may be lit at once whatever the mapper does.
+     *
+     * 한국어
+     * ------
+     * @brief 이 등이 동적 슬롯을 차지하는지. `light_*` 프리셋만 그렇습니다.
+     *
+     * *맨 `light`는 여전히 아무것도 밝히지 않으며*, 그것은 실수가 아닙니다. 한 방의 서른둘이
+     * 여덟 슬롯을 놓고 다투는 것이 애초에 이 엔진에서 등을 걷어내게 만든 일입니다. 가장 가까운
+     * 여덟이 계속 바뀌므로 플레이어가 걸을 때마다 방이 스스로 다시 밝혀지고, 프래그먼트 루프의
+     * 무엇도 그림자를 드리우지 않으므로 벽 뒤의 등이 벽 반대편을 밝힙니다. 임포터는 모든 Quake
+     * 라이트를 맨 `light`로 바꾸므로, 다시 가져온 맵은 자기 서른둘을 예전 그대로의 불활성인
+     * 것으로 데려옵니다.
+     *
+     * *`light_*` 프리셋은 의도적인 배치입니다.* 손으로, 하나씩, 자기에게 예산이 있다는 것을
+     * 아는 맵에 타이핑됩니다. 그리고 ::LVL_LAMP_MAX가 제작자가 무엇을 하든 동시에 몇 개까지
+     * 켜질 수 있는지를 묶습니다.
+     */
+    short lit;
+
+    /**
+     * @brief How much the lamp wavers, percent. 0 holds still.
+     *
+     * ENGLISH: A smooth waver rather than a strobe -- the phase comes from the
+     * lamp's own position, so a row of them does not breathe in unison, and the
+     * curve is a sine because a flicker that snaps reads as a fault in the light
+     * rather than as a quality of it.
+     *
+     * 한국어: 스트로브가 아니라 부드러운 일렁임입니다. 위상은 등 자신의 위치에서 오므로 줄지어
+     * 놓인 것들이 한 호흡으로 숨쉬지 않고, 곡선이 사인인 것은 딱딱 끊기는 깜박임이 빛의 성질이
+     * 아니라 고장으로 읽히기 때문입니다.
+     */
+    short flicker;
 } Light;
 
 /**

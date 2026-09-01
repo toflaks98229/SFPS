@@ -684,6 +684,41 @@ int main(void) {
     ok(rd_light_count() == 0, "lamps on top of the camera still take no slot");
     ok(lamped == bare, "and change no pixel of the frame");
 
+    /* --- AND A PRESET DOES, WHICH IS THE OTHER HALF ----------------------
+     *
+     * The eight above are bare `light`, ::Light::lit clear, and they are meant
+     * to stay dark: that classname is what the importer writes for every Quake
+     * lamp, thirty-two of them in the room this engine learned the lesson from.
+     * Turning one on is a decision a mapper makes by typing `light_` in front
+     * of the name.
+     *
+     * A CHECK ON THE DARK HALF ALONE WOULD PASS WITH THE FEATURE DELETED --
+     * which is exactly what it did for the two revisions the lamps were off.
+     * So the same eight are marked lit and offered again: the slots must fill,
+     * and ::LVL_LAMP_MAX must stop them filling more than three of the eight
+     * the frame has, because the failure that took lamps out was never one
+     * lamp being wrong, it was the nearest set churning as the player walked.
+     *
+     * *그리고 프리셋은 밝히며, 그것이 나머지 절반입니다.* 위의 여덟은 맨 `light`이고
+     * ::Light::lit이 비어 있으며 어두운 채로 있어야 합니다. 그 classname은 임포터가 모든 Quake
+     * 등에 대해 쓰는 것이고, 이 엔진이 교훈을 얻은 그 방에는 서른둘이 있었습니다. 하나를 켜는
+     * 것은 제작자가 이름 앞에 `light_`를 타이핑하며 내리는 결정입니다.
+     *
+     * *어두운 절반만 보는 검사는 기능을 지워도 통과합니다.* 램프가 꺼져 있던 두 판 동안 실제로
+     * 그랬습니다. 그래서 같은 여덟에 lit을 표시하고 다시 제안합니다. 슬롯이 차야 하고,
+     * ::LVL_LAMP_MAX가 프레임이 가진 여덟 중 셋을 넘겨 채우지 못하게 막아야 합니다. 등을
+     * 걷어내게 만든 실패는 등 하나가 틀린 것이 아니라 플레이어가 걸을 때 가장 가까운 집합이
+     * 요동치는 것이었기 때문입니다. */
+    for (int i = 0; i < w.level.n_lights; i++) w.level.lights[i].lit = 1;
+    unsigned preset = frame_hash(&w, &scene, 0);
+    printf("      %d lamp(s) declared, %d slot(s) taken (cap %d)\n",
+           w.level.n_lights, rd_light_count(), LVL_LAMP_MAX);
+    ok(rd_light_count() > 0, "a light_* preset does take a slot");
+    ok(rd_light_count() <= LVL_LAMP_MAX,
+       "and no more of them than LVL_LAMP_MAX, whatever the map declares");
+    ok(preset != bare, "and it changes the frame");
+    for (int i = 0; i < w.level.n_lights; i++) w.level.lights[i].lit = 0;
+
     w.level.n_lights = saved;
 
     /* --- and the slots are not merely unusable ---------------------------

@@ -420,6 +420,39 @@ enum MonTypeID {
    모두 존재하는 이유는, 매 프레임 다시 결정하는 몬스터가 제자리에서 떨기 때문입니다.
    발밑의 지형이 바뀌는 속도로 선택이 뒤집히고, 그 결과는 움직임이 아니라 결함으로
    읽힙니다. */
+/**
+ * @def INFIGHT_TIME
+ * @brief How long a monster stays angry at another monster, in seconds.
+ *
+ * ENGLISH
+ * -------
+ * QUAKE HAS NO SUCH TIMER: a monster keeps its `enemy` until that enemy dies
+ * or it loses track of it, and it can spend the rest of the level on a feud.
+ * That works there because a Quake level is a sequence of rooms with a fixed
+ * population; it does not work in an arena, where the spawners keep arriving
+ * and a permanent grudge is a monster permanently removed from the fight the
+ * player is in.
+ *
+ * Eight seconds is long enough to watch happen -- to see two of them turn on
+ * each other, close, and finish it -- and short enough that walking away is
+ * not a strategy. A player who could start a feud and leave would have found
+ * a way to delete monsters for free.
+ *
+ * 한국어
+ * ------
+ * @brief 몬스터가 다른 몬스터에게 화가 나 있는 시간(초).
+ *
+ * *Quake에는 그런 타이머가 없습니다.* 몬스터는 그 적이 죽거나 놓칠 때까지 `enemy`를 유지하며,
+ * 레벨의 나머지를 원한에 쓸 수도 있습니다. 그곳에서는 통합니다. Quake의 레벨은 인구가 고정된
+ * 방들의 연속이기 때문입니다. 투기장에서는 통하지 않습니다. 스포너가 계속 도착하고, 영구적인
+ * 원한은 플레이어가 있는 전투에서 영구히 빠진 몬스터입니다.
+ *
+ * 8초는 벌어지는 것을 지켜보기에 충분히 길고(둘이 서로에게 돌아서서 붙고 끝내는 것을 보기에),
+ * 자리를 뜨는 것이 전략이 되지 않을 만큼 짧습니다. 싸움을 붙여 놓고 떠날 수 있는 플레이어는
+ * 몬스터를 공짜로 지우는 방법을 찾은 것입니다.
+ */
+#define INFIGHT_TIME 8.0f
+
 #define MON_SLIDE_LEG     2.5f
 
 /* AND WHY THAT IS A DISTANCE RATHER THAN THE TIME IT USED TO BE. It was 1.1
@@ -1317,6 +1350,49 @@ typedef struct {
     short  sight_age;
 
     /**
+     * @brief Which monster this one is fighting instead of the player, or -1.
+     *
+     * ENGLISH
+     * -------
+     * THE WHOLE OF INFIGHTING IS THIS FIELD. Every function that steers a
+     * monster already takes "the point to fight" as an argument -- it was
+     * always the player's eye, and nothing below ::enemy_update ever asked
+     * whose eye it was. So a monster fighting another monster is not a second
+     * AI; it is the same AI handed a different point.
+     *
+     * SET ONLY BY BEING HURT, and only by a monster of a different kind. That
+     * is Quake's rule from combat.qc: `T_Damage` retargets the victim onto its
+     * attacker unless `targ.classname == attacker.classname`. The damage lands
+     * either way -- two water spirits crossing fire still hurt each other,
+     * they just do not take it personally.
+     *
+     * CLEARED BY THE PLAYER. Being shot by the player puts this back to -1,
+     * which is the closest thing here to Quake's `oldenemy`: a monster you
+     * have started shooting is a monster that should be coming for you, not
+     * one still settling a grudge with something behind it.
+     *
+     * 한국어
+     * ------
+     * @brief 이 몬스터가 플레이어 대신 싸우고 있는 몬스터의 색인. 없으면 -1입니다.
+     *
+     * *내분의 전부가 이 필드입니다.* 몬스터를 조종하는 모든 함수가 이미 "싸울 지점"을 인자로
+     * 받습니다. 그것이 늘 플레이어의 눈이었을 뿐이고, ::enemy_update 아래의 무엇도 그것이
+     * *누구의* 눈인지 물은 적이 없습니다. 그러므로 다른 몬스터와 싸우는 몬스터는 두 번째 AI가
+     * 아니라, 다른 점을 건네받은 같은 AI입니다.
+     *
+     * *맞았을 때만, 그리고 다른 종류에게 맞았을 때만 설정됩니다.* combat.qc의 Quake 규칙입니다.
+     * `T_Damage`는 `targ.classname == attacker.classname`이 아닌 한 피해자를 가해자에게로
+     * 돌립니다. 피해는 어느 쪽이든 꽂힙니다. 물 정령 둘이 서로의 사격에 걸리면 여전히 서로를
+     * 다치게 하며, 다만 그것을 개인적으로 받아들이지 않을 뿐입니다.
+     *
+     * *플레이어가 지웁니다.* 플레이어에게 맞으면 -1로 돌아가며, 이곳에서 Quake의 `oldenemy`에
+     * 가장 가까운 것입니다. 당신이 쏘기 시작한 몬스터는 당신에게 와야 하는 몬스터이지, 뒤쪽의
+     * 무언가와 아직 원한을 정리하고 있는 몬스터가 아닙니다.
+     */
+    short  foe;
+    float  foe_time;    /**< Seconds the grudge has left. / 원한에 남은 시간(초). */
+
+    /**
      * @brief Where the monster WANTS to face. Its actual yaw turns towards it.
      *
      * Quake's `ideal_yaw`, and the reason it is stored rather than computed at
@@ -1465,6 +1541,21 @@ typedef struct {
      * ::SHOT_TRAIL_INTERVAL을 참조하십시오.
      */
     float trail_timer;
+
+    /**
+     * @brief Which monster fired this, so it cannot hit itself and the victim
+     *        knows who to blame.
+     *
+     * ENGLISH: ::type was already here and is the CASTER'S KIND, which the
+     * trail colour reads. It cannot serve as the owner: two water spirits are
+     * the same type and must still be able to shoot each other, and one water
+     * spirit must not be able to shoot itself.
+     *
+     * 한국어: ::type이 이미 있었고 그것은 *시전자의 종류*이며 궤적 색이 읽습니다. 소유자
+     * 역할은 할 수 없습니다. 물 정령 둘은 같은 type이지만 서로를 쏠 수 있어야 하고, 물 정령
+     * 하나는 자기를 쏠 수 없어야 하기 때문입니다.
+     */
+    short owner;
 } Shot;
 
 /**
@@ -2529,6 +2620,27 @@ int enemy_hitscan(const Pools *pl, v3 o, v3 d, float maxdist, float *out_t, int 
  *       몬스터를 죽을 때까지 붙잡아 둘 수 없습니다.
  */
 void enemy_hurt(Pools *pl, int idx, int dmg, v3 dir);
+
+/**
+ * @brief The same, told who did it -- which is how a monster learns to fight
+ *        another monster.
+ *
+ * ENGLISH: ::enemy_hurt is this with `from` = -1, meaning the player, and
+ * every one of its twenty-odd callers is a player weapon. Keeping the short
+ * name for that case is not laziness: "the player hurt it" is the overwhelming
+ * majority and a -1 threaded through every grapple and pellet would be noise
+ * at each site to serve one caller that is not the player.
+ *
+ * @param from Index of the attacking monster, or -1 for the player.
+ *
+ * 한국어: ::enemy_hurt는 `from`이 -1인 이것이며, -1은 플레이어를 뜻합니다. 그 스무 곳 남짓의
+ * 호출자가 전부 플레이어의 무기입니다. 그 경우에 짧은 이름을 남겨 두는 것은 게으름이
+ * 아닙니다. "플레이어가 때렸다"가 압도적 다수이고, 모든 갈고리와 펠릿에 -1을 꿰는 것은
+ * 플레이어가 아닌 호출자 하나를 위해 모든 자리에 소음을 두는 일입니다.
+ *
+ * @param from 공격한 몬스터의 색인. 플레이어이면 -1입니다.
+ */
+void enemy_hurt_by(Pools *pl, int idx, int dmg, v3 dir, int from);
 
 /**
  * @brief Takes what a corpse owes the floor, clearing it so it is owed once.

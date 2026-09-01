@@ -293,6 +293,154 @@ static void check_weave(void) {
     }
 }
 
+/* --- monsters fight each other --------------------------------------------
+ *
+ * ENGLISH
+ * -------
+ * THREE CLAIMS, AND THEY FAIL SEPARATELY. A rule about who gets angry is worth
+ * nothing if nothing can land the blow that angers them, and a bolt that hits
+ * a monster is worth nothing if the monster then walks on toward the player as
+ * though it had not. So the collision, the grudge and the exemption are asked
+ * one at a time.
+ *
+ * THE FIRST IS THE ONE THAT WAS MISSING ENTIRELY. Until this feature a
+ * monster's bolt tested the player's capsule and the level geometry and
+ * nothing else -- two monsters could stand in each other's fire for a whole
+ * level. There was no infighting rule to be broken because there was nothing
+ * for a rule to be about.
+ *
+ * 한국어
+ * ------
+ * *주장 셋이며 각자 따로 실패합니다.* 누가 화를 내는가에 대한 규칙은, 화를 낼 만한 일격을
+ * 꽂을 수 있는 것이 없다면 아무 값어치가 없습니다. 그리고 몬스터에 맞는 탄환은, 그 몬스터가
+ * 아무 일 없었다는 듯 플레이어를 향해 계속 걸어간다면 아무 값어치가 없습니다. 그래서 충돌과
+ * 원한과 면제를 하나씩 묻습니다.
+ *
+ * *첫 번째가 아예 없던 것입니다.* 이 기능 전까지 몬스터의 탄환은 플레이어의 캡슐과 레벨
+ * 기하만 검사했습니다. 몬스터 둘은 레벨 내내 서로의 사격 속에 서 있을 수 있었습니다. 깨질
+ * 내분 규칙이 없었던 것은 규칙이 다룰 대상이 없었기 때문입니다.
+ */
+static void check_infight(void) {
+    printf("\nmonsters fight each other\n");
+
+    /* --- the grudge, and who is exempt from it ------------------------- */
+    {
+        build();
+        put_kind(&L.ents[0], "caster");
+        Entity *b = &L.ents[L.n_ents++];
+        put_kind(b, "brute"); b->x = 1200; b->z = -1500;
+        Entity *c = &L.ents[L.n_ents++];
+        put_kind(c, "caster"); c->x = -1200; c->z = -1500;
+
+        enemy_reset(&g_pools);
+        enemy_spawn_level(&g_pools, &L);
+        okf(enemy_count(&g_pools) == 3, "three monsters stand in the room", (float)(enemy_count(&g_pools)), (float)(3));
+
+        /* Index 0 is the caster the fixture places; 1 is the brute. */
+        v3 push = v3f(1.0f, 0.0f, 0.0f);
+        okf(enemy_at(&g_pools, 1)->foe == -1,
+            "a fresh monster holds no grudge",
+            (float)enemy_at(&g_pools, 1)->foe, -1.0f);
+
+        /* FROM INDEX 2, NOT 0. The first cut attacked from 0 and asserted the
+           foe became 0 -- which the uninitialised field already was, so the
+           check passed without the code running. An index that cannot be the
+           default is the whole difference between a test and a coincidence.
+           *0이 아니라 색인 2에서입니다.* 첫 판은 0에서 공격하고 상대가 0이 되는지 단언했는데,
+           초기화되지 않은 필드가 이미 0이었으므로 코드가 돌지 않아도 통과했습니다. 기본값일 수
+           없는 색인이, 테스트와 우연의 차이 전부입니다. */
+        enemy_hurt_by(&g_pools, 1, 5, push, 2);
+        okf(enemy_at(&g_pools, 1)->foe == 2,
+            "a brute shot by a caster turns on that caster",
+            (float)enemy_at(&g_pools, 1)->foe, 2.0f);
+
+        /* SAME KIND: NO GRUDGE, and in this game no damage either -- a bolt
+           passes through its own kind before it ever reaches ::enemy_hurt_by.
+           Quake exempts only the anger and lets the damage land; the collision
+           in shots_update explains at length why an arena that spawns one kind
+           per spawner cannot afford that. What is asserted here is the rule
+           that survives either way: being hurt by your own kind is not
+           personal.
+           *같은 종류: 원한도 없고*, 이 게임에서는 피해도 없습니다. 탄환이 ::enemy_hurt_by에
+           닿기도 전에 자기 종류를 통과합니다. Quake는 분노만 면제하고 피해는 꽂히게 두는데,
+           스포너마다 한 종류를 내는 투기장이 왜 그것을 감당할 수 없는지는 shots_update의
+           충돌부가 길게 설명합니다. 이곳에서 단언하는 것은 어느 쪽이든 살아남는 규칙입니다.
+           자기 종류에게 맞는 것은 개인적인 일이 아니라는 것입니다. */
+        enemy_hurt_by(&g_pools, 2, 5, push, 0);
+        okf(enemy_at(&g_pools, 2)->foe == -1,
+            "a caster hurt by a caster does not take it personally",
+            (float)enemy_at(&g_pools, 2)->foe, -1.0f);
+
+        /* And the player pulls the attention back. */
+        enemy_hurt(&g_pools, 1, 5, push);
+        okf(enemy_at(&g_pools, 1)->foe == -1,
+            "and the player shooting it ends the feud",
+            (float)enemy_at(&g_pools, 1)->foe, -1.0f);
+    }
+
+    /* --- and a real bolt is what starts it ------------------------------
+     *
+     * THE CHECKS ABOVE CALL ::enemy_hurt_by DIRECTLY, which tests the rule and
+     * not the collision the rule needs. This one puts a brute in the line
+     * between a caster and the player and lets the caster shoot: if a bolt
+     * still passes through monsters the way it did before this feature, the
+     * brute's health never moves and nothing above would notice.
+     * *위의 검사들은 ::enemy_hurt_by를 직접 부르므로* 규칙을 검사하고 그 규칙이 필요로 하는
+     * 충돌은 검사하지 않습니다. 이것은 캐스터와 플레이어 사이의 선 위에 브루트를 세우고
+     * 캐스터가 쏘게 합니다. 탄환이 이 기능 이전처럼 여전히 몬스터를 통과한다면 브루트의
+     * 체력은 결코 움직이지 않으며, 위의 어느 것도 그것을 알아채지 못합니다. */
+    {
+        build();
+        put_kind(&L.ents[0], "caster");
+        L.ents[0].x = 0; L.ents[0].z = -1600;
+        Entity *b = &L.ents[L.n_ents++];
+        put_kind(b, "brute"); b->x = 0; b->z = -700;
+
+        enemy_reset(&g_pools);
+        enemy_spawn_level(&g_pools, &L);
+
+        v3 player = v3f(0.0f, PLAYER_EYE, 0.0f);
+        int hp0 = enemy_at(&g_pools, 1)->health;
+        int hit_at = -1;
+        for (int i = 0; i < 60 * 12; i++) {
+            enemy_update(&g_pools, &L, player, DT);
+            if (enemy_at(&g_pools, 1)->health < hp0) { hit_at = i; break; }
+        }
+        printf("      the brute in the way lost health after %.2fs\n",
+               hit_at < 0 ? -1.0f : hit_at * DT);
+        ok(hit_at >= 0, "a caster's bolt stops at the monster standing in it");
+        okf(enemy_at(&g_pools, 1)->foe == 0,
+            "and the brute turns on the caster that fired it",
+            (float)enemy_at(&g_pools, 1)->foe, 0.0f);
+    }
+
+    /* --- and it walks toward its foe rather than the player ------------ */
+    {
+        build();
+        put_kind(&L.ents[0], "brute");
+        Entity *c = &L.ents[L.n_ents++];
+        put_kind(c, "caster"); c->x = -1500; c->z = 1500;
+
+        enemy_reset(&g_pools);
+        enemy_spawn_level(&g_pools, &L);
+
+        v3 player = v3f(0.0f, PLAYER_EYE, 0.0f);
+        v3 foe    = enemy_at(&g_pools, 1)->pos;
+        v3 start  = enemy_at(&g_pools, 0)->pos;
+
+        enemy_hurt_by(&g_pools, 0, 1, v3f(1.0f, 0.0f, 0.0f), 1);
+        for (int i = 0; i < 60 * 3; i++) enemy_update(&g_pools, &L, player, DT);
+
+        v3 now = enemy_at(&g_pools, 0)->pos;
+        float to_foe    = dist_xz(now, foe)    - dist_xz(start, foe);
+        float to_player = dist_xz(now, player) - dist_xz(start, player);
+        printf("      three seconds later: %+.1fm toward its foe, %+.1fm toward the player\n",
+               -to_foe, -to_player);
+        ok(to_foe < to_player,
+           "a monster with a grudge closes on the monster, not on the player");
+    }
+}
+
 int main(void) {
     printf("enemytest\n\n");
     build();
@@ -1190,6 +1338,7 @@ int main(void) {
     }
 
     check_weave();
+    check_infight();
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall enemy checks passed\n", fails);
     return fails != 0;

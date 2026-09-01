@@ -254,7 +254,7 @@ static int spawner_crowded(const Spawner *s, v3 player_eye);
 static int spawners_update(Pools *pl, const Level *l, v3 player_eye, float dt);
 
 static void shot_fire(Pools *pl, v3 from, v3 at, float speed, int damage,
-                      int type);
+                      int type, int owner);
 static int shots_update(Pools *pl, const Level *l, v3 player_eye, float dt);
 
 static float mon_step(const MonType *S);
@@ -545,6 +545,34 @@ const Spawner *enemy_spawner_at(const Pools *pl, int i) {
     return (i >= 0 && i < pl->enemy.n_spawners) ? &pl->enemy.spawner[i] : 0;
 }
 
+/* WHERE THIS MONSTER IS FIGHTING, which is the player unless it is holding a
+   grudge. Every function below ::enemy_update takes "the point to fight" and
+   none of them ever asked whose it was, so infighting is not a second AI -- it
+   is the same one handed a different point.
+   THE GRUDGE LAPSES THREE WAYS and all of them end here rather than in
+   ::enemy_hurt_by: the timer runs out, the foe stops being a live monster, or
+   the index goes stale. Checking on READ rather than clearing on those events
+   means there is no list of events to keep complete -- a foe that dies while
+   this monster is mid-swing is answered the next time anybody asks, and nothing
+   had to notice the death.
+   *이 몬스터가 어디를 상대로 싸우고 있는가*이며, 원한을 품고 있지 않으면 플레이어입니다.
+   ::enemy_update 아래의 모든 함수가 "싸울 지점"을 받고 그중 누구도 그것이 *누구의* 것인지 물은
+   적이 없으므로, 내분은 두 번째 AI가 아니라 다른 점을 건네받은 같은 AI입니다.
+   *원한은 세 가지로 풀리며* 전부 ::enemy_hurt_by가 아니라 이곳에서 끝납니다. 시간이 다하거나,
+   상대가 살아 있는 몬스터이기를 그만두거나, 색인이 낡는 것입니다. 그 사건들에서 지우는 대신
+   *읽을 때* 검사하는 것은, 빠짐없이 관리해야 할 사건 목록이 없다는 뜻입니다. 이 몬스터가
+   휘두르는 도중에 죽은 상대는 다음에 누가 묻든 그때 답해지며, 그 죽음을 알아챌 필요가 있는
+   것은 아무것도 없습니다. */
+static v3 foe_point(const Pools *pl, const Enemy *m, v3 player_eye)
+{
+    if (m->foe < 0 || m->foe_time <= 0.0f || m->foe >= pl->enemy.count)
+        return player_eye;
+    const Enemy *f = &pl->enemy.m[m->foe];
+    if (!f->active || f->state == E_DEAD)
+        return player_eye;
+    return v3f(f->pos.x, f->pos.y + TYPES[f->type].eye, f->pos.z);
+}
+
 int enemy_update(Pools *pl, const Level *l, v3 player_eye, float dt)
 {
     int player_damage = shots_update(pl, l, player_eye, dt);
@@ -561,6 +589,15 @@ int enemy_update(Pools *pl, const Level *l, v3 player_eye, float dt)
         if (!m->active)
             continue;
         const MonType *S = &TYPES[m->type];
+
+        if (m->foe_time > 0.0f) m->foe_time -= dt;
+
+        /* Resolved ONCE, so every question this frame asks about the same
+           thing. Splitting it -- chasing one point and shooting at another --
+           is the bug this variable exists to make impossible.
+           *한 번만 해결하므로* 이 프레임의 모든 질문이 같은 것에 대해 묻습니다. 나누는 것(한
+           점을 쫓으며 다른 점을 쏘는 것)이 이 변수가 불가능하게 만들려고 존재하는 버그입니다. */
+        v3 goal = foe_point(pl, m, player_eye);
 
         m->anim += dt;
         if (m->flash > 0.0f)
@@ -722,7 +759,7 @@ int enemy_update(Pools *pl, const Level *l, v3 player_eye, float dt)
         if (m->sight_age > 0)
             m->sight_age--;
 
-        v3 to = v3sub(player_eye, v3f(m->pos.x, m->pos.y + S->eye, m->pos.z));
+        v3 to = v3sub(goal, v3f(m->pos.x, m->pos.y + S->eye, m->pos.z));
         float dist = sqrtf(to.x * to.x + to.z * to.z);
 
         /* WHERE IT WANTS TO LOOK, which is no longer the same as where it is
@@ -755,7 +792,7 @@ int enemy_update(Pools *pl, const Level *l, v3 player_eye, float dt)
                캐시를 씁니다. 플레이어를 한두 프레임 늦게 알아채는 것은 지각되지 않으며,
                앞의 거리 검사 덕분에 시야 거리 밖의 몬스터는 판정 비용을 아예 치르지
                않습니다. */
-            if (dist < S->sight && sees_player(pl, l, m, player_eye))
+            if (dist < S->sight && sees_player(pl, l, m, goal))
             {
                 m->state = E_CHASE;
                 play_at(m->pos, "sight", 80);
@@ -771,7 +808,7 @@ int enemy_update(Pools *pl, const Level *l, v3 player_eye, float dt)
                `shot_speed > 0` 검사는 각각 "이것은 캐스터인가"를 뜻했고, 세 번째 아키타입이
                생기는 날 각각을 다시 찾아내야 했을 것입니다. */
             if (S->behaviour == AI_CASTER)
-                chase_caster(pl, l, S, m, to, dist, player_eye, dt);
+                chase_caster(pl, l, S, m, to, dist, goal, dt);
             else
                 chase_brawler(pl, l, S, m, to, dist, dt);
             break;
@@ -799,7 +836,7 @@ int enemy_update(Pools *pl, const Level *l, v3 player_eye, float dt)
                     while (m->swung < shots &&
                            m->timer >= S->windup + (float)m->swung * S->shot_gap)
                     {
-                        release_bolt(pl, l, S, m, player_eye);
+                        release_bolt(pl, l, S, m, goal);
                         m->swung++;
                     }
                 }
@@ -978,11 +1015,44 @@ int enemy_hitscan(const Pools *pl, v3 o, v3 d, float maxdist, float *out_t, int 
 
 void enemy_hurt(Pools *pl, int idx, int dmg, v3 dir)
 {
+    enemy_hurt_by(pl, idx, dmg, dir, -1);
+}
+
+void enemy_hurt_by(Pools *pl, int idx, int dmg, v3 dir, int from)
+{
     if (idx < 0 || idx >= pl->enemy.count)
         return;
     Enemy *m = &pl->enemy.m[idx];
     if (!m->active || m->state == E_DEAD)
         return;
+
+    /* WHO IT IS ANGRY AT NOW, decided before the damage lands so a killing blow
+       still records it -- a monster that dies facing its killer is the picture
+       the player is owed.
+       QUAKE'S RULE, from combat.qc: the victim retargets onto its attacker
+       unless `targ.classname == attacker.classname`. The DAMAGE is not exempted
+       -- two of a kind crossing fire still hurt each other, they just do not
+       take it personally -- so this sits beside the subtraction rather than in
+       front of it.
+       AND THE PLAYER CANCELS IT. `from` of -1 puts the grudge back to nobody,
+       the nearest thing here to Quake's `oldenemy`: a monster you have started
+       shooting should be coming for you.
+       *지금 무엇에 화가 나 있는지*를 피해가 꽂히기 전에 정합니다. 치명타도 그것을 기록하게
+       하기 위해서이며, 자기를 죽인 것을 마주 보고 죽는 몬스터는 플레이어가 받아야 할 그림입니다.
+       *combat.qc의 Quake 규칙입니다.* 피해자는 `targ.classname == attacker.classname`이 아닌
+       한 가해자로 표적을 돌립니다. *피해*는 면제되지 않습니다. 같은 종류 둘이 서로의 사격에
+       걸리면 여전히 서로를 다치게 하며 다만 개인적으로 받아들이지 않을 뿐이므로, 이것은 뺄셈
+       앞이 아니라 그 곁에 있습니다.
+       *그리고 플레이어가 취소합니다.* `from`이 -1이면 원한은 아무에게도 없는 상태로 돌아갑니다.
+       당신이 쏘기 시작한 몬스터는 당신에게 와야 합니다. */
+    if (from < 0) {
+        m->foe = -1;
+        m->foe_time = 0.0f;
+    } else if (from != idx && from < pl->enemy.count &&
+               pl->enemy.m[from].type != m->type) {
+        m->foe = (short)from;
+        m->foe_time = INFIGHT_TIME;
+    }
 
     /* Centre of mass rather than the feet, so the spray leaves the body and
        not the floor underneath it. Enemy stores only what varies per instance,
@@ -1849,6 +1919,20 @@ static int make_monster(Pools *pl, const Level *l, int type,
     m->active = 1;
     m->anim   = frand(&pl->enemy) * 6.28f;
     m->drop   = -1;
+    /* -1 IS "NOBODY", AND ZERO IS MONSTER ZERO. Every other field here is
+       content with the pool's zeroing; this one cannot be, because its zero is
+       a valid index and means "already holding a grudge against the first
+       monster in the room". Caught by a test that asserted a same-kind victim
+       stays at -1 and got 0 -- and by the same token the assertion next to it,
+       that a brute turns on caster 0, had been passing without the code doing
+       anything at all.
+       *-1이 "아무도 아님"이고 0은 몬스터 0입니다.* 이곳의 다른 모든 필드는 풀의 0 채우기로
+       충분하지만 이것은 그럴 수 없습니다. 이것의 0은 유효한 색인이고 "방의 첫 몬스터에게 이미
+       원한을 품고 있음"을 뜻하기 때문입니다. 같은 종류의 피해자가 -1로 남는지 단언한 테스트가
+       0을 받아 잡았습니다. 그리고 같은 이유로, 그 곁의 단언(브루트가 캐스터 0에게 돌아선다)은
+       코드가 아무 일도 하지 않는 채로 통과하고 있었습니다. */
+    m->foe      = -1;
+    m->foe_time = 0.0f;
     m->sight_age = (short)((pl->enemy.count - 1) % SIGHT_PERIOD);
     return 1;
 }
@@ -2176,7 +2260,7 @@ static int spawners_update(Pools *pl, const Level *l, v3 player_eye, float dt)
  * @note `at`과 `from`이 같은 지점이면 발사할 방향이 없으므로 역시 발사하지 않고 반환합니다.
  */
 static void shot_fire(Pools *pl, v3 from, v3 at, float speed, int damage,
-                      int type)
+                      int type, int owner)
 {
     Shot *s = 0;
     for (int i = 0; i < ENEMY_MAX_SHOTS; i++)
@@ -2213,6 +2297,7 @@ static void shot_fire(Pools *pl, v3 from, v3 at, float speed, int damage,
     s->life = 6.0f;
     s->damage = damage;
     s->active = 1;
+    s->owner  = (short)owner;
     /* Carried for the renderer and nothing else -- see ::Shot::type. Set here
        rather than at the call site's convenience because this is the one place
        a Shot comes into existence, and a field initialised anywhere else is a
@@ -2357,6 +2442,97 @@ static int shots_update(Pools *pl, const Level *l, v3 player_eye, float dt)
                 if (y < feet.y - 0.2f || y > feet.y + PLAYER_EYE + 0.35f)
                     body_hit = -1.0f;
             }
+        }
+
+        /* AND THE OTHER BODIES IN THE ROOM. Until this existed a monster's
+           bolt tested the player's capsule and the level and nothing else, so
+           two monsters could stand in each other's fire all day -- which is
+           why there was no infighting to have: not a missing rule, a missing
+           collision.
+           NEAREST WINS, and it is compared against the wall on the same terms
+           the player already was. A bolt that would have hit a wall first must
+           not reach past it to a monster standing behind, and one that hits a
+           monster in front of the player must not also charge the player.
+           ::Shot::owner IS SKIPPED, because a caster stands where its own bolt
+           is born. Skipping by TYPE instead would make two water spirits
+           immune to each other, which is not the exemption Quake has -- that
+           one is about who gets ANGRY, not about what lands.
+           *그리고 방 안의 다른 몸들입니다.* 이것이 있기 전까지 몬스터의 탄환은 플레이어의
+           캡슐과 레벨만 검사했으므로, 몬스터 둘은 온종일 서로의 사격 속에 서 있을 수
+           있었습니다. 내분이 없었던 이유가 그것입니다. 빠진 규칙이 아니라 빠진 충돌입니다.
+           *가장 가까운 것이 이기며*, 플레이어가 이미 그랬던 것과 같은 조건으로 벽과
+           비교합니다. 벽에 먼저 맞았을 탄환이 그 너머의 몬스터에게 닿아서는 안 되고,
+           플레이어 앞의 몬스터에 맞은 탄환이 플레이어에게까지 값을 물려서는 안 됩니다.
+           *::Shot::owner를 건너뜁니다.* 캐스터는 자기 탄환이 태어나는 자리에 서 있기
+           때문입니다. 대신 *종류*로 건너뛰면 물 정령 둘이 서로에게 무적이 되는데, 그것은
+           Quake가 가진 면제가 아닙니다. 그쪽은 누가 *화를 내는가*에 대한 것이지 무엇이
+           꽂히는가에 대한 것이 아닙니다. */
+        int   mon_i = -1;
+        float mon_t = -1.0f;
+        for (int j = 0; j < pl->enemy.count; j++)
+        {
+            if (j == s->owner) continue;
+            const Enemy *o = &pl->enemy.m[j];
+            if (!o->active || o->state == E_DEAD) continue;
+
+            /* AND A BOLT PASSES THROUGH ITS OWN KIND, which is where this
+               parts company with Quake. There `T_Damage` exempts nothing: the
+               classname test decides who gets ANGRY and the damage lands on
+               everyone. Faithful, and wrong here, for a reason that is about
+               this game's shape rather than about the rule.
+               A Quake level places a mixed, spread-out population by hand. An
+               arena spawns from a spawner, and a spawner makes ONE kind --
+               so same-kind fire is not the occasional crossfire it is there,
+               it is four casters clustered at a spawn point emptying into each
+               other. Measured before this line existed: a ceiling of four fell
+               to two over two minutes with the player standing still and doing
+               nothing.
+               THE DECIDING ARGUMENT IS THAT IT BUYS NOTHING. Same-kind damage
+               can never start a feud -- the grudge is exempted by the very
+               same classname rule -- so it is attrition the player did not
+               cause, cannot cause, and cannot use. Infighting is a thing the
+               player engineers by making two DIFFERENT kinds cross; the rest
+               is a spawner quietly eating itself.
+               *그리고 탄환은 자기 종류를 통과하며*, 이곳이 Quake와 갈라지는 지점입니다.
+               그쪽의 `T_Damage`는 아무것도 면제하지 않습니다. classname 검사는 누가 *화를
+               내는가*를 정하고 피해는 모두에게 꽂힙니다. 충실하지만 이곳에서는 틀렸으며,
+               이유는 규칙이 아니라 이 게임의 모양에 있습니다.
+               Quake의 레벨은 섞이고 흩어진 인구를 손으로 배치합니다. 투기장은 스포너에서
+               나오고 스포너는 *한 종류*를 만듭니다. 그러므로 같은 종류의 사격은 그곳에서처럼
+               이따금의 교차 사격이 아니라, 스폰 지점에 뭉친 캐스터 넷이 서로에게 쏟아붓는
+               일입니다. 이 줄이 있기 전에 쟀습니다. 상한 넷이 2분 만에 둘로 떨어졌고,
+               플레이어는 가만히 서서 아무것도 하지 않았습니다.
+               *결정적인 논거는 그것이 아무것도 사지 않는다는 것입니다.* 같은 종류의 피해는
+               결코 반목을 시작할 수 없습니다. 원한이 바로 그 classname 규칙으로 면제되기
+               때문입니다. 그러므로 그것은 플레이어가 일으키지 않았고, 일으킬 수도 없고, 쓸
+               수도 없는 소모입니다. 내분은 플레이어가 서로 *다른* 두 종류를 엇갈리게 만들어
+               설계하는 것이고, 나머지는 스포너가 조용히 자기를 먹는 일입니다. */
+            if (o->type == s->type) continue;
+
+            const MonType *OS = &TYPES[o->type];
+            v3 mid = v3f(o->pos.x, o->pos.y + OS->height * 0.5f, o->pos.z);
+            v3 rel = v3sub(mid, s->pos);
+            float along = v3dot(rel, dir);
+            if (along < 0.0f || along > dist) continue;
+
+            v3 near_p = v3add(s->pos, v3scale(dir, along));
+            float dx = near_p.x - mid.x, dy = near_p.y - mid.y, dz = near_p.z - mid.z;
+            float r = OS->radius + SHOT_RADIUS;
+            float hy = OS->height * 0.5f + SHOT_RADIUS;
+            if (dx*dx + dz*dz > r*r || dy*dy > hy*hy) continue;
+
+            if (mon_i < 0 || along < mon_t) { mon_i = j; mon_t = along; }
+        }
+
+        if (mon_i >= 0 && (!hit_wall || mon_t <= t) &&
+            (body_hit < 0.0f || mon_t <= body_hit))
+        {
+            enemy_hurt_by(pl, mon_i, s->damage, dir, s->owner);
+            s->active = 0;
+            play_at(s->pos, "ehit", 85);
+            fx_spawn(pl, "boltburst", s->pos, v3scale(dir, -1.0f));
+            fx_spawn(pl, "boltshard", s->pos, v3scale(dir, -1.0f));
+            continue;
         }
 
         if (body_hit >= 0.0f && (!hit_wall || body_hit <= t))
@@ -3595,7 +3771,8 @@ static void release_bolt(Pools *pl, const Level *l, const MonType *S, Enemy *m, 
         float ry = (frand(&pl->enemy) * 2.0f - 1.0f) * S->spread * dist;
         aim = v3add(aim, v3add(v3scale(right, rx), v3scale(up, ry)));
     }
-    shot_fire(pl, from, aim, S->shot_speed, S->damage, m->type);
+    shot_fire(pl, from, aim, S->shot_speed, S->damage, m->type,
+              (int)(m - pl->enemy.m));
 
     /* ONCE PER VOLLEY, not once per bolt, and that is what it already was: the
        call sat after the loop when the five left together. Ten of these inside

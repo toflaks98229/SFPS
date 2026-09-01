@@ -783,6 +783,71 @@ int main(void) {
     ok(hue_shift > 0.5f,
        "and warmer the way its own colour says, not merely brighter");
 
+    /* --- an artifact says which one it is, on the whole screen -------------
+     *
+     * ENGLISH
+     * -------
+     * THE READOUT IS THE POINT, not the effect. `steptest` already proves all
+     * three powerups DO their three things; what nothing asked is whether the
+     * player can tell WHICH is running without looking away from the fight.
+     * There was a countdown for that, three digits above the health -- except
+     * that at ::HUD_TEXT_SIZE a row of 1.15 is on top of the health, and a
+     * number is a thing you have to look at anyway.
+     *
+     * Quake's answer is a colour over the whole frame, and a colour is read
+     * without being looked at. So the check is the one the countdown could
+     * never have passed: does the FRAME change, and does it change the way this
+     * particular artifact says?
+     *
+     * Measured as a lean toward one channel against the mean of the other two,
+     * so a wash that merely brightened or dimmed would score zero. Blue for the
+     * quad and green for the aegis are Quake's own `V_CalcPowerupCshift`
+     * colours; the shadow is grey and correctly scores nothing on any single
+     * channel, which is why it is checked by how much it moves the frame at all
+     * rather than by which way.
+     *
+     * 한국어
+     * ------
+     * *요점은 효과가 아니라 표시입니다.* `steptest`는 이미 파워업 셋이 각자의 일을 *한다*는
+     * 것을 증명합니다. 아무도 묻지 않은 것은 플레이어가 전투에서 눈을 떼지 않고 *어느 것이*
+     * 돌고 있는지 알 수 있는가입니다. 그것을 위한 카운트다운이 있었습니다. 체력 위의 세 자리
+     * 숫자였는데, ::HUD_TEXT_SIZE 단위에서 1.15줄은 체력 *위*이고, 숫자는 어차피 들여다봐야
+     * 하는 것입니다.
+     *
+     * 퀘이크의 답은 프레임 전체에 깔리는 색이며, 색은 들여다보지 않고 읽힙니다. 그래서 이 검사는
+     * 카운트다운이 결코 통과할 수 없었을 그것입니다. *프레임이 바뀌는가, 그리고 이 아티팩트가
+     * 말하는 방향으로 바뀌는가.*
+     *
+     * 나머지 두 채널의 평균에 대한 한 채널의 기울기로 재므로, 그저 밝아지거나 어두워지는 물듦은
+     * 0점입니다. 쿼드의 파랑과 아이기스의 초록은 퀘이크 자신의 `V_CalcPowerupCshift` 색입니다.
+     * 그림자는 회색이라 어느 단일 채널로도 옳게 0점이며, 그래서 어느 쪽인지가 아니라 프레임을
+     * 얼마나 움직이는지로 검사합니다.
+     */
+    clear_state(&w);
+    frame_hash(&w, &scene, 0);
+    float base_b = lean(2), base_g = lean(1);
+    unsigned bare_hud = frame_hash(&w, &scene, 0);
+
+    w.player.power[PW_QUAD] = PLAYER_POWER_TIME;
+    frame_hash(&w, &scene, 0);
+    float quad_b = lean(2);
+    w.player.power[PW_QUAD] = 0.0f;
+
+    w.player.power[PW_AEGIS] = PLAYER_POWER_TIME;
+    frame_hash(&w, &scene, 0);
+    float aegis_g = lean(1);
+    w.player.power[PW_AEGIS] = 0.0f;
+
+    w.player.power[PW_SHADOW] = PLAYER_POWER_TIME;
+    unsigned shadow_hud = frame_hash(&w, &scene, 0);
+    w.player.power[PW_SHADOW] = 0.0f;
+
+    printf("      blue lean %.2f -> %.2f (quad), green %.2f -> %.2f (aegis)\n",
+           base_b, quad_b, base_g, aegis_g);
+    ok(quad_b - base_b > 1.0f,  "the quad turns the whole frame blue");
+    ok(aegis_g - base_g > 0.5f, "the aegis turns it green, and less hard");
+    ok(shadow_hud != bare_hud,  "and the ring of shadows greys it");
+
     clear_state(&w);
     proj_reset(&w.pools);
 

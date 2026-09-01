@@ -1854,6 +1854,77 @@ void scene_draw_hud(Scene *s, int vw, int vh, const Level *l,
         full_screen_wash(s, vw, vh, 0.7f, 0.0f, 0.0f, a * HURT_FLASH_MAX);
     }
 
+    /* --- the powerup wash, which is Quake's ------------------------------
+     *
+     * ENGLISH
+     * -------
+     * QUAKE TINTS THE WHOLE SCREEN AND COUNTS NOTHING DOWN. `V_CalcPowerupCshift`
+     * in view.c picks one colour per active item and hands it to the blend that
+     * already exists for damage and for being underwater; the status bar shows
+     * the item's picture and no number anywhere says how long is left. The
+     * player learns the time by the wash ENDING, which costs no glance.
+     *
+     * The numbers below are that function's, converted: Quake's `percent` is
+     * out of 255 rather than 100, so its 30 is 0.118 and its 100 is 0.392.
+     * Taking them rather than inventing them is the same choice `check_attack`
+     * makes with fight.qc's odds -- these are tuned values from a game whose
+     * feel this one is after, and a number invented here would be a guess
+     * wearing the same clothes.
+     *
+     * THE MAPPING, and one of the three is an argument:
+     *   quad   -> Quake's quad, blue at 30/255. The same item.
+     *   shadow -> Quake's ring of shadows, grey at 100/255. The same item, and
+     *             the strongest wash of the four on purpose: invisibility is
+     *             the one powerup whose whole effect is invisible, so the
+     *             screen has to carry all of it.
+     *   aegis  -> Quake's BIOSUIT, green at 20/255, not the pentagram. The
+     *             pentagram is invulnerability and this is not that; the suit
+     *             is the item that cuts damage taken from the world, which is
+     *             what ::PW_AEGIS does -- lava included, since world.c's
+     *             `aegis_pct` reaches the hazard floors as well as the blows.
+     *
+     * AFTER THE HURT WASH, so a hit still reads as red over whatever is
+     * running. The hurt flash is an event and the powerup is a state, and an
+     * event that a state can hide is an event the player misses.
+     *
+     * 한국어
+     * ------
+     * *퀘이크는 화면 전체를 물들이고 아무것도 세어 내리지 않습니다.* view.c의
+     * `V_CalcPowerupCshift`가 활성 항목마다 색 하나를 고르고, 피해와 물속에 대해 이미 존재하는
+     * 블렌드에 넘깁니다. 상태 바는 항목의 그림을 보여 주며, 남은 시간을 말하는 숫자는 어디에도
+     * 없습니다. 플레이어는 물듦이 *끝남*으로써 시간을 알고, 그것은 시선을 들지 않습니다.
+     *
+     * 아래 수치는 그 함수의 것이며 변환했습니다. 퀘이크의 `percent`는 100이 아니라 255분율이므로
+     * 30은 0.118이고 100은 0.392입니다. 지어내지 않고 가져오는 것은 `check_attack`이 fight.qc의
+     * 확률에 대해 하는 것과 같은 선택입니다. 이 게임이 좇는 감각을 지닌 게임에서 조율된 값이며,
+     * 이곳에서 지어낸 수는 같은 옷을 입은 짐작일 뿐입니다.
+     *
+     * *대응이며, 셋 중 하나는 주장입니다.*
+     *   quad   -> 퀘이크의 쿼드, 30/255의 파랑. 같은 항목입니다.
+     *   shadow -> 퀘이크의 그림자 반지, 100/255의 회색. 같은 항목이며, 넷 중 가장 강한 물듦인
+     *             것은 의도적입니다. 투명은 효과 자체가 보이지 않는 유일한 파워업이므로 화면이
+     *             그것을 전부 짊어져야 합니다.
+     *   aegis  -> 퀘이크의 *생체보호복*, 20/255의 초록이며 펜타그램이 아닙니다. 펜타그램은
+     *             무적이고 이것은 그것이 아닙니다. 보호복은 세계로부터 받는 피해를 줄이는
+     *             항목이고 그것이 ::PW_AEGIS가 하는 일입니다. 용암도 포함됩니다. world.c의
+     *             `aegis_pct`가 일격뿐 아니라 유해 지형 바닥에도 닿기 때문입니다.
+     *
+     * *피격 물듦 다음*이므로 무엇이 돌고 있든 타격은 여전히 붉게 읽힙니다. 피격 섬광은
+     * *사건*이고 파워업은 *상태*이며, 상태가 가릴 수 있는 사건은 플레이어가 놓치는 사건입니다.
+     */
+    {
+        static const float PW_WASH[PW_KINDS][4] = {
+            { 0.00f, 0.00f, 1.00f,  30.0f / 255.0f },   /* PW_QUAD   */
+            { 0.39f, 0.39f, 0.39f, 100.0f / 255.0f },   /* PW_SHADOW */
+            { 0.00f, 1.00f, 0.00f,  20.0f / 255.0f },   /* PW_AEGIS  */
+        };
+        for (int i = 0; i < PW_KINDS; i++)
+            if (p->power[i] > 0.0f)
+                full_screen_wash(s, vw, vh, PW_WASH[i][0], PW_WASH[i][1],
+                                 PW_WASH[i][2], PW_WASH[i][3]);
+    }
+
+
     rd_mode(RD_TEXT);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, font_texture());
@@ -1866,46 +1937,57 @@ void scene_draw_hud(Scene *s, int vw, int vh, const Level *l,
     text_run(s, HUD_MARGIN, vh - HUD_BASELINE, HUD_TEXT_SIZE, hp,
              1.0f - lo * 0.6f, 0.25f + lo * 0.7f, 0.25f, 1.0f);
 
-    /* THE ARTIFACT CLOCKS, above the health and in their own colours, so the
-       thing on the floor and the number on the bar are recognisably one
-       object. The same three HUES as sprite.c's rings, lifted in value: a ring
-       is lit against the room and this is text against a dark bar, and
-       matching the literal triples would have made the shadow clock the least
-       legible thing on screen.
-       SECONDS, ROUNDED UP, and shown only while running. A powerup whose
-       remaining time the player cannot see is one they cannot plan around,
-       and planning around it is the whole of what a thirty-second window is
-       for: a quad is not "more damage", it is "get to the brutes NOW".
-       Rounded UP so the last second is shown as 1 rather than as 0 -- a bar
-       reading zero while the effect is still on is a bar that lies at the one
-       moment the player is reading it hardest.
-       *아티팩트 시계이며*, 체력 위에 각자의 색으로 표시됩니다. 획득물이 그려지는 것과 같은
-       세 색이라, 바닥의 물건과 막대의 표시가 하나의 물건으로 알아보입니다.
-       *초 단위로 올림하며*, 도는 동안에만 보입니다. 남은 시간을 볼 수 없는 파워업은 그것을
-       두고 계획할 수 없는 파워업이고, 계획하는 것이 30초짜리 창의 전부입니다. 쿼드는 "피해
-       증가"가 아니라 "지금 브루트에게 가라"입니다.
-       *올림*하는 이유는 마지막 1초가 0이 아니라 1로 보이게 하기 위함입니다. 효과가 아직
-       도는데 0을 읽는 막대는 플레이어가 가장 열심히 읽는 바로 그 순간에 거짓말하는
-       막대입니다. */
+    /* --- which artifact is running ----------------------------------------
+     *
+     * ENGLISH
+     * -------
+     * THE NAME, IN ITS OWN COLOUR, which is what the keycards and the weapon
+     * roster a few rows up already do. A powerup joining that column reads as
+     * one more thing the player is carrying rather than as a new kind of
+     * readout, and it costs no atlas cell and no icon art.
+     *
+     * NO CLOCK. There was one -- three digits counting down, and they were
+     * placed a row and a bit above the health, which at ::HUD_TEXT_SIZE is on
+     * top of it: the keys sit at 7.4 and the weapons at 9.0, and 1.15 was not
+     * a row at all. But the number was the wrong instrument as well as in the
+     * wrong place. Quake does not count powerups down; it shows the item and
+     * TINTS THE SCREEN, so the information arrives peripherally and the player
+     * never looks away from the fight to read it. A digit demands a glance,
+     * and a glance is the thing a thirty-second window cannot afford.
+     *
+     * The wash below is what actually says how long is left, by ending.
+     *
+     * 한국어
+     * ------
+     * *자기 색의 이름*이며, 몇 줄 위의 열쇠와 무기 목록이 이미 하는 일입니다. 파워업이 그 열에
+     * 합류하면 새로운 종류의 계기판이 아니라 플레이어가 지니고 있는 것 하나 더로 읽히고,
+     * 아틀라스 칸도 아이콘 그림도 들지 않습니다.
+     *
+     * *시계는 없습니다.* 있었습니다. 세어 내려가는 숫자였고, 체력보다 한 줄 남짓 위에
+     * 놓였는데 ::HUD_TEXT_SIZE 단위에서 그것은 체력 *위*입니다. 열쇠가 7.4, 무기가 9.0이며
+     * 1.15는 애초에 한 줄이 아니었습니다. 다만 그 숫자는 자리만 틀린 것이 아니라 도구 자체가
+     * 틀렸습니다. 퀘이크는 파워업을 세어 내리지 않습니다. 항목을 보여 주고 *화면을 물들입니다*.
+     * 그래서 정보가 주변시로 도착하고 플레이어는 그것을 읽으려고 전투에서 눈을 떼지 않습니다.
+     * 숫자는 시선을 요구하며, 30초짜리 창이 감당할 수 없는 것이 바로 그 한 번의 시선입니다.
+     *
+     * 아래의 물듦이 남은 시간을 실제로 말해 줍니다. 끝남으로써.
+     */
     {
+        static const char *const PW_NAME[PW_KINDS] = { "quad", "shadow", "aegis" };
         static const float PW_COL[PW_KINDS][3] = {
             { 0.45f, 0.65f, 1.00f },   /* PW_QUAD   */
             { 0.65f, 0.45f, 0.95f },   /* PW_SHADOW */
             { 1.00f, 0.80f, 0.35f },   /* PW_AEGIS  */
         };
-        int row = 0;
+        float x = HUD_MARGIN;
+        float y = vh - HUD_BASELINE - HUD_TEXT_SIZE * 5.8f;
         for (int i = 0; i < PW_KINDS; i++) {
             if (p->power[i] <= 0.0f) continue;
-            char t[16];
-            t[txt_append_int(t, sizeof(t), 0, (int)(p->power[i] + 0.999f))] = 0;
-            text_run(s, HUD_MARGIN,
-                     vh - HUD_BASELINE - (float)(row + 1) * HUD_TEXT_SIZE * 1.15f,
-                     HUD_TEXT_SIZE, t,
+            text_run(s, x, y, 1.0f, PW_NAME[i],
                      PW_COL[i][0], PW_COL[i][1], PW_COL[i][2], 1.0f);
-            row++;
+            x += font_width(1.0f, PW_NAME[i]) + 10.0f;
         }
     }
-
     /* Ammo, bottom-right, and red when the gun is empty. */
     char am[16];
     am[txt_append_int(am, sizeof(am), 0, w->ammo[w->cur])] = 0;

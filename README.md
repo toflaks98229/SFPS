@@ -1678,10 +1678,21 @@ suit of armour **does** for a while instead of becoming a bar. Quake absorbs
 that ran out, and a flat 80% for thirty seconds with nothing to deplete is
 closer to invulnerability than to armour.
 
-Remaining seconds show above the health, in the colour of the ring on the floor,
-**rounded up** so the last second reads `1` rather than `0`. They have their own
-sound (`part` in [assets/sounds.txt](assets/sounds.txt)) rather than the ammo
-box's — a thirty-second window should not be announced like a shell pickup.
+**Nothing counts them down.** The name joins the keycard column in its own
+colour, and the whole screen takes a wash — Quake's answer, and Quake's
+numbers: blue at 30/255 for the quad and grey at 100/255 for the ring are
+`V_CalcPowerupCshift`'s own, and the aegis takes the **biosuit's** green at
+20/255 rather than the pentagram's yellow, because the suit is the item that
+cuts damage taken from the world and the pentagram is invulnerability.
+
+There was a countdown, and it was wrong twice: it sat a row of 1.15 above the
+health, which at `HUD_TEXT_SIZE` is *on* it (the keys are at 7.4, the weapons
+at 9.0), and a digit has to be looked at. A wash is read without looking, and
+what tells you the time is left is that it is still there.
+
+They have their own sound (`part` in [assets/sounds.txt](assets/sounds.txt))
+rather than the ammo box's — a thirty-second window should not be announced
+like a shell pickup.
 
 ## Level transitions
 

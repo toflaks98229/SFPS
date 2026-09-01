@@ -159,6 +159,144 @@ static void fixture(World *w) {
     door_reset(&w->level);
 }
 
+/* --- a kind has a ceiling of its own, and the rate has a dial --------------
+ *
+ * ENGLISH
+ * -------
+ * ::Spawner::max_alive COUNTS THE ROOM, WHICH IS NOT THE SAME QUESTION. A cap
+ * of eight is satisfied by eight brutes exactly as well as by a mixed wave, so
+ * the composition of a fight was decided by which spawner happened to win the
+ * tick -- a race nobody is steering, and a fight the author did not write.
+ * ::MonType::cap asks the other question.
+ *
+ * THE SECOND CLAIM IS THE ONE THAT ROTS QUIETLY: a refusal here must be "not
+ * now" and not "never". If the spawner spent budget on a room that was full of
+ * its own kind, every wave after the first would be quietly smaller, and
+ * nothing would report it -- the wave would still complete, just with fewer
+ * monsters than it owed.
+ *
+ * 한국어
+ * ------
+ * *::Spawner::max_alive는 방을 세며, 그것은 같은 질문이 아닙니다.* 상한 여덟은 섞인 웨이브만큼이나
+ * 브루트 여덟으로도 충족되므로, 전투의 구성은 어느 스포너가 틱을 이겼는지가 정했습니다. 아무도
+ * 조종하지 않는 경주이고, 제작자가 쓰지 않은 전투입니다. ::MonType::cap이 다른 쪽 질문을 합니다.
+ *
+ * *두 번째 주장이 조용히 썩는 쪽입니다.* 이곳의 거절은 "절대"가 아니라 "지금은 아니다"여야
+ * 합니다. 스포너가 자기 종류로 가득 찬 방에 예산을 써 버리면 첫 웨이브 이후 모든 웨이브가 조용히
+ * 작아지고, 아무도 그것을 보고하지 않습니다. 웨이브는 여전히 완료되며, 다만 빚진 것보다 적은
+ * 몬스터로 완료됩니다.
+ */
+static void check_type_cap(void) {
+    printf("\na kind has a ceiling of its own\n");
+
+    const MonType *S = mon_stats(mon_type_for("brute"));
+    printf("      brute cap is %d\n", S->cap);
+    ok(S->cap > 0, "the brute declares one");
+
+    World w;
+    fixture(&w);
+    /* Room for far more than the kind allows, so the only thing that can hold
+       the number down is the per-kind ceiling. */
+    add_spawner(&w.level, "spawner_brute", 2500, 2500, 1, 99, 0);
+    enemy_spawn_level(&w.pools, &w.level);
+    pickup_spawn_level(&w.pools, &w.level);
+
+    step_alive(&w, 60 * 30);
+
+    int brutes = enemy_alive_of(&w.pools, mon_type_for("brute"));
+    oki(brutes <= S->cap,
+        "and thirty seconds of a hungry spawner does not exceed it",
+        brutes, S->cap);
+    oki(brutes == S->cap, "and does reach it", brutes, S->cap);
+
+    /* The budget was not spent on the refusals: the spawner still owes what it
+       could not deliver, which is what makes the group arrive late instead of
+       never.
+       거절에 예산을 쓰지 않았습니다. 스포너는 전달하지 못한 것을 여전히 빚지고 있으며, 그것이
+       무리를 영영이 아니라 늦게 도착하게 만드는 것입니다. */
+    const Spawner *sp = enemy_spawner_at(&w.pools, 0);
+    ok(sp && sp->left != 0,
+       "and the spawner still owes the ones it could not place");
+}
+
+/* --- the rate is a dial, and it is not the boss's ------------------------- */
+static void check_spawn_rate(void) {
+    printf("\nthe spawn rate is a dial of its own\n");
+
+    /* TIME TO THE FIRST ONE, not how many arrive. A count over a fixed window
+       is confounded by everything else that can refuse a spawn -- the kind's
+       ceiling, the room's, how close the player is standing -- and the first
+       cut of this measured 3 against 4 and called it a difference. The wait
+       before the first monster is the interval and nothing else.
+       *몇 마리가 오는지가 아니라 첫 마리까지의 시간입니다.* 고정된 창 안의 개수는 스폰을
+       거절할 수 있는 다른 모든 것(종류의 상한, 방의 상한, 플레이어가 얼마나 가까이 서 있는지)에
+       의해 교란되며, 이 검사의 첫 판은 3 대 4를 재고 그것을 차이라고 불렀습니다. 첫 몬스터
+       이전의 기다림은 간격이며 그 밖의 무엇도 아닙니다. */
+    int frames[2];
+    for (int fast = 0; fast < 2; fast++) {
+        World w;
+        fixture(&w);
+        add_spawner(&w.level, "spawner_water_spirit", 2500, 2500, 40, 99, 0);
+        enemy_spawn_level(&w.pools, &w.level);
+        pickup_spawn_level(&w.pools, &w.level);
+        w.pools.enemy.spawn_rate = fast ? 4.0f : 1.0f;
+
+        int n = 0;
+        for (; n < 60 * 20 && enemy_alive(&w.pools) == 0; n++)
+            step_alive(&w, 1);
+        frames[fast] = n;
+    }
+    printf("      first monster after %.2fs at 1x, %.2fs at 4x\n",
+           frames[0] * DT, frames[1] * DT);
+    ok(frames[1] * 2 < frames[0],
+       "four times the rate arrives in well under half the time");
+
+    /* AND A LEVEL CAN SAY IT, which is the half that makes this a feature
+       rather than a field. ::Level::spawn_rate is a percent and world.c
+       copies it onto the pool -- but only if it does so AFTER
+       ::enemy_spawn_level, which opens with ::enemy_reset and puts the rate
+       back to 1 along with the rest of the pool. The first cut assigned
+       before that call and was erased one line later; the test above did not
+       catch it, because it sets the field by hand and by hand happens after.
+       *그리고 레벨이 그것을 말할 수 있습니다.* 이것을 필드가 아니라 기능으로 만드는 절반입니다.
+       ::Level::spawn_rate는 퍼센트이고 world.c가 풀로 복사합니다. 다만 ::enemy_spawn_level
+       *뒤*에 할 때만 그렇습니다. 그 함수는 ::enemy_reset으로 시작하며 풀의 나머지와 함께
+       비율을 1로 되돌립니다. 첫 판은 그 호출 앞에 대입했고 한 줄 뒤에 지워졌습니다. 위의
+       검사는 그것을 잡지 못했습니다. 손으로 필드를 설정하고, 손으로 하는 일은 그 뒤에
+       일어나기 때문입니다. */
+    {
+        World lw;
+        fixture(&lw);
+        lw.level.spawn_rate = 250;
+        add_spawner(&lw.level, "spawner_water_spirit", 2500, 2500, 40, 99, 0);
+        enemy_spawn_level(&lw.pools, &lw.level);
+        pickup_spawn_level(&lw.pools, &lw.level);
+        lw.pools.enemy.spawn_rate =
+            lw.level.spawn_rate > 0 ? lw.level.spawn_rate / 100.0f : 1.0f;
+        ok(lw.pools.enemy.spawn_rate > 2.4f,
+           "a level that authors 250 reaches the pool as 2.5");
+    }
+
+    /* AND IT IS NOT THE BOSS'S FIELD. ::spawn_slow is set and cleared by the
+       boss fight; a difficulty folded into it would be erased the moment the
+       maw died. They multiply independently, so both can be true at once.
+       *그리고 보스의 필드가 아닙니다.* ::spawn_slow는 보스전이 설정하고 지웁니다. 그것에 접어
+       넣은 난이도는 아귀가 죽는 순간 지워집니다. 둘은 독립적으로 곱해지므로 동시에 참일 수
+       있습니다. */
+    World w;
+    fixture(&w);
+    add_spawner(&w.level, "spawner_water_spirit", 2500, 2500, 40, 99, 0);
+    enemy_spawn_level(&w.pools, &w.level);
+    pickup_spawn_level(&w.pools, &w.level);
+    w.pools.enemy.spawn_rate = 4.0f;
+    w.pools.enemy.spawn_slow = 3.0f;          /* the boss, suppressing */
+    int n = 0;
+    for (; n < 60 * 20 && enemy_alive(&w.pools) == 0; n++) step_alive(&w, 1);
+    printf("      and with the boss suppressing as well, %.2fs\n", n * DT);
+    ok(n > frames[1],
+       "the boss still suppresses a raised rate");
+}
+
 int main(void) {
     printf("wavetest -- the arena\n");
     static World w;
@@ -781,6 +919,9 @@ int main(void) {
 
         ok(arenas > 0, "the campaign still contains an arena to ask about");
     }
+
+    check_type_cap();
+    check_spawn_rate();
 
     printf("\n%s\n", fails ? "  FAILED" : "  passed");
     return fails ? 1 : 0;

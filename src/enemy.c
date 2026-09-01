@@ -183,7 +183,7 @@ static const struct { const char *was; int now; } MON_LEGACY[] = {
  * @note ::types_check는 behaviour와 shot_speed의 정합성, 그리고 플래그 비트만 봅니다. 치수는
  *       검사하지 *않습니다.* `eye`가 `hgt`보다 높아도 잡히지 않고 그대로 플레이됩니다.
  */
-/*    name,           behaviour,   hp,  spd, weave,   rad,   hgt,   eye, sight,   atk, dmg,  wind,  cool, aspct,  shot, brst, bmin,  sprd,   gap,    yaw, pain, flags      */
+/*    name,           behaviour,   hp,  spd, weave,   rad,   hgt,   eye, sight,   atk, dmg,  wind,  cool, aspct,  shot, brst, bmin,  sprd,   gap,    yaw, pain, cap, flags      */
 static const MonType TYPES[MON_TYPES] = {
     /* the baseline: the fastest thing in the bestiary and the loosest weave,
        at 65% of ::PLAYER_WALK -- it cannot catch you, but it can be there
@@ -191,7 +191,7 @@ static const MonType TYPES[MON_TYPES] = {
        기준선. 도감에서 가장 빠르고 갈지자가 가장 큽니다. ::PLAYER_WALK의 65%이며,
        따라잡지는 못하지만 돌아섰을 때 거기 있을 수는 있습니다. 근접 샷건 한 방에
        죽습니다. */
-    { "water_spirit", AI_CASTER,   40, 7.0f, 0.62f, 0.52f, 1.70f, 1.30f, 34.0f,  7.5f,   3, 0.30f, 0.50f, 0.70f,  9.0f,   10,  5, 0.13f, 0.07f, 260.0f, 0.6f, 0         },
+    { "water_spirit", AI_CASTER,   40, 7.0f, 0.62f, 0.52f, 1.70f, 1.30f, 34.0f,  7.5f,   3, 0.30f, 0.50f, 0.70f,  9.0f,   10,  5, 0.13f, 0.07f, 260.0f, 0.6f, 8, 0         },
     /* a wall with health -- hits hard, cannot be stun-locked, and closes at
        half your walking speed on the straightest line in the bestiary. Heavy
        is the small weave, not the speed: it commits to a direction and comes,
@@ -199,7 +199,7 @@ static const MonType TYPES[MON_TYPES] = {
        체력이 높은 벽. 강하게 때리고, 스턴 락에 걸리지 않으며, 도감에서 가장 곧은 선으로
        걷기 속도의 절반으로 다가옵니다. 무거움은 속도가 아니라 작은 갈지자입니다. 방향을
        정하고 오며, 살아남을 수 있게 하는 것은 그것이 어디로 올지 읽을 수 있다는 점입니다. */
-    { "brute",        AI_BRAWLER, 120, 5.6f, 0.30f, 0.806f, 2.35f, 1.80f, 34.0f,  2.3f,  24, 0.55f, 1.50f, 0.85f,  0.0f,    1,  1,  0.0f, 0.0f, 130.0f, 2.2f, 0         },
+    { "brute",        AI_BRAWLER, 120, 5.6f, 0.30f, 0.806f, 2.35f, 1.80f, 34.0f,  2.3f,  24, 0.55f, 1.50f, 0.85f,  0.0f,    1,  1,  0.0f, 0.0f, 130.0f, 2.2f, 3, 0         },
     /* holds its range instead of closing, and holds it in the AIR -- so cover
        and angles matter, and so does the ceiling. Nothing about the numbers
        changed when MON_FLIES arrived: this is the same creature, no longer
@@ -209,7 +209,7 @@ static const MonType TYPES[MON_TYPES] = {
        천장의 문제이기도 합니다. MON_FLIES가 붙을 때 수치는 하나도 바뀌지 않았습니다. 아무것도
        딛고 있지 않게 되었을 뿐 같은 생물입니다. 이것이 대신한 행("wraith")은 여기서 체력 4점과
        사거리 1미터를 뺀 것이었고, 그것은 별개의 몬스터가 아닙니다. */
-    { "caster",       AI_CASTER,   26, 5.8f, 0.46f, 0.546f, 1.90f, 1.45f, 40.0f, 13.0f,  12, 0.85f, 1.40f, 0.80f, 11.0f,    1,  1,  0.0f, 0.0f, 180.0f, 0.9f, MON_FLIES },
+    { "caster",       AI_CASTER,   26, 5.8f, 0.46f, 0.546f, 1.90f, 1.45f, 40.0f, 13.0f,  12, 0.85f, 1.40f, 0.80f, 11.0f,    1,  1,  0.0f, 0.0f, 180.0f, 0.9f, 4, MON_FLIES },
     /* the boss: a caster with the footwork taken away. Its hp is spent in
        BOSS_CYCLES equal thirds and must divide by it -- types_check says so.
        The pain lock is effectively infinite because a boss that flinches is a
@@ -227,14 +227,14 @@ static const MonType TYPES[MON_TYPES] = {
        한 뼘까지 닿는 보스는 큰 적이 아니라 모델링 오류로 읽히고, 탑 위에 걸린 결계핵은 있을
        자리가 없어집니다. 신장을 내리면서 반경, 시선, 사거리를 함께 내렸습니다. MonType의 치수
        블록이 이곳의 모든 행에 대해 진술하는 규칙입니다. */
-    { "maw",          AI_CASTER,  900, 0.0f, 0.0f, 1.20f, 3.60f, 2.00f, 60.0f, 40.0f,  14, 0.90f, 1.10f, 1.10f, 14.0f,    5,  5, 0.22f, 0.0f,  90.0f,99.0f, MON_BOSS | MON_ANCHORED },
+    { "maw",          AI_CASTER,  900, 0.0f, 0.0f, 1.20f, 3.60f, 2.00f, 60.0f, 40.0f,  14, 0.90f, 1.10f, 1.10f, 14.0f,    5,  5, 0.22f, 0.0f,  90.0f,99.0f, 1, MON_BOSS | MON_ANCHORED },
     /* what guards it: no sight, no reach, no damage, and the only monster in
        the game that never acts. Ninety health is three WARD_SUMMON_DMG chunks,
        so a ward pays out exactly three times on its way down whatever kills it.
        그것을 지키는 것. 시야도 사거리도 피해도 없으며, 이 게임에서 유일하게 결코 행동하지 않는
        몬스터입니다. 체력 90은 WARD_SUMMON_DMG 세 덩어리이므로, 결계핵은 무엇에 죽든 쓰러지는
        동안 정확히 세 번 지급합니다. */
-    { "ward",         AI_INERT,    90, 0.0f, 0.0f, 0.50f, 1.10f, 0.55f,  0.0f,  0.0f,   0,  0.0f,  0.0f, 1.00f,  0.0f,    1,  1,  0.0f, 0.0f,   0.0f,99.0f, MON_GUARD | MON_ANCHORED },
+    { "ward",         AI_INERT,    90, 0.0f, 0.0f, 0.50f, 1.10f, 0.55f,  0.0f,  0.0f,   0,  0.0f,  0.0f, 1.00f,  0.0f,    1,  1,  0.0f, 0.0f,   0.0f,99.0f, 0, MON_GUARD | MON_ANCHORED },
 };
 
 /* --- Static function prototypes / 정적 함수 프로토타입 --- */
@@ -360,6 +360,7 @@ void enemy_reset(Pools *pl)
        레벨이 남은 플레이 내내 스포너를 3분의 1 속도로 돌리게 되고, 왜 그런지 설명할 것이
        아무것도 남지 않습니다. */
     pl->enemy.spawn_slow = 0.0f;
+    pl->enemy.spawn_rate = 1.0f;
 }
 
 void enemy_spawn_level(Pools *pl, const Level *l)
@@ -895,6 +896,27 @@ int enemy_alive(const Pools *pl)
     int n = 0;
     for (int i = 0; i < pl->enemy.count; i++)
         if (pl->enemy.m[i].active && pl->enemy.m[i].state != E_DEAD)
+            n++;
+    return n;
+}
+
+/* The same count as ::enemy_alive, narrowed to one kind. A scan rather than
+   a running total kept on the pool: a total has to be decremented on every
+   road out of being alive -- death, eviction, reset, a wave clearing the room
+   -- and one missed road is a kind that can never spawn again, which reads as
+   a monster that vanished from the game rather than as a counter that drifted.
+   ::ENEMY_MAX is small enough that the scan is not worth the risk.
+   ::enemy_alive와 같은 세기를 한 종류로 좁힌 것입니다. 풀에 누적 합계를 두지 않고 훑는
+   이유는, 합계는 살아 있음에서 나가는 *모든* 길에서 줄여야 하고(죽음, 퇴출, 초기화, 방을
+   비우는 웨이브) 길 하나를 놓치면 그 종류가 다시는 스폰될 수 없기 때문입니다. 그것은 어긋난
+   계수기가 아니라 게임에서 사라진 몬스터로 읽힙니다. ::ENEMY_MAX는 훑기가 그 위험만 못할
+   만큼 작습니다. */
+int enemy_alive_of(const Pools *pl, int type)
+{
+    int n = 0;
+    for (int i = 0; i < pl->enemy.count; i++)
+        if (pl->enemy.m[i].active && pl->enemy.m[i].state != E_DEAD &&
+            pl->enemy.m[i].type == type)
             n++;
     return n;
 }
@@ -1611,7 +1633,8 @@ static int name_eq(const char *a, const char *b)
  * 덮어써집니다. ::EnemyPool::spawn_slow를 참조하십시오. */
 static float spawn_wait(const EnemyPool *ep, float interval)
 {
-    return interval * (1.0f + ep->spawn_slow);
+    float rate = ep->spawn_rate > 0.01f ? ep->spawn_rate : 1.0f;
+    return interval * (1.0f + ep->spawn_slow) / rate;
 }
 
 /* --- Utilities / 보조 함수 --- */
@@ -1963,6 +1986,20 @@ static int spawners_update(Pools *pl, const Level *l, v3 player_eye, float dt)
             for (int k = 0; k < n; k++) {
                 if (s->left == 0) break;
                 if (s->max_alive > 0 && enemy_alive(pl) >= s->max_alive) break;
+
+                /* AND THE SAME REFUSAL FOR THIS KIND, which the line above
+                   cannot make: it counts the ROOM, so eight brutes and eight
+                   of a mixed wave are the same number to it. Kept as a
+                   `break` beside it because it is the same class of answer --
+                   "not now" -- and the budget stays owed either way.
+                   *그리고 이 종류에 대한 같은 거절이며*, 위의 줄은 그것을 할 수 없습니다.
+                   그것은 *방*을 세므로 브루트 여덟과 섞인 웨이브 여덟이 같은 수입니다.
+                   같은 부류의 답("지금은 아니다")이므로 곁에 `break`로 두었고, 어느 쪽이든
+                   예산은 빚진 채로 남습니다. */
+                {
+                    const MonType *ST = mon_stats(s->type);
+                    if (ST->cap > 0 && enemy_alive_of(pl, s->type) >= ST->cap) break;
+                }
 
                 if (!make_monster(pl, l, s->type, s->pos.x, s->pos.y, s->pos.z)) {
                     /* A REFUSAL THAT COSTS NOTHING NEVER ENDS. The budget used

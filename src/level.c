@@ -689,6 +689,19 @@ static int level_parse_text(const char *name, Level *out) {
             continue;
         }
 
+        /* How often this level's spawners run, in percent. See
+           ::Level::spawn_rate for why it is an integer and why silence is
+           100 rather than nothing.
+           이 레벨의 스포너가 얼마나 자주 도는지, 퍼센트입니다. 왜 정수이고 왜 침묵이
+           0이 아니라 100인지는 ::Level::spawn_rate를 보십시오. */
+        if (txt_is(t, len, "spawnrate")) {
+            const char *v = txt_token(p, &len);
+            if (!v) break;
+            p = v + len;
+            if (found) out->spawn_rate = (short)txt_to_int(v, len);
+            continue;
+        }
+
         if (txt_is(t, len, "next")) {
             const char *nm = txt_token(p, &len);
             if (!nm) break;
@@ -1204,6 +1217,7 @@ static void brush_sun_of(Level *out, const BrushMap *bm) {
         const char *cn = brush_ent_value(e, "classname");
         if (!cn || !txt_eq(cn, "worldspawn")) continue;
 
+        out->spawn_rate = (short)brush_ent_num(e, "spawnrate", 0.0f);
         float sun = brush_ent_num(e, "_sunlight",  0.0f);
         float sky = brush_ent_num(e, "_sunlight2", 0.0f);
         if (sun <= 0.0f && sky <= 0.0f) return;      /* an indoor level */

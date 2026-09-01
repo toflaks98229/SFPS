@@ -1083,7 +1083,44 @@ typedef struct {
      * 한국어: ::MON_FLIES와 이후에 합류할 것들입니다. 0은 평범한 몬스터입니다. 0은 코드가 하는
      * 모든 가정이 적용된다는 뜻이며, 지금까지 배포된 모든 종류가 원하는 바입니다. 따라서 이 열이
      * 생기기 전에 작성된 행은 그것이 뜻하던 바를 정확히 그대로 뜻합니다.
+     */
+    /**
+     * @brief How many of this kind may be alive at once. 0 is no limit.
+     *
+     * ENGLISH
+     * -------
+     * PER KIND, WHERE ::Spawner::max_alive IS PER ROOM. That one asks how
+     * many monsters are alive at all and holds the spawner back above its
+     * number; this asks how many of THIS kind are, and the difference is
+     * what a mixed wave feels like. A room capped at eight can be eight
+     * brutes, which is not a harder version of the fight the author wrote,
+     * it is a different fight -- and it happens by accident, because which
+     * spawner wins the tick is a race nobody is steering.
+     *
+     * A REFUSAL HERE IS "NOT NOW", not "never", and it keeps the spawner's
+     * budget for the same reason ::Spawner::max_alive does: the group still
+     * arrives, once there is room for its kind. A spawner that spent its
+     * budget on a full room would quietly shrink every wave after the
+     * first.
+     *
+     * 한국어
+     * ------
+     * @brief 이 종류가 동시에 몇 마리까지 살아 있을 수 있는지. 0이면 제한 없음.
+     *
+     * *::Spawner::max_alive가 방 단위인 곳에서 이것은 종류 단위입니다.* 그쪽은 몬스터가
+     * 통틀어 몇 마리 살아 있는지를 묻고 자기 수를 넘으면 스포너를 붙잡습니다. 이것은
+     * *이 종류*가 몇 마리인지를 묻고, 그 차이가 곧 섞인 웨이브의 감각입니다. 여덟으로
+     * 제한된 방은 브루트 여덟일 수 있고, 그것은 제작자가 쓴 전투의 더 어려운 판이 아니라
+     * *다른 전투*입니다. 게다가 우연히 그렇게 됩니다. 어느 스포너가 틱을 이기는지는
+     * 아무도 조종하지 않는 경주이기 때문입니다.
+     *
+     * *이곳의 거절은 "절대"가 아니라 "지금은 아니다"이며*, ::Spawner::max_alive와 같은
+     * 이유로 스포너의 예산을 지킵니다. 그 종류의 자리가 나면 무리는 여전히 도착합니다.
+     * 가득 찬 방에 예산을 써 버리는 스포너는 첫 웨이브 이후 모든 웨이브를 조용히
+     * 줄어들게 만듭니다.
      */
+    int   cap;
+
     int flags;
 } MonType;
 
@@ -1950,6 +1987,49 @@ typedef struct {
 
     float    spawn_slow;
 
+    /**
+     * @brief Multiplies how OFTEN spawners fire. 1 is as authored.
+     *
+     * ENGLISH
+     * -------
+     * SEPARATE FROM ::spawn_slow BECAUSE THEY HAVE DIFFERENT OWNERS, and one
+     * knob with two owners is a knob that gets overwritten. ::spawn_slow is
+     * the BOSS's: ::world_step sets it when the fight starts and clears it
+     * when it ends, and it describes an event. This is the RUN's -- a
+     * difficulty, a level that wants to be busier than its spawner intervals
+     * say, a test that wants a wave now rather than in six seconds -- and it
+     * describes a setting. Folding the setting into the event's field would
+     * mean the boss clearing the difficulty on its way out.
+     *
+     * A RATE, NOT AN INTERVAL, so bigger means more: ::spawn_wait divides by
+     * it. That is the opposite of ::spawn_slow, which multiplies, and the two
+     * read in opposite directions on purpose -- a field called `slow` that
+     * made things faster at 2.0 would be worse than either name alone.
+     *
+     * @note Clamped away from zero where it is read. A rate of zero is not
+     *       "no spawns", it is a division by zero, and a caller who wants no
+     *       spawns has ::Spawner::active to say so with.
+     *
+     * 한국어
+     * ------
+     * @brief 스포너가 *얼마나 자주* 터지는지에 대한 배율. 1이면 저작된 그대로입니다.
+     *
+     * *::spawn_slow와 분리된 이유는 주인이 다르기 때문이며*, 주인이 둘인 손잡이는 덮어써지는
+     * 손잡이입니다. ::spawn_slow는 *보스의 것*입니다. ::world_step이 전투가 시작될 때
+     * 설정하고 끝날 때 지우며, *사건*을 서술합니다. 이것은 *런의 것*입니다. 난이도, 자기
+     * 스포너 간격이 말하는 것보다 분주하고 싶은 레벨, 6초 뒤가 아니라 지금 웨이브를 원하는
+     * 테스트이며, *설정*을 서술합니다. 설정을 사건의 필드에 접어 넣으면 보스가 나가면서
+     * 난이도를 지우게 됩니다.
+     *
+     * *간격이 아니라 비율*이므로 클수록 많습니다. ::spawn_wait가 이것으로 나눕니다. 곱하는
+     * ::spawn_slow와 반대이며, 둘이 반대 방향으로 읽히는 것은 의도적입니다. 2.0에서 빨라지는
+     * `slow`라는 이름의 필드는 둘 중 어느 이름보다도 나쁩니다.
+     *
+     * @note 읽는 곳에서 0으로부터 떨어뜨려 고정합니다. 비율 0은 "스폰 없음"이 아니라 0으로
+     *       나누기이며, 스폰을 원하지 않는 호출자에게는 ::Spawner::active가 있습니다.
+     */
+    float    spawn_rate;
+
     Spawner spawner[ENEMY_MAX_SPAWNERS]; /**< Markers that keep making monsters. / 몬스터를 계속 만들어 내는 표식. */
     int     n_spawners;                  /**< How many are in use. / 사용 중인 개수. */
 
@@ -2298,6 +2378,19 @@ int enemy_count(const Pools *pl);
  * @return ::E_DEAD인 것을 제외한 개수.
  */
 int enemy_alive(const Pools *pl);
+
+/**
+ * @brief How many of one ::MonTypeID are alive. ::enemy_alive, narrowed.
+ *
+ * ENGLISH: What ::MonType::cap is checked against, and the question
+ * ::Spawner::max_alive cannot ask -- that one counts the room, so a cap of
+ * eight is satisfied by eight brutes just as well as by a mixed wave.
+ *
+ * 한국어: ::MonType::cap이 대조되는 값이며, ::Spawner::max_alive가 물을 수 없는
+ * 질문입니다. 그쪽은 *방*을 세므로 상한 여덟은 섞인 웨이브만큼이나 브루트 여덟으로도
+ * 충족됩니다.
+ */
+int enemy_alive_of(const Pools *pl, int type);
 
 /**
  * @brief One monster by index.

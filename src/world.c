@@ -2328,6 +2328,22 @@ int world_load_level(World *w, const char *name, WorldEnter how) {
     enemy_spawn_level(&w->pools, &w->level);
     pickup_spawn_level(&w->pools, &w->level);
 
+    /* THE LEVEL'S OWN SPAWN RATE, and it has to be set AFTER the line above
+       it. ::enemy_spawn_level opens with ::enemy_reset, which puts the rate
+       back to 1 along with everything else in the pool -- so assigning before
+       it, which is where this first went, wrote a value that was erased one
+       call later. It survived the test because the test set the field by hand
+       after the same call.
+       0 means the level did not say, which is 100. See ::Level::spawn_rate.
+       *레벨 자신의 스폰 비율*이며, 바로 위 줄보다 *뒤*에 설정해야 합니다.
+       ::enemy_spawn_level은 ::enemy_reset으로 시작하고, 그것이 풀의 나머지와 함께 비율을
+       1로 되돌립니다. 그래서 그 앞에 대입하는 것은(처음에 그렇게 했습니다) 한 호출 뒤에
+       지워지는 값을 쓰는 일이었습니다. 테스트는 같은 호출 뒤에 손으로 필드를 설정했기 때문에
+       통과했습니다.
+       0은 레벨이 말하지 않았다는 뜻이고 그것은 100입니다. ::Level::spawn_rate를 보십시오. */
+    w->pools.enemy.spawn_rate =
+        w->level.spawn_rate > 0 ? w->level.spawn_rate / 100.0f : 1.0f;
+
     /* After the sectors exist and before the first door_update: door.c copies
        each door's CLOSED shape here, and it can only do that while the level
        still holds it.

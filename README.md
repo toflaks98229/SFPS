@@ -22,7 +22,7 @@ Models, materials, sounds and levels are all authored as text and hot-reload
 into the running game.
 
 ```
-1,035,264 / 1,474,560 bytes   (70.21% used)
+1,035,776 / 1,474,560 bytes   (70.24% used)
 ```
 
 ## Build
@@ -1504,7 +1504,25 @@ code path. The atlas is a grid, one row per type, one column per frame:
 | | role | reads as |
 |---|---|---|
 | **water_spirit** | the baseline — holds mid range and hoses a stream of five to ten small bolts at where you *were* | a small pale drifting shape |
-| **brute** | a wall of health that hits like a truck, slow | broad grey-green hulk, tusks, back spikes |
+| **brute** | a wall of health that hits like a truck, and the straightest line in the bestiary | broad grey-green hulk, tusks, back spikes |
+
+**Everything moves at roughly half your walking speed, and none of it comes at
+you in a straight line.** Those are one change: `PLAYER_WALK` is 10.8 m/s and
+the bestiary used to be 1.9–3.0, so *nothing in the game could reach a player
+who kept walking* — not a balance choice, an arithmetic fact nobody had put the
+two numbers beside each other to notice. They are 5.6–7.0 now (0.52–0.65×).
+
+Speed alone would have made them **easier**: a straight line gets simpler to
+avoid as it gets faster, because it arrives sooner without arriving anywhere
+new. `MonType::weave` rotates the approach vector toward the side the monster is
+committed to — the *same* committed side its close-range strafe uses, so a weave
+and a strafe are one decision seen at two ranges. A brute crosses nineteen
+metres in 3.55 s, 1.80 m off the line, turning three times on the way.
+
+`MON_SLIDE_HOLD` is a **distance divided by speed**, not a time. It was 1.1 s,
+which was a two-metre leg at the old speeds and a seven-metre one at the new:
+the tuned quantity was the *shape* of the zig-zag, and a shape held in seconds
+stretches every time something walks faster.
 | **caster** | ranged, and *off the floor* — never closes, shoots across the room | violet robe, no legs, cold cyan eyes |
 
 **It used to be five, and the two that went were the two that were adjectives.**

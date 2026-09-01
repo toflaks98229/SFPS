@@ -474,14 +474,42 @@ static void digest_print(const Digest *d) {
    틱마다 더 나아갑니다. 플레이어가 느낄 모든 것은 비트 단위로 그대로입니다. `px`, `health`,
    `erng`, `enemies hp`, `world_time`이며, 그것이 이 줄이 존재하는 이유인 주장입니다. `erng`를
    움직인 표면 효과였다면 그것은 전투를 바꾼 표면 효과였을 것입니다. */
+/* THE EIGHTH REVERSED THE FIGHT, and the reversal is the report. The
+   bestiary went from 1.9-3.0 m/s to 5.6-7.0 against a player who walks at
+   10.8, and the approach stopped being a straight line. `health` went 73 to
+   100 and `enemies hp` went 40 to -2: the monster used to shoot the player and
+   never be hit, and now it is killed without landing anything.
+   THAT IS NOT THE MONSTERS GETTING WEAKER. A demo is a RECORDED INPUT and
+   recorded input does not adapt: the monster reaches its firing band about
+   four and a half seconds earlier than it used to, so it arrives into shots
+   that were aimed at where it would have been. Against a player who reacts it
+   is the opposite -- steptest still measures 30 damage landed on a passive
+   player over five seconds, and enemytest measures a brute crossing nineteen
+   metres in 3.55s where the old one needed ten seconds.
+   WHAT DID NOT MOVE IS THE PROOF. `px`, `vx`, `yaw`, `pitch`, `world_time`,
+   `wrng` and `srng` are bit-for-bit what they were: the recording drives the
+   player identically and the player's own frame is untouched. Only the fight
+   is different, which is the only thing this change should be able to reach.
+   *여덟 번째는 전투를 뒤집었고, 그 뒤집힘이 곧 보고입니다.* 도감이 1.9~3.0 m/s에서
+   5.6~7.0으로 갔습니다. 걷기 10.8인 플레이어에 대해서이며, 접근이 직선이기를 그만두었습니다.
+   `health`가 73에서 100으로, `enemies hp`가 40에서 -2로 갔습니다. 몬스터는 플레이어를 쏘고
+   자신은 맞지 않았었는데, 이제 아무것도 맞히지 못한 채 죽습니다.
+   *그것은 몬스터가 약해진 것이 아닙니다.* 데모는 *녹화된 입력*이고 녹화된 입력은 적응하지
+   않습니다. 몬스터는 예전보다 4.5초쯤 일찍 사격 사거리에 닿으므로, 그것이 *있었을* 자리를
+   겨눈 사격 속으로 들어옵니다. 반응하는 플레이어에게는 반대입니다. steptest는 여전히 수동적인
+   플레이어에게 5초 동안 30의 피해가 꽂히는 것을 재고, enemytest는 브루트가 19미터를 3.55초에
+   건너는 것을 잽니다. 예전 것은 10초가 필요했습니다.
+   *움직이지 않은 것이 증거입니다.* `px`, `vx`, `yaw`, `pitch`, `world_time`, `wrng`, `srng`가
+   비트 단위로 그대로입니다. 녹화본이 플레이어를 똑같이 구동하고 플레이어 자신의 프레임은
+   손대지 않았습니다. 다른 것은 전투뿐이며, 이 변경이 닿을 수 있어야 하는 유일한 것입니다. */
 static const Digest GOLDEN = {
     /* px py pz */ -12.2013168f, 2.84367466f, -14.8857975f,
     /* vx vy vz */ -0.312936455f, 1.9998908f, 0.38904506f,
     /* yaw pitch */ 0.382800102f, 0.534599602f,
-    /* health keys grounded */ 73, 0, 0,
+    /* health keys grounded */ 100, 0, 0,
     /* cur ammo */ 0, 0,
-    /* wrng srng erng frng */ 2972006077u, 3888997821u, 3081125676u, 1913620148u,
-    /* enemies hp */ 1, 40,
+    /* wrng srng erng frng */ 2972006077u, 3888997821u, 4174342929u, 98971687u,
+    /* enemies hp */ 1, -2,
     /* proj marks */ 0, 0,
     /* world_time */ 29.9002438f
 };

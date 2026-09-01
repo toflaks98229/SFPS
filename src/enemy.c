@@ -183,14 +183,23 @@ static const struct { const char *was; int now; } MON_LEGACY[] = {
  * @note ::types_check는 behaviour와 shot_speed의 정합성, 그리고 플래그 비트만 봅니다. 치수는
  *       검사하지 *않습니다.* `eye`가 `hgt`보다 높아도 잡히지 않고 그대로 플레이됩니다.
  */
-/*    name,           behaviour,   hp,  spd,   rad,   hgt,   eye, sight,   atk, dmg,  wind,  cool, aspct,  shot, brst, bmin,  sprd,   gap,    yaw, pain, flags      */
+/*    name,           behaviour,   hp,  spd, weave,   rad,   hgt,   eye, sight,   atk, dmg,  wind,  cool, aspct,  shot, brst, bmin,  sprd,   gap,    yaw, pain, flags      */
 static const MonType TYPES[MON_TYPES] = {
-    /* the baseline: fast enough to matter, and one point-blank blast kills it
-       기준선. 충분히 빠르고, 근접 샷건 한 방에 죽습니다. */
-    { "water_spirit", AI_CASTER,   40, 3.0f, 0.52f, 1.70f, 1.30f, 34.0f,  7.5f,   3, 0.30f, 0.50f, 0.70f,  9.0f,   10,  5, 0.13f, 0.07f, 260.0f, 0.6f, 0         },
-    /* a wall with health -- closes slowly, hits hard, and cannot be stun-locked
-       체력이 높은 벽. 느리게 다가와 강하게 때리며, 스턴 락에 걸리지 않습니다. */
-    { "brute",        AI_BRAWLER, 120, 1.9f, 0.806f, 2.35f, 1.80f, 34.0f,  2.3f,  24, 0.55f, 1.50f, 0.85f,  0.0f,    1,  1,  0.0f, 0.0f, 130.0f, 2.2f, 0         },
+    /* the baseline: the fastest thing in the bestiary and the loosest weave,
+       at 65% of ::PLAYER_WALK -- it cannot catch you, but it can be there
+       when you turn round. One point-blank blast kills it.
+       기준선. 도감에서 가장 빠르고 갈지자가 가장 큽니다. ::PLAYER_WALK의 65%이며,
+       따라잡지는 못하지만 돌아섰을 때 거기 있을 수는 있습니다. 근접 샷건 한 방에
+       죽습니다. */
+    { "water_spirit", AI_CASTER,   40, 7.0f, 0.62f, 0.52f, 1.70f, 1.30f, 34.0f,  7.5f,   3, 0.30f, 0.50f, 0.70f,  9.0f,   10,  5, 0.13f, 0.07f, 260.0f, 0.6f, 0         },
+    /* a wall with health -- hits hard, cannot be stun-locked, and closes at
+       half your walking speed on the straightest line in the bestiary. Heavy
+       is the small weave, not the speed: it commits to a direction and comes,
+       and what makes it survivable is that you can read where.
+       체력이 높은 벽. 강하게 때리고, 스턴 락에 걸리지 않으며, 도감에서 가장 곧은 선으로
+       걷기 속도의 절반으로 다가옵니다. 무거움은 속도가 아니라 작은 갈지자입니다. 방향을
+       정하고 오며, 살아남을 수 있게 하는 것은 그것이 어디로 올지 읽을 수 있다는 점입니다. */
+    { "brute",        AI_BRAWLER, 120, 5.6f, 0.30f, 0.806f, 2.35f, 1.80f, 34.0f,  2.3f,  24, 0.55f, 1.50f, 0.85f,  0.0f,    1,  1,  0.0f, 0.0f, 130.0f, 2.2f, 0         },
     /* holds its range instead of closing, and holds it in the AIR -- so cover
        and angles matter, and so does the ceiling. Nothing about the numbers
        changed when MON_FLIES arrived: this is the same creature, no longer
@@ -200,7 +209,7 @@ static const MonType TYPES[MON_TYPES] = {
        천장의 문제이기도 합니다. MON_FLIES가 붙을 때 수치는 하나도 바뀌지 않았습니다. 아무것도
        딛고 있지 않게 되었을 뿐 같은 생물입니다. 이것이 대신한 행("wraith")은 여기서 체력 4점과
        사거리 1미터를 뺀 것이었고, 그것은 별개의 몬스터가 아닙니다. */
-    { "caster",       AI_CASTER,   26, 2.4f, 0.546f, 1.90f, 1.45f, 40.0f, 13.0f,  12, 0.85f, 1.40f, 0.80f, 11.0f,    1,  1,  0.0f, 0.0f, 180.0f, 0.9f, MON_FLIES },
+    { "caster",       AI_CASTER,   26, 5.8f, 0.46f, 0.546f, 1.90f, 1.45f, 40.0f, 13.0f,  12, 0.85f, 1.40f, 0.80f, 11.0f,    1,  1,  0.0f, 0.0f, 180.0f, 0.9f, MON_FLIES },
     /* the boss: a caster with the footwork taken away. Its hp is spent in
        BOSS_CYCLES equal thirds and must divide by it -- types_check says so.
        The pain lock is effectively infinite because a boss that flinches is a
@@ -218,14 +227,14 @@ static const MonType TYPES[MON_TYPES] = {
        한 뼘까지 닿는 보스는 큰 적이 아니라 모델링 오류로 읽히고, 탑 위에 걸린 결계핵은 있을
        자리가 없어집니다. 신장을 내리면서 반경, 시선, 사거리를 함께 내렸습니다. MonType의 치수
        블록이 이곳의 모든 행에 대해 진술하는 규칙입니다. */
-    { "maw",          AI_CASTER,  900, 0.0f, 1.20f, 3.60f, 2.00f, 60.0f, 40.0f,  14, 0.90f, 1.10f, 1.10f, 14.0f,    5,  5, 0.22f, 0.0f,  90.0f,99.0f, MON_BOSS | MON_ANCHORED },
+    { "maw",          AI_CASTER,  900, 0.0f, 0.0f, 1.20f, 3.60f, 2.00f, 60.0f, 40.0f,  14, 0.90f, 1.10f, 1.10f, 14.0f,    5,  5, 0.22f, 0.0f,  90.0f,99.0f, MON_BOSS | MON_ANCHORED },
     /* what guards it: no sight, no reach, no damage, and the only monster in
        the game that never acts. Ninety health is three WARD_SUMMON_DMG chunks,
        so a ward pays out exactly three times on its way down whatever kills it.
        그것을 지키는 것. 시야도 사거리도 피해도 없으며, 이 게임에서 유일하게 결코 행동하지 않는
        몬스터입니다. 체력 90은 WARD_SUMMON_DMG 세 덩어리이므로, 결계핵은 무엇에 죽든 쓰러지는
        동안 정확히 세 번 지급합니다. */
-    { "ward",         AI_INERT,    90, 0.0f, 0.50f, 1.10f, 0.55f,  0.0f,  0.0f,   0,  0.0f,  0.0f, 1.00f,  0.0f,    1,  1,  0.0f, 0.0f,   0.0f,99.0f, MON_GUARD | MON_ANCHORED },
+    { "ward",         AI_INERT,    90, 0.0f, 0.0f, 0.50f, 1.10f, 0.55f,  0.0f,  0.0f,   0,  0.0f,  0.0f, 1.00f,  0.0f,    1,  1,  0.0f, 0.0f,   0.0f,99.0f, MON_GUARD | MON_ANCHORED },
 };
 
 /* --- Static function prototypes / 정적 함수 프로토타입 --- */
@@ -2950,15 +2959,30 @@ static void change_yaw(Enemy *m, float yaw_speed_deg, float dt)
  * 그리는 몬스터가 벽에 대해 해야 할 일은 반대로 도는 것뿐이기 때문입니다. 방향은 매
  * 프레임 다시 고르지 않고 MON_SLIDE_HOLD 동안 유지합니다. Doom이 movecount를 두는 이유도
  * 같습니다. 프레임률로 다시 결정하는 몬스터는 제자리에서 떱니다. */
+/* THE ONE COMMITTED DIRECTION, and both the weave and the strafe ask for it
+   here so they cannot disagree. Held for ::MON_SLIDE_HOLD for Doom's reason,
+   written above ::ai_run_slide: a monster that re-decides at frame rate
+   vibrates in place, because the choice flips as fast as the geometry under it
+   changes.
+   *하나의 정해진 방향*이며, 갈지자와 횡이동이 모두 이곳에서 그것을 물으므로 서로 어긋날 수
+   없습니다. ::ai_run_slide 위에 적힌 Doom의 이유로 ::MON_SLIDE_HOLD 동안 유지합니다. 프레임
+   단위로 다시 정하는 몬스터는 제자리에서 진동합니다. 아래의 지형이 바뀌는 속도만큼 빠르게
+   선택이 뒤집히기 때문입니다. */
+static float committed_side(Pools *pl, const MonType *S, Enemy *m)
+{
+    if (m->slide_wait <= 0.0f)
+    {
+        m->lefty = (char)(frand(&pl->enemy) < 0.5f);
+        m->slide_wait = MON_SLIDE_HOLD(S->speed);
+    }
+    return m->lefty ? 1.0f : -1.0f;
+}
+
 static void ai_run_slide(Pools *pl, const Level *l, const MonType *S, Enemy *m, float dt)
 {
     float step = S->speed * dt;
 
-    if (m->slide_wait <= 0.0f)
-    {
-        m->lefty = (char)(frand(&pl->enemy) < 0.5f);
-        m->slide_wait = MON_SLIDE_HOLD;
-    }
+    (void)committed_side(pl, S, m);
 
     /* Perpendicular to where it is FACING, not to where the player is. The
        two differ while the monster is still turning, and using the player
@@ -2983,7 +3007,7 @@ static void ai_run_slide(Pools *pl, const Level *l, const MonType *S, Enemy *m, 
     if (moved < step * 0.25f)
     {
         m->lefty = (char)!m->lefty;
-        m->slide_wait = MON_SLIDE_HOLD;
+        m->slide_wait = MON_SLIDE_HOLD(S->speed);
     }
 }
 
@@ -3141,8 +3165,27 @@ static int sees_player(const Pools *pl, const Level *l, Enemy *m, v3 player_eye)
  *
  * The odds come straight from fight.qc, including its halving for a monster
  * that also has a melee attack -- something that can bite prefers to close, so
- * it shoots less on the way in. Our `shot_speed > 0` is already the field that
- * says "ranged", so it decides here too rather than a second flag.
+ * it shoots less on the way in.
+ *
+ * WHO IS ASKED, AND WHY IT IS NOT `shot_speed`. This line read
+ * `S->shot_speed <= 0.0f` and meant "is this a brawler", which is the reading
+ * ::MonBehaviour was introduced to abolish -- its own note says three such
+ * tests "each meant 'is this a caster'" and would each have to be hunted down
+ * the day a third archetype arrived. ::MonType::shot_speed's field comment
+ * still promises "Read only by ::AI_CASTER". Neither was true here: this was
+ * the fourth case, missed by the sweep rather than hidden from it, and it is
+ * the one that would have made a third archetype answer as a brawler by
+ * default. The behaviour column is asked directly now, so both notes are true
+ * again.
+ *
+ * *누구에게 묻는가, 그리고 왜 `shot_speed`가 아닌가.* 이 줄은 `S->shot_speed <= 0.0f`
+ * 였고 "이것은 근접형인가"를 뜻했습니다. ::MonBehaviour가 없애려고 도입된 바로 그
+ * 읽기입니다. 그 주석 자신이 그런 검사 셋이 "각각 '이것은 캐스터인가'를 뜻했다"고,
+ * 세 번째 아키타입이 생기는 날 각각을 다시 찾아내야 했을 것이라고 적었습니다.
+ * ::MonType::shot_speed의 필드 주석도 여전히 "::AI_CASTER만 읽습니다"라고 약속합니다.
+ * 이곳에서는 둘 다 참이 아니었습니다. 이것이 네 번째 사례이며, 숨어 있던 것이 아니라
+ * 정리에서 빠진 것이고, 세 번째 아키타입이 기본적으로 근접형으로 답하게 만들었을 바로
+ * 그것입니다. 이제 behaviour 열에 직접 물으므로 두 주석이 다시 참입니다.
  *
  * 플레이어와의 거리에 따라 공격을 시작할지 결정합니다. 확률은 fight.qc에서 그대로 왔으며,
  * 근접 공격도 가진 몬스터에 대한 절반 감소도 포함합니다. 물 수 있는 것은 거리를 좁히기를
@@ -3167,7 +3210,7 @@ static int check_attack(Pools *pl, const MonType *S, Enemy *m, float dist)
        say. The bands are about willingness; this is about arms.
        근접 몬스터는 사거리 밖에서는 주사위와 무관하게 공격할 수 없습니다. 대역은
        의사에 관한 것이고 이것은 팔 길이에 관한 것입니다. */
-    if (S->shot_speed <= 0.0f)
+    if (S->behaviour != AI_CASTER)
         return dist <= S->attack;
 
     return frand(&pl->enemy) < chance;
@@ -3258,6 +3301,35 @@ static void begin_attack(Pools *pl, const MonType *S, Enemy *m)
  * @param[in]     dist 플레이어까지의 수평 거리 (미터).
  * @param[in]     dt   시간 간격 (초).
  */
+/* THE APPROACH, TURNED ASIDE. ::MonType::weave radians toward the side this
+   monster is committed to, so closing is a zig-zag rather than a line and the
+   player cannot get away by backing along one axis.
+   ROTATING the vector rather than adding a sideways step on top of it: an
+   added step makes the monster travel faster than ::MonType::speed and arrive
+   early from an angle nobody budgeted for. A rotation spends the same metres
+   per second and spends them elsewhere. What it costs in closing rate is
+   `cos(weave)`, and the speed column is set knowing that.
+   *접근을 옆으로 틉니다.* 이 몬스터가 정해 둔 쪽으로 ::MonType::weave 라디안만큼 틀어서,
+   다가오는 길이 직선이 아니라 갈지자가 되고, 플레이어가 한 축으로 물러나는 것만으로는
+   벗어날 수 없게 합니다.
+   옆걸음을 *더하는* 것이 아니라 벡터를 *회전*시킵니다. 더하면 몬스터가 ::MonType::speed보다
+   빠르게 이동해, 아무도 예산에 넣지 않은 각도에서 일찍 도착합니다. 회전은 초당 같은 미터를
+   쓰고 다만 다른 곳에 씁니다. 접근 속도로 치르는 값은 `cos(weave)`이며, 속도 열은 그것을
+   알고 정해져 있습니다. */
+static void move_weaving(Pools *pl, const Level *l, const MonType *S, Enemy *m,
+                         float ux, float uz, float step)
+{
+    if (S->weave > 0.0f)
+    {
+        float a = S->weave * committed_side(pl, S, m);
+        float c = cosf(a), sn = sinf(a);
+        float rx = ux * c - uz * sn;
+        float rz = ux * sn + uz * c;
+        ux = rx; uz = rz;
+    }
+    move_toward(l, S, m, ux * step, uz * step);
+}
+
 static void chase_brawler(Pools *pl, const Level *l, const MonType *S, Enemy *m,
                           v3 to, float dist, float dt)
 {
@@ -3266,7 +3338,7 @@ static void chase_brawler(Pools *pl, const Level *l, const MonType *S, Enemy *m,
 
     if (dist > S->attack)
     {
-        move_toward(l, S, m, to.x * inv * step, to.z * inv * step);
+        move_weaving(pl, l, S, m, to.x * inv, to.z * inv, step);
         return;
     }
 
@@ -3316,7 +3388,7 @@ static void chase_caster(Pools *pl, const Level *l, const MonType *S, Enemy *m,
 
     if (dist > S->attack)
     {
-        move_toward(l, S, m, to.x * inv * step, to.z * inv * step);
+        move_weaving(pl, l, S, m, to.x * inv, to.z * inv, step);
         return;
     }
     if (dist < S->attack * CASTER_KEEP)

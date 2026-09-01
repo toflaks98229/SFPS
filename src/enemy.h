@@ -420,7 +420,21 @@ enum MonTypeID {
    모두 존재하는 이유는, 매 프레임 다시 결정하는 몬스터가 제자리에서 떨기 때문입니다.
    발밑의 지형이 바뀌는 속도로 선택이 뒤집히고, 그 결과는 움직임이 아니라 결함으로
    읽힙니다. */
-#define MON_SLIDE_HOLD    1.1f
+#define MON_SLIDE_LEG     2.5f
+
+/* AND WHY THAT IS A DISTANCE RATHER THAN THE TIME IT USED TO BE. It was 1.1
+   seconds, which is a leg of about two metres at the speeds this bestiary had
+   -- and about seven at the speeds it has now. The number that was tuned was
+   never the second; it was the SHAPE of the zig-zag, and a shape held in
+   seconds silently stretches every time something walks faster. Held in metres
+   the shape survives the speed column: a quick monster flips more often, a
+   heavy one commits longer, and both draw the same figure at different rates.
+   *그리고 그것이 왜 예전의 시간이 아니라 거리인가.* 1.1초였고, 이 도감이 가지고 있던 속도에서는
+   한 다리가 2미터쯤이었으며 지금의 속도에서는 7미터쯤입니다. 조율된 수는 애초에 초가 아니라
+   갈지자의 *모양*이었고, 초로 붙잡아 둔 모양은 무언가가 더 빨리 걸을 때마다 조용히
+   늘어납니다. 미터로 붙잡으면 모양이 속도 열을 견딥니다. 빠른 몬스터는 더 자주 꺾고 무거운
+   몬스터는 더 오래 밀고 나가며, 둘이 서로 다른 속도로 같은 도형을 그립니다. */
+#define MON_SLIDE_HOLD(spd) (MON_SLIDE_LEG / ((spd) > 0.1f ? (spd) : 0.1f))
 
 /**
  * @enum EState
@@ -700,6 +714,56 @@ typedef struct {
     int   behaviour;    /**< A ::MonBehaviour: how this kind fights. / ::MonBehaviour 값. 이 종류가 어떻게 싸우는가. */
     int   hp;           /**< Starting health. / 시작 체력. */
     float speed;        /**< Walking speed, m/s. / 이동 속도(m/s). */
+
+    /**
+     * @brief How far off a straight line this kind closes, in radians.
+     *
+     * ENGLISH
+     * -------
+     * A MONSTER THAT WALKS STRAIGHT AT YOU IS A MONSTER YOU STRAFE PAST.
+     * `chase_brawler` moved along the vector to the player and nothing else,
+     * so the approach was a line: predictable at any speed, and the faster it
+     * got the easier it was to sidestep, because a fast straight line arrives
+     * sooner without arriving anywhere new.
+     *
+     * The approach vector is rotated by this much, to the side ::Enemy::lefty
+     * is committed to, and that commitment flips on ::MON_SLIDE_HOLD -- the
+     * same clock the close-range strafe uses, and deliberately the same: one
+     * monster holds ONE direction at a time, so a weave and a strafe are the
+     * same decision seen at two ranges rather than two systems that can
+     * disagree.
+     *
+     * IT COSTS CLOSING SPEED, by `cos` of itself: at 0.62 rad a monster closes
+     * at 81% of ::speed. That is paid for in the speed column rather than
+     * hidden, because the two are read together and a weave tuned against a
+     * speed it does not know is a weave that reads as slowness.
+     *
+     * Zero is a straight line, which is what ::AI_INERT and the anchored boss
+     * want: neither goes anywhere, and a weave on something that does not walk
+     * would be a column with a value and no meaning.
+     *
+     * 한국어
+     * ------
+     * @brief 이 종류가 직선에서 얼마나 벗어나 접근하는지, 라디안.
+     *
+     * *곧장 걸어오는 몬스터는 옆으로 지나쳐 버리면 그만인 몬스터입니다.* `chase_brawler`는
+     * 플레이어를 향한 벡터로만 움직였으므로 접근이 직선이었습니다. 어떤 속도에서든
+     * 예측 가능하며, 빨라질수록 오히려 피하기 쉬워집니다. 빠른 직선은 더 일찍 도착할 뿐
+     * 새로운 곳에 도착하지 않기 때문입니다.
+     *
+     * 접근 벡터를 이만큼, ::Enemy::lefty가 정해 둔 쪽으로 회전시키며, 그 결정은
+     * ::MON_SLIDE_HOLD마다 뒤집힙니다. 근접 횡이동이 쓰는 것과 같은 시계이고 일부러
+     * 같습니다. 한 몬스터는 한 번에 *한* 방향을 지니므로, 갈지자와 횡이동은 서로 어긋날 수
+     * 있는 두 시스템이 아니라 두 거리에서 본 같은 결정입니다.
+     *
+     * *접근 속도를 자기 `cos`만큼 치릅니다.* 0.62라디안이면 ::speed의 81%로 다가옵니다.
+     * 숨기지 않고 속도 열에서 지불하는 이유는 둘이 함께 읽히기 때문이며, 자기가 모르는
+     * 속도에 맞춰 조율된 갈지자는 느림으로 읽히는 갈지자입니다.
+     *
+     * 0은 직선이며 ::AI_INERT와 고정된 보스가 원하는 것입니다. 둘 다 아무 데도 가지 않고,
+     * 걷지 않는 것에 붙은 갈지자는 값은 있고 뜻은 없는 열입니다.
+     */
+    float weave;
 
     /* --- HOW BIG IT IS -----------------------------------------------------
      *

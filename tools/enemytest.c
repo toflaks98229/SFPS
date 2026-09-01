@@ -195,6 +195,104 @@ static void check_step_fixture(float riser, float wall) {
     ok(1, "fixture: the control wall is out of everything's reach");
 }
 
+/* --- the approach is not a line, and it is fast enough to matter -----------
+ *
+ * ENGLISH
+ * -------
+ * TWO CLAIMS THAT ONLY A PATH CAN ANSWER. A monster's speed and its weave are
+ * both single numbers in a table, and both are trivially "set" and easily
+ * meaningless: a weave the approach never reads leaves a straight line, and a
+ * speed nothing can reach with leaves a monster that never arrives.
+ *
+ * WHY IT MATTERS THAT THE LINE BENDS. `chase_brawler` moved along the vector to
+ * the player and nothing else, so the approach was a straight line -- and a
+ * straight line gets EASIER to avoid as it gets faster, because it arrives
+ * sooner without arriving anywhere new. Raising the speed column without
+ * bending the path would have made the bestiary quicker and no more dangerous.
+ *
+ * MEASURED AS OFF-AXIS TRAVEL. The straight-line path from the start to the
+ * player is one axis; how far the monster gets from it is the other. A weave of
+ * zero scores zero by construction, whatever the speed, so this cannot pass by
+ * the monster merely moving.
+ *
+ * 한국어
+ * ------
+ * *경로만이 답할 수 있는 주장 둘입니다.* 몬스터의 속도와 갈지자는 둘 다 표 안의 수 하나이고,
+ * 둘 다 "설정"하기는 쉬우며 무의미해지기도 쉽습니다. 접근이 읽지 않는 갈지자는 직선을 남기고,
+ * 무엇에도 닿을 수 없는 속도는 결코 도착하지 않는 몬스터를 남깁니다.
+ *
+ * *선이 휘는 것이 왜 중요한가.* `chase_brawler`는 플레이어를 향한 벡터로만 움직였으므로 접근이
+ * 직선이었습니다. 그리고 직선은 빨라질수록 피하기 *쉬워집니다*. 더 일찍 도착할 뿐 새로운 곳에
+ * 도착하지 않기 때문입니다. 경로를 휘게 하지 않고 속도 열만 올렸다면 도감은 더 빨라지되 더
+ * 위험해지지는 않았을 것입니다.
+ *
+ * *축에서 벗어난 거리로 잽니다.* 출발점에서 플레이어까지의 직선이 한 축이고, 몬스터가 그것에서
+ * 얼마나 멀어지는지가 다른 축입니다. 갈지자가 0이면 속도가 얼마든 구조적으로 0점이므로, 몬스터가
+ * 그저 움직이는 것만으로는 이 검사를 통과할 수 없습니다.
+ */
+static void check_weave(void) {
+    printf("\nthe approach bends, and arrives\n");
+
+    static const struct { const char *kind; float min_off; } WANT[] = {
+        { "brute",        0.40f },   /* the straightest walker in the table */
+        { "water_spirit", 1.00f },   /* the loosest */
+    };
+
+    for (int k = 0; k < 2; k++) {
+        build();
+        put_kind(&L.ents[0], WANT[k].kind);
+        enemy_reset(&g_pools);
+        enemy_spawn_level(&g_pools, &L);
+        if (enemy_count(&g_pools) != 1) { ok(0, "the kind spawned"); continue; }
+
+        v3 player = v3f(0.0f, PLAYER_EYE, 0.0f);
+        v3 start  = enemy_at(&g_pools, 0)->pos;
+
+        /* The straight line this approach is being compared against. */
+        float ax = player.x - start.x, az = player.z - start.z;
+        float alen = sqrtf(ax*ax + az*az);
+        ax /= alen; az /= alen;
+
+        float worst = 0.0f;
+        int   flips = 0; char was = enemy_at(&g_pools, 0)->lefty;
+        float d0 = dist_xz(start, player);
+        int   frames = 0;
+        for (; frames < 60 * 8; frames++) {
+            enemy_update(&g_pools, &L, player, DT);
+            const Enemy *m = enemy_at(&g_pools, 0);
+            float rx = m->pos.x - start.x, rz = m->pos.z - start.z;
+            /* Distance from the line, which is the component across it. */
+            float off = rx * az - rz * ax;
+            if (off < 0.0f) off = -off;
+            if (off > worst) worst = off;
+            if (m->lefty != was) { flips++; was = m->lefty; }
+            /* THE APPROACH ONLY. A caster stops closing at its band and
+               strafes there, and a strafe at seven metres is a long way
+               from a line drawn to the player -- the first cut of this
+               measured that and reported the water spirit as wandering
+               seven metres off course, which was the close-range strafe
+               wearing the weave's name.
+               *접근 구간만입니다.* 캐스터는 자기 사거리에서 다가오기를 멈추고 그곳에서
+               횡이동하며, 7미터에서의 횡이동은 플레이어까지 그은 선에서 한참
+               떨어져 있습니다. 이 검사의 첫 판이 그것을 쟀고 물의 정령이 7미터를
+               벗어났다고 보고했는데, 그것은 갈지자의 이름을 달고 있던 근접
+               횡이동이었습니다. */
+            if (dist_xz(m->pos, player) <= mon_stats(m->type)->attack) break;
+        }
+
+        float d1 = dist_xz(enemy_at(&g_pools, 0)->pos, player);
+        printf("      %-13s closed %.1fm of %.1fm in %.2fs, %.2fm off the line, %d turns\n",
+               WANT[k].kind, d0 - d1, d0, frames * DT, worst, flips);
+
+        okf(worst > WANT[k].min_off,
+            "the approach leaves the straight line",
+            worst, WANT[k].min_off);
+        okf(d1 < d0 * 0.5f,
+            "and still closes most of the distance",
+            d1, d0 * 0.5f);
+    }
+}
+
 int main(void) {
     printf("enemytest\n\n");
     build();
@@ -1090,6 +1188,8 @@ int main(void) {
             "and it is on the floor four seconds later",
             g_pools.enemy.m[0].pos.y, 0.0f);
     }
+
+    check_weave();
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall enemy checks passed\n", fails);
     return fails != 0;

@@ -793,7 +793,107 @@ function Get-ProceduralMaterials([string]$recipePath) {
 $procMats = Get-ProceduralMaterials (Join-Path $root 'assets\textures.txt')
 
 $spriteBytes = New-Object System.Collections.Generic.List[byte]
+# --- kept in assets, left out of the binary ---------------------------------
+#
+# THE SOLSTICE-TO-PSYCHOFUGE SWAP ORPHANED TWELVE WALL TEXTURES. lqdm1 named
+# them; lqdm4 does not, and nothing else ever did -- no map, no levels.txt row,
+# no line of C. They stayed in assets/sprites and kept riding in .rdata,
+# because the bake takes every .png in the folder and a texture nobody asks for
+# looks exactly like a texture somebody might.
+#
+# NOT DELETED, and that is the point of doing it here rather than with `rm`.
+# They are LibreQuake's, they are correctly imported, their recipes are still
+# in textures.txt, and the next map to want a wooden floor should find one
+# already converted rather than import it again. Deleting them would spend the
+# import work to save the disk space twice.
+#
+# A NAME HERE IS A CLAIM WITH TWO HALVES, and both are checked below: the file
+# still exists, and nothing has started naming it since. The second is the one
+# that matters -- a material excluded from the bake but named by a map draws
+# the fallback, which is a texture that looks like a mistake rather than an
+# error that says what happened.
+#
+# 한국어
+# ------
+# *Solstice에서 Psychofuge로 바꾸면서 벽 텍스처 열둘이 고아가 되었습니다.* lqdm1이 이름을
+# 불렀고 lqdm4는 부르지 않으며, 그 밖의 무엇도 부른 적이 없습니다. 맵도, levels.txt 행도,
+# C 한 줄도 없습니다. 그것들은 assets/sprites에 남아 계속 .rdata에 실려 왔습니다. 굽기가
+# 폴더의 모든 .png를 가져가고, 아무도 찾지 않는 텍스처는 누군가 찾을지도 모르는 텍스처와
+# 똑같이 생겼기 때문입니다.
+#
+# *지우지 않으며*, 그것이 `rm`이 아니라 이곳에서 하는 이유입니다. LibreQuake의 것이고, 올바르게
+# 가져와졌고, 레시피가 여전히 textures.txt에 있으며, 나무 바닥을 원하는 다음 맵은 다시 가져오는
+# 대신 이미 변환된 것을 찾아야 합니다. 지우는 것은 디스크 공간을 아끼려고 가져오기 작업을 두 번
+# 치르는 일입니다.
+#
+# *이곳의 이름은 절반이 둘인 주장*이며 아래에서 둘 다 검사합니다. 파일이 여전히 존재하고,
+# 그 이후로 아무도 그것을 부르기 시작하지 않았다는 것입니다. 중요한 쪽은 두 번째입니다. 굽기에서
+# 빠졌는데 맵이 부르는 재질은 대체 텍스처를 그리며, 그것은 무슨 일이 일어났는지 말해 주는 오류가
+# 아니라 실수처럼 보이는 텍스처입니다.
+$notBaked = @{
+    'med_cobstn1_1'  = 'lqdm1 cobblestone; Psychofuge is brick and trim'
+    'med_csl_brk14_f' = 'the fourteen-course brick; lqdm4 uses 18 and 19'
+    'med_csl_flr5_1' = 'lqdm1 floor'
+    'med_dr1a'       = 'a door face, and Psychofuge has no doors'
+    'med_dr3c'       = 'the other door face'
+    'med_roof4'      = 'lqdm1 roof; lqdm4 has med_roof5'
+    'med_wood2_plk1' = 'planking, unnamed since the swap'
+    'med_wood3_plk1' = 'planking, unnamed since the swap'
+    'med_wood5'      = 'planking, unnamed since the swap'
+    'med_wood_riv1b' = 'riveted wood, unnamed since the swap'
+    'met_brn_trim32' = 'brown metal trim; lqdm4 trims in stone'
+    'met_brn_trim64' = 'the wider one'
+}
+
 $spriteDir   = Join-Path $root 'assets\sprites'
+
+# Both halves of the claim, checked. Ordered so the cheaper one runs first and
+# so a rename reports as a rename rather than as twelve missing textures.
+# 주장의 양쪽 절반을 모두 검사합니다. 값싼 쪽이 먼저 돌도록, 그리고 이름 변경이 텍스처 열두 개가
+# 사라졌다는 보고가 아니라 이름 변경으로 보고되도록 순서를 정했습니다.
+$bakedNames = Get-ChildItem $spriteDir -Filter *.png | ForEach-Object { $_.BaseName }
+$staleSkips = $notBaked.Keys | Where-Object { $bakedNames -notcontains $_ }
+if ($staleSkips) {
+    throw ("These are excluded from the bake but no longer exist in " +
+           "assets\sprites: " + ($staleSkips -join ', ') +
+           " -- delete the entry, or put the file back.")
+}
+
+# AND THE HALF THAT ACTUALLY BITES. An excluded material that a map starts
+# naming draws the fallback: a wall that looks like a mistake instead of an
+# error that says what happened. Cheap to check -- the maps and the level table
+# are already text this script can read -- and it turns the silent version of
+# this failure into a build that stops and names the file.
+#
+# textures.txt is excluded from the scan on purpose: the recipes for these
+# STAY, and are the thing that makes re-enabling one a single line here.
+#
+# *그리고 실제로 무는 쪽 절반입니다.* 맵이 부르기 시작한, 제외된 재질은 대체 텍스처를 그립니다.
+# 무슨 일이 있었는지 말하는 오류가 아니라 실수처럼 보이는 벽입니다. 검사는 값쌉니다. 맵과 레벨
+# 표는 이미 이 스크립트가 읽을 수 있는 텍스트입니다. 그리고 이것은 이 실패의 조용한 판을, 멈춰
+# 서서 파일 이름을 말하는 빌드로 바꿉니다.
+#
+# textures.txt를 훑기에서 뺀 것은 의도적입니다. 이것들의 레시피는 *남으며*, 그것이 이곳의 한 줄로
+# 다시 켤 수 있게 만드는 바로 그것입니다.
+$namers = @()
+$namers += Get-ChildItem (Join-Path $root 'assets\maps') -Filter *.map -ErrorAction SilentlyContinue
+$namers += Get-ChildItem (Join-Path $root 'assets') -Filter *.txt -ErrorAction SilentlyContinue |
+           Where-Object { $_.Name -ne 'textures.txt' }
+$wanted = @()
+foreach ($f in $namers) {
+    $text = Get-Content $f.FullName -Raw -ErrorAction SilentlyContinue
+    if (-not $text) { continue }
+    foreach ($k in $notBaked.Keys) {
+        if ($text -match ("(?<![A-Za-z0-9_])" + [regex]::Escape($k) + "(?![A-Za-z0-9_])")) {
+            $wanted += "$k (named by $($f.Name))"
+        }
+    }
+}
+if ($wanted) {
+    throw ("These are excluded from the bake but something now names them: " +
+           ($wanted -join '; ') +
+           " -- remove the entry from `$notBaked so the texture ships.")
+}
 $skipped     = 0
 
 if (Test-Path $spriteDir) {
@@ -817,7 +917,9 @@ if (Test-Path $spriteDir) {
     # 실려 다닙니다. 임포터의 --preview 대조 시트가 한 번 이곳에 떨어져, 한 번도 그려지지
     # 않으면서 1.44MB 중 411KB를 차지했습니다.
     foreach ($png in (Get-ChildItem $spriteDir -Filter *.png |
-                      Where-Object { $_.Name -notlike '_*' } | Sort-Object Name)) {
+                      Where-Object { $_.Name -notlike '_*' -and
+                                     -not $notBaked.ContainsKey($_.BaseName) } |
+                      Sort-Object Name)) {
         $name = [System.IO.Path]::GetFileNameWithoutExtension($png.Name)
         if ($procMats.ContainsKey($name)) { $skipped++; continue }
 
@@ -893,7 +995,9 @@ if (-not (Test-Path $refDir)) { [void](New-Item -ItemType Directory -Path $refDi
 $refLines = New-Object System.Collections.ArrayList
 Add-Type -AssemblyName System.Drawing
 foreach ($png in (Get-ChildItem $spriteDir -Filter *.png |
-                  Where-Object { $_.Name -notlike '_*' } | Sort-Object Name)) {
+                  Where-Object { $_.Name -notlike '_*' -and
+                                 -not $notBaked.ContainsKey($_.BaseName) } |
+                  Sort-Object Name)) {
     $nm = [System.IO.Path]::GetFileNameWithoutExtension($png.Name)
     if ($procMats.ContainsKey($nm)) { continue }
 

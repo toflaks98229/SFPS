@@ -58,6 +58,81 @@
  */
 #define PLAYER_STEP    (PLAYER_EYE / 3.0f)
 
+/**
+ * @brief How far above the feet a ledge may be and still be pulled onto, metres.
+ *
+ * ENGLISH
+ * -------
+ * WHAT IT FIXES, MEASURED. ::can_stand refuses a horizontal move onto anything
+ * more than ::PLAYER_STEP above the feet, airborne or not, so getting onto a
+ * shelf means being ABOVE it at the moment you press forward. Jumping at a wall
+ * and holding forward tops out at 1.75m and fails at 2.00m -- and at 2.00m the
+ * player does not merely fail, they end up pushed back off the wall. The hook's
+ * arrival launch reaches 3.00m, which is why this only ever bit when the hook
+ * was not involved: you could be carried up but not climb.
+ *
+ * ONE-THIRTY, which is a hand's reach over the head of somebody 1.70 tall. It
+ * is deliberately under ::PLAYER_EYE: a ledge you can see the top of is a ledge
+ * you can get your arms over, and one above your eyeline is a wall. With the
+ * jump's own 1.28m of rise it puts a plain jump onto shelves a little under
+ * three metres, which is the hook launch's reach -- the two ways up now agree
+ * about how high the world is.
+ *
+ * NO STATE, AND THAT IS THE WHOLE DESIGN. There is no climb timer and no climb
+ * flag: the rise happens on any frame where the player is airborne, pressing
+ * into something that refused them, and a standable top is within this reach.
+ * The climb ENDS BY ITSELF, because once the feet clear the top ::can_stand
+ * accepts the move and the ordinary walk carries them on. What bounds it is not
+ * a duration but the world -- you may climb exactly what you can see the top
+ * of, and a wall with no top in reach is a wall.
+ *
+ * 한국어
+ * ------
+ * @brief 발보다 얼마나 높은 턱까지 끌어올라 설 수 있는가(미터).
+ *
+ * *무엇을 고치는가, 측정으로.* ::can_stand는 공중이든 아니든 발보다 ::PLAYER_STEP 넘게 높은
+ * 것으로의 수평 이동을 거절하므로, 선반에 올라선다는 것은 앞으로 누르는 순간 이미 그것보다
+ * *위에* 있다는 뜻입니다. 벽을 향해 점프하며 전진을 누르면 1.75m가 한계이고 2.00m에서
+ * 실패합니다. 그리고 2.00m에서는 그냥 실패하는 것이 아니라 벽에서 뒤로 밀려납니다. 훅의 도달
+ * 도약은 3.00m에 닿으며, 그래서 이것이 훅이 관여하지 않을 때만 물었습니다. 실려 올라갈 수는
+ * 있어도 기어오를 수는 없었습니다.
+ *
+ * *1.30*이며, 키 1.70인 사람의 머리 위로 손이 닿는 거리입니다. 일부러 ::PLAYER_EYE보다
+ * 아래입니다. 꼭대기가 보이는 턱은 팔을 걸칠 수 있는 턱이고, 눈높이보다 위에 있는 것은
+ * 벽입니다. 점프 자신의 1.28m 상승과 합치면 그냥 점프로 3미터에 조금 못 미치는 선반에
+ * 올라서게 되며, 그것이 훅 도약의 사거리입니다. 올라가는 두 길이 이제 세계의 높이에 대해 같은
+ * 말을 합니다.
+ *
+ * *상태가 없고, 그것이 설계의 전부입니다.* 등반 타이머도 등반 플래그도 없습니다. 상승은
+ * 플레이어가 공중에 있고, 자기를 거절한 무언가를 향해 누르고 있고, 설 수 있는 꼭대기가 이
+ * 거리 안에 있는 프레임마다 일어납니다. 등반은 *스스로 끝납니다.* 발이 꼭대기를 넘는 순간
+ * ::can_stand가 이동을 받아들이고 평범한 걷기가 그를 데려가기 때문입니다. 그것을 묶는 것은
+ * 지속 시간이 아니라 세계입니다. 꼭대기가 보이는 만큼만 오를 수 있고, 손 닿는 곳에 꼭대기가
+ * 없는 벽은 벽입니다.
+ */
+#define PLAYER_MANTLE_REACH 1.30f
+
+/**
+ * @brief How fast the pull-up rises, m/s.
+ *
+ * ENGLISH: Four is brisk -- ::PLAYER_MANTLE_REACH in a third of a second -- and
+ * brisk is what keeps it from reading as flight. Slower and the player hangs on
+ * the face long enough to wonder whether they are stuck; faster and the climb
+ * is over before the eye can see it happen, which makes a wall look like a
+ * thing that sometimes lets you through. It is set as a SPEED rather than as an
+ * impulse because the rise has to continue for as long as the wall does: an
+ * impulse would launch and then be at gravity's mercy for the rest of the
+ * climb.
+ *
+ * 한국어: @brief 끌어올림이 상승하는 속도(m/s). 4는 빠릅니다. ::PLAYER_MANTLE_REACH를 3분의
+ * 1초에 오릅니다. 그리고 빠른 것이 이것을 비행으로 읽히지 않게 합니다. 더 느리면 플레이어가
+ * 벽면에 매달린 채 자기가 걸린 것인지 의심할 만큼 시간이 흐르고, 더 빠르면 눈이 알아채기 전에
+ * 등반이 끝나 벽이 이따금 통과시켜 주는 것처럼 보입니다. 충격량이 아니라 *속도*로 두는 이유는
+ * 상승이 벽이 이어지는 동안 계속되어야 하기 때문입니다. 충격량은 쏘아 올린 뒤 나머지 등반을
+ * 중력에 맡깁니다.
+ */
+#define PLAYER_MANTLE_CLIMB 4.0f
+
 #define PLAYER_MAX_HP  100     ///< @brief Health at spawn and the cap pickups top up to. / 스폰 시 체력이자 아이템으로 회복 가능한 상한값.
 
 /**

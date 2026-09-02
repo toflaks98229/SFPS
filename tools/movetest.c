@@ -229,6 +229,62 @@ int main(void) {
               (float)sunk, 0.0f);
     }
 
+    /* --- the pull-up: what a jump can get onto ---------------------------
+     *
+     * ::can_stand REFUSES A HORIZONTAL MOVE onto anything more than
+     * ::PLAYER_STEP above the feet, airborne or not, so mounting a shelf meant
+     * already being above it at the moment forward was pressed. Measured before
+     * the pull-up existed: a jump held into a wall topped out at 1.75m and
+     * failed at 2.00m -- and at 2.00m the player did not merely fail to mount,
+     * they ended up pushed back off the face. The hook's arrival launch reached
+     * 3.00m over the same fixture, which is why this only bit when the hook was
+     * not involved. You could be carried up and not climb.
+     *
+     * THREE CASES, AND THE TWO NEGATIVES ARE THE DESIGN. A rule that only ever
+     * says yes is not a rule: what makes this a pull-up rather than flight is
+     * that a wall whose top is out of reach stays a wall, and that it takes a
+     * jump to begin -- otherwise it is a way to walk up anything.
+     *
+     * *::can_stand는 공중이든 아니든 발보다 ::PLAYER_STEP 넘게 높은 것으로의 수평 이동을
+     * 거절하므로*, 선반에 올라선다는 것은 앞으로 누르는 순간 이미 그 위에 있다는 뜻이었습니다.
+     * 끌어올림이 생기기 전 측정: 벽을 향해 누른 점프는 1.75m가 한계이고 2.00m에서 실패했으며,
+     * 2.00m에서는 올라서지 못하는 정도가 아니라 벽면에서 뒤로 밀려났습니다. 같은 픽스처에서
+     * 훅의 도달 도약은 3.00m에 닿았고, 그래서 이것이 훅이 관여하지 않을 때만 물었습니다.
+     * 실려 올라갈 수는 있어도 기어오를 수는 없었습니다.
+     * *경우가 셋이고 부정 둘이 곧 설계입니다.* 언제나 예라고만 하는 규칙은 규칙이 아닙니다.
+     * 이것을 비행이 아니라 끌어올림으로 만드는 것은, 손 닿는 곳에 꼭대기가 없는 벽은 벽으로
+     * 남는다는 것과, 시작하려면 점프가 필요하다는 것입니다. 아니라면 무엇이든 걸어 오르는
+     * 방법입니다. */
+    {
+        struct { float shelf; int jump; int want_on; const char *what; } CASE[] = {
+            { 2.50f, 1, 1, "a jump pulls up onto a shelf a jump could not reach" },
+            { 3.50f, 1, 0, "and a wall whose top is out of reach stays a wall" },
+            { 1.20f, 0, 0, "and standing against one climbs nothing" },
+        };
+
+        for (int k = 0; k < 3; k++) {
+            Level z = {0};
+            L = z;
+            box(&L, -2000, -2000, 2000, 2000, 0, 3000);
+            box(&L,     0, -2000, 2000, 2000, (short)(CASE[k].shelf * 100), 3000);
+
+            Player p = {0};
+            p.pos = v3f(-2.0f, PLAYER_EYE, 0.0f);
+            p.grounded = 1;
+            for (int i = 0; i < 180; i++)
+                player_move(&p, &L, 0, 0, v3f(1, 0, 0), PLAYER_WALK,
+                            CASE[k].jump && i == 0, DT);
+
+            float feet = p.pos.y - PLAYER_EYE;
+            int on = feet > CASE[k].shelf - 0.1f;
+            printf("      %.2fm shelf, %s -> feet at %.2f, %s\n",
+                   (double)CASE[k].shelf, CASE[k].jump ? "jumped" : "walked",
+                   (double)feet, on ? "on it" : "below it");
+            check(on == CASE[k].want_on, CASE[k].what,
+                  (float)on, (float)CASE[k].want_on);
+        }
+    }
+
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall movement checks passed\n", fails);
     return fails != 0;
 }

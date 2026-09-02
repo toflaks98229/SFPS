@@ -47,7 +47,7 @@
 
 static int  can_stand(const Level *l, float x, float z, float feet,
                       float *out_floor);
-static void move_axis(Player *p, const Level *l, const Blocker *solid,
+static int  move_axis(Player *p, const Level *l, const Blocker *solid,
                       int n_solid, int axis, float delta);
 
 /* --- Public function definitions / 공개 함수 정의 --- */
@@ -140,8 +140,58 @@ void player_move(Player *p, const Level *l,
        각 축은 독립적으로 이동하며, 이것이 벽을 따라 미끄러지는 효과를 만듭니다.
        X를 막고 Z를 열어 두면 플레이어가 표면을 따라 미끄러집니다. */
     v3 dir = v3norm(wish);
-    move_axis(p, l, solid, n_solid, 0, dir.x * speed * dt);
-    move_axis(p, l, solid, n_solid, 2, dir.z * speed * dt);
+    int walked = move_axis(p, l, solid, n_solid, 0, dir.x * speed * dt);
+    walked    &= move_axis(p, l, solid, n_solid, 2, dir.z * speed * dt);
+
+    /* THE PULL-UP, and it is a rule rather than a state.
+     *
+     * WHAT IT ANSWERS: ::can_stand refuses a horizontal move onto anything more
+     * than ::PLAYER_STEP above the feet, airborne or not, so getting onto a
+     * shelf means already being above it when you press forward. Jumping at a
+     * wall tops out at 1.75m; the hook's arrival launch reaches 3.00m. You
+     * could be CARRIED up and not CLIMB, and the gap between those two numbers
+     * is where a player who had just arrived somewhere found they could go no
+     * further.
+     *
+     * THREE CONDITIONS AND NO FOURTH. Off the ground -- so this is something a
+     * jump or a fall begins, never a way to walk up a wall. Pushing into
+     * something that refused the step, which is what `walked` reports and the
+     * only reason ::move_axis now returns anything. And a standable top within
+     * ::PLAYER_MANTLE_REACH, probed one radius ahead: the place the player was
+     * trying to go, not the place they are.
+     *
+     * IT ENDS BY ITSELF. Nothing here stops the climb, because nothing has to:
+     * once the feet clear the top, ::can_stand accepts the move on the next
+     * frame and the ordinary walk carries the player on. What the rise is
+     * bounded by is the world -- you climb exactly what you can see the top of.
+     * Let go of forward and `dir` is zero, the probe never runs, and gravity
+     * has the player back.
+     *
+     * *끌어올림이며, 상태가 아니라 규칙입니다.*
+     * *무엇에 답하는가.* ::can_stand는 공중이든 아니든 발보다 ::PLAYER_STEP 넘게 높은 것으로의
+     * 수평 이동을 거절하므로, 선반에 올라선다는 것은 앞으로 누를 때 이미 그 위에 있다는
+     * 뜻입니다. 벽을 향한 점프는 1.75m가 한계이고 훅의 도달 도약은 3.00m에 닿습니다. *실려*
+     * 올라갈 수는 있어도 *기어오를* 수는 없었고, 그 두 수 사이가 방금 어딘가에 도착한
+     * 플레이어가 더 갈 수 없음을 발견하는 구간이었습니다.
+     * *조건은 셋이고 넷째는 없습니다.* 땅에서 떨어져 있을 것. 그래야 이것이 점프나 낙하가
+     * 시작하는 것이지 벽을 걸어 오르는 방법이 아닙니다. 자기를 거절한 무언가를 향해 누르고
+     * 있을 것. 그것이 `walked`가 보고하는 것이고 ::move_axis가 이제 무언가를 돌려주는 유일한
+     * 이유입니다. 그리고 ::PLAYER_MANTLE_REACH 안에 설 수 있는 꼭대기가 있을 것. 반경 하나
+     * 앞에서 재며, 플레이어가 있는 자리가 아니라 가려던 자리입니다.
+     * *스스로 끝납니다.* 이곳의 무엇도 등반을 멈추지 않습니다. 멈출 필요가 없기 때문입니다.
+     * 발이 꼭대기를 넘으면 다음 프레임에 ::can_stand가 이동을 받아들이고 평범한 걷기가
+     * 데려갑니다. 상승을 묶는 것은 지속 시간이 아니라 세계입니다. 꼭대기가 보이는 만큼만
+     * 오릅니다. 전진에서 손을 떼면 `dir`이 0이 되어 탐사가 돌지 않고, 중력이 플레이어를 도로
+     * 가져갑니다. */
+    if (!walked && !p->grounded && (dir.x != 0.0f || dir.z != 0.0f)) {
+        float feet = p->pos.y - PLAYER_EYE;
+        float ax   = p->pos.x + dir.x * PLAYER_RADIUS;
+        float az   = p->pos.z + dir.z * PLAYER_RADIUS;
+        float top;
+        if (can_stand(l, ax, az, feet + PLAYER_MANTLE_REACH, &top) &&
+            top > feet + PLAYER_STEP && top <= feet + PLAYER_MANTLE_REACH)
+            p->vel.y = PLAYER_MANTLE_CLIMB;
+    }
 
     /* External momentum rides on top of the walk above rather than replacing
        it: it moves through the same wall collision, then decays on its own.
@@ -264,9 +314,9 @@ static int can_stand(const Level *l, float x, float z, float feet,
  * @warning `axis`를 `&p->pos.x`에 대한 인덱스로 사용하므로, ::v3의 x, y, z가
  *          연속된 float이라는 점에 의존합니다.
  */
-static void move_axis(Player *p, const Level *l, const Blocker *solid,
-                      int n_solid, int axis, float delta) {
-    if (delta == 0.0f) return;
+static int move_axis(Player *p, const Level *l, const Blocker *solid,
+                     int n_solid, int axis, float delta) {
+    if (delta == 0.0f) return 1;
 
     float *coord = (&p->pos.x) + axis;
     float before = *coord;
@@ -281,7 +331,7 @@ static void move_axis(Player *p, const Level *l, const Blocker *solid,
     float floor_y;
     if (!can_stand(l, p->pos.x, p->pos.z, feet, &floor_y)) {
         *coord = before;
-        return;
+        return 0;
     }
 
     /* AND THE SAME ROLLBACK FOR A CYLINDER SOMETHING IS STANDING IN. Refused
@@ -340,7 +390,7 @@ static void move_axis(Player *p, const Level *l, const Blocker *solid,
         float dx = p->pos.x - b->pos.x, dz = p->pos.z - b->pos.z;
         if (dx * dx + dz * dz < r * r) {
             *coord = before;
-            return;
+            return 0;
         }
     }
 
@@ -350,4 +400,5 @@ static void move_axis(Player *p, const Level *l, const Blocker *solid,
         p->vel.y = 0.0f;
         p->grounded = 1;
     }
+    return 1;
 }

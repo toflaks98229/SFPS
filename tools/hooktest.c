@@ -822,7 +822,7 @@ int main(void) {
         player_impulse(&p, v3f(6.0f, 0.0f, 0.0f));
 
         float x0 = p.pos.x;
-        player_move(&p, &L, v3f(0,0,0), 0.0f, 0, DT);
+        player_move(&p, &L, 0, 0, v3f(0,0,0), 0.0f, 0, DT);
         float moved_first_frame = p.pos.x - x0;
         ok(moved_first_frame > 0.03f, "an impulse moves the player next frame");
         ok(!p.grounded, "and the fixture is actually airborne, not resting on it");
@@ -832,7 +832,7 @@ int main(void) {
            still genuinely airborne throughout and ground drag never gets a
            chance to sneak into this measurement the way it did before. */
         float speed0 = fabsf(p.vel.x);
-        for (int i = 0; i < 30; i++) player_move(&p, &L, v3f(0,0,0), 0.0f, 0, DT);
+        for (int i = 0; i < 30; i++) player_move(&p, &L, 0, 0, v3f(0,0,0), 0.0f, 0, DT);
         float speed1 = fabsf(p.vel.x);
         ok(!p.grounded, "and still airborne at the end of the measurement");
         ok(speed1 < speed0, "and bleeds off rather than lasting forever");
@@ -857,8 +857,8 @@ int main(void) {
         player_impulse(&a, v3f(6.0f, 0.0f, 0.0f));
 
         for (int i = 0; i < 30; i++) {
-            player_move(&g, &L, v3f(0,0,0), 0.0f, 0, DT);
-            player_move(&a, &L, v3f(0,0,0), 0.0f, 0, DT);
+            player_move(&g, &L, 0, 0, v3f(0,0,0), 0.0f, 0, DT);
+            player_move(&a, &L, 0, 0, v3f(0,0,0), 0.0f, 0, DT);
         }
         ok(g.grounded, "the ground fixture really is grounded throughout");
         ok(!a.grounded, "and the air fixture really is not");

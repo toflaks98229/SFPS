@@ -22,7 +22,7 @@ Models, materials, sounds and levels are all authored as text and hot-reload
 into the running game.
 
 ```
-1,051,648 / 1,474,560 bytes   (71.32% used)
+1,052,160 / 1,474,560 bytes   (71.35% used)
 ```
 
 ## Build
@@ -1583,6 +1583,31 @@ a mistake — *a refusal that costs nothing never ends*: a spawner that could no
 deliver kept what it owed, `enemy_wave_done` never came true, and the run
 stopped on that wave for good. The push resolves a stacked delivery in a fifth
 of a second and cannot stall anything.
+
+**And the player stops against them too, one way only.** `move_axis` refuses a
+step into an occupied cylinder exactly as it refuses a step into a wall — per
+axis, so brushing a monster on the diagonal slides round it rather than sticking
+flat. Nothing stops a monster walking into a *standing* player, and that
+asymmetry is chosen: a brawler closes to arm's length to swing, and a monster
+the player's own cylinder could hold at bay is a monster the player can never be
+hit by. What it costs is that the player can end up inside one, which is why the
+refusal — like the monsters' — applies only to the cylinders they are not
+already in.
+
+**player.c does not know what a monster is.** It takes `Blocker`, a cylinder
+with a radius and a height, and world.c fills the array from the bestiary each
+frame. The alternative was player.c including enemy.h while enemy.c already
+includes player.h for `PLAYER_RADIUS` — two modules neither of which could be
+read without the other, which is the coupling `m_hash` was moved into `m.h` to
+undo. Joining two modules is what world.c *is*.
+
+That split is also what makes the pair of tests mean something. `movetest`
+drives `player_move` with a `Blocker` it invented: it proves the rule and would
+pass for ever if world.c stopped filling the array. `steptest` never says the
+word `Blocker` — it puts a real brute in the room, holds forward, and measures
+the closest approach through `world_step`. Cutting the join drops that from
+1.220 m to **0.000 m**: the player walks through the brute, and only the second
+test says so.
 | **caster** | ranged, and *off the floor* — never closes, shoots across the room | violet robe, no legs, cold cyan eyes |
 
 **It used to be five, and the two that went were the two that were adjectives.**

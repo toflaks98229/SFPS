@@ -313,7 +313,51 @@ static void step_look_move(World *w, const Input *in, float aspect, float dt) {
     /* Jump is suppressed only while actually being pulled. It would not fire
        mid-pull anyway (jumping needs `grounded`), but suppressing it keeps the
        intent explicit rather than relying on that coincidence. */
-    player_move(&w->player, &w->level, wish, speed, in->jump && !hooked, dt);
+    /* THE JOIN, AND IT LIVES HERE BECAUSE JOINING IS WHAT THIS MODULE IS.
+       player.c is told that some cylinders are occupied and not who is standing
+       in them: it takes ::Blocker and never learns the word "monster". The
+       alternative was player.c including enemy.h while enemy.c already includes
+       player.h, which is two modules neither of which can be read without the
+       other -- the coupling `m_hash` was moved into m.h to undo.
+
+       CORPSES ARE NOT SOLID, matching ::mon_clear and ::enemy_hitscan and
+       ::E_DEAD's own note: a body you cannot walk over is a body that blocks a
+       doorway for the rest of the level.
+
+       ONE WAY ONLY. This stops the player walking into a monster; nothing here
+       stops a monster walking into the player, and that asymmetry is chosen. A
+       brawler closes to arm's length to swing, and a monster the player's own
+       cylinder could hold at bay is a monster the player can never be hit by.
+       What it costs is that the player can end up inside one -- which is why
+       ::move_axis refuses only the cylinders the player is not already in.
+
+       *이음매이며, 잇는 것이 이 모듈이기 때문에 이곳에 있습니다.* player.c는 어떤 원기둥이
+       찼다는 것만 듣고 거기 서 있는 것이 무엇인지는 듣지 않습니다. ::Blocker를 받을 뿐
+       "몬스터"라는 말을 배우지 않습니다. 대안은 enemy.c가 이미 player.h를 포함한 상태에서
+       player.c가 enemy.h를 포함하는 것이었고, 그것은 어느 쪽도 상대 없이는 읽을 수 없는 두
+       모듈입니다. `m_hash`를 m.h로 옮겨 풀어낸 그 결합입니다.
+       *시체는 고체가 아닙니다.* ::mon_clear, ::enemy_hitscan, 그리고 ::E_DEAD 자신의 주석과
+       같습니다. 넘어갈 수 없는 시체는 레벨이 끝날 때까지 문간을 막는 시체입니다.
+       *한 방향뿐입니다.* 이것은 플레이어가 몬스터 안으로 걸어 들어가는 것을 막고, 몬스터가
+       플레이어 안으로 걸어 들어오는 것은 이곳의 무엇도 막지 않습니다. 그 비대칭은 고른
+       것입니다. 근접형은 팔 길이까지 붙어야 휘두르고, 플레이어의 원기둥이 밀어낼 수 있는
+       몬스터는 플레이어가 결코 맞을 수 없는 몬스터입니다. 그 대가는 플레이어가 몬스터 안에 있게
+       될 수 있다는 것이고, 그래서 ::move_axis는 플레이어가 아직 안에 있지 않은 원기둥만
+       거절합니다. */
+    Blocker solid[ENEMY_MAX];
+    int n_solid = 0;
+    for (int i = 0; i < enemy_count(&w->pools); i++) {
+        const Enemy *m = enemy_at(&w->pools, i);
+        if (!m->active || m->state == E_DEAD) continue;
+        const MonType *S = mon_stats(m->type);
+        solid[n_solid].pos    = m->pos;
+        solid[n_solid].radius = S->radius;
+        solid[n_solid].height = S->height;
+        n_solid++;
+    }
+
+    player_move(&w->player, &w->level, solid, n_solid,
+                wish, speed, in->jump && !hooked, dt);
 
     /* Landing. The floor test is ::WORLD_SHAKE_LAND_MIN's, so stepping off a
        stair is not an impact.

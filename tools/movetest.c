@@ -29,7 +29,18 @@ static void check(int ok, const char *what, float got, float want) {
 
 static void run(Player *p, v3 wish, float speed, int jump, int frames) {
     for (int i = 0; i < frames; i++)
-        player_move(p, &L, wish, speed, jump, DT);
+        player_move(p, &L, 0, 0, wish, speed, jump, DT);
+}
+
+static void run_past(Player *p, const Blocker *b, int n, v3 wish, float speed,
+                     int frames) {
+    for (int i = 0; i < frames; i++)
+        player_move(p, &L, b, n, wish, speed, 0, DT);
+}
+
+static float flat_gap(v3 a, v3 b) {
+    float dx = a.x - b.x, dz = a.z - b.z;
+    return sqrtf(dx * dx + dz * dz);
 }
 
 /* Appends an axis-aligned sector, in centimetres. */
@@ -124,6 +135,72 @@ int main(void) {
         float f, c;
         check(level_ground(&L, p.pos.x, p.pos.z, p.pos.y - PLAYER_EYE, 1e9f, &f, &c) != 0,
               "walk into a wall: still inside the map", 1.0f, 1.0f);
+    }
+
+    /* --- a body in the way is a body you stop against ---------------------
+     *
+     * ::Blocker AND NOT A MONSTER, which is the point of the type and the
+     * reason this check lives in movetest at all: the rule is about a cylinder
+     * somebody is standing in, and nothing in this file links enemy.c. What
+     * fills the array from the bestiary is world.c's, and steptest is where
+     * that half is checked -- a synthetic cylinder here would pass forever if
+     * the join stopped filling it, and the whole-world check would pass on a
+     * rule that only ever refused monsters.
+     *
+     * *몬스터가 아니라 ::Blocker이며*, 그것이 이 타입의 요점이자 이 검사가 movetest에 있는
+     * 이유입니다. 규칙은 누군가 서 있는 원기둥에 대한 것이고, 이 파일의 무엇도 enemy.c를
+     * 링크하지 않습니다. 도감으로 그 배열을 채우는 것은 world.c의 몫이며 그 절반은
+     * steptest에서 확인합니다. 이곳의 합성 원기둥은 이음매가 채우기를 그만두어도 영원히
+     * 통과할 것이고, 세계 전체 검사는 몬스터만 거절하는 규칙에 대해서도 통과할 것입니다. */
+    {
+        const float R = 0.80f;                  /* about a brute */
+        Blocker b = { v3f(0.0f, FLOOR, -4.0f), R, 2.35f };
+        float touch = PLAYER_RADIUS + R;
+
+        /* Head on: walk at it from three metres and stop against it. */
+        Player p = {0};
+        p.pos = v3f(0.0f, FLOOR + PLAYER_EYE, -1.0f);
+        run_past(&p, &b, 1, v3f(0, 0, -1), PLAYER_WALK, 60);
+        float gap = flat_gap(p.pos, b.pos);
+        check(gap >= touch - 0.02f, "walked at a body: stopped against it",
+              gap, touch);
+        check(gap < touch + 0.25f, "  and got all the way to it", gap, touch);
+        /* ON THE NEAR SIDE OF IT. A distance alone cannot tell "stopped
+           against it" from "went clean through and kept walking" -- both leave
+           the player one touching-distance away, and the second is the bug.
+           *그것의 가까운 쪽에서입니다.* 거리만으로는 "그것에 막혀 섰다"와 "통과해서 계속
+           걸었다"를 구별할 수 없습니다. 둘 다 플레이어를 닿는 거리만큼 떨어뜨려 놓고,
+           두 번째가 버그입니다. */
+        check(p.pos.z > b.pos.z, "  on the near side of it, not past it",
+              p.pos.z, b.pos.z);
+
+        /* AND THE STOP IS NOT A WALL. Aimed a little off centre the player
+           slides round rather than sticking, which is what per-axis rollback
+           buys and what a whole-move rollback would lose.
+           *그리고 그 멈춤은 벽이 아닙니다.* 중심에서 조금 빗겨 겨누면 플레이어는 들러붙지
+           않고 돌아서 미끄러집니다. 축별 되돌림이 사 주는 것이고, 이동 전체를 되돌리면
+           잃는 것입니다. */
+        Player q = {0};
+        q.pos = v3f(0.30f, FLOOR + PLAYER_EYE, -1.0f);
+        run_past(&q, &b, 1, v3norm(v3f(0.15f, 0, -1.0f)), PLAYER_WALK, 60);
+        check(q.pos.x > 0.30f + touch * 0.5f,
+              "  and a glancing approach slides round it", q.pos.x, touch);
+
+        /* Standing inside one -- which happens, because nothing stops a
+           monster walking into the player -- must not pin the player there. */
+        Player r = {0};
+        r.pos = v3f(b.pos.x, FLOOR + PLAYER_EYE, b.pos.z);
+        run_past(&r, &b, 1, v3f(0, 0, 1), PLAYER_WALK, 60);
+        float out = flat_gap(r.pos, b.pos);
+        check(out >= touch, "started inside a body: walked out of it", out, touch);
+
+        /* And one over the player's head is scenery. */
+        Blocker air = { v3f(0.0f, FLOOR + PLAYER_EYE + 0.5f, -4.0f), R, 1.9f };
+        Player s = {0};
+        s.pos = v3f(0.0f, FLOOR + PLAYER_EYE, -1.0f);
+        run_past(&s, &air, 1, v3f(0, 0, -1), PLAYER_WALK, 60);
+        check(s.pos.z < air.pos.z - 1.0f, "walked under a hovering one",
+              s.pos.z, air.pos.z);
     }
 
     /* --- the shipped level, asked only what any level must satisfy --- */

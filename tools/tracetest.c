@@ -768,7 +768,7 @@ static void test_level_on_map(void) {
     for (int i = 0; i < 3000; i++) {
         rng = rng * 1664525u + 1013904223u;
         float a = (rng >> 8) * (6.2831853f / 16777216.0f);
-        player_move(&p, &LV, v3f(cosf(a), 0, sinf(a)), PLAYER_WALK,
+        player_move(&p, &LV, 0, 0, v3f(cosf(a), 0, sinf(a)), PLAYER_WALK,
                     (rng & 0x400000) != 0, DT);
 
         if (p.pos.y > highest) highest = p.pos.y;

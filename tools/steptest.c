@@ -985,6 +985,71 @@ static void check_lava(void) {
     level_release(&w.level);
 }
 
+/* --- the player stops against a monster ------------------------------------
+ *
+ * THE OTHER HALF OF movetest'S, AND NEITHER IS THE FEATURE ON ITS OWN. That
+ * file drives ::player_move with a ::Blocker it made up, which proves the rule
+ * and would go on passing for ever if world.c stopped filling the array from
+ * the bestiary. This one never mentions ::Blocker: it puts a real monster in
+ * the room, holds forward, and asks how close the player got. If the join is
+ * cut, the array is empty, and the player walks through the brute.
+ *
+ * A REAL ::world_step, not player_move, for that reason -- the thing being
+ * checked is the wiring between two modules and it only exists inside the
+ * function that joins them.
+ *
+ * *movetest의 나머지 절반이며, 어느 쪽도 혼자서는 그 기능이 아닙니다.* 그 파일은 자기가 지어낸
+ * ::Blocker로 ::player_move를 몰며, 규칙을 증명하고, world.c가 도감으로 배열 채우기를
+ * 그만두어도 영원히 통과할 것입니다. 이것은 ::Blocker를 한 번도 입에 올리지 않습니다. 방에 진짜
+ * 몬스터를 놓고 전진을 누른 채 플레이어가 얼마나 가까이 갔는지 묻습니다. 이음매가 끊기면 배열은
+ * 비고 플레이어는 브루트를 통과합니다.
+ * *player_move가 아니라 진짜 ::world_step*인 이유가 그것입니다. 검사되는 것은 두 모듈 사이의
+ * 배선이고, 그것은 둘을 잇는 함수 안에서만 존재합니다. */
+static void check_body_block(void) {
+    printf("\na body in the way\n");
+
+    World w;
+    fixture(&w, 0);
+
+    Entity *e = &w.level.ents[w.level.n_ents++];
+    e->kind[0]='b'; e->kind[1]='r'; e->kind[2]='u'; e->kind[3]='t';
+    e->kind[4]='e'; e->kind[5]=0;
+    e->x = 0; e->y = 0; e->z = -500;             /* five metres ahead */
+
+    enemy_reset(&w.pools);
+    enemy_spawn_level(&w.pools, &w.level);
+    if (enemy_count(&w.pools) != 1) { ok(0, "a brute stands in the room"); return; }
+    ok(1, "a brute stands in the room");
+
+    const MonType *S = mon_stats(enemy_at(&w.pools, 0)->type);
+    float touch = PLAYER_RADIUS + S->radius;
+
+    /* Straight at it. The monster walks too -- it has noticed the player by the
+       second frame -- so what is asserted is the closest the two ever came,
+       which is the only number that survives both of them moving.
+       곧장 그것을 향해서입니다. 몬스터도 걷습니다. 두 번째 프레임이면 플레이어를 알아챕니다.
+       그러므로 단언하는 것은 둘이 가장 가까웠던 거리이며, 둘 다 움직이는 상황에서 살아남는
+       수는 그것뿐입니다. */
+    Input in = {0};
+    in.forward = 1;
+    float closest = 1e9f;
+    for (int i = 0; i < 240; i++) {
+        world_step(&w, &in, 1.777f, 0.016f);
+        const Enemy *m = enemy_at(&w.pools, 0);
+        if (!m->active || m->state == E_DEAD) break;
+        float dx = w.player.pos.x - m->pos.x, dz = w.player.pos.z - m->pos.z;
+        float d = sqrtf(dx * dx + dz * dz);
+        if (d < closest) closest = d;
+    }
+    printf("      closest the player got is %.3fm; touching is %.3fm\n",
+           (double)closest, (double)touch);
+    okf(closest >= touch - 0.05f,
+        "holding forward at a brute never puts the player inside it",
+        closest, touch);
+    ok(closest < touch + 0.60f,
+       "and the player did reach it, so the number above says something");
+}
+
 int main(void) {
     printf("steptest\n\n");
 
@@ -2136,6 +2201,7 @@ int main(void) {
     check_score();
     check_power();
     check_self_damage();
+    check_body_block();
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall frame-order checks passed\n", fails);
     return fails != 0;

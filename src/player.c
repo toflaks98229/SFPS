@@ -47,7 +47,8 @@
 
 static int  can_stand(const Level *l, float x, float z, float feet,
                       float *out_floor);
-static void move_axis(Player *p, const Level *l, int axis, float delta);
+static void move_axis(Player *p, const Level *l, const Blocker *solid,
+                      int n_solid, int axis, float delta);
 
 /* --- Public function definitions / 공개 함수 정의 --- */
 
@@ -90,8 +91,9 @@ float player_spawn(Player *p, const Level *l) {
    numbers are one dial split across two files by necessity, not by choice,
    and are worth reading together. */
 
-void player_move(Player *p, const Level *l, v3 wish, float speed,
-                 int jump, float dt) {
+void player_move(Player *p, const Level *l,
+                 const Blocker *solid, int n_solid,
+                 v3 wish, float speed, int jump, float dt) {
     /* Jump before gravity, so the upward velocity gets a full frame of
        travel before being pulled back.
        중력보다 점프를 먼저 처리하여, 상승 속도가 되돌아가기 전에 온전한 한
@@ -138,15 +140,15 @@ void player_move(Player *p, const Level *l, v3 wish, float speed,
        각 축은 독립적으로 이동하며, 이것이 벽을 따라 미끄러지는 효과를 만듭니다.
        X를 막고 Z를 열어 두면 플레이어가 표면을 따라 미끄러집니다. */
     v3 dir = v3norm(wish);
-    move_axis(p, l, 0, dir.x * speed * dt);
-    move_axis(p, l, 2, dir.z * speed * dt);
+    move_axis(p, l, solid, n_solid, 0, dir.x * speed * dt);
+    move_axis(p, l, solid, n_solid, 2, dir.z * speed * dt);
 
     /* External momentum rides on top of the walk above rather than replacing
        it: it moves through the same wall collision, then decays on its own.
        Nothing feeds vel.x/z under normal walking, so this is a no-op until
        something (the grapple, a recoil kick) actually adds to it. */
-    move_axis(p, l, 0, p->vel.x * dt);
-    move_axis(p, l, 2, p->vel.z * dt);
+    move_axis(p, l, solid, n_solid, 0, p->vel.x * dt);
+    move_axis(p, l, solid, n_solid, 2, p->vel.z * dt);
     float drag = p->grounded ? MOMENTUM_DRAG_GROUND : MOMENTUM_DRAG_AIR;
     /* Exponential decay, framerate-independent: halving dt and stepping twice
        produces the same result as one full step.
@@ -262,7 +264,8 @@ static int can_stand(const Level *l, float x, float z, float feet,
  * @warning `axis`를 `&p->pos.x`에 대한 인덱스로 사용하므로, ::v3의 x, y, z가
  *          연속된 float이라는 점에 의존합니다.
  */
-static void move_axis(Player *p, const Level *l, int axis, float delta) {
+static void move_axis(Player *p, const Level *l, const Blocker *solid,
+                      int n_solid, int axis, float delta) {
     if (delta == 0.0f) return;
 
     float *coord = (&p->pos.x) + axis;
@@ -279,6 +282,66 @@ static void move_axis(Player *p, const Level *l, int axis, float delta) {
     if (!can_stand(l, p->pos.x, p->pos.z, feet, &floor_y)) {
         *coord = before;
         return;
+    }
+
+    /* AND THE SAME ROLLBACK FOR A CYLINDER SOMETHING IS STANDING IN. Refused
+       per axis like the wall above, so brushing a monster on the diagonal
+       slides past it rather than stopping dead -- the sliding is the whole
+       reason move_axis is called twice, and a monster the player stops flat
+       against would feel like a pillar rather than like a body.
+
+       ALREADY INSIDE ONE IS NOT REFUSED, which is the half a naive version
+       gets wrong and the half that matters more here than it does between two
+       monsters. Nothing stops a monster walking into a standing player -- the
+       enemy side tests other monsters and not this one, on purpose, because a
+       brawler that cannot reach the player cannot fight -- so the player being
+       inside a monster is ordinary. If that made every step illegal the player
+       would be pinned there until the thing died. Every direction out of an
+       overlap is still an overlap, so the test is against the cylinders the
+       player is NOT already in.
+
+       *그리고 무언가 서 있는 원기둥에 대해서도 같은 되돌림입니다.* 위의 벽과 마찬가지로 축마다
+       거절하므로, 대각선으로 몬스터를 스치면 멈춰 서지 않고 미끄러져 지나갑니다. 미끄러짐이
+       move_axis를 두 번 부르는 이유의 전부이고, 플레이어가 정면으로 멈춰 서는 몬스터는 몸이
+       아니라 기둥처럼 느껴집니다.
+       *이미 안에 있는 것은 거절하지 않으며*, 그것이 순진한 판이 틀리는 절반이자 몬스터 둘
+       사이에서보다 이곳에서 더 중요한 절반입니다. 몬스터가 서 있는 플레이어 안으로 걸어
+       들어오는 것을 막는 것은 없습니다. 적 쪽은 일부러 다른 몬스터만 검사합니다. 플레이어에게
+       닿을 수 없는 근접형은 싸울 수 없기 때문입니다. 그러므로 플레이어가 몬스터 안에 있는 것은
+       일상입니다. 그것이 모든 걸음을 불법으로 만든다면 플레이어는 그것이 죽을 때까지 그 자리에
+       박혀 있게 됩니다. 겹침에서 나가는 모든 방향은 여전히 겹침이므로, 검사는 플레이어가 아직
+       *안에 있지 않은* 원기둥에 대해서만 합니다. */
+    for (int i = 0; i < n_solid; i++) {
+        const Blocker *b = &solid[i];
+
+        /* ::PLAYER_EYE IS THE TOP, because this game has no other number for
+           it. There is no PLAYER_HEIGHT: the ceiling test five lines up in
+           ::player_move is `pos.y > c - 0.05f`, which is the eye itself kept a
+           handspan below the ceiling, so the engine already treats the eye as
+           the crown of the head. Inventing a taller figure here would make the
+           player duckable-under by a hovering caster in one function and not in
+           the other.
+           *::PLAYER_EYE가 정수리인 이유는* 이 게임에 그것을 가리키는 다른 수가 없기
+           때문입니다. PLAYER_HEIGHT는 없습니다. ::player_move의 천장 검사는
+           `pos.y > c - 0.05f`이며 그것은 눈 자체를 천장 아래 한 뼘에 붙잡아 두는 것이므로,
+           엔진은 이미 눈을 머리 꼭대기로 다룹니다. 이곳에서 더 큰 수를 지어내면 떠 있는
+           캐스터 밑으로 지나갈 수 있는지가 한 함수와 다른 함수에서 달라집니다. */
+        if (feet >= b->pos.y + b->height || b->pos.y >= feet + PLAYER_EYE)
+            continue;
+
+        float r = PLAYER_RADIUS + b->radius;
+
+        float wx = before, wz = p->pos.z;
+        if (axis == 2) { wx = p->pos.x; wz = before; }
+        float cx = wx - b->pos.x, cz = wz - b->pos.z;
+        if (cx * cx + cz * cz < r * r)
+            continue;               /* already inside it: see above */
+
+        float dx = p->pos.x - b->pos.x, dz = p->pos.z - b->pos.z;
+        if (dx * dx + dz * dz < r * r) {
+            *coord = before;
+            return;
+        }
     }
 
     /* Walked up onto something: rise with it. */

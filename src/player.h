@@ -410,6 +410,44 @@ typedef struct {
 float player_spawn(Player *p, const Level *l);
 
 /**
+ * @brief A cylinder the player cannot walk into.
+ *
+ * ENGLISH
+ * -------
+ * A SHAPE AND NOT A MONSTER, deliberately. Everything that stops the player is
+ * a monster today, and this header still does not say so: enemy.c already
+ * includes player.h for ::PLAYER_RADIUS and ::PLAYER_EYE, and having player.c
+ * include enemy.h back would make two modules neither of which can be read
+ * without the other -- which is the coupling `m_hash` was moved into m.h to
+ * undo, over one helper, for exactly this reason. What ::player_move needs to
+ * know is that some space is taken. Who is standing in it is world.c's
+ * business, because joining the two is what world.c is.
+ *
+ * THE FEET, NOT THE CENTRE, so this can be filled from a monster's ::Enemy
+ * position without arithmetic at the join, and so the span test reads the same
+ * way on both sides of it. ::height goes up from ::pos.
+ *
+ * 한국어
+ * ------
+ * @brief 플레이어가 걸어 들어갈 수 없는 원기둥.
+ *
+ * *몬스터가 아니라 형태이며*, 의도적입니다. 오늘 플레이어를 막는 것은 전부 몬스터이지만 이
+ * 헤더는 여전히 그렇게 말하지 않습니다. enemy.c는 ::PLAYER_RADIUS와 ::PLAYER_EYE를 위해 이미
+ * player.h를 포함하고 있고, player.c가 enemy.h를 되포함하면 어느 쪽도 상대 없이는 읽을 수 없는
+ * 두 모듈이 됩니다. 그것이 헬퍼 하나 때문에 `m_hash`를 m.h로 옮겨 풀어낸 바로 그 결합입니다.
+ * ::player_move가 알아야 하는 것은 *어떤 자리가 찼다*는 것입니다. 거기 서 있는 것이 무엇인지는
+ * world.c의 일이며, 둘을 잇는 것이 곧 world.c이기 때문입니다.
+ *
+ * *중심이 아니라 발*입니다. 그래야 이음매에서 산술 없이 몬스터의 ::Enemy 위치로 채울 수 있고,
+ * 구간 검사가 이음매 양쪽에서 같은 방식으로 읽힙니다. ::height는 ::pos에서 위로 올라갑니다.
+ */
+typedef struct {
+    v3    pos;      /**< The cylinder's feet, world metres. / 원기둥의 발. 월드 미터. */
+    float radius;   /**< Half-width. / 반너비. */
+    float height;   /**< How far up from ::pos it reaches. / ::pos에서 위로 닿는 높이. */
+} Blocker;
+
+/**
  * @brief Advances the player one frame.
  *
  * ENGLISH
@@ -454,8 +492,9 @@ float player_spawn(Player *p, const Level *l);
  *          목적지를 검사하는 방식으로 처리되므로, 시간 간격이 매우 크면 플레이어가
  *          얇은 지오메트리를 통과해 버릴 수 있습니다.
  */
-void player_move(Player *p, const Level *l, v3 wish, float speed,
-                 int jump, float dt);
+void player_move(Player *p, const Level *l,
+                 const Blocker *solid, int n_solid,
+                 v3 wish, float speed, int jump, float dt);
 
 /**
  * @brief Adds directly to the player's momentum -- a recoil kick, a grapple's pull.

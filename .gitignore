@@ -73,3 +73,20 @@ __pycache__/
 # 루트입니다. 스프라이트 아틀라스를 눈으로 보기 위한 원본 덤프이며, 필요할 때 다시 만들어지고,
 # 아무도 두 번 읽지 않는 2MB짜리 파일입니다. 커밋될 뻔했습니다.
 sprites.ppm
+
+# TrenchBroom's autosaves. The editor writes `<map>.N.map` beside the map it is
+# editing, and it keeps writing them for maps that have since left the tree --
+# 1.7MB of lqdm1 and spire sat here untracked, both recoverable from history and
+# neither shippable. `git status` listed them, which means one `git add -A`
+# would have put editor scratch into a repository whose whole discipline is a
+# 1.44MB budget.
+#
+# TrenchBroom의 자동 저장입니다. 편집기는 편집 중인 맵 곁에 `<맵>.N.map`을 쓰며, 그 뒤로 트리를
+# 떠난 맵에 대해서도 계속 씁니다. lqdm1과 spire의 1.7MB가 추적되지 않은 채 있었고, 둘 다 이력에서
+# 복구 가능하며 어느 쪽도 출하되지 않습니다. `git status`가 그것들을 나열했으니, `git add -A` 한
+# 번이면 1.44MB 예산이 규율의 전부인 저장소에 편집기의 임시 파일이 들어갔을 것입니다.
+assets/maps/autosave/
+
+# Python bytecode from the asset importers. Regenerated on every run.
+# 에셋 임포터가 남기는 파이썬 바이트코드입니다. 실행할 때마다 다시 만들어집니다.
+__pycache__/

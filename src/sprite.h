@@ -134,6 +134,22 @@
  * 200행 전체 화면에 맞췄을 때 샷건은 화면의 35.8%..99.8%에 놓였습니다. 아래가 잘리지
  * 않고 가장자리에 정확히 걸터앉아, 너무 높고 작게 놓인 총으로 읽혔습니다. 배포판 Doom은
  * 33.0%..109.2%에 놓습니다. 5분의 1만큼 크고, 아래 가장자리 너머로 박혀 있습니다. */
+/* THE ONE OF THESE FOUR NOTHING READS, AND IT STAYS. A sweep for header
+   constants with no reader found it beside three that became false and were
+   deleted -- an ammo count the weapon table overrode, a toss speed nothing
+   throws at, a buffer size with no buffer. This is not that. Those three
+   stated rules the code had stopped following; 320 is Doom's screen width and
+   will be Doom's screen width for ever. It is the horizontal half of the frame
+   the three below are read in, and ::weaponview.c's aspect term is 4:3 rather
+   than 320/200 precisely because Doom's pixels were not square -- which is a
+   thing you can only notice with both numbers in front of you.
+   *이 넷 중 아무도 읽지 않는 것이며, 남습니다.* 독자가 없는 헤더 상수를 훑다가, 거짓이 되어
+   삭제된 셋 곁에서 발견했습니다. 무기 표가 덮어쓴 탄약 수, 아무것도 그 속도로 던지지 않는
+   던지기 속도, 버퍼가 없는 버퍼 크기입니다. 이것은 그것이 아닙니다. 그 셋은 코드가 따르기를
+   그만둔 규칙을 진술했지만, 320은 Doom 화면의 너비이고 영원히 그럴 것입니다. 아래 셋이 읽히는
+   좌표계의 가로 절반이며, weaponview.c의 종횡비 항이 320/200이 아니라 4:3인 것은 Doom의
+   픽셀이 정사각형이 아니었기 때문입니다. 그것은 두 수를 함께 놓고 보아야만 알아챌 수 있는
+   사실입니다. */
 #define WPN_DOOM_W    320   ///< @brief Doom's screen width, in its own units. / Doom 화면의 너비 (자체 단위).
 #define WPN_DOOM_FULL 200   ///< @brief Doom's whole screen height; the psprite reference. / Doom 화면 전체 높이. 뷰 모델의 기준.
 #define WPN_DOOM_VIEW 168   ///< @brief The 3D view: the screen less its status bar. / 3D 뷰. 화면에서 상태 표시줄을 뺀 높이.

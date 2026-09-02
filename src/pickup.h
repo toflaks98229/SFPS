@@ -35,7 +35,17 @@
 
 #define PICKUP_MAX     64       ///< @brief Maximum pickups tracked per level. / 레벨당 관리되는 최대 아이템 수.
 #define PICKUP_RADIUS  0.75f    ///< @brief How close your feet must get, metres. / 발이 얼마나 가까워져야 하는지 (미터).
-#define PICKUP_AMMO    8        ///< @brief Shells per ammo box. / 탄약 상자 하나당 탄환 수.
+/* PICKUP_AMMO WAS HERE and said "shells per ammo box". It has not been true
+   since ammo boxes learned to give different amounts: ::pickup_take reads
+   ::WeaponStats::start_ammo, a column, so a shotgun box and a grenade box give
+   what their own rows say. A constant nobody reads costs nothing; one that
+   states a rule the code no longer follows costs the next person the time to
+   discover it is a lie. ::PICKUP_HEALTH beside it is still read and stays.
+   *PICKUP_AMMO이 이곳에 있었고* "탄약 상자 하나당 탄환 수"라고 말했습니다. 탄약 상자가 서로
+   다른 양을 주게 된 이래 참이 아닙니다. ::pickup_take는 열인 ::WeaponStats::start_ammo를
+   읽으므로 샷건 상자와 유탄 상자는 자기 행이 말하는 것을 줍니다. 아무도 읽지 않는 상수는
+   비용이 없지만, 코드가 더 이상 따르지 않는 규칙을 진술하는 상수는 다음 사람에게 그것이
+   거짓임을 알아내는 시간을 물립니다. 곁의 ::PICKUP_HEALTH는 여전히 읽히므로 남습니다. */
 #define PICKUP_HEALTH  25       ///< @brief Points per medkit. / 구급상자 하나당 회복량.
 
 /* --- Enumerations / 열거형 --- */
@@ -261,8 +271,23 @@ typedef struct {
 
 /** @brief Downward acceleration on an item in the air, m/s^2. / 공중의 아이템에 걸리는 하향 가속도. */
 #define PICKUP_GRAVITY  16.0f
-/** @brief Outward speed a reward leaves the drop point at, m/s. / 보상이 낙하 지점을 떠나는 바깥 방향 속도. */
-#define PICKUP_TOSS_OUT 3.4f
+/* PICKUP_TOSS_OUT WAS HERE and named an outward speed nothing leaves at. The
+   two throws in the game both ignored it: ::reward_items takes `out` from
+   loot.txt so an author can shape the ring, and a monster's drop is
+   `v3f(0, PICKUP_TOSS_UP * 0.55f, 0)` -- straight up, no outward component at
+   all. That second one is why a corpse and the thing it dropped land on each
+   other, which ::PICKUP_NUDGE now pushes apart at the drawing end. Giving
+   drops a spread would fix it at the throwing end instead; that is a change to
+   how the game moves and not a tidy-up, so what goes here is the constant and
+   not the behaviour.
+   *PICKUP_TOSS_OUT이 이곳에 있었고* 아무것도 그 속도로 떠나지 않는 바깥 방향 속도에 이름을
+   붙였습니다. 게임의 두 던지기가 모두 그것을 무시했습니다. ::reward_items는 제작자가 고리를
+   빚을 수 있도록 loot.txt에서 `out`을 가져오고, 몬스터의 드롭은
+   `v3f(0, PICKUP_TOSS_UP * 0.55f, 0)`입니다. 곧장 위이며 바깥 성분이 아예 없습니다. 시체와
+   그것이 떨군 물건이 서로 위에 놓이는 이유가 그 두 번째이고, 지금은 ::PICKUP_NUDGE가 그리는
+   쪽에서 밀어냅니다. 드롭에 퍼짐을 주면 던지는 쪽에서 고쳐지겠지만, 그것은 게임이 움직이는
+   방식에 대한 변경이지 정리가 아닙니다. 그래서 이곳에서 사라지는 것은 동작이 아니라
+   상수입니다. */
 /** @brief Upward speed it leaves at, m/s. / 떠날 때의 상승 속도. */
 #define PICKUP_TOSS_UP  4.2f
 

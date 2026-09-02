@@ -114,8 +114,16 @@
  */
 #define STORY_LINE_MAX 48
 
-/** @brief Characters in a cutscene's name, terminator included. / 컷신 이름의 문자 수. 종료 문자 포함. */
-#define STORY_NAME_MAX 16
+/* STORY_NAME_MAX WAS HERE and sized nothing. Cutscene names are not copied:
+   ::story_moment_name hands back a pointer into a static table, so there is no
+   buffer for sixteen characters to be the length of. A sizing constant with no
+   array is a promise about storage that does not exist, and the day somebody
+   writes `char name[STORY_NAME_MAX]` against a longer name it becomes a
+   truncation nobody chose.
+   *STORY_NAME_MAX가 이곳에 있었고* 아무것도 재지 않았습니다. 컷신 이름은 복사되지 않습니다.
+   ::story_moment_name은 정적 표 안을 가리키는 포인터를 돌려주므로, 열여섯 글자가 길이가 될
+   버퍼가 없습니다. 배열 없는 크기 상수는 존재하지 않는 저장 공간에 대한 약속이며, 누군가 더 긴
+   이름에 대해 `char name[STORY_NAME_MAX]`를 쓰는 날 아무도 고르지 않은 잘림이 됩니다. */
 
 /* --- Timing / 시간 --- */
 

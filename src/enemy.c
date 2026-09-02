@@ -10,7 +10,7 @@
  *
  * The AI is Quake's, named after the routines it came from so the borrowing is
  * findable: ::change_yaw is ChangeYaw, ::ai_run_slide is ai_run_slide,
- * ::check_attack is CheckAttack. What those give a monster is inertia -- a
+ * ::pick_attack is CheckAttack. What those give a monster is inertia -- a
  * finite turn rate, a committed strafe direction, a random rest after
  * attacking, and dice rather than a threshold -- and inertia is the difference
  * between a creature and a mechanism.
@@ -33,7 +33,7 @@
  * 중인 게임 안에서는 보이지 않습니다.
  *
  * AI는 Quake의 것이며, 빌려 온 출처를 찾을 수 있도록 원래 루틴의 이름을 따랐습니다.
- * ::change_yaw는 ChangeYaw, ::ai_run_slide는 ai_run_slide, ::check_attack은
+ * ::change_yaw는 ChangeYaw, ::ai_run_slide는 ai_run_slide, ::pick_attack은
  * CheckAttack입니다. 그것들이 몬스터에게 주는 것은 관성입니다. 유한한 회전 속도, 한 방향을
  * 밀고 나가는 횡이동, 공격 후의 무작위 휴식, 그리고 문턱값이 아닌 주사위입니다. 관성이야말로
  * 생물과 기계장치를 가르는 차이입니다.
@@ -183,7 +183,7 @@ static const struct { const char *was; int now; } MON_LEGACY[] = {
  * @note ::types_check는 behaviour와 shot_speed의 정합성, 그리고 플래그 비트만 봅니다. 치수는
  *       검사하지 *않습니다.* `eye`가 `hgt`보다 높아도 잡히지 않고 그대로 플레이됩니다.
  */
-/*    name,           behaviour,   hp,  spd, weave,   rad,   hgt,   eye, sight,   atk, dmg,  wind,  cool, aspct,  shot, brst, bmin,  sprd,   gap,    yaw, pain, cap, flags      */
+/*    name,           behaviour,   hp,  spd, weave,   rad,   hgt,   eye, sight, aspct,    yaw, pain, cap, flags      */
 static const MonType TYPES[MON_TYPES] = {
     /* the baseline: the fastest thing in the bestiary and the loosest weave,
        at 65% of ::PLAYER_WALK -- it cannot catch you, but it can be there
@@ -191,7 +191,7 @@ static const MonType TYPES[MON_TYPES] = {
        기준선. 도감에서 가장 빠르고 갈지자가 가장 큽니다. ::PLAYER_WALK의 65%이며,
        따라잡지는 못하지만 돌아섰을 때 거기 있을 수는 있습니다. 근접 샷건 한 방에
        죽습니다. */
-    { "water_spirit", AI_CASTER,   40, 7.0f, 0.62f, 0.52f, 1.70f, 1.30f, 34.0f,  7.5f,   3, 0.30f, 0.50f, 0.70f,  9.0f,   10,  5, 0.13f, 0.07f, 260.0f, 0.6f, 8, MON_FLOATS },
+    { "water_spirit",   AI_CASTER, 40, 7.0f, 0.62f, 0.52f, 1.70f, 1.30f, 34.0f, 0.70f, 260.0f, 0.6f, 8, MON_FLOATS },
     /* a wall with health -- hits hard, cannot be stun-locked, and closes at
        half your walking speed on the straightest line in the bestiary. Heavy
        is the small weave, not the speed: it commits to a direction and comes,
@@ -199,7 +199,7 @@ static const MonType TYPES[MON_TYPES] = {
        체력이 높은 벽. 강하게 때리고, 스턴 락에 걸리지 않으며, 도감에서 가장 곧은 선으로
        걷기 속도의 절반으로 다가옵니다. 무거움은 속도가 아니라 작은 갈지자입니다. 방향을
        정하고 오며, 살아남을 수 있게 하는 것은 그것이 어디로 올지 읽을 수 있다는 점입니다. */
-    { "brute",        AI_BRAWLER, 120, 5.6f, 0.30f, 0.806f, 2.35f, 1.80f, 34.0f,  2.3f,  24, 0.55f, 1.50f, 0.85f,  0.0f,    1,  1,  0.0f, 0.0f, 130.0f, 2.2f, 3, MON_UNFLINCHING },
+    { "brute",          AI_BRAWLER, 120, 5.6f, 0.30f, 0.806f, 2.35f, 1.80f, 34.0f, 0.85f, 130.0f, 2.2f, 3, MON_UNFLINCHING },
     /* holds its range instead of closing, and holds it in the AIR -- so cover
        and angles matter, and so does the ceiling. Nothing about the numbers
        changed when MON_FLIES arrived: this is the same creature, no longer
@@ -209,7 +209,7 @@ static const MonType TYPES[MON_TYPES] = {
        천장의 문제이기도 합니다. MON_FLIES가 붙을 때 수치는 하나도 바뀌지 않았습니다. 아무것도
        딛고 있지 않게 되었을 뿐 같은 생물입니다. 이것이 대신한 행("wraith")은 여기서 체력 4점과
        사거리 1미터를 뺀 것이었고, 그것은 별개의 몬스터가 아닙니다. */
-    { "caster",       AI_CASTER,   26, 5.8f, 0.46f, 0.546f, 1.90f, 1.45f, 40.0f, 13.0f,  12, 0.85f, 1.40f, 0.80f, 11.0f,    1,  1,  0.0f, 0.0f, 180.0f, 0.9f, 4, MON_FLIES | MON_FLOATS },
+    { "caster",         AI_CASTER, 26, 5.8f, 0.46f, 0.546f, 1.90f, 1.45f, 40.0f, 0.80f, 180.0f, 0.9f, 4, MON_FLIES | MON_FLOATS },
     /* the boss: a caster with the footwork taken away. Its hp is spent in
        BOSS_CYCLES equal thirds and must divide by it -- types_check says so.
        The pain lock is effectively infinite because a boss that flinches is a
@@ -227,15 +227,73 @@ static const MonType TYPES[MON_TYPES] = {
        한 뼘까지 닿는 보스는 큰 적이 아니라 모델링 오류로 읽히고, 탑 위에 걸린 결계핵은 있을
        자리가 없어집니다. 신장을 내리면서 반경, 시선, 사거리를 함께 내렸습니다. MonType의 치수
        블록이 이곳의 모든 행에 대해 진술하는 규칙입니다. */
-    { "maw",          AI_CASTER,  900, 0.0f, 0.0f, 1.20f, 3.60f, 2.00f, 60.0f, 40.0f,  14, 0.90f, 1.10f, 1.10f, 14.0f,    5,  5, 0.22f, 0.0f,  90.0f,99.0f, 1, MON_BOSS | MON_ANCHORED },
+    { "maw",            AI_CASTER, 900, 0.0f, 0.0f, 1.20f, 3.60f, 2.00f, 60.0f, 1.10f, 90.0f, 99.0f, 1, MON_BOSS | MON_ANCHORED },
     /* what guards it: no sight, no reach, no damage, and the only monster in
        the game that never acts. Ninety health is three WARD_SUMMON_DMG chunks,
        so a ward pays out exactly three times on its way down whatever kills it.
        그것을 지키는 것. 시야도 사거리도 피해도 없으며, 이 게임에서 유일하게 결코 행동하지 않는
        몬스터입니다. 체력 90은 WARD_SUMMON_DMG 세 덩어리이므로, 결계핵은 무엇에 죽든 쓰러지는
        동안 정확히 세 번 지급합니다. */
-    { "ward",         AI_INERT,    90, 0.0f, 0.0f, 0.50f, 1.10f, 0.55f,  0.0f,  0.0f,   0,  0.0f,  0.0f, 1.00f,  0.0f,    1,  1,  0.0f, 0.0f,   0.0f,99.0f, 0, MON_GUARD | MON_ANCHORED },
+    { "ward",           AI_INERT, 90, 0.0f, 0.0f, 0.50f, 1.10f, 0.55f, 0.0f, 1.00f, 0.0f, 99.0f, 0, MON_GUARD | MON_ANCHORED },
 };
+
+/* WHAT EACH KIND CAN DO, ONE ROW PER ATTACK.
+ *
+ * SEPARATE FROM ::TYPES RATHER THAN NESTED IN IT, because that table is one
+ * line per monster and has been readable as a table for exactly that reason.
+ * Three slots of eleven columns inside a row would end that, and the row is
+ * where somebody tuning a monster looks first.
+ *
+ * KEYED BY ::MonKind so the two cannot fall out of order. An index column in
+ * TYPES pointing into a flat pool would be smaller by a few hundred bytes and
+ * would be a magic number in every row -- the kind of number that is right
+ * until a row is inserted above it.
+ *
+ * SLOTS RUN TO THE FIRST ::ATK_NONE. The rest of each row is zeroed by the
+ * designated initialiser, and zero IS not-an-attack, so there is no count to
+ * keep in step. `ward` is ::AI_INERT and has none at all.
+ *
+ * *종류마다 할 수 있는 일이며, 공격 하나에 한 행입니다.*
+ * ::TYPES 안에 넣지 않고 따로 두는 이유는, 그 표가 몬스터 하나에 한 줄이고 바로 그 이유로
+ * 표로 읽혀 왔기 때문입니다. 한 행 안의 열한 열짜리 슬롯 셋은 그것을 끝냅니다. 그리고 행은
+ * 몬스터를 조정하는 사람이 가장 먼저 보는 곳입니다.
+ * ::MonKind로 키를 잡으므로 둘이 순서를 잃을 수 없습니다. 평평한 풀을 가리키는 색인 열은 몇백
+ * 바이트 작겠지만 모든 행에 마법의 수를 남기며, 그것은 위에 행이 하나 끼워지기 전까지만 맞는
+ * 종류의 수입니다.
+ * *슬롯은 첫 ::ATK_NONE까지입니다.* 각 행의 나머지는 지정 초기화가 0으로 채우고 0이 곧
+ * *공격 아님*이므로, 맞춰 둘 개수가 없습니다. `ward`는 ::AI_INERT이고 아예 없습니다. */
+/*        kind,      min,    max,  dmg,  wind,  cool,  shot, brst, bmin,  sprd,   gap, weight */
+static const MonAttack ATTACKS[MON_TYPES][MON_MAX_ATTACKS] = {
+    [MON_WATER_SPIRIT] = {
+        { ATK_BOLT,  0.0f,  7.5f,   3, 0.30f, 0.50f,  9.0f,   10,   5, 0.13f, 0.07f, 1.0f },
+    },
+    [MON_BRUTE] = {
+        { ATK_SWING, 0.0f,  2.3f,  24, 0.55f, 1.50f,  0.0f,    1,   1,  0.0f,  0.0f, 1.0f },
+    },
+    [MON_CASTER] = {
+        { ATK_BOLT,  0.0f, 13.0f,  12, 0.85f, 1.40f, 11.0f,    1,   1,  0.0f,  0.0f, 1.0f },
+    },
+    [MON_MAW] = {
+        { ATK_BOLT,  0.0f, 40.0f,  14, 0.90f, 1.10f, 14.0f,    5,   5, 0.22f,  0.0f, 1.0f },
+    },
+};
+
+const MonAttack *mon_attack(int type, int slot)
+{
+    if (type < 0 || type >= MON_TYPES) return 0;
+    if (slot < 0 || slot >= MON_MAX_ATTACKS) return 0;
+    const MonAttack *a = &ATTACKS[type][slot];
+    return a->kind == ATK_NONE ? 0 : a;
+}
+
+int mon_attack_count(int type)
+{
+    if (type < 0 || type >= MON_TYPES) return 0;
+    int n = 0;
+    while (n < MON_MAX_ATTACKS && ATTACKS[type][n].kind != ATK_NONE) n++;
+    return n;
+}
+
 
 /* --- Static function prototypes / 정적 함수 프로토타입 --- */
 static void types_check(void);
@@ -272,13 +330,36 @@ static void ai_run_slide(Pools *pl, const Level *l, const MonType *S, Enemy *m, 
 
 static int can_see(const Level *l, const Enemy *m, v3 player_eye);
 static int sees_player(const Pools *pl, const Level *l, Enemy *m, v3 player_eye);
-static int check_attack(Pools *pl, const MonType *S, Enemy *m, float dist);
+static int pick_attack(Pools *pl, Enemy *m, float dist);
+
+/**
+ * The range the archetype keeps, metres: slot 0's upper bound.
+ *
+ * ENGLISH: Slot 0 is the attack a kind was built around, so where a monster
+ * WANTS to stand is where that attack works -- ::chase_brawler closes to it and
+ * ::chase_caster keeps just inside it. The other slots are what the monster
+ * does when the player is somewhere it did not plan for, and letting them move
+ * the band would make a creature drift toward whichever attack it happened to
+ * use last. A kind with no attack at all (::AI_INERT) has no band and gets 0,
+ * which the callers read as "already there" and stop.
+ * 한국어: 아키타입이 유지하는 거리(미터)이며 슬롯 0의 상한입니다. 슬롯 0은 종류가 지어진
+ * 공격이므로, 몬스터가 *서고 싶은* 자리는 그 공격이 통하는 자리입니다. 나머지 슬롯은 플레이어가
+ * 예정에 없던 자리에 있을 때 하는 일이고, 그것이 대역을 움직이게 하면 생물이 마지막으로 쓴
+ * 공격 쪽으로 표류하게 됩니다. 공격이 아예 없는 종류(::AI_INERT)는 대역이 없어 0을 받으며,
+ * 호출자는 그것을 "이미 도착"으로 읽고 멈춥니다.
+ */
+static float mon_band(int type)
+{
+    const MonAttack *A = mon_attack(type, 0);
+    return A ? A->max : 0.0f;
+}
 
 static void chase_brawler(Pools *pl, const Level *l, const MonType *S, Enemy *m, v3 to, float dist, float dt);
 static void chase_caster(Pools *pl, const Level *l, const MonType *S, Enemy *m, v3 to, float dist, v3 player_eye, float dt);
-static int release_swing(const MonType *S, Enemy *m, float dist);
-static void begin_attack(Pools *pl, const MonType *S, Enemy *m);
-static void release_bolt(Pools *pl, const Level *l, const MonType *S, Enemy *m, v3 player_eye);
+static int release_swing(const MonAttack *A, Enemy *m, float dist);
+static void begin_attack(Pools *pl, const MonAttack *A, Enemy *m);
+static void release_bolt(Pools *pl, const Level *l, const MonType *S,
+                         const MonAttack *A, Enemy *m, v3 player_eye);
 
 /* --- Public function definitions / 공개 함수 정의 --- */
 /* Ordered as enemy.h declares them. The contract for each is in the header and
@@ -940,6 +1021,24 @@ int enemy_update(Pools *pl, const Level *l, v3 player_eye, float dt)
                    나옵니다. */
                 int shots = m->volley_n > 0 ? m->volley_n : 1;
 
+                /* THE SLOT, RESOLVED ONCE. ::Enemy::atk was chosen when this
+                   state was entered and every line below reads it rather than
+                   the type -- the archetype no longer decides what an attack
+                   IS, only where the monster stands while looking for one.
+                   A slot that has gone missing (a save from an older table, a
+                   type edited under a running fight) falls back to slot 0
+                   rather than dereferencing nothing: an attack that plays the
+                   wrong animation is a bug, and one that crashes is a crash.
+                   *슬롯을 한 번 해결합니다.* ::Enemy::atk은 이 상태에 들어갈 때 골랐고 아래의
+                   모든 줄이 종류가 아니라 그것을 읽습니다. 아키타입은 이제 공격이 *무엇인지*
+                   정하지 않고, 몬스터가 공격을 찾는 동안 어디에 서는지만 정합니다.
+                   사라진 슬롯(옛 표의 세이브, 전투 중에 편집된 종류)은 아무것도 아닌 것을
+                   역참조하는 대신 슬롯 0으로 물러납니다. 틀린 동작을 재생하는 공격은 버그이고
+                   죽는 공격은 죽음입니다. */
+                const MonAttack *A = mon_attack(m->type, m->atk);
+                if (!A) A = mon_attack(m->type, 0);
+                if (!A) { m->state = E_CHASE; break; }
+
                 /* THE CHARGE, WHILE THE POSE IS UP. `caster_attack` and
                    `water_spirit_attack` are drawings of a creature gathering
                    itself -- the caster's has a magic circle in it -- and for
@@ -962,7 +1061,7 @@ int enemy_update(Pools *pl, const Level *l, v3 player_eye, float dt)
                    발사한 마법진에 도착하게 됩니다.
                    *발이 아니라 가슴에서*입니다. ::MonType::eye가 탄환이 떠나는 높이이므로,
                    모임은 탄환이 떠나는 자리에 내려앉습니다. */
-                if (S->behaviour == AI_CASTER && !m->swung)
+                if (A->kind == ATK_BOLT && !m->swung)
                 {
                     m->cast_timer -= dt;
                     if (m->cast_timer <= 0.0f)
@@ -974,19 +1073,19 @@ int enemy_update(Pools *pl, const Level *l, v3 player_eye, float dt)
                     }
                 }
 
-                if (S->behaviour == AI_CASTER)
+                if (A->kind == ATK_BOLT)
                 {
                     while (m->swung < shots &&
-                           m->timer >= S->windup + (float)m->swung * S->shot_gap)
+                           m->timer >= A->windup + (float)m->swung * A->shot_gap)
                     {
-                        release_bolt(pl, l, S, m, goal);
+                        release_bolt(pl, l, S, A, m, goal);
                         m->swung++;
                     }
                 }
-                else if (!m->swung && m->timer >= S->windup)
+                else if (!m->swung && m->timer >= A->windup)
                 {
                     m->swung = 1;
-                    player_damage += release_swing(S, m, dist);
+                    player_damage += release_swing(A, m, dist);
                 }
 
                 /* The cooldown starts after the LAST bolt, not after the first.
@@ -996,9 +1095,9 @@ int enemy_update(Pools *pl, const Level *l, v3 player_eye, float dt)
                    경직은 첫 볼트가 아니라 *마지막* 볼트 뒤에 시작합니다. 아직 쏘는 중에 휴식을
                    시작하는 줄기는 다음 일제 사격이 이번 것과 겹치게 만들고, 한 몬스터에게서
                    겹쳐 나오는 두 일제 사격은 아무도 저작하지 않은 볼트의 벽입니다. */
-                float firing = (float)(shots - 1) * S->shot_gap;
+                float firing = (float)(shots - 1) * A->shot_gap;
 
-            if (m->timer >= S->windup + firing + S->cooldown)
+            if (m->timer >= A->windup + firing + A->cooldown)
             {
                 /* Quake's SUB_AttackFinished(2*random()): a RANDOM rest before
                    the next attack is even considered, on top of the animation's
@@ -1011,9 +1110,16 @@ int enemy_update(Pools *pl, const Level *l, v3 player_eye, float dt)
                    in reach swings again without paying for the walk back.
                    캐스터는 언제나 자기 대역으로 돌아갑니다. 아직 사거리 안에 있는 근접형은
                    되돌아오는 비용을 치르지 않고 다시 휘두릅니다. */
-                if (S->behaviour == AI_CASTER)
+                /* A BOLT ALWAYS RETURNS TO THE BAND; A SWING STILL IN REACH
+                   SWINGS AGAIN, and it is the SLOT that says which -- a caster
+                   that has just swung at something in its face is a brawler for
+                   as long as the thing stays there.
+                   *볼트는 언제나 대역으로 돌아가고 사거리 안의 휘두르기는 다시 휘두르며*,
+                   어느 쪽인지는 *슬롯*이 말합니다. 코앞의 것에 방금 휘두른 캐스터는 그것이
+                   거기 머무는 동안 근접형입니다. */
+                if (A->kind == ATK_BOLT)
                     m->state = E_CHASE;
-                else if (dist <= S->attack)
+                else if (dist <= A->max)
                 {
                     m->timer = 0.0f;
                     m->swung = 0;
@@ -1735,46 +1841,101 @@ static void types_check(void)
 {
     for (int i = 0; i < MON_TYPES; i++)
     {
-        int caster = TYPES[i].behaviour == AI_CASTER;
-        if (caster != (TYPES[i].shot_speed > 0.0f))
+        /* THE INVARIANT MOVED FROM THE KIND TO THE SLOT, which is what the
+           slots are for. It used to read `behaviour == AI_CASTER` against
+           `shot_speed > 0` -- one archetype, one attack, and the two had to
+           agree because there was nothing else they could disagree about. Now
+           an ::AI_CASTER may carry a swing, so the pairing that still has to
+           hold is per attack: a slot that launches something needs a speed for
+           it, and a slot that reaches out must not name one.
+           *불변식이 종류에서 슬롯으로 옮겨 갔고*, 슬롯이 있는 이유가 그것입니다. 예전에는
+           `behaviour == AI_CASTER`와 `shot_speed > 0`을 맞대어 보았습니다. 아키타입 하나에
+           공격 하나였고, 둘이 어긋날 수 있는 다른 것이 없었으므로 일치해야 했습니다. 이제
+           ::AI_CASTER가 휘두르기를 지닐 수 있으므로 여전히 성립해야 하는 짝은 *공격마다*
+           입니다. 무언가를 쏘아 보내는 슬롯에는 그 속도가 필요하고, 뻗는 슬롯은 속도를
+           적어서는 안 됩니다. */
+        int n_atk = mon_attack_count(i);
+
+        /* EVERY FIGHTING KIND HAS AT LEAST ONE, AND AN INERT ONE HAS NONE.
+           A kind with no slots would walk to its band and stand there, which
+           looks exactly like a monster that has not noticed the player.
+           *싸우는 종류는 최소 하나를 가지고 불활성인 것은 하나도 갖지 않습니다.* 슬롯이 없는
+           종류는 자기 대역까지 걸어가 서 있으며, 그것은 플레이어를 알아채지 못한 몬스터와
+           똑같이 보입니다. */
+        if ((TYPES[i].behaviour == AI_INERT) != (n_atk == 0))
             DIAG(DIAG_MON_TABLE);
 
-        /* THE VOLLEY BOUNDS, and the empty one is the reason. ::begin_attack
-           rolls in `burst_min..burst` and a row with them the wrong way round
-           rolls an empty range -- a monster that winds up, fires nothing and
-           rests, which looks like a monster that has decided not to attack you
-           and is very hard to tell from one that cannot see you.
-           A floor of 1 for the same reason: 0 is the same empty volley written
-           a different way.
-           *일제 사격의 경계이며, 빈 것이 그 이유입니다.* ::begin_attack은
-           `burst_min..burst`에서 굴리는데, 둘이 뒤바뀐 행은 빈 범위를 굴립니다. 준비 동작을
-           하고 아무것도 쏘지 않고 쉬는 몬스터이며, 그것은 당신을 공격하지 않기로 한 몬스터처럼
-           보이고 당신을 보지 못하는 몬스터와 구별하기가 매우 어렵습니다.
-           하한 1도 같은 이유입니다. 0은 같은 빈 일제 사격을 다르게 적은 것입니다. */
-        if (TYPES[i].burst < 1 || TYPES[i].burst_min < 1 ||
-            TYPES[i].burst_min > TYPES[i].burst)
-            DIAG(DIAG_MON_TABLE);
+        for (int k = 0; k < n_atk; k++)
+        {
+            const MonAttack *A = &ATTACKS[i][k];
 
-        /* A GAP WITH NOTHING TO SEPARATE. A row that fires once and still names
-           a cadence is a number with no reader, and the next person to change
-           ::MonType::burst would inherit it as though it had been chosen.
-           Zero on a multi-bolt row is not an error -- it is "together", which is
-           what the maw still does.
-           *가를 것이 없는 간격입니다.* 단발이면서 박자를 적어 둔 행은 독자가 없는 수이고,
-           다음에 ::MonType::burst를 바꾸는 사람은 그것이 골라진 값인 양 물려받게 됩니다. 여러
-           발인 행의 0은 오류가 아니라 "함께"이며, 아귀가 여전히 하는 일입니다. */
-        if (TYPES[i].burst == 1 && TYPES[i].shot_gap != 0.0f)
-            DIAG(DIAG_MON_TABLE);
-        if (TYPES[i].shot_gap < 0.0f)
-            DIAG(DIAG_MON_TABLE);
+            if ((A->kind == ATK_BOLT) != (A->shot_speed > 0.0f))
+                DIAG(DIAG_MON_TABLE);
 
-        /* A bit nobody defined is a row that was written against a different
-           version of this header -- a typo in a hand-edited table, or a column
-           shifted by an insertion. Neither shows up in play: the monster simply
-           behaves normally and the intent is lost.
-           정의되지 않은 비트는 이 헤더의 다른 판본을 기준으로 작성된 행입니다. 손으로 편집한
-           표의 오타이거나, 삽입으로 열이 밀린 것입니다. 어느 쪽도 플레이에서 드러나지
-           않습니다. 그 몬스터는 그냥 평범하게 행동하고 의도만 사라집니다. */
+            /* A BAND THAT IS NOT A BAND. `min >= max` is a slot no distance
+               satisfies -- an attack written into the table and never offered,
+               which is indistinguishable in play from one that was forgotten.
+               *대역이 아닌 대역입니다.* `min >= max`는 어떤 거리도 만족시키지 못하는
+               슬롯입니다. 표에 적혔으나 결코 제안되지 않는 공격이며, 플레이에서는 잊힌 공격과
+               구별되지 않습니다. */
+            if (A->min < 0.0f || A->min >= A->max)
+                DIAG(DIAG_MON_TABLE);
+
+            if (A->weight <= 0.0f)
+                DIAG(DIAG_MON_TABLE);
+
+            /* THE VOLLEY BOUNDS, and the empty one is the reason. ::begin_attack
+               rolls in `burst_min..burst` and a slot with them the wrong way
+               round rolls an empty range -- a monster that winds up, fires
+               nothing and rests, which looks like a monster that has decided not
+               to attack you and is very hard to tell from one that cannot see
+               you. A floor of 1 for the same reason: 0 is the same empty volley
+               written a different way.
+               *일제 사격의 경계이며, 빈 것이 그 이유입니다.* ::begin_attack은
+               `burst_min..burst`에서 굴리는데, 둘이 뒤바뀐 슬롯은 빈 범위를 굴립니다. 준비
+               동작을 하고 아무것도 쏘지 않고 쉬는 몬스터이며, 그것은 당신을 공격하지 않기로 한
+               몬스터처럼 보이고 당신을 보지 못하는 몬스터와 구별하기가 매우 어렵습니다. 하한
+               1도 같은 이유입니다. 0은 같은 빈 일제 사격을 다르게 적은 것입니다. */
+            if (A->burst < 1 || A->burst_min < 1 || A->burst_min > A->burst)
+                DIAG(DIAG_MON_TABLE);
+
+            /* A GAP WITH NOTHING TO SEPARATE. A slot that fires once and still
+               names a cadence is a number with no reader, and the next person to
+               change ::MonAttack::burst would inherit it as though it had been
+               chosen. Zero on a multi-bolt slot is not an error -- it is
+               "together", which is what the maw still does.
+               *가를 것이 없는 간격입니다.* 단발이면서 박자를 적어 둔 슬롯은 독자가 없는
+               수이고, 다음에 ::MonAttack::burst를 바꾸는 사람은 그것이 골라진 값인 양
+               물려받게 됩니다. 여러 발인 슬롯의 0은 오류가 아니라 "함께"이며, 아귀가 여전히
+               하는 일입니다. */
+            if (A->burst == 1 && A->shot_gap != 0.0f)
+                DIAG(DIAG_MON_TABLE);
+            if (A->shot_gap < 0.0f)
+                DIAG(DIAG_MON_TABLE);
+        }
+
+        /* NO HOLE IN THE UNION OF THE BANDS. A distance covered by no slot is a
+           distance at which the monster winds nothing up and simply stands
+           there, and the player reads that as the monster being broken rather
+           than as a gap in a table. Checked by walking outward: the slots are
+           sorted by nothing, so this asks whether every slot's `min` is reached
+           by some other slot's `max`, starting from zero.
+           *대역들의 합집합에 구멍이 없어야 합니다.* 어떤 슬롯도 덮지 않는 거리는 몬스터가
+           아무것도 준비하지 않고 그냥 서 있는 거리이며, 플레이어는 그것을 표의 구멍이 아니라
+           몬스터가 고장 난 것으로 읽습니다. 바깥으로 걸으며 확인합니다. 슬롯은 아무 순서도
+           없으므로, 0에서 시작해 모든 슬롯의 `min`이 다른 슬롯의 `max`에 닿는지 묻습니다. */
+        if (n_atk > 0)
+        {
+            float reach = 0.0f;
+            for (int pass = 0; pass < n_atk; pass++)
+                for (int k = 0; k < n_atk; k++)
+                    if (ATTACKS[i][k].min <= reach && ATTACKS[i][k].max > reach)
+                        reach = ATTACKS[i][k].max;
+            for (int k = 0; k < n_atk; k++)
+                if (ATTACKS[i][k].min > reach)
+                    DIAG(DIAG_MON_TABLE);
+        }
+
         if (TYPES[i].flags & ~MON_FLAGS_ALL)
             DIAG(DIAG_MON_TABLE);
 
@@ -1787,8 +1948,7 @@ static void types_check(void)
            나중의 편집이 사거리를 주면 ::AI_INERT의 무엇도 공격 코드에 도달하는 것을 막지
            않으며, 그 실패는 무는 결계핵입니다. 그것은 이 표의 숫자가 아니라 보스전의 버그로
            읽힙니다. */
-        if (TYPES[i].behaviour == AI_INERT &&
-            (TYPES[i].damage != 0 || TYPES[i].attack > 0.0f))
+        if (TYPES[i].behaviour == AI_INERT && n_atk != 0)
             DIAG(DIAG_MON_TABLE);
 
         /* A BOSS WHOSE HEALTH DOES NOT DIVIDE BY ::BOSS_CYCLES survives its
@@ -2076,6 +2236,15 @@ static int make_monster(Pools *pl, const Level *l, int type,
        원한을 품고 있음"을 뜻하기 때문입니다. 같은 종류의 피해자가 -1로 남는지 단언한 테스트가
        0을 받아 잡았습니다. 그리고 같은 이유로, 그 곁의 단언(브루트가 캐스터 0에게 돌아선다)은
        코드가 아무 일도 하지 않는 채로 통과하고 있었습니다. */
+    /* NO SLOT UNTIL ONE IS PICKED. -1 rather than 0 for ::Enemy::foe's reason:
+       0 is a valid slot, so a fresh monster initialised to it would be carrying
+       a decision nobody made -- and the ::E_ATTACK block would run slot 0 for a
+       monster that never entered the state through ::pick_attack.
+       *고를 때까지 슬롯은 없습니다.* 0이 아니라 -1인 것은 ::Enemy::foe와 같은 이유입니다.
+       0은 유효한 슬롯이므로 그것으로 초기화된 새 몬스터는 아무도 내리지 않은 결정을 지니게
+       되고, ::pick_attack을 거쳐 그 상태에 들어간 적 없는 몬스터에 대해 ::E_ATTACK 블록이
+       슬롯 0을 실행하게 됩니다. */
+    m->atk      = -1;
     m->foe      = -1;
     m->foe_time = 0.0f;
     m->sight_age = (short)((pl->enemy.count - 1) % SIGHT_PERIOD);
@@ -3649,10 +3818,10 @@ static int sees_player(const Pools *pl, const Level *l, Enemy *m, v3 player_eye)
  * 근접 공격도 가진 몬스터에 대한 절반 감소도 포함합니다. 물 수 있는 것은 거리를 좁히기를
  * 선호하므로 다가오는 동안 덜 쏩니다. 우리의 `shot_speed > 0`이 이미 "원거리"를 말하는
  * 필드이므로, 두 번째 플래그가 아니라 그것이 여기서도 결정합니다. */
-static int check_attack(Pools *pl, const MonType *S, Enemy *m, float dist)
+static int pick_attack(Pools *pl, Enemy *m, float dist)
 {
     if (m->attack_wait > 0.0f)
-        return 0;
+        return -1;
 
     float chance;
     if (dist <= MON_RANGE_MELEE)
@@ -3662,16 +3831,77 @@ static int check_attack(Pools *pl, const MonType *S, Enemy *m, float dist)
     else if (dist <= MON_RANGE_MID)
         chance = MON_ODDS_MID;
     else
-        return 0;
+        return -1;
 
     /* A melee monster out of its reach cannot attack at all, whatever the dice
        say. The bands are about willingness; this is about arms.
        근접 몬스터는 사거리 밖에서는 주사위와 무관하게 공격할 수 없습니다. 대역은
        의사에 관한 것이고 이것은 팔 길이에 관한 것입니다. */
-    if (S->behaviour != AI_CASTER)
-        return dist <= S->attack;
+    /* AN ARM IS NOT A WILLINGNESS, and that is why the two kinds of slot are
+       offered on different terms. A swing is offered whenever the player is
+       inside its band, because a monster with its fist already back does not
+       reconsider; the dice are Quake's answer to "should I shoot from here",
+       and a creature at arm's length is past the question. That is exactly
+       what the line this replaces said with `behaviour != AI_CASTER` -- the
+       difference is that it is now a property of the ATTACK, so a caster's
+       swing gets the same certainty a brute's does.
+       *팔은 의향이 아니며*, 두 종류의 슬롯이 서로 다른 조건으로 제안되는 이유가 그것입니다.
+       휘두르기는 플레이어가 그 대역 안에 있으면 언제나 제안됩니다. 이미 주먹을 뒤로 뺀
+       몬스터는 다시 생각하지 않기 때문입니다. 주사위는 "여기서 쏠까"에 대한 Quake의 답이고,
+       팔 길이에 있는 생물은 그 질문을 지났습니다. 이것이 대체하는 줄이
+       `behaviour != AI_CASTER`로 말하던 것과 정확히 같습니다. 달라진 것은 이것이 이제
+       *공격*의 성질이라는 점이며, 캐스터의 휘두르기도 브루트의 것과 같은 확실함을 얻습니다. */
+    int n = mon_attack_count(m->type);
+    float total = 0.0f;
+    int offered = 0, only = -1;
+    unsigned mask = 0;
 
-    return frand(&pl->enemy) < chance;
+    for (int k = 0; k < n; k++)
+    {
+        const MonAttack *A = &ATTACKS[m->type][k];
+        if (dist < A->min || dist > A->max) continue;
+        if (A->kind == ATK_BOLT && !(frand(&pl->enemy) < chance)) continue;
+        mask |= 1u << k;
+        total += A->weight;
+        offered++;
+        only = k;
+    }
+    if (!offered) return -1;
+
+    /* A CHOICE AMONG ONE IS NOT A CHOICE, AND IT MUST NOT COST A DRAW.
+       ::EnemyPool::rng is one stream shared by the weave, the attack rest and
+       the spawners, so a number taken here and not used moves every decision
+       downstream of it. That is not a style point: the first cut of this
+       function rolled unconditionally, and the whole suite noticed -- two
+       brutes converged to 2.397m instead of 1.634m and demotest's golden went
+       red, because a monster with exactly one attack was drawing where it never
+       used to. A kind that still has one attack must consume exactly what it
+       consumed before, or "the slots changed nothing" is a claim with no way to
+       be true.
+       *하나 중에서 고르는 것은 고르는 것이 아니며, 뽑기를 써서는 안 됩니다.*
+       ::EnemyPool::rng는 갈지자와 공격 휴식과 스포너가 함께 쓰는 하나의 스트림이므로, 이곳에서
+       뽑고 쓰지 않은 수는 그 아래의 모든 결정을 밀어냅니다. 취향의 문제가 아닙니다. 이 함수의
+       첫 판은 무조건 굴렸고 스위트 전체가 알아챘습니다. 브루트 둘이 1.634m 대신 2.397m까지만
+       모였고 demotest의 골든이 빨개졌습니다. 공격이 정확히 하나인 몬스터가 예전에는 뽑지 않던
+       자리에서 뽑았기 때문입니다. 여전히 공격이 하나인 종류는 예전과 정확히 같은 만큼을 써야
+       하며, 그러지 않으면 "슬롯은 아무것도 바꾸지 않았다"는 참일 방법이 없는 주장입니다. */
+    if (offered == 1) return only;
+
+    /* ONE DRAW ACROSS THE OFFERED WEIGHTS, and over the ones the band and the
+       dice already agreed to -- `mask` is why the loop is not simply run again.
+       Walking the slots a second time would re-roll every ::ATK_BOLT chance and
+       could offer a slot the first pass refused.
+       *제안된 가중치들에 대해 한 번 뽑으며*, 대역과 주사위가 이미 동의한 것들에 대해서입니다.
+       `mask`가 반복문을 그냥 다시 돌리지 않는 이유입니다. 슬롯을 두 번째로 걸으면 모든
+       ::ATK_BOLT 확률을 다시 굴리게 되고, 첫 번째 통과가 거절한 슬롯을 제안할 수 있습니다. */
+    float roll = frand(&pl->enemy) * total;
+    for (int k = 0; k < n; k++)
+    {
+        if (!(mask & (1u << k))) continue;
+        roll -= ATTACKS[m->type][k].weight;
+        if (roll <= 0.0f) return k;
+    }
+    return only;
 }
 
 /**
@@ -3716,10 +3946,10 @@ static int check_attack(Pools *pl, const MonType *S, Enemy *m, float dist)
  *       않고 시계만 되돌리며, 그것은 휘두르기에 대해 옳고 캐스터에게는 도달 불가능합니다.
  *       캐스터는 언제나 ::E_CHASE로 돌아가므로 언제나 이 함수를 통해 되돌아옵니다.
  */
-static void begin_attack(Pools *pl, const MonType *S, Enemy *m)
+static void begin_attack(Pools *pl, const MonAttack *A, Enemy *m)
 {
-    int lo = S->burst_min > 0 ? S->burst_min : 1;
-    int hi = S->burst     > lo ? S->burst     : lo;
+    int lo = A->burst_min > 0 ? A->burst_min : 1;
+    int hi = A->burst     > lo ? A->burst     : lo;
 
     m->state    = E_ATTACK;
     m->timer    = 0.0f;
@@ -3793,8 +4023,9 @@ static void chase_brawler(Pools *pl, const Level *l, const MonType *S, Enemy *m,
 {
     float inv = dist > 0.001f ? 1.0f / dist : 0.0f;
     float step = S->speed * dt;
+    float band = mon_band(m->type);
 
-    if (dist > S->attack)
+    if (dist > band)
     {
         move_weaving(pl, l, S, m, to.x * inv, to.z * inv, step);
         return;
@@ -3806,9 +4037,11 @@ static void chase_brawler(Pools *pl, const Level *l, const MonType *S, Enemy *m,
        사거리 안입니다. 여기의 굴림은 근접 대역에서 Quake의 0.9입니다. 거리를 좁히는 것이
        여전히 치명적일 만큼 높고, 몬스터가 코앞에서 공격 타이머만 돌리는 대신 이따금 자리를
        바꿀 만큼 낮습니다. */
-    if (check_attack(pl, S, m, dist))
+    int slot = pick_attack(pl, m, dist);
+    if (slot >= 0)
     {
-        begin_attack(pl, S, m);
+        m->atk = (short)slot;
+        begin_attack(pl, mon_attack(m->type, slot), m);
     }
     else
     {
@@ -3843,13 +4076,14 @@ static void chase_caster(Pools *pl, const Level *l, const MonType *S, Enemy *m,
 {
     float inv = dist > 0.001f ? 1.0f / dist : 0.0f;
     float step = S->speed * dt;
+    float band = mon_band(m->type);
 
-    if (dist > S->attack)
+    if (dist > band)
     {
         move_weaving(pl, l, S, m, to.x * inv, to.z * inv, step);
         return;
     }
-    if (dist < S->attack * CASTER_KEEP)
+    if (dist < band * CASTER_KEEP)
     {
         move_toward(pl, l, S, m, -to.x * inv * step, -to.z * inv * step);
         return;
@@ -3875,9 +4109,11 @@ static void chase_caster(Pools *pl, const Level *l, const MonType *S, Enemy *m,
        선호하는 대역 안에서 플레이어를 정면으로 보고 있으면서도, 여전히 *가끔만* 쏩니다.
        나머지 시간에는 원을 그립니다. 그것이 캐스터를 포탑에서 방 안을 쫓아다녀야 하는
        무언가로 바꿉니다. */
-    if (check_attack(pl, S, m, dist))
+    int slot = pick_attack(pl, m, dist);
+    if (slot >= 0)
     {
-        begin_attack(pl, S, m);
+        m->atk = (short)slot;
+        begin_attack(pl, mon_attack(m->type, slot), m);
     }
     else
     {
@@ -3910,12 +4146,12 @@ static void chase_caster(Pools *pl, const Level *l, const MonType *S, Enemy *m,
  *       같습니다. 이 모듈은 플레이어의 체력을 소유하지 않으며, 비워진 체력을 한 곳에서
  *       감지하는 것이 새로운 피해원이 플레이어를 죽이는 것을 잊지 않게 합니다.
  */
-static int release_swing(const MonType *S, Enemy *m, float dist)
+static int release_swing(const MonAttack *A, Enemy *m, float dist)
 {
-    if (dist > S->attack + 0.3f)
+    if (dist > A->max + 0.3f)
         return 0;
     play_at(m->pos, "eatt", 90);
-    return S->damage;
+    return A->damage;
 }
 
 /**
@@ -3951,7 +4187,8 @@ static int release_swing(const MonType *S, Enemy *m, float dist)
  *          볼트당 한 번이라면 판정 비용을 감당할 수 있습니다. 감당할 수 없었던 것은
  *          ::chase_caster의 매 프레임 폴링입니다.
  */
-static void release_bolt(Pools *pl, const Level *l, const MonType *S, Enemy *m, v3 player_eye)
+static void release_bolt(Pools *pl, const Level *l, const MonType *S,
+                         const MonAttack *A, Enemy *m, v3 player_eye)
 {
     /* CHECKED PER BOLT, NOT PER VOLLEY, and a blocked one is spent rather than
        postponed. ::Enemy::swung advances in ::enemy_update whether this fires
@@ -4011,12 +4248,12 @@ static void release_bolt(Pools *pl, const Level *l, const MonType *S, Enemy *m, 
        있는 몬스터이며, 그것은 난사가 아니라 버그로 읽힙니다. 그리고 플레이어에게는 넓은 원뿔과
        나쁜 조준을 구별할 방법이 없습니다. 줄기의 머리에 놓인 정확한 한 발이 "여기를 맞히려
        했다"고 말하고, 나머지가 그 둘레에 얼마나 여유가 있는지를 말합니다. */
-    if (m->swung > 0 && S->spread > 0.0f) {
-        float rx = (frand(&pl->enemy) * 2.0f - 1.0f) * S->spread * dist;
-        float ry = (frand(&pl->enemy) * 2.0f - 1.0f) * S->spread * dist;
+    if (m->swung > 0 && A->spread > 0.0f) {
+        float rx = (frand(&pl->enemy) * 2.0f - 1.0f) * A->spread * dist;
+        float ry = (frand(&pl->enemy) * 2.0f - 1.0f) * A->spread * dist;
         aim = v3add(aim, v3add(v3scale(right, rx), v3scale(up, ry)));
     }
-    shot_fire(pl, from, aim, S->shot_speed, S->damage, m->type,
+    shot_fire(pl, from, aim, A->shot_speed, A->damage, m->type,
               (int)(m - pl->enemy.m));
 
     /* ONCE PER VOLLEY, not once per bolt, and that is what it already was: the

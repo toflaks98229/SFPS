@@ -95,7 +95,8 @@ static float dist_xz(v3 a, v3 b) {
    벽이 아니라 AI를 재는 것입니다. */
 static Level WALL;
 
-static float wall_gap(const MonType *M) {
+static float wall_gap(int t) {
+    const MonType *M = mon_stats(t);
     Level z = {0};
     WALL = z;
     Sector *s = &WALL.sectors[WALL.n_sectors++];
@@ -144,7 +145,8 @@ static void stair_band(float x0, float x1, float floor_m) {
     s->n = 4; s->floor = (short)(floor_m * 100); s->ceil = 800;
 }
 
-static void stair_build(const MonType *M, float rise, int risers) {
+static void stair_build(int t, float rise, int risers) {
+    const MonType *M = mon_stats(t);
     Level z = {0};
     STAIR = z;
     stair_band(-10.0f, 0.0f, 0.0f);
@@ -162,14 +164,14 @@ static void stair_build(const MonType *M, float rise, int risers) {
    arrive disguised as "could not climb it".
    한 종류를 30초 동안 계단으로 걷게 하고 도달한 높이를 반환합니다. 플레이어를 알아채기는
    했는지도 함께 단언하여, "보지 못했다"가 "오르지 못했다"로 위장해 도착하지 못하게 합니다. */
-static float climb(const MonType *M, float rise, int risers) {
-    stair_build(M, rise, risers);
+static float climb(int t, float rise, int risers) {
+    stair_build(t, rise, risers);
     enemy_reset(&g_pools);
     enemy_spawn_level(&g_pools, &STAIR);
     if (enemy_count(&g_pools) != 1) { ok(0, "the kind spawned"); return -1.0f; }
 
     float top = rise * (float)risers;
-    v3 player = v3f(M->attack + 4.0f, top + PLAYER_EYE, 0.0f);
+    v3 player = v3f(mon_attack(t, 0)->max + 4.0f, top + PLAYER_EYE, 0.0f);
     int noticed = 0;
     for (int i = 0; i < 60 * 30; i++) {
         enemy_update(&g_pools, &STAIR, player, DT);
@@ -278,7 +280,7 @@ static void check_weave(void) {
                떨어져 있습니다. 이 검사의 첫 판이 그것을 쟀고 물의 정령이 7미터를
                벗어났다고 보고했는데, 그것은 갈지자의 이름을 달고 있던 근접
                횡이동이었습니다. */
-            if (dist_xz(m->pos, player) <= mon_stats(m->type)->attack) break;
+            if (dist_xz(m->pos, player) <= mon_attack(m->type, 0)->max) break;
         }
 
         float d1 = dist_xz(enemy_at(&g_pools, 0)->pos, player);
@@ -712,7 +714,7 @@ int main(void) {
         for (int i = 0; i < 60 * 20; i++)      /* up to 20 s to arrive + swing */
             total += enemy_update(&g_pools, &L, player, DT);
         ok(total > 0, "it eventually lands a melee hit on the player");
-        ok(total >= mon_stats(MON_WATER_SPIRIT)->damage, "for at least one swing of damage");
+        ok(total >= mon_attack(MON_WATER_SPIRIT, 0)->damage, "for at least one swing of damage");
     }
 
     /* --- it stays inside the map the whole time --- */
@@ -802,13 +804,24 @@ int main(void) {
         const MonType *spirit = mon_stats(MON_WATER_SPIRIT);
         const MonType *brute  = mon_stats(MON_BRUTE);
         const MonType *cast   = mon_stats(MON_CASTER);
-        const MonType *maw    = mon_stats(MON_MAW);
+
+        /* SLOT 0 IS THE ROLE. Every claim below is about the attack the kind
+           was built around, which is the slot movement keeps its band by; a
+           kind's later slots are what it does out of position and are not what
+           makes a brute a brute.
+           *슬롯 0이 곧 역할입니다.* 아래의 모든 주장은 그 종류가 지어진 공격에 대한 것이며,
+           이동이 대역을 잡는 슬롯이 그것입니다. 뒤쪽 슬롯은 자리를 벗어났을 때 하는 일이고,
+           브루트를 브루트로 만드는 것은 그것이 아닙니다. */
+        const MonAttack *spirit_a = mon_attack(MON_WATER_SPIRIT, 0);
+        const MonAttack *brute_a  = mon_attack(MON_BRUTE, 0);
+        const MonAttack *cast_a   = mon_attack(MON_CASTER, 0);
+        const MonAttack *maw_a    = mon_attack(MON_MAW, 0);
 
         ok(brute->hp > spirit->hp * 2,      "the brute is far tougher than the water spirit");
-        ok(brute->damage > spirit->damage,  "and hits harder");
+        ok(brute_a->damage > spirit_a->damage,  "and hits harder");
         ok(brute->speed < spirit->speed,    "but is slower");
         ok(cast->hp < spirit->hp,           "the caster is frailer than the baseline");
-        ok(cast->attack > spirit->attack,   "and reaches further");
+        ok(cast_a->max > spirit_a->max,   "and reaches further");
         ok(cast->flags & MON_FLIES,         "and it is the one that is not on the floor");
 
         ok(mon_type_for("water_spirit") == MON_WATER_SPIRIT,
@@ -857,9 +870,9 @@ int main(void) {
            ranged" flag that could disagree with it.
            원거리 여부는 shot_speed 하나로 정의됩니다. 그것과 어긋날 수 있는 두 번째
            "원거리인가" 플래그는 없습니다. */
-        ok(cast->shot_speed > 0.0f && spirit->shot_speed > 0.0f,
+        ok(cast_a->shot_speed > 0.0f && spirit_a->shot_speed > 0.0f,
            "shot speed alone is what makes a type ranged");
-        ok(brute->shot_speed == 0.0f,
+        ok(brute_a->shot_speed == 0.0f,
            "and the melee type carries none");
 
         /* THREE DISTANCES, NOT TWO, and that is what the water spirit was
@@ -877,9 +890,9 @@ int main(void) {
            끊기지 않을 만큼 가깝고, 붙으려면 원뿔을 감수해야 할 만큼 멉니다.
            숫자가 아니라 *비율*인 이유는 7.5미터가 누군가 옮길 설계 결정이고, 그 이동을
            견뎌야 하는 것은 *관계*이기 때문입니다. */
-        ok(spirit->attack > brute->attack * 2.0f,
+        ok(spirit_a->max > brute_a->max * 2.0f,
            "the water spirit outranges every melee type");
-        ok(spirit->attack < cast->attack * 0.75f,
+        ok(spirit_a->max < cast_a->max * 0.75f,
            "and still sits well inside the caster's, which is what mid means");
 
         /* And it sprays. A volley is not a faster single shot: one aimed bolt
@@ -889,9 +902,9 @@ int main(void) {
            그리고 난사합니다. 일제 사격은 더 빠른 단발이 아닙니다. 조준된 볼트 하나에는 옆으로
            비켜서는 것으로 답하고, 줄기에는 그것이 겨누는 자리에서 벗어나는 것으로 답합니다.
            다른 동작입니다. 이것이 없으면 물의 정령은 사거리만 짧은 캐스터입니다. */
-        ok(spirit->burst > 1 && spirit->spread > 0.0f,
+        ok(spirit_a->burst > 1 && spirit_a->spread > 0.0f,
            "it sprays rather than firing one aimed bolt");
-        ok(cast->burst == 1 && brute->burst == 1,
+        ok(cast_a->burst == 1 && brute_a->burst == 1,
            "while everything else still fires or swings once");
 
         /* OVER TIME, AND THAT IS THE WHOLE CHANGE. A cone and a stream can have
@@ -905,9 +918,9 @@ int main(void) {
            길이만큼의 시간을 플레이어에게 다른 곳에 있으라고 내어 줍니다. 둘을 가르는 것이
            간격이므로 검사하는 것도 그것입니다. `burst > 1`만으로는 이것이 대체한 산탄도
            통과합니다. */
-        ok(spirit->shot_gap > 0.0f,
+        ok(spirit_a->shot_gap > 0.0f,
            "and it sprays over time rather than all at once");
-        ok(spirit->burst_min >= 5 && spirit->burst <= 10,
+        ok(spirit_a->burst_min >= 5 && spirit_a->burst <= 10,
            "a volley is five to ten bolts");
 
         /* The maw keeps the cone, and a gap of zero is how it says so. The two
@@ -915,10 +928,10 @@ int main(void) {
            of `shot_gap` being a number rather than a flag.
            아귀는 원뿔을 유지하며, 간격 0이 그것을 말하는 방식입니다. `burst`의 두 해석이 한 표
            안에 나란히 살며, 그것이 `shot_gap`이 플래그가 아니라 수인 이유입니다. */
-        ok(maw->burst > 1 && maw->shot_gap == 0.0f,
+        ok(maw_a->burst > 1 && maw_a->shot_gap == 0.0f,
            "while the maw still throws its five together");
         ok(cast->hp < spirit->hp,    "but it is frailer than a water spirit");
-        ok(cast->windup > spirit->windup,
+        ok(cast_a->windup > spirit_a->windup,
            "and telegraphs longer, so the bolt can be avoided");
     }
 
@@ -957,7 +970,7 @@ int main(void) {
         e->kind[4]='e';e->kind[5]='r';e->kind[6]=0;
         e->x = 0; e->z = 0;
 
-        const MonType *C = mon_stats(MON_CASTER);
+        const MonAttack *C_a = mon_attack(MON_CASTER, 0);
         enemy_spawn_level(&g_pools, &r);
         ok(enemy_at(&g_pools, 0)->type == MON_CASTER, "the caster entity spawned a caster");
 
@@ -965,9 +978,9 @@ int main(void) {
         v3 player = v3f(0.0f, PLAYER_EYE, 30.0f);
         for (int i = 0; i < 60 * 12; i++) enemy_update(&g_pools, &r, player, DT);
         float held = dist_xz(enemy_at(&g_pools, 0)->pos, player);
-        okf(held <= C->attack + 1.0f && held >= C->attack * 0.5f,
-            "from far off it closes only to its firing range", held, C->attack);
-        ok(held > mon_stats(MON_BRUTE)->attack * 2.0f,
+        okf(held <= C_a->max + 1.0f && held >= C_a->max * 0.5f,
+            "from far off it closes only to its firing range", held, C_a->max);
+        ok(held > mon_attack(MON_BRUTE, 0)->max * 2.0f,
            "which is nowhere near melee reach");
 
         /* Standing on top of it, it should give ground rather than stand there. */
@@ -1003,7 +1016,7 @@ int main(void) {
         }
         ok(seen_shot, "a bolt appears in the world once it attacks");
         ok(damage > 0, "and standing in front of it costs health");
-        ok(damage >= mon_stats(MON_CASTER)->damage,
+        ok(damage >= mon_attack(MON_CASTER, 0)->damage,
            "for at least one full bolt's worth");
 
         /* Nothing should still be in flight forever: bolts expire or land. */
@@ -1383,7 +1396,7 @@ int main(void) {
             const MonType *M = mon_stats(t);
             if (M->flags & MON_ANCHORED) continue;   /* it IS the wall */
 
-            float gap = wall_gap(M);
+            float gap = wall_gap(t);
             okf(gap > M->radius - 0.02f, M->name, gap, M->radius);
 
             /* The consequence, stated in the units the bug was reported in.
@@ -1465,14 +1478,14 @@ int main(void) {
             const MonType *M = mon_stats(t);
             if (M->flags & (MON_FLIES | MON_ANCHORED)) continue;
 
-            float got = climb(M, RISER, 2);
+            float got = climb(t, RISER, 2);
             okf(got > 2.0f * RISER - 0.05f, M->name, got, 2.0f * RISER);
 
             /* And the same kind, the same walk, against a riser nothing can
                climb. A monster that gets up THIS has stopped colliding.
                같은 종류가 같은 걸음으로, 무엇도 오를 수 없는 단을 만납니다. 이것을
                올라가는 몬스터는 충돌을 멈춘 것입니다. */
-            got = climb(M, WALL, 1);
+            got = climb(t, WALL, 1);
             okf(got < 0.05f, "  and is stopped by one nothing can climb", got, 0.0f);
         }
     }

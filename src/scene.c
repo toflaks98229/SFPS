@@ -1699,10 +1699,27 @@ void scene_draw_enemies(Scene *s, const Pools *pl, mat4 vp, v3 eye, v3 cam_right
            갑니다. 휘두름은 들어 올린 만큼 마무리에 걸리고, `windup`에 묶으면 마무리가 그
            몬스터의 무게감을 이미 조율하는 같은 수로 비례합니다. */
         else if (m->state == E_ATTACK)
-            fr = (S->behaviour == AI_BRAWLER)
-                 ? ((m->timer >= S->windup && m->timer < S->windup * 2.0f)
-                    ? SPR_ATTACK : SPR_WALK0)
-                 : ((m->timer < S->windup) ? SPR_ATTACK : SPR_WALK0);
+        {
+            /* THE SLOT AND NOT THE ARCHETYPE, which is the same correction
+               enemy.c's ::E_ATTACK took: a caster carrying a swing has to be
+               drawn on the swing's timing, and asking ::MonType::behaviour
+               would draw it on the bolt's. The two windows are genuinely
+               different -- a bolt's pose is the wind-up BEFORE it leaves and a
+               swing's is the follow-through AFTER it lands -- so this is one
+               question about the attack, not two about the creature.
+               *아키타입이 아니라 슬롯입니다.* enemy.c의 ::E_ATTACK이 받은 것과 같은
+               교정입니다. 휘두르기를 지닌 캐스터는 휘두르기의 타이밍으로 그려져야 하고,
+               ::MonType::behaviour에게 물으면 볼트의 타이밍으로 그려집니다. 두 창은 실제로
+               다릅니다. 볼트의 자세는 떠나기 *전*의 준비동작이고 휘두르기의 자세는 닿은
+               *뒤*의 마무리입니다. 그러므로 이것은 생물에 대한 두 질문이 아니라 공격에 대한
+               한 질문입니다. */
+            const MonAttack *A = mon_attack(m->type, m->atk);
+            if (!A) A = mon_attack(m->type, 0);
+            float w = A ? A->windup : 0.0f;
+            fr = (A && A->kind == ATK_SWING)
+                 ? ((m->timer >= w && m->timer < w * 2.0f) ? SPR_ATTACK : SPR_WALK0)
+                 : ((m->timer < w) ? SPR_ATTACK : SPR_WALK0);
+        }
         else if (m->state == E_CHASE)
             fr = (sinf(m->anim * WALK_CYCLE_RATE) > 0.0f) ? SPR_WALK0 : SPR_WALK1;
 

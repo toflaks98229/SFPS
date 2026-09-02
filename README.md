@@ -22,7 +22,7 @@ Models, materials, sounds and levels are all authored as text and hot-reload
 into the running game.
 
 ```
-1,054,720 / 1,474,560 bytes   (71.53% used)
+1,055,232 / 1,474,560 bytes   (71.56% used)
 ```
 
 ## Build
@@ -1584,6 +1584,33 @@ the weave, the attack rest and the spawners -- so a brute, which used to draw
 came to 2.397 m instead of 1.634 m and the demo golden went red. A choice among
 one is not a choice and must not cost a draw; with the single candidate returned
 before the roll, both numbers came back exactly.
+
+**A swing could not miss, and the turn rate was decorative because of it.**
+`change_yaw` was put in so a player could get behind something — its own note
+says "nothing could ever get behind anything, so strafing won no angle and the
+whole of Quake's manoeuvring had nothing to bite on." That fixed the *looking*.
+The hitting stayed `release_swing` testing a distance and nothing else, so a
+player who got behind a brute during its half-second wind-up was hit anyway.
+
+`MON_SWING_CONE` is 60°, and **it is not Quake's** — `ai_melee` is four lines
+and checks `vlen(delta) > 60`, a distance with no angle. Quake gets away with it
+because its monsters keep turning through the attack, and so do these, and it
+*still* left a brute swinging at your back. The gate is argued from
+`change_yaw`'s own note rather than from id's source.
+
+**And the cone is drawn.** `clawarc` marks exactly that wedge at exactly the
+slot's reach, the moment the swing lands — whether it connected or not, because
+a swing that missed is the one whose shape the player most needs to see. It is a
+*mark*, not a telegraph: the wind-up already warns, and a cone painted on the
+floor beforehand would be the monster doing the player's job.
+
+The `arc` placement op exists for it: `spawn` stops being a scatter and becomes
+a ring segment — particles land **at** the radius rather than within it, because
+a reach has an edge and a cloud does not. `fx_spawn_arc` takes the radius and
+the angle from the *caller*, since a reach is a column in `enemy.c`'s attack
+table and writing it into `effects.txt` too would be one number in two files.
+`fxtest` checks it as geometry: every particle at the radius asked for, none
+outside the wedge, and the wedge spanned rather than collapsed to a line.
 
 **And they take up room, which for a long time they did not.**
 `MonType::radius` had two readers — what a monster is to shoot at, and what it

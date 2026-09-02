@@ -548,6 +548,51 @@ e lavaboil
 # The day the trails become per-creature this recipe follows them, and the way
 # it follows is ::fx_spawn_tinted at the spawn site rather than three near
 # identical blocks in this file.
+# WHERE THE CLAW WENT, drawn at the moment it lands.
+#
+# THE POINT IS THE EDGE. A monster's reach is a number in a table and the player
+# has no way to learn it except by being hit at distances they thought were
+# safe. This draws it: a segment of the ring the swing actually tests, at the
+# radius it actually tests, through the angle it actually tests. Same three
+# numbers, one of them read by ::release_swing and all three by this.
+#
+# AFTER, NOT BEFORE, and that is what makes it a MARK rather than a warning.
+# The wind-up is the warning -- the sprite comes at you for half a second before
+# anything happens. What this adds is the reading afterwards: that is how far it
+# went, and next time you will know where to stand. A telegraph drawn on the
+# floor before the blow would tell the player where not to be, which is the
+# monster doing the player's job.
+#
+# *발톱이 지나간 자리*이며, 닿는 순간에 그려집니다.
+# *요점은 가장자리입니다.* 몬스터의 사거리는 표 안의 수이고, 플레이어가 그것을 배울 길은 안전한
+# 줄 알았던 거리에서 맞아 보는 것뿐입니다. 이것이 그것을 그립니다. 휘두르기가 실제로 검사하는
+# 고리의 한 조각을, 실제로 검사하는 반지름에서, 실제로 검사하는 각도만큼. 같은 세 수이며 그중
+# 하나를 ::release_swing이 읽고 셋 다를 이것이 읽습니다.
+# *전이 아니라 후*이며, 그것이 이것을 경고가 아니라 *자국*으로 만듭니다. 예고는 준비동작입니다.
+# 아무 일도 일어나기 반 초 전부터 스프라이트가 다가옵니다. 이것이 더하는 것은 그 뒤의 읽기입니다.
+# 저기까지 갔구나, 다음에는 어디에 설지 알겠구나. 일격 전에 바닥에 그려진 예고는 플레이어에게
+# 어디에 있지 말라고 알려 주는 것이고, 그것은 몬스터가 플레이어의 일을 대신하는 것입니다.
+e clawarc
+  count 26               # enough that the segment reads as a line rather than
+                         # as a handful of sparks. It is drawn once, so the
+                         # whole shape has to arrive in one frame
+  life 260               # a quarter second: long enough to be read after the
+                         # hit has registered, short enough that two swings do
+                         # not leave two marks overlapping
+  size 7 2               # thins as it fades, so the mark reads as a cut closing
+  rgb 255 235 205        # bone rather than blood: this is the shape of a reach,
+  rgb2 235 120 70        # and it cools to the ember every other impact here uses
+  alpha 190 0
+  spawn 0                # SET BY THE CALLER: enemy.c passes the slot's own
+                         # reach, because a mark drawn at a radius the table
+                         # does not use is a lie told carefully
+  arc 0                  # SET BY THE CALLER, from MON_SWING_CONE
+  speed 0.6 0.2          # a breath outward, so the ring loosens as it fades
+  gravity 0              # it hangs where the claw was
+  drag 3
+  blend 1
+  face 1
+
 e castgather
   count 3                # a few per tick -- world.c paces the rest
   life 380               # under half a second: the wind-up is short and the

@@ -88,6 +88,20 @@ typedef struct {
         고정 속력으로는 그럴 수 없습니다. `spawn`은 상자 안에 흩뿌리므로 먼 모서리는 가까운
         면보다 `sqrt(3)`배 멀고, 하나의 속력은 가까운 것들이 한가운데서 기다리는 동안 먼 것들이
         아직 오고 있게 만듭니다. 그러면 모임이 밀려듦이 아니라 표류로 읽힙니다. */
+    /* HALF-ANGLE OF A HORIZONTAL ARC TO PLACE PARTICLES ON, degrees. Zero is
+       the ordinary box `spawn` describes. Above zero the radius stops being a
+       scatter and becomes a RING SEGMENT: particles land at exactly `spawn`
+       centimetres out, spread through this many degrees either side of the
+       direction the effect was handed. It exists to draw a REACH -- a shape
+       whose whole job is to say "this far and this wide", which a cloud cannot
+       say because a cloud has no edge.
+       *입자를 놓을 수평 호의 반각(도).* 0이면 `spawn`이 말하는 평범한 상자입니다. 0보다 크면
+       반지름이 흩뿌림이 아니라 *고리 조각*이 됩니다. 입자는 정확히 `spawn` 센티미터 밖에
+       놓이고, 이펙트가 받은 방향의 양옆으로 이만큼의 각도에 퍼집니다. *닿는 거리*를 그리려고
+       존재합니다. "여기까지, 이만큼 넓게"라고 말하는 것이 일의 전부인 형태이며, 구름은
+       가장자리가 없어 그 말을 할 수 없습니다. */
+    int   arc;
+
     int   gather;
     /** Non-zero to spread evenly around the RING perpendicular to the normal,
         at one exact speed. `dome` is a shell and this is its equator: with
@@ -272,7 +286,7 @@ static void parse_defs(void) {
             cur->alpha0 = 100; cur->alpha1 = 0;
             cur->speed = 0;   cur->spread = 0;
             cur->spawn_r = 0; cur->drag = 0; cur->spin = 0;
-            cur->dome = 0; cur->disc = 0; cur->gather = 0;
+            cur->dome = 0; cur->disc = 0; cur->gather = 0; cur->arc = 0;
             cur->gravity = 0; cur->blend = FX_BLEND_ALPHA;
             cur->face = FX_FACE_CAMERA;
             /* No streak and no wake unless the definition asks. Both are read
@@ -313,6 +327,8 @@ static void parse_defs(void) {
             p = txt_read_int(p, &cur->dome, &ok);
         else if (txt_is(t, len, "disc"))
             p = txt_read_int(p, &cur->disc, &ok);
+        else if (txt_is(t, len, "arc"))
+            p = txt_read_int(p, &cur->arc, &ok);
         else if (txt_is(t, len, "gather"))
             p = txt_read_int(p, &cur->gather, &ok);
         else if (txt_is(t, len, "drag"))
@@ -475,7 +491,7 @@ void fx_tint_colour(FxTint tint, float rgb[3]) {
  * 규칙이며, 막으려는 대상은 방출하는 쪽이 그냥 하지 않으면 그만인 일입니다.
  */
 static void spawn_def(Pools *pl, int di, v3 pos, v3 normal, float scale, int wake,
-                      FxTint tint) {
+                      FxTint tint, int arc_cm, int arc_deg) {
     const FxDef *d = &g_defs[di];
 
     /* A basis around the normal, so `spread` can throw particles off-axis
@@ -558,7 +574,31 @@ static void spawn_def(Pools *pl, int di, v3 pos, v3 normal, float scale, int wak
            겹치는데, 겹친 가산 사각형은 즉시 포화됩니다. 알파 90% 두 장이 99.7%가 됩니다.
            이 오프셋이 흰 얼룩을 구분 가능한 불꽃으로 바꿉니다. */
         v3 at = pos;
-        if (d->spawn_r) {
+        int a_deg = arc_deg > 0 ? arc_deg : d->arc;
+        int a_cm  = arc_cm  > 0 ? arc_cm  : d->spawn_r;
+        if (a_deg) {
+            /* ON THE RING RATHER THAN INSIDE IT. `spawn` is a radius either
+               way; what `arc` changes is that the particle lands AT it instead
+               of anywhere within it, and only through a wedge centred on the
+               direction the effect was handed. A reach has an edge, and a box
+               of particles has none -- scattered through the same volume the
+               same count reads as a puff of dust at the monster's feet.
+               Horizontal on purpose: the thing being drawn is how far a swing
+               goes across the floor, and the floor is where the player is
+               deciding whether to step back.
+               *안이 아니라 고리 위입니다.* `spawn`은 어느 쪽이든 반지름이고, `arc`가 바꾸는
+               것은 입자가 그 안 아무 데가 아니라 *그 위에* 놓인다는 것, 그리고 이펙트가 받은
+               방향을 중심으로 한 쐐기 안에서만 놓인다는 것입니다. 닿는 거리에는 가장자리가
+               있고 입자 상자에는 없습니다. 같은 개수를 같은 부피에 흩뿌리면 몬스터 발치의
+               먼지 한 모금으로 읽힙니다.
+               수평인 것은 의도적입니다. 그려지는 것은 휘두르기가 바닥을 가로질러 얼마나
+               멀리 가는가이고, 바닥은 플레이어가 물러설지 정하고 있는 곳입니다. */
+            float base = atan2f(n.x, n.z);
+            float half = (float)a_deg * 0.0174533f;
+            float th   = base + frand_signed(&pl->fx) * half;
+            float rr   = a_cm * 0.01f;
+            at = v3add(pos, v3f(sinf(th) * rr, 0.0f, cosf(th) * rr));
+        } else if (d->spawn_r) {
             float rr = d->spawn_r * 0.01f;
             at = v3add(at, v3f(frand_signed(&pl->fx) * rr,
                                frand_signed(&pl->fx) * rr,
@@ -639,7 +679,29 @@ void fx_spawn_tinted(Pools *pl, const char *name, v3 pos, v3 normal, float scale
 
     int di = find_def(name);
     if (di < 0) return;                 /* unknown name: nothing, and not an error */
-    spawn_def(pl, di, pos, normal, scale, 1, tint);
+    spawn_def(pl, di, pos, normal, scale, 1, tint, 0, 0);
+}
+
+/* THE CALLER OWNS THE MEASUREMENT HERE, and it has to. A reach is a column in
+   enemy.c's attack table; drawing it would mean writing the same number into
+   effects.txt, and one number in two files is the arrangement this codebase
+   keeps taking apart. The recipe holds the LOOK -- colour, count, how long the
+   mark lasts -- and the caller holds the size.
+   *이곳에서는 호출자가 치수를 소유하며, 그래야 합니다.* 닿는 거리는 enemy.c 공격 표의
+   열입니다. 그것을 그린다는 것은 effects.txt에 같은 수를 적는다는 뜻이고, 한 수가 두 파일에
+   있는 것은 이 코드베이스가 계속 뜯어내 온 배치입니다. 레시피는 *생김새*를 쥡니다. 색, 개수,
+   자국이 얼마나 남는가. 치수는 호출자가 쥡니다. */
+void fx_spawn_arc(Pools *pl, const char *name, v3 pos, v3 normal,
+                  float radius_m, int half_deg) {
+    if (!g_parsed) parse_defs();
+    if (half_deg <= 0 || radius_m <= 0.0f) return;
+
+    int di = find_def(name);
+    if (di < 0) return;
+
+    FxTint none = { 0, 0, 0 };
+    spawn_def(pl, di, pos, normal, 1.0f, 1, none,
+              (int)(radius_m * 100.0f + 0.5f), half_deg);
 }
 
 void fx_update(Pools *pl, float dt) {
@@ -711,7 +773,7 @@ void fx_update(Pools *pl, float dt) {
                 float sp = v3len(q->vel);
                 v3 back = sp > 1e-4f ? v3scale(q->vel, -1.0f / sp) : v3f(0, 1, 0);
                 FxTint wt = { q->tint[0], q->tint[1], q->tint[2] };
-                spawn_def(pl, d->trail, q->pos, back, 1.0f, 0, wt);
+                spawn_def(pl, d->trail, q->pos, back, 1.0f, 0, wt, 0, 0);
             }
         }
     }

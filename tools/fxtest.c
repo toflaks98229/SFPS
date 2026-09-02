@@ -84,6 +84,66 @@ int main(void) {
             fx_live_count(&g_pools), before);
     }
 
+    /* --- a reach has an edge ------------------------------------------------
+     *
+     * `arc` IS THE ONLY PLACEMENT THAT MEANS A MEASUREMENT. Every other one
+     * scatters -- a box, a dome, a disc -- and a scatter is a look. This one
+     * puts particles AT a radius rather than within it, because what it draws
+     * is how far a swing goes, and a number drawn as a cloud is not a number.
+     *
+     * SO IT IS CHECKED AS GEOMETRY, not as a count: every particle at the
+     * radius the caller asked for, none of them outside the wedge, and the
+     * wedge actually spanned rather than collapsed to a line. A version that
+     * ignored the angle would pass a radius check; one that ignored the radius
+     * would pass an angle check. Both, or neither says anything.
+     *
+     * THE CALLER'S NUMBERS AND NOT THE RECIPE'S, which is the point of
+     * ::fx_spawn_arc existing: `clawarc` ships with zeroes in both fields,
+     * because a reach lives in enemy.c's attack table and writing it here as
+     * well would be one number in two files.
+     *
+     * *`arc`은 치수를 뜻하는 유일한 배치입니다.* 다른 모든 것은 흩뿌립니다. 상자, 반구, 원반.
+     * 흩뿌림은 생김새입니다. 이것은 입자를 반지름 *안*이 아니라 *위에* 놓습니다. 그리는 것이
+     * 휘두르기가 얼마나 멀리 가는가이고, 구름으로 그려진 수는 수가 아니기 때문입니다.
+     * *그래서 개수가 아니라 기하로 검사합니다.* 모든 입자가 호출자가 요청한 반지름에 있고,
+     * 어느 것도 쐐기 밖에 없으며, 쐐기가 선으로 무너지지 않고 실제로 펼쳐져 있는가. 각도를
+     * 무시하는 판은 반지름 검사를 통과하고, 반지름을 무시하는 판은 각도 검사를 통과합니다. 둘
+     * 다여야 하며, 아니면 어느 쪽도 아무 말을 하지 않습니다.
+     * *레시피의 수가 아니라 호출자의 수*이며, 그것이 ::fx_spawn_arc이 존재하는 이유입니다.
+     * `clawarc`은 두 필드가 0인 채로 출하됩니다. 닿는 거리는 enemy.c 공격 표에 살고, 이곳에도
+     * 적으면 한 수가 두 파일에 있게 되기 때문입니다. */
+    {
+        const float R = 2.8f;
+        const int   HALF = 60;
+
+        fx_reload(&g_pools);
+        fx_spawn_arc(&g_pools, "clawarc", v3f(0, 0, 0), v3f(0, 0, -1), R, HALF);
+
+        int n = fx_live_count(&g_pools);
+        ok(n > 0, "the claw mark spawns");
+
+        float worst_r = 0.0f, widest = 0.0f, high = 0.0f;
+        for (int i = 0; i < FX_MAX_PARTICLES; i++) {
+            const FxParticle *q = &g_pools.fx.parts[i];
+            if (q->life <= 0.0f) continue;
+            float r = sqrtf(q->pos.x * q->pos.x + q->pos.z * q->pos.z);
+            float d = fabsf(r - R);
+            if (d > worst_r) worst_r = d;
+            if (fabsf(q->pos.y) > high) high = fabsf(q->pos.y);
+            /* the facing is -z, so the bearing is measured from there */
+            float th = fabsf(atan2f(q->pos.x, -q->pos.z)) * 57.2958f;
+            if (th > widest) widest = th;
+        }
+        printf("      %d on the ring: radius off by at most %.3fm, widest %.1f deg,"
+               " highest %.3fm\n", n, (double)worst_r, (double)widest, (double)high);
+        okf(worst_r < 0.01f, "every particle lands at the radius asked for",
+            worst_r, 0.0f);
+        okf(widest <= (float)HALF + 0.5f, "and none outside the wedge",
+            widest, (float)HALF);
+        ok(widest > (float)HALF * 0.5f, "and the wedge is spanned, not a line");
+        okf(high < 0.001f, "and the mark lies flat on the floor plan", high, 0.0f);
+    }
+
     /* --- particles age out ------------------------------------------------- */
     {
         fx_reload(&g_pools);

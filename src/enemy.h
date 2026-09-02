@@ -569,6 +569,63 @@ enum MonTypeID {
  */
 #define MON_CHARGE_CONE 0.52f
 
+/**
+ * @brief Half-angle a swing actually covers, degrees.
+ *
+ * ENGLISH
+ * -------
+ * A SWING COULD NOT MISS, and until this existed the turn rate was decorative
+ * for anything with arms. ::change_yaw was put in because "a monster faced the
+ * player exactly, every frame, however fast the player circled it. Nothing
+ * could ever get behind anything, so strafing won no angle and the whole of
+ * Quake's manoeuvring had nothing to bite on." That fixed the LOOKING. The
+ * hitting was still ::release_swing testing a distance and nothing else, so a
+ * player who got behind a brute during its half-second wind-up was hit anyway
+ * and the angle they had won bought them nothing.
+ *
+ * THIS IS NOT QUAKE'S, and the honest note matters more than the borrowing.
+ * `ai_melee` is four lines and checks `vlen(delta) > 60`: a distance, no angle.
+ * Quake gets away with it because its monsters call `ai_charge` through the
+ * attack and keep turning. This engine's do too -- and it still leaves a brute
+ * that swings at your back. The gate is an addition, argued from ::change_yaw's
+ * own note rather than from id's source.
+ *
+ * SIXTY DEGREES, a third of the front. Wide enough that a swing is not a
+ * pinprick you slip past by standing still and leaning, narrow enough that the
+ * brute's 130 degrees a second cannot cover a player who commits to going
+ * round: a full circuit at arm's length is faster than the turn.
+ *
+ * AND IT IS DRAWN. `clawarc` marks exactly this wedge at exactly the slot's
+ * reach, so the shape the player has to read is the shape the code tests. A
+ * cone enforced and not shown is a rule the player learns by dying to it.
+ *
+ * 한국어
+ * ------
+ * @brief 휘두르기가 실제로 덮는 반각(도).
+ *
+ * *휘두르기는 빗나갈 수 없었고*, 이것이 생기기 전까지 회전 속도는 팔이 있는 것에게 장식이었습니다.
+ * ::change_yaw가 들어온 이유는 "몬스터가 플레이어가 아무리 빨리 돌아도 매 프레임 정확히 플레이어를
+ * 향했다. 무엇도 어떤 것의 뒤로 갈 수 없었고, 그래서 횡이동은 아무 각도 얻지 못했으며 Quake의
+ * 기동 전체가 물 것이 없었다"였습니다. 그것이 *바라보기*를 고쳤습니다. *맞히기*는 여전히
+ * ::release_swing이 거리 하나만 검사하는 것이었으므로, 브루트의 반 초짜리 준비동작 동안 뒤로 돌아
+ * 들어간 플레이어도 맞았고 그들이 따낸 각도는 아무것도 사 주지 않았습니다.
+ *
+ * *이것은 Quake의 것이 아니며*, 빌려 온 것보다 그 사실을 적어 두는 것이 더 중요합니다.
+ * `ai_melee`는 네 줄이고 `vlen(delta) > 60`을 검사합니다. 거리이고, 각도는 없습니다. Quake가
+ * 그러고도 괜찮은 것은 몬스터가 공격 내내 `ai_charge`를 부르며 계속 돌기 때문입니다. 이 엔진의
+ * 것도 그렇게 하며, 그럼에도 여전히 당신의 등을 휘두르는 브루트를 남깁니다. 이 관문은 추가이고,
+ * id의 소스가 아니라 ::change_yaw 자신의 주석에서 논증됩니다.
+ *
+ * *60도*, 앞쪽의 3분의 1입니다. 가만히 서서 몸만 기울여 빠져나갈 수 있는 바늘구멍이 아닐 만큼
+ * 넓고, 브루트의 초당 130도가 돌아가기로 마음먹은 플레이어를 따라잡지 못할 만큼 좁습니다. 팔
+ * 길이에서 한 바퀴를 도는 것이 그 회전보다 빠릅니다.
+ *
+ * *그리고 그려집니다.* `clawarc`이 정확히 이 쐐기를 슬롯의 정확한 사거리에 표시하므로, 플레이어가
+ * 읽어야 할 형태가 코드가 검사하는 형태입니다. 강제되고 보이지 않는 원뿔은 플레이어가 죽어 가며
+ * 배우는 규칙입니다.
+ */
+#define MON_SWING_CONE 60
+
 
 
 /**

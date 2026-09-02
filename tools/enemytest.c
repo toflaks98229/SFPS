@@ -999,6 +999,64 @@ static void check_charge(void) {
     ok(moved == 0, "and misses somebody who walked");
 }
 
+/* --- a swing has a front ---------------------------------------------------
+ *
+ * ::change_yaw WAS PUT IN so a player could get behind something: "nothing
+ * could ever get behind anything, so strafing won no angle and the whole of
+ * Quake's manoeuvring had nothing to bite on". It fixed the looking. The
+ * hitting stayed a distance test, so the angle bought nothing -- a brute swung
+ * at your back and connected.
+ *
+ * THE PAIR IS THE CHECK. The same brute, the same distance, the same wind-up,
+ * and the only difference is where the player is standing relative to where the
+ * monster is looking. Held there both times, because a player free to move is a
+ * player the brute turns to face, and then the check measures the turn rate
+ * instead of the cone.
+ *
+ * *::change_yaw는 플레이어가 뒤로 돌아갈 수 있게 하려고 들어왔습니다.* "무엇도 어떤 것의 뒤로
+ * 갈 수 없었고, 그래서 횡이동은 아무 각도 얻지 못했으며 Quake의 기동 전체가 물 것이 없었다."
+ * 그것이 바라보기를 고쳤습니다. 맞히기는 거리 검사인 채로 남아 각도는 아무것도 사 주지
+ * 않았습니다. 브루트는 당신의 등을 휘둘렀고 명중했습니다.
+ * *그 쌍이 곧 검사입니다.* 같은 브루트, 같은 거리, 같은 준비동작이며, 다른 것은 몬스터가 보는
+ * 방향에 대해 플레이어가 어디에 서 있는가뿐입니다. 양쪽 다 붙들어 둡니다. 움직일 수 있는
+ * 플레이어는 브루트가 돌아서 마주 보는 플레이어이고, 그러면 이 검사는 원뿔이 아니라 회전 속도를
+ * 재게 됩니다. */
+static int swing_from(float bearing_deg) {
+    build();
+    put_kind(&L.ents[0], "brute");
+    L.ents[0].x = 0; L.ents[0].y = 0; L.ents[0].z = -200;
+
+    enemy_reset(&g_pools);
+    g_pools.enemy.rng = 1u;
+    enemy_spawn_level(&g_pools, &L);
+    if (enemy_count(&g_pools) != 1) return -1;
+
+    v3 player = v3f(0.0f, PLAYER_EYE, 0.0f);
+    enemy_update(&g_pools, &L, player, DT);
+
+    Enemy *m = &g_pools.enemy.m[0];
+    float face = m->ideal_yaw + bearing_deg * 0.0174533f;
+
+    int dmg = 0;
+    for (int f = 0; f < 150; f++) {
+        m->pos = v3f(0.0f, 0.0f, -2.0f);        /* held at arm's length */
+        m->yaw = face;                          /* and held off its line */
+        dmg += enemy_update(&g_pools, &L, player, DT);
+    }
+    return dmg;
+}
+
+static void check_behind(void) {
+    printf("\na swing has a front\n");
+
+    int ahead  = swing_from(0.0f);
+    int behind = swing_from(180.0f);
+
+    printf("      player in front: %d damage; player behind: %d\n", ahead, behind);
+    ok(ahead > 0,   "a brute swinging at what it faces connects");
+    ok(behind == 0, "and one swinging at its own back does not");
+}
+
 int main(void) {
     printf("enemytest\n\n");
     build();
@@ -1913,6 +1971,7 @@ int main(void) {
     check_close_quarters();
     check_swing_step();
     check_charge();
+    check_behind();
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall enemy checks passed\n", fails);
     return fails != 0;

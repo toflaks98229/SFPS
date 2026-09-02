@@ -442,6 +442,23 @@ typedef struct Pools Pools;
 void fx_spawn(Pools *pl, const char *name, v3 pos, v3 normal);
 
 /**
+ * @brief Spawns a recipe as a horizontal ring segment of a given size.
+ *
+ * ENGLISH: For drawing a measurement -- a reach, a blast edge -- where the
+ * number belongs to the caller and not to effects.txt. The recipe supplies the
+ * look and this supplies the geometry; a radius written into both files is one
+ * number in two places.
+ * 한국어: 치수를 그리기 위한 것입니다. 닿는 거리나 폭발의 가장자리처럼, 그 수가 effects.txt가
+ * 아니라 호출자의 것일 때 씁니다. 레시피는 생김새를, 이것은 기하를 줍니다. 두 파일에 적힌
+ * 반지름은 한 수가 두 곳에 있는 것입니다.
+ *
+ * @param[in]     radius_m Distance from  the particles land at, metres.
+ * @param[in]     half_deg Half-angle either side of , degrees.
+ */
+void fx_spawn_arc(Pools *pl, const char *name, v3 pos, v3 normal,
+                  float radius_m, int half_deg);
+
+/**
  * @brief Spawns an effect with its speeds multiplied.
  *
  * ENGLISH

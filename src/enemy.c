@@ -396,7 +396,7 @@ static float mon_band(int type)
 
 static void chase_brawler(Pools *pl, const Level *l, const MonType *S, Enemy *m, v3 to, float dist, v3 player_eye, float dt);
 static void chase_caster(Pools *pl, const Level *l, const MonType *S, Enemy *m, v3 to, float dist, v3 player_eye, float dt);
-static int release_swing(const MonAttack *A, Enemy *m, float dist);
+static int release_swing(const MonAttack *A, Enemy *m, float dist, float off);
 static void begin_attack(Pools *pl, const MonAttack *A, Enemy *m);
 static void release_bolt(Pools *pl, const Level *l, const MonType *S,
                          const MonAttack *A, Enemy *m, v3 player_eye);
@@ -1144,7 +1144,36 @@ int enemy_update(Pools *pl, const Level *l, v3 player_eye, float dt)
                 else if (!m->swung && m->timer >= A->windup)
                 {
                     m->swung = 1;
-                    player_damage += release_swing(A, m, dist);
+
+                    /* HOW FAR OFF ITS LINE THE TARGET IS, measured from the
+                       facing and not from ::Enemy::ideal_yaw -- the ideal is
+                       where the monster WANTS to look and the facing is where
+                       it got to, and the gap between them is exactly what the
+                       turn rate is for.
+                       *목표가 자기 선에서 얼마나 벗어나 있는가*이며, ::Enemy::ideal_yaw가
+                       아니라 바라보는 방향에서 잽니다. 이상은 몬스터가 보고 *싶은* 곳이고
+                       바라보는 방향은 실제로 닿은 곳이며, 둘 사이의 틈이 바로 회전 속도가
+                       존재하는 이유입니다. */
+                    float want = atan2f(-(goal.x - m->pos.x),
+                                        -(goal.z - m->pos.z));
+                    float off  = want - m->yaw;
+                    while (off >  M_PI_F) off -= 2.0f * M_PI_F;
+                    while (off < -M_PI_F) off += 2.0f * M_PI_F;
+                    off = fabsf(off);
+
+                    player_damage += release_swing(A, m, dist, off);
+
+                    /* THE MARK, at the reach the swing just tested and through
+                       the wedge it just tested. Drawn whether it connected or
+                       not: a swing that missed is the one the player most needs
+                       to see the shape of.
+                       *자국*이며, 방금 검사한 사거리에 방금 검사한 쐐기만큼 그려집니다. 맞았든
+                       아니든 그립니다. 빗나간 휘두르기야말로 플레이어가 그 형태를 가장 봐야 할
+                       것입니다. */
+                    fx_spawn_arc(pl, "clawarc",
+                                 v3f(m->pos.x, m->pos.y + S->eye * 0.6f, m->pos.z),
+                                 v3f(-sinf(m->yaw), 0.0f, -cosf(m->yaw)),
+                                 A->reach, MON_SWING_CONE);
                 }
 
                 /* The cooldown starts after the LAST bolt, not after the first.
@@ -4383,9 +4412,20 @@ static void chase_caster(Pools *pl, const Level *l, const MonType *S, Enemy *m,
  *       같습니다. 이 모듈은 플레이어의 체력을 소유하지 않으며, 비워진 체력을 한 곳에서
  *       감지하는 것이 새로운 피해원이 플레이어를 죽이는 것을 잊지 않게 합니다.
  */
-static int release_swing(const MonAttack *A, Enemy *m, float dist)
+static int release_swing(const MonAttack *A, Enemy *m, float dist, float off)
 {
     if (dist > A->reach + 0.3f)
+        return 0;
+
+    /* AND IT HAS TO BE IN FRONT. Until this line a swing tested a distance and
+       nothing else, so getting behind a brute during its wind-up won an angle
+       that bought nothing. See ::MON_SWING_CONE, including the part about this
+       not being Quake's.
+       *그리고 앞에 있어야 합니다.* 이 줄이 생기기 전까지 휘두르기는 거리 하나만 검사했으므로,
+       준비동작 동안 브루트의 뒤로 돌아 들어가는 것은 아무것도 사 주지 않는 각도를 따내는
+       일이었습니다. ::MON_SWING_CONE을 참조하십시오. 이것이 Quake의 것이 아니라는 대목까지
+       포함해서입니다. */
+    if (off > (float)MON_SWING_CONE * 0.0174533f)
         return 0;
     play_at(m->pos, "eatt", 90);
     return A->damage;

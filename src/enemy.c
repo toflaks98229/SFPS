@@ -3659,27 +3659,70 @@ static void move_toward(const Pools *pl, const Level *l, const MonType *S,
        몬스터 검사에서 `m->pos.y`가 아니라 `f`인 이유는, 걸음이 서 있는 높이를 바꿀 수 있고
        묻고 있는 원기둥은 걸음 *뒤에* 차지할 그것이기 때문입니다. 다른 하나 옆의 턱으로 올라서는
        몬스터는 저 위에 자리가 있는지를 묻고 있지 이 아래를 묻고 있지 않습니다. */
-    float f;
+    /* IT RISES ONTO A FLOOR AND IT DOES NOT DESCEND ONTO ONE, which is the
+       difference between climbing a step and falling off a ledge.
+
+       This line was `m->pos.y = f` -- the destination's floor, whatever the
+       drop -- so a monster that walked off a cliff ARRIVED at the bottom in the
+       frame it left the top. Not a fall: a teleport, with no arc, no time in
+       the air and no sound of landing, and the deeper the drop the more it
+       looked like the creature had blinked out and back in.
+
+       ::monster_fall was already right and was never reached. It runs at the
+       bottom of ::enemy_update for anything ::holds_height says is not flying,
+       it applies ::PLAYER_GRAVITY, and it settles onto the floor when it gets
+       there. It could do none of that on a monster this function had already
+       put on the floor.
+
+       ::move_axis DOES IT THIS WAY AND ALWAYS HAS -- `if (floor_y > feet)`,
+       rise and nothing else, with the drop left to gravity in ::player_move.
+       The player has never teleported down a ledge. The two movers disagreed
+       about a rule only one of them had.
+
+       `ny` RATHER THAN THE ASSIGNMENT TWICE, because ::mon_clear wants the
+       height the monster will actually occupy: testing the cylinder at the
+       floor below would let a monster begin a fall through something standing
+       at the bottom of it.
+
+       *바닥 위로 올라서기는 하고 바닥으로 내려서지는 않습니다.* 그것이 계단을 오르는 것과
+       턱에서 떨어지는 것의 차이입니다.
+       이 줄은 `m->pos.y = f`였습니다. 낙차와 무관하게 목적지의 바닥이었으므로, 절벽에서 걸어
+       나간 몬스터는 꼭대기를 떠난 그 프레임에 바닥에 *도착했습니다*. 낙하가 아니라
+       순간이동입니다. 궤적도, 공중에 있는 시간도, 착지음도 없으며, 낙차가 깊을수록 그 생물이
+       깜빡이며 사라졌다 나타난 것처럼 보였습니다.
+       ::monster_fall은 이미 옳았고 한 번도 닿지 못했습니다. ::holds_height가 날지 않는다고 하는
+       모든 것에 대해 ::enemy_update 끝에서 돌고, ::PLAYER_GRAVITY를 적용하며, 도착하면 바닥에
+       앉힙니다. 이 함수가 이미 바닥에 올려놓은 몬스터에 대해서는 그중 무엇도 할 수 없었습니다.
+       *::move_axis는 언제나 이렇게 해 왔습니다.* `if (floor_y > feet)`, 올라서는 것뿐이고
+       낙하는 ::player_move의 중력에 맡깁니다. 플레이어는 턱을 순간이동해 내려간 적이 없습니다.
+       두 이동자가 한쪽만 가진 규칙에 대해 서로 다른 말을 하고 있었습니다.
+       *대입을 두 번 하지 않고 `ny`인* 이유는 ::mon_clear이 몬스터가 실제로 차지할 높이를 원하기
+       때문입니다. 아래 바닥에서 원기둥을 검사하면, 그 바닥에 서 있는 무언가를 관통하며 낙하를
+       시작할 수 있게 됩니다. */
+    float f, ny;
     if (foot_ok(l, S, m->pos.x + dx, m->pos.z + dz, m->pos.y, &f) &&
-        mon_clear(pl, S, m, player_eye, m->pos.x + dx, m->pos.z + dz, f))
+        (ny = f > m->pos.y ? f : m->pos.y,
+         mon_clear(pl, S, m, player_eye, m->pos.x + dx, m->pos.z + dz, ny)))
     {
         m->pos.x += dx;
         m->pos.z += dz;
-        m->pos.y = f;
+        m->pos.y = ny;
         return;
     }
     if (foot_ok(l, S, m->pos.x + dx, m->pos.z, m->pos.y, &f) &&
-        mon_clear(pl, S, m, player_eye, m->pos.x + dx, m->pos.z, f))
+        (ny = f > m->pos.y ? f : m->pos.y,
+         mon_clear(pl, S, m, player_eye, m->pos.x + dx, m->pos.z, ny)))
     {
         m->pos.x += dx;
-        m->pos.y = f;
+        m->pos.y = ny;
         return;
     }
     if (foot_ok(l, S, m->pos.x, m->pos.z + dz, m->pos.y, &f) &&
-        mon_clear(pl, S, m, player_eye, m->pos.x, m->pos.z + dz, f))
+        (ny = f > m->pos.y ? f : m->pos.y,
+         mon_clear(pl, S, m, player_eye, m->pos.x, m->pos.z + dz, ny)))
     {
         m->pos.z += dz;
-        m->pos.y = f;
+        m->pos.y = ny;
     }
 }
 

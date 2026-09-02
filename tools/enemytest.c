@@ -1057,6 +1057,78 @@ static void check_behind(void) {
     ok(behind == 0, "and one swinging at its own back does not");
 }
 
+/* --- a monster walks off a ledge; it does not blink to the bottom ----------
+ *
+ * ::move_toward SET `m->pos.y` TO THE DESTINATION'S FLOOR, whatever the drop,
+ * so a monster that walked off a cliff arrived at the bottom in the frame it
+ * left the top. ::monster_fall was already right and never reached: it cannot
+ * apply gravity to something already standing on the floor.
+ *
+ * THE PER-FRAME DROP IS THE MEASUREMENT, not the total. Both a teleport and a
+ * fall end at the same height and take the monster the same distance; what
+ * separates them is that a fall spends frames in the air and a teleport spends
+ * one. The largest single-frame drop is bounded by gravity from rest -- half
+ * `a * dt^2` on the first frame, growing after -- and it can never be the whole
+ * cliff.
+ *
+ * BUILT AS A CLIFF AND NOT AS STAIRS. `mon_step` is what a monster may climb,
+ * and the stair fixture is deliberately inside it; this one is four metres,
+ * far outside anything a step rule would allow, so the only way down is down.
+ *
+ * *::move_toward가 낙차와 무관하게 `m->pos.y`를 목적지 바닥으로 놓았으므로*, 절벽에서 걸어 나간
+ * 몬스터는 꼭대기를 떠난 프레임에 바닥에 도착했습니다. ::monster_fall은 이미 옳았고 한 번도
+ * 닿지 못했습니다. 이미 바닥에 선 것에 중력을 적용할 수는 없습니다.
+ * *재는 것은 총 낙차가 아니라 프레임당 낙차입니다.* 순간이동과 낙하는 같은 높이에서 끝나고 같은
+ * 거리를 데려갑니다. 둘을 가르는 것은 낙하가 공중에서 여러 프레임을 쓰고 순간이동은 한 프레임을
+ * 쓴다는 것입니다. 한 프레임의 최대 낙차는 정지에서 시작하는 중력으로 묶이며, 절벽 전체일 수는
+ * 없습니다.
+ * *계단이 아니라 절벽으로 짓습니다.* ::mon_step은 몬스터가 오를 수 있는 높이이고 계단 픽스처는
+ * 일부러 그 안입니다. 이것은 4미터로 어떤 걸음 규칙도 허용하지 않는 밖이므로, 내려가는 길은
+ * 내려가는 것뿐입니다. */
+static void check_ledge(void) {
+    printf("\na monster walks off a ledge\n");
+
+    const float TOP = 4.0f;
+
+    Level z = {0};
+    STAIR = z;
+    stair_band(-14.0f, -2.0f, TOP);      /* the shelf it starts on */
+    stair_band(-2.0f,  40.0f, 0.0f);     /* the floor it has to fall to */
+
+    Entity *e = &STAIR.ents[STAIR.n_ents++];
+    const char *nm = mon_stats(MON_BRUTE)->name;
+    for (int i = 0; nm[i]; i++) e->kind[i] = nm[i];
+    e->x = -800; e->z = 0; e->y = (short)(TOP * 100.0f);
+
+    enemy_reset(&g_pools);
+    g_pools.enemy.rng = 1u;
+    enemy_spawn_level(&g_pools, &STAIR);
+    if (enemy_count(&g_pools) != 1) { ok(0, "the brute stands on the shelf"); return; }
+    ok(1, "the brute stands on the shelf");
+
+    /* The player waits at the bottom, well out along the low floor. */
+    v3 player = v3f(12.0f, PLAYER_EYE, 0.0f);
+
+    float prev = enemy_at(&g_pools, 0)->pos.y;
+    float worst = 0.0f, low = prev;
+    int airborne = 0;
+    for (int f = 0; f < 60 * 12; f++) {
+        enemy_update(&g_pools, &STAIR, player, DT);
+        float y = enemy_at(&g_pools, 0)->pos.y;
+        float drop = prev - y;
+        if (drop > 0.0005f) { airborne++; if (drop > worst) worst = drop; }
+        if (y < low) low = y;
+        prev = y;
+    }
+    printf("      fell %.2fm over %d frame(s); biggest single frame %.3fm\n",
+           (double)(TOP - low), airborne, (double)worst);
+
+    ok(low < 0.2f, "it gets to the bottom");
+    ok(airborne >= 8, "and spends frames in the air rather than one");
+    okf(worst < TOP * 0.5f, "no single frame covers half the cliff",
+        worst, TOP * 0.5f);
+}
+
 int main(void) {
     printf("enemytest\n\n");
     build();
@@ -1972,6 +2044,7 @@ int main(void) {
     check_swing_step();
     check_charge();
     check_behind();
+    check_ledge();
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall enemy checks passed\n", fails);
     return fails != 0;

@@ -49,6 +49,7 @@
  */
 #include <stdio.h>
 #include <math.h>
+#include <string.h>
 #include "world.h"
 #include "level.h"
 #include "brush.h"
@@ -127,6 +128,78 @@ int main(void) {
     printf("  face area, m2:\n");
     for (int i = 0; i < 6; i++)
         printf("    %-8s %6d\n", BAND[i], hist[i]);
+
+    /* WHERE THE ART SAYS A LAMP IS.
+
+       No shipped map has a `light` entity -- the importer drops the classname,
+       so a converted map arrives with its author's lighting design deleted.
+       What survives the conversion is the TEXTURE: Psychofuge draws its lamps
+       with `med_tmpl_lit3`, and a face wearing it is the author pointing at a
+       spot and saying a light hangs here. That is the argument brush_is_lava
+       makes as well -- Quake put the fact in the surface rather than in an
+       entity, and a converter that reads entities brings it across as paint.
+
+       PRINTED RATHER THAN PLACED. These are candidate origins to paste into the
+       .map as `light_day`, not lamps this tool creates: the engine reads
+       entities and knows nothing about lamp textures, which keeps the rule out
+       of the shipping binary and keeps the placement editable in TrenchBroom.
+       The count is the reason it is worth printing at all -- twenty candidates
+       against ::LVL_LAMP_MAX's three is the ratio the README's thirty-two-
+       against-eight failure was made of, so whoever pastes these has to choose.
+
+       *예술이 등이 있다고 말하는 곳입니다.* 출하되는 어떤 맵에도 `light` 엔티티가 없습니다.
+       임포터가 그 classname을 버리므로, 변환된 맵은 제작자의 조명 설계가 지워진 채 도착합니다.
+       변환에서 살아남는 것은 *텍스처*입니다. 그것을 입은 면은 제작자가 한 지점을 가리키며
+       여기에 등이 걸린다고 말하는 것입니다. brush_is_lava가 펴는 것과 같은 논증입니다.
+       *놓는 것이 아니라 출력합니다.* .map에 `light_day`로 붙여 넣을 후보 원점이며, 이 도구가
+       만드는 등이 아닙니다. 엔진은 엔티티를 읽고 램프 텍스처를 모르며, 그래야 규칙이 출하
+       바이너리 밖에 남고 배치가 TrenchBroom에서 편집 가능한 채로 남습니다. 개수가 이것을
+       출력할 값어치의 이유입니다. 후보 스물 대 ::LVL_LAMP_MAX의 셋은 README의 실패가
+       만들어진 그 비율이므로, 붙여 넣는 쪽이 골라야 합니다. */
+    {
+        static const char LAMPTEX[] = "med_tmpl_lit3";
+        /* Out of the wall by half a metre, so the lamp is in the room rather
+           than inside the solid it is drawn on. A light at the surface itself
+           lights the face it sits on and little else.
+           벽에서 0.5m 밖으로. 등이 그려진 고체 안이 아니라 방 안에 있도록 합니다. 표면
+           자체에 놓인 빛은 자기가 앉은 면을 밝히고 그 밖은 거의 밝히지 못합니다. */
+        const float STANDOFF = 0.5f;
+        int n_lamp = 0;
+
+        printf("\n  %s faces, as light_day origins in map units:\n", LAMPTEX);
+        for (int bi = 0; bi < m->n_brushes; bi++) {
+            const Brush *b = &m->brushes[bi];
+            for (int fi = 0; fi < b->n_faces; fi++) {
+                const BrushFace *f = &m->faces[b->first_face + fi];
+                if (strcmp(f->tex, LAMPTEX) != 0) continue;
+
+                v3 poly[BR_MAX_POLY];
+                int n = brush_face_poly(m, bi, fi, poly, BR_MAX_POLY);
+                if (n < 3) continue;
+
+                v3 c = v3f(0.0f, 0.0f, 0.0f);
+                for (int i = 0; i < n; i++) c = v3add(c, poly[i]);
+                c = v3scale(c, 1.0f / (float)n);
+                c = v3add(c, v3scale(f->normal, STANDOFF));
+
+                /* Engine metres back to map units. brush.c's map_pos is
+                   (x, z, -y) scaled by ::BRUSH_UNIT and this is its inverse,
+                   written out rather than shared because a reader checking one
+                   against the other is the only thing keeping them in step.
+                   엔진 미터를 맵 단위로 되돌립니다. brush.c의 map_pos의 역이며, 공유하는
+                   대신 적어 두는 이유는 둘을 맞대어 보는 독자만이 둘의 발을 맞추기
+                   때문입니다. */
+                printf("    \"origin\" \"%.0f %.0f %.0f\"   %5.1f m2\n",
+                       (double)( c.x / BRUSH_UNIT),
+                       (double)(-c.z / BRUSH_UNIT),
+                       (double)( c.y / BRUSH_UNIT),
+                       (double)poly_area(poly, n));
+                n_lamp++;
+            }
+        }
+        printf("    %d lamp face(s), %d lit at once (LVL_LAMP_MAX)\n",
+               n_lamp, LVL_LAMP_MAX);
+    }
 
     /* WHAT A PATCH SIZE WOULD COST. A face cut into patches of side L needs
        about area/L^2 quads, and a quad is 6 vertices the way brush_geometry

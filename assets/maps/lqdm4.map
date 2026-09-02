@@ -9576,3 +9576,67 @@
 "classname" "info_ward_air"
 "origin" "640 0 -192"
 }
+{
+"classname" "light_day"
+"origin" "-448 -448 -304"
+"light" "400"
+"_color" "255 236 170"
+"power" "100"
+"flicker" "35"
+}
+{
+"classname" "light_day"
+"origin" "872 0 -264"
+"light" "400"
+"_color" "255 236 170"
+"power" "100"
+"flicker" "35"
+}
+{
+"classname" "light_day"
+"origin" "-104 400 -264"
+"light" "400"
+"_color" "255 236 170"
+"power" "100"
+"flicker" "35"
+}
+{
+"classname" "light_day"
+"origin" "0 -184 -32"
+"light" "400"
+"_color" "255 236 170"
+"power" "100"
+"flicker" "35"
+}
+{
+"classname" "light_day"
+"origin" "416 -216 -288"
+"light" "400"
+"_color" "255 236 170"
+"power" "100"
+"flicker" "35"
+}
+{
+"classname" "light_day"
+"origin" "-208 200 -520"
+"light" "400"
+"_color" "255 236 170"
+"power" "100"
+"flicker" "35"
+}
+{
+"classname" "light_day"
+"origin" "640 0 -16"
+"light" "400"
+"_color" "255 236 170"
+"power" "100"
+"flicker" "35"
+}
+{
+"classname" "light_day"
+"origin" "0 -376 -288"
+"light" "400"
+"_color" "255 236 170"
+"power" "100"
+"flicker" "35"
+}

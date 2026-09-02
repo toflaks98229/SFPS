@@ -626,15 +626,20 @@ int main(void) {
        occupy their slots", because the bake sampled them at the corners of
        faces metres across and they had moved to the shader's loop. Then they
        were switched off in the loop as well -- and then deleted from the level
-       files, so no shipped map declares one at all.
+       files, so for two revisions no shipped map declared one at all.
 
-       A CHECK THAT ONLY READS THE SHIPPED LEVELS WOULD NOW PASS FOR THE WRONG
-       REASON. Zero lamps in, zero slots out, and it would go on passing if
-       somebody wired ::Level::lights straight back into ::scene_lights. So
-       this puts the lamps in itself. Eight of them, on top of the camera,
-       reaching twenty metres -- placed where they would take every slot and
-       light every wall in sight if anything read them at all -- and requires
-       the count to stay put and the frame not to change by a single pixel.
+       IT HAS ITS SUBJECT BACK. The arena carries eight `light_day` again, put
+       where its own art draws a lamp, so the first claim is no longer that
+       nothing declares one -- it is that the shipped map's lamps light it and
+       that the cap holds. The emptiness this check used to guard is gone and
+       what stood in its place is the thing now being measured.
+
+       IT STILL PUTS LAMPS IN ITSELF, for the reason it always did: a check that
+       reads only what the map declares cannot tell a bare `light` staying dark
+       from a bare `light` nobody looked at. So eight more go on top of the
+       camera, reaching twenty metres -- placed where they would take every slot
+       and light every wall in sight if anything read them at all -- and the
+       count must stay put and the frame must not change by a single pixel.
 
        The other half of the same fact -- that they do not reach a VERTEX
        either -- is leveltest's and tracetest's, because this file has no
@@ -663,10 +668,62 @@ int main(void) {
 
     clear_state(&w);
     unsigned bare = frame_hash(&w, &scene, 0);
-    printf("      the level declares %d lamps; the shader was given %d\n",
-           w.level.n_lights, rd_light_count());
-    ok(w.level.n_lights == 0, "no shipped level declares a lamp any more");
-    ok(rd_light_count() == 0, "and nothing occupies a light slot");
+    /* `room` IS WHAT THE LEVEL COSTS BEFORE ANYTHING HAPPENS IN IT, and every
+       event check below counts from it rather than from zero. Those checks
+       used to read `== 1` and `== 0` against an arena that declared no lamp;
+       an arena with lamps in it makes an absolute count a statement about the
+       map rather than about the event, and the claim they are making is that
+       a grenade adds ONE.
+       `room`은 그 안에서 아무 일도 일어나지 않았을 때 레벨이 드는 비용이며, 아래의 모든 사건
+       검사는 0이 아니라 그것에서부터 셉니다. 그 검사들은 등을 선언하지 않는 투기장에 대해
+       `== 1`과 `== 0`이었습니다. 등이 있는 투기장에서 절대 개수는 사건이 아니라 맵에 대한
+       진술이 되며, 그 검사들이 하려는 주장은 유탄이 *하나를* 더한다는 것입니다. */
+    int declared = w.level.n_lights, room = rd_light_count();
+    printf("      the shipped level declares %d lamp(s); the shader was given %d\n",
+           declared, room);
+    ok(declared > 0, "the shipped level declares a lamp again");
+    ok(room > 0, "and the shader is given one");
+    ok(room <= LVL_LAMP_MAX, "and no more of them than LVL_LAMP_MAX");
+
+    /* THE MAP MUST NOT CROWD, which is the property the cap makes survivable
+       rather than the property it provides. Nearest-three churns when there
+       are more than three to choose between and cannot churn when there are
+       not, so a map that never offers a fourth never exercises the sort at
+       all. This walks the markers the map puts a player at -- item drops, ward
+       posts, the start -- and asks how many lamps reach each one. The arena
+       draws twenty lamp faces and at the shipped reach some markers have seven
+       of them in range; the eight that were placed leave no marker with more
+       than three, which is the whole reason the count is eight.
+       *맵은 붐비지 않아야 하며*, 그것은 상한이 *제공하는* 성질이 아니라 상한이 *견딜 만하게
+       만드는* 성질입니다. 가장 가까운 셋은 고를 것이 셋보다 많을 때 요동치고 많지 않으면
+       요동칠 수 없으므로, 넷째를 내밀지 않는 맵은 정렬을 아예 쓰지 않습니다. 맵이 플레이어를
+       두는 표식들을 걸으며 각각에 몇 개의 등이 닿는지 묻습니다. 투기장은 램프 면 스무 개를
+       그리며 출하 도달거리에서 어떤 표식에는 그중 일곱이 들어옵니다. 놓인 여덟은 어떤
+       표식에도 셋을 넘기지 않으며, 그것이 개수가 여덟인 이유의 전부입니다. */
+    int worst = 0, worst_at = -1;
+    for (int i = 0; i < w.level.n_ents; i++) {
+        const Entity *E = &w.level.ents[i];
+        int n = 0;
+        for (int j = 0; j < w.level.n_lights; j++) {
+            const Light *L = &w.level.lights[j];
+            float dx = (float)(E->x - L->x), dy = (float)(E->y - L->y),
+                  dz = (float)(E->z - L->z);
+            if (dx*dx + dy*dy + dz*dz < (float)L->radius * (float)L->radius) n++;
+        }
+        if (n > worst) { worst = n; worst_at = i; }
+    }
+    printf("      %d marker(s); the most lamps reaching one is %d (%s)\n",
+           w.level.n_ents, worst,
+           worst_at >= 0 ? w.level.ents[worst_at].kind : "none");
+    ok(worst <= LVL_LAMP_MAX,
+       "no marker has more lamps in reach than the cap can hold");
+
+    /* Saved rather than cleared afterwards: the arena's own eight are lit and
+       have to still be lit when this check hands the world on.
+       뒤에 지우는 대신 저장합니다. 투기장 자신의 여덟은 켜져 있으며, 이 검사가 월드를
+       넘겨줄 때에도 켜져 있어야 합니다. */
+    short was[LVL_MAX_LIGHTS];
+    for (int i = 0; i < w.level.n_lights; i++) was[i] = w.level.lights[i].lit;
 
     int saved = w.level.n_lights;
     for (int i = 0; i < RD_MAX_LIGHTS && w.level.n_lights < LVL_MAX_LIGHTS; i++) {
@@ -677,11 +734,12 @@ int main(void) {
         L->radius = 2000;              /* twenty metres: would light plenty */
         L->r = L->g = L->b = 255;
         L->power = 100;
+        L->lit = 0;                    /* a bare `light`, which is the point */
     }
     unsigned lamped = frame_hash(&w, &scene, 0);
-    printf("      %d lamps placed on the camera; the shader was given %d\n",
-           w.level.n_lights, rd_light_count());
-    ok(rd_light_count() == 0, "lamps on top of the camera still take no slot");
+    printf("      %d bare lamp(s) placed on the camera; the shader was given %d\n",
+           w.level.n_lights - saved, rd_light_count());
+    ok(rd_light_count() == room, "bare lamps on top of the camera take no slot");
     ok(lamped == bare, "and change no pixel of the frame");
 
     /* --- AND A PRESET DOES, WHICH IS THE OTHER HALF ----------------------
@@ -717,7 +775,7 @@ int main(void) {
     ok(rd_light_count() <= LVL_LAMP_MAX,
        "and no more of them than LVL_LAMP_MAX, whatever the map declares");
     ok(preset != bare, "and it changes the frame");
-    for (int i = 0; i < w.level.n_lights; i++) w.level.lights[i].lit = 0;
+    for (int i = 0; i < saved; i++) w.level.lights[i].lit = was[i];
 
     w.level.n_lights = saved;
 
@@ -748,7 +806,7 @@ int main(void) {
     frame_hash(&w, &scene, 0);
     printf("      with one projectile in the air the shader was given %d\n",
            rd_light_count());
-    ok(rd_light_count() == 1, "a projectile in flight does occupy one");
+    ok(rd_light_count() == room + 1, "a projectile in flight does occupy one");
 
     /* --- and the light it occupies the slot with is ITS OWN COLOUR --------
      *
@@ -1166,7 +1224,8 @@ int main(void) {
     clear_state(&w);
     proj_reset(&w.pools);
     frame_hash(&w, &scene, 0);
-    ok(rd_light_count() == 0, "and the set empties again once it is gone");
+    ok(rd_light_count() == room,
+       "and the set is back to the room's own lamps once it is gone");
 
     /* --- 6a2. and the explosion lights what the projectile stopped lighting
        THE CHECK ABOVE IS EXACTLY THE FAULT THIS ONE IS ABOUT. It puts a
@@ -1199,7 +1258,7 @@ int main(void) {
     frame_hash(&w, &scene, 0);
     printf("      with one detonation and no projectile the shader was given %d\n",
            rd_light_count());
-    ok(rd_light_count() == 1,
+    ok(rd_light_count() == room + 1,
        "a blast lights the frame after the round that made it is gone");
 
     /* Twice its own life, so nothing is left to argue about. ::proj_reset
@@ -1210,7 +1269,7 @@ int main(void) {
        *끝나서* 반납된다는 것을 증명합니다. */
     proj_flash_update(&w.pools, PROJ_FLASH_TIME * 2.0f);
     frame_hash(&w, &scene, 0);
-    ok(rd_light_count() == 0, "and the room is dark again once it is over");
+    ok(rd_light_count() == room, "and the room is its own lamps again once it is over");
 
     /* --- 6b. a bolt is coloured by whoever cast it ------------------------
        ONE FIELD, TWO READERS, AND NEITHER OF THEM IS OBLIGED TO AGREE.
@@ -1262,7 +1321,7 @@ int main(void) {
 
         sh->type = MON_CASTER;
         unsigned as_caster = frame_hash(&w, &scene, 0);
-        ok(rd_light_count() == 1, "the hand-placed bolt lights the frame");
+        ok(rd_light_count() == room + 1, "the hand-placed bolt lights the frame");
 
         sh->type = MON_MAW;
         unsigned as_maw = frame_hash(&w, &scene, 0);
@@ -1274,7 +1333,7 @@ int main(void) {
         sh->life   = 0.0f;
     }
     frame_hash(&w, &scene, 0);
-    ok(rd_light_count() == 0, "the bolt is gone again");
+    ok(rd_light_count() == room, "the bolt is gone again");
 
     /* --- 7. what the boundary counted -----------------------------------
        Last, so it covers every frame above. A non-zero delta means one of

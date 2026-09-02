@@ -175,13 +175,15 @@ e exit 0 -1200
 
 # Point lights: light <x> <y> <z> <radius> <r> <g> <b> <power>
 #
-# NO LEVEL DECLARES ONE ANY MORE, and the four that used to sit here are why
-# the line is still documented. The parser reads `light`, ::Level keeps room
-# for sixty-four of them, and nothing lights anything with them -- so a lamp
-# written here is eight numbers that load and then sit still.
+# A LAMP WRITTEN HERE IS LIT, which is not true of a brush level's `light`.
+# The difference is who writes the line. The importer emits `light` for every
+# Quake lamp it converts -- thirty-two in one room on the map this engine
+# learned from -- so there it stays dark until a mapper types `light_` in front
+# of it. Nothing emits THIS line. It is typed by a person, one lamp at a time.
 #
-# WHAT HAPPENED TO THEM. A lamp was applied two ways and neither one looked
-# right on the maps this game ships:
+# WHY THEY WERE TAKEN OUT, because the four below are the ones that were taken.
+# A lamp was applied two ways and neither looked right on the maps this game
+# ships:
 #
 #   - COMPILED INTO THE VERTICES, it was sampled at the corners of each face
 #     and smeared across everything between them. On a brush level whose walls
@@ -191,15 +193,26 @@ e exit 0 -1200
 #     eight nearest fit -- so a big room re-lit itself as you walked through
 #     it, and nothing cast a shadow.
 #
-# So the rooms are lit by the engine's own ambient level plus the things you
-# and the monsters put in the air: muzzle flashes, grenades, plasma, bolts.
-# Bright ROOMS are a shader constant (AMBIENT in src/render.c); bright MOMENTS
-# are what gets fired. src/scene.c's note above MoveLight is the whole account.
+# WHAT CHANGED IS THE COUNT. LVL_LAMP_MAX offers the nearest three and offers
+# them last, after the muzzle flashes and the grenades have taken theirs, so a
+# lamp can no longer crowd out the things that happen. Four lamps spread across
+# a room this size never put more than two within reach of one another, so the
+# nearest-three sort has nothing to sort and cannot churn. Nothing casts a
+# shadow still; that is not fixed, it is made small enough to place around.
 #
-# The syntax stays documented rather than deleted because the parser still
-# accepts it and a format that silently drops a word it can read is worse than
-# one that reads a word nothing uses. If lamps ever come back, this is the line
-# they come back as.
+# Rooms are still mostly lit by the engine's own ambient level plus what you
+# and the monsters put in the air. Bright ROOMS are a shader constant (AMBIENT
+# in src/render.c); bright MOMENTS are what gets fired. src/scene.c's note
+# above MoveLight is the whole account.
+#
+# NO PLAYER REACHES THIS LEVEL as the game currently starts -- world.h says
+# "the old campaign levels still load by name; nothing reaches them by walking
+# forward" -- so these four are for whoever loads it by name, and for the day
+# the chain has an entrance again.
+light     0  380 -1100  900  255 190 110  115   # warm lamp over the exit
+light  -1500 300   200  800  120 170 255   90   # cold fill in the west corner
+light   1400 300   900  750  120 170 255   85   # and its counterpart east
+light      0 300  -400  600  255 140  70   70   # low ember at the caster's post
 #
 # *이제 어떤 레벨도 이것을 선언하지 않으며*, 이곳에 있던 네 개가 이 줄이 여전히 문서화되어
 # 있는 이유입니다. 파서는 `light`를 읽고 ::Level은 예순넷을 담을 자리를 두지만, 그것으로

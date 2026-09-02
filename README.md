@@ -22,7 +22,7 @@ Models, materials, sounds and levels are all authored as text and hot-reload
 into the running game.
 
 ```
-1,048,064 / 1,474,560 bytes   (71.08% used)
+1,050,112 / 1,474,560 bytes   (71.22% used)
 ```
 
 ## Build
@@ -2082,14 +2082,12 @@ hands its slot to another lamp two steps later. Two arrangements, both wrong in
 different ways, is a sign the thing being placed is wrong rather than its
 placement.
 
-So `::Level::lights` is parsed, stored, and **read by nothing** — and then the
-lamps came out of the maps as well. Solstice's thirty-two `light` entities are
-gone from `lqdm1.map`, arena's four `light` lines are gone from `levels.txt`,
-and no shipped level declares one. The parser still knows the word, because a
+So `::Level::lights` was parsed, stored, and **read by nothing** — and then the
+lamps came out of the maps as well. Solstice's thirty-two `light` entities went
+from `lqdm1.map`, arena's four `light` lines went from `levels.txt`, and for two
+revisions no shipped level declared one. The parser kept the word, because a
 format that silently drops a word it can read is worse than one that reads a
-word nothing uses; `levels.txt` documents the line and says outright that
-writing one changes nothing you can see. What lights a room instead is two
-things:
+word nothing uses. What lit a room instead was two things:
 
 **The floor came up.** `AMBIENT` was 0.32, chosen when the lamps did the work
 and the floor only had to be dark rather than black. It is **0.45**, and the
@@ -2104,6 +2102,50 @@ ambient and nothing else has to carry the whole moment. The muzzle is **1.15** �
 over 1.0 deliberately, since `lum` clamps before it bands and a shotgun going
 off in your hands *should* blow out. Monster bolts are 1.00, the grenade 0.95,
 the shrine 0.80.
+
+### The lamps came back, and what changed was the count
+
+Nothing above is retracted. The two failures were real, the measurements that
+found them stand, and the mechanism is the same one that failed: the same
+`(1 - d/r)²` in the same fragment loop, competing for the same eight slots,
+casting the same absence of shadow. **`LVL_LAMP_MAX` is 3.**
+
+That number is the whole change. Eight slots against thirty-two candidates is
+what made a room re-light itself — the nearest eight kept changing while the
+player walked — and three cannot churn the way thirty-two did, because a lamp
+leaves the set when the player has walked past it, which is when its own falloff
+had taken it out anyway. They are offered **last**, after the muzzle flash and
+the grenades have taken theirs, so a lamp can no longer crowd out an event.
+
+**A bare `light` is still dark, and that is not a leftover.** It is the classname
+the importer writes for every Quake lamp it converts, so a re-imported map brings
+its thirty-two back as the inert things they were and no shipped level moves. A
+`light_*` preset lights — `light_day` is the one in the FGD — and the underscore
+is required rather than a bare prefix, because a classname turning into a lamp on
+its first syllable (`lightning_bolt`) is the kind of surprise found in a dark
+room six months later. A `light` line in `levels.txt` lights too, by the same
+rule read the other way: nothing generates that line, a person types it.
+
+**The shadow problem is not solved.** What is solved is the count. Three lamps
+placed by hand in a room somebody chose is a case small enough to place around;
+thirty-two arriving with a conversion is not.
+
+**Where they went is what the map already said.** No converted map has a `light`
+entity — the importer drops the classname, so Psychofuge arrived with its
+author's lighting design deleted. What survived the conversion is the *texture*:
+the arena draws its lamps with `med_tmpl_lit3`, and a face wearing it is the
+author pointing at a spot. `lightprobe` prints those faces as candidate origins
+(21 of them, 17 fixtures once the multi-face ones are merged), the same argument
+`brush_is_lava` makes — Quake put the fact in the surface rather than in an
+entity.
+
+**Eight were placed, and the number is a measurement rather than a taste.** At
+the shipped reach of 400 units, all seventeen put **seven** lamps within reach of
+some of the places the map stands a player, and 44% of those places exceed the
+cap. The eight leave **no marker with more than three** — so the nearest-three
+sort never has a fourth to choose between and cannot churn at all. `scenetest`
+asserts that of the brush arena and `leveltest` asserts it of the text one; the
+cap makes crowding survivable, and not crowding is what makes it a non-event.
 
 **Colour stopped being flavour and became the legend.** When lamps lit the
 room, a light in the air was one source among many and its hue was decoration.

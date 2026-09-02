@@ -798,6 +798,57 @@ int main(void) {
     ok(l.n_ents   >= 1,  "and at least one entity");
     ok(l.sectors[0].n >= 3, "the first sector is a real polygon");
 
+    /* --- the lamps this level declares are lit, and do not crowd -----------
+
+       A TEXT `light` LINE IS LIT WHERE A BRUSH ONE IS NOT, and only a test
+       says so: both go through the same ::Light and differ by one field that
+       nothing in the geometry or the bake reads. The rule is about who writes
+       the line -- the importer emits `light` by the dozen, a person types this
+       one -- so it cannot be inferred from anything in the file, and if the
+       flag were dropped the four lamps below would load, count, and light
+       nothing, exactly as they did for the two revisions they were deleted.
+
+       AND THE COUNT IS THE OTHER HALF. ::LVL_LAMP_MAX offers three; the sort
+       that picks them can only churn when there is a fourth to pick between,
+       so the claim worth holding is that no place the map puts a player has
+       more lamps in reach than the cap can hold. scenetest makes the same
+       claim about the brush arena. Same rule, both level formats, because the
+       failure it guards against does not care which parser built the room.
+
+       *텍스트 `light` 줄은 켜져 있고 브러시의 것은 아니며*, 그것을 말하는 것은 검사뿐입니다.
+       둘은 같은 ::Light를 지나며 기하와 베이크의 무엇도 읽지 않는 필드 하나로 갈립니다.
+       규칙은 그 줄을 누가 쓰는가에 대한 것이므로 파일 안의 무엇으로도 추론할 수 없고,
+       플래그가 빠지면 아래 네 등은 불러들여지고 세어지고 아무것도 밝히지 않습니다. 삭제되어
+       있던 두 판 동안 정확히 그랬던 대로입니다.
+       *그리고 개수가 나머지 절반입니다.* ::LVL_LAMP_MAX는 셋을 내놓으며, 그것을 고르는
+       정렬은 고를 넷째가 있을 때만 요동칩니다. 그러므로 지킬 값어치가 있는 주장은 맵이
+       플레이어를 두는 어느 자리에도 상한이 담을 수 있는 것보다 많은 등이 닿지 않는다는
+       것입니다. scenetest가 브러시 투기장에 대해 같은 주장을 합니다. 같은 규칙, 두 형식.
+       이것이 막는 실패는 어느 파서가 방을 지었는지 신경 쓰지 않기 때문입니다. */
+    {
+        int unlit = 0;
+        for (int i = 0; i < l.n_lights; i++) if (!l.lights[i].lit) unlit++;
+
+        int worst = 0;
+        for (int i = 0; i < l.n_ents; i++) {
+            int n = 0;
+            for (int j = 0; j < l.n_lights; j++) {
+                const Light *L = &l.lights[j];
+                float dx = (float)(l.ents[i].x - L->x),
+                      dy = (float)(l.ents[i].y - L->y),
+                      dz = (float)(l.ents[i].z - L->z);
+                if (dx*dx + dy*dy + dz*dz < (float)L->radius * (float)L->radius) n++;
+            }
+            if (n > worst) worst = n;
+        }
+        printf("      %d lamp(s), %d of them unlit; the most reaching one marker is %d\n",
+               l.n_lights, unlit, worst);
+        ok(l.n_lights > 0, "the level declares a lamp");
+        ok(unlit == 0, "and a text `light` line is lit, unlike a brush one");
+        ok(worst <= LVL_LAMP_MAX,
+           "and no marker has more of them in reach than the cap can hold");
+    }
+
     /* --- geometry --- */
     MeshBuf b;
     mb_init(&b, 32768);
@@ -1299,44 +1350,37 @@ int main(void) {
             (float)disagreed, 0.0f);
     }
 
-    /* --- no shipped level declares a point light any more ------------------
-       THIS CHECK USED TO READ ARENA'S FOUR, and what it proved was a parser
-       property: a `light` line is eight integers, the reader has to consume
-       exactly those eight, and a miscount leaves it mid-line so every
-       declaration after it is read as garbage -- silently, because the level
-       still loads and is merely lit wrongly.
+    /* --- the eight integers of a `light` line ------------------------------
+       THIS CHECK READ ARENA'S FOUR, THEN LOST THEM, AND HAS THEM BACK. What it
+       proves is a parser property: a `light` line is eight integers, the
+       reader has to consume exactly those eight, and a miscount leaves it
+       mid-line so every declaration after it is read as garbage -- silently,
+       because the level still loads and is merely lit wrongly.
 
-       The lamps were deleted from the levels, so that check has no input and
-       cannot be written honestly. What replaces it is the fact that took its
-       place: EVERY SHIPPED LEVEL DECLARES ZERO. That is worth asserting rather
-       than assuming, because "no lamp lights anything" is now a property of
-       the DATA as well as of the engine, and a lamp that came back into a
-       level file by accident would light nothing and say nothing.
+       While the lamps were deleted the check had no input, and what stood in
+       its place was the weaker fact that every shipped level declared zero.
+       Its own note said what to do if they ever came back: "a fixture for that
+       line is the first thing to write back". This is that.
 
-       WHAT IS NO LONGER COVERED, said out loud rather than left to be found:
-       the eight-integer parse itself. `light` is still a word this parser
-       reads, and nothing exercises it. tools/tracetest.c still covers the
-       other half -- Quake `light` entities out of a .map, on the atrium
-       fixture -- so the import path is watched and the text path is not. If a
-       lamp is ever wanted again, a fixture for that line is the first thing to
-       write back.
+       THE LAST LAMP IS THE WITNESS. Reading seven integers instead of eight, or
+       nine, does not go wrong where it happens -- it goes wrong afterwards, so
+       the first lamp can be perfect while the fourth is nonsense. All four are
+       compared field for field and the fourth is the one that would fail.
 
-       *이 검사는 arena의 넷을 읽고 있었고*, 증명하던 것은 파서의 성질이었습니다. `light`
-       줄은 정수 여덟 개이고 읽기는 정확히 그 여덟 개를 소비해야 하며, 개수를 잘못 세면 줄
-       중간에 남아 이후의 모든 선언이 쓰레기 값으로 읽힙니다. 조용히 그렇습니다. 레벨은
-       여전히 로드되고 다만 잘못 조명될 뿐이기 때문입니다.
+       AND THE ENTITIES AROUND THEM. A parse that went wrong in the lamp block
+       would eat the declarations either side of it, which is why the count of
+       entities is still asserted here rather than left to the checks above.
 
-       등이 레벨에서 삭제되었으므로 그 검사에는 입력이 없고 정직하게 쓸 수 없습니다. 그
-       자리를 대신하는 것은 그 자리를 차지한 사실입니다. *출하되는 모든 레벨이 0을
-       선언합니다.* 가정하지 않고 단언할 가치가 있습니다. "어떤 등도 아무것도 밝히지 않는다"는
-       이제 엔진의 성질일 뿐 아니라 *데이터*의 성질이기도 하고, 실수로 레벨 파일에 되돌아온
-       등은 아무것도 밝히지 않으면서 아무 말도 하지 않을 것이기 때문입니다.
-
-       *더 이상 보장되지 않는 것*을, 나중에 발견되도록 두지 않고 밝혀 둡니다. 정수 여덟 개의
-       파싱 그 자체입니다. `light`는 여전히 이 파서가 읽는 단어이고, 그것을 실행하는 것이
-       없습니다. tools/tracetest.c는 나머지 절반(atrium 픽스처의 .map에서 나오는 Quake `light`
-       엔티티)을 여전히 검사하므로 임포트 경로는 지켜지고 텍스트 경로는 지켜지지 않습니다.
-       등이 다시 필요해진다면 그 줄을 위한 픽스처가 가장 먼저 쓰여야 할 것입니다. */
+       *이 검사는 arena의 넷을 읽었고, 그것을 잃었고, 되찾았습니다.* 증명하는 것은 파서의
+       성질입니다. `light` 줄은 정수 여덟 개이고 읽기는 정확히 그 여덟 개를 소비해야 하며,
+       개수를 잘못 세면 줄 중간에 남아 이후의 모든 선언이 쓰레기 값으로 읽힙니다. 조용히
+       그렇습니다. 레벨은 여전히 로드되고 다만 잘못 조명될 뿐이기 때문입니다.
+       등이 삭제되어 있는 동안 이 검사에는 입력이 없었고, 그 자리에는 모든 출하 레벨이 0을
+       선언한다는 더 약한 사실이 있었습니다. 그 주석 자신이 등이 돌아오면 무엇을 할지 적어
+       두었습니다. "그 줄을 위한 픽스처가 가장 먼저 쓰여야 할 것입니다." 이것이 그것입니다.
+       *마지막 등이 증인입니다.* 여덟 대신 일곱이나 아홉을 읽는 것은 그 자리에서 어긋나지
+       않고 *그 뒤에서* 어긋나므로, 첫 등이 완벽한 채로 넷째가 헛소리일 수 있습니다. 넷 모두를
+       필드 단위로 비교하며, 실패할 것은 넷째입니다. */
     {
         static const char *NAMES[] = { "arena", "vault", "dm03" };
         int declared = 0, loaded = 0, ents = 0;
@@ -1352,16 +1396,40 @@ int main(void) {
         int want = (int)(sizeof(NAMES)/sizeof(NAMES[0]));
         okd(loaded == want, "every shipped text level loads for the light check",
             loaded, want);
-        okd(declared == 0, "and none of them declares a point light",
-            declared, 0);
+        okd(declared > 0, "and at least one of them declares a point light",
+            declared, 1);
 
-        /* The reader still has to keep its place through the block the lamps
-           used to sit in. Entities are declared around it, so a parse that
-           went wrong where they were would eat them.
-           읽기는 등이 앉아 있던 자리를 지나면서도 위치를 지켜야 합니다. 그 둘레에 엔티티가
-           선언되어 있으므로, 등이 있던 자리에서 잘못된 파싱은 그것들을 먹어 치웁니다. */
+        /* assets/levels.txt, `l arena`, field for field. */
+        static const short WANT[4][8] = {
+            {     0,  380, -1100,  900, 255, 190, 110, 115 },
+            { -1500,  300,   200,  800, 120, 170, 255,  90 },
+            {  1400,  300,   900,  750, 120, 170, 255,  85 },
+            {     0,  300,  -400,  600, 255, 140,  70,  70 },
+        };
+        Level a;
+        int matched = 0;
+        if (level_load("arena", &a)) {
+            for (int i = 0; i < 4 && i < a.n_lights; i++) {
+                const Light *L = &a.lights[i];
+                const short *w = WANT[i];
+                if (L->x == w[0] && L->y == w[1] && L->z == w[2] &&
+                    L->radius == w[3] && L->r == w[4] && L->g == w[5] &&
+                    L->b == w[6] && L->power == w[7]) matched++;
+                else
+                    printf("      lamp %d read %d %d %d %d  %d %d %d  %d\n", i,
+                           L->x, L->y, L->z, L->radius, L->r, L->g, L->b, L->power);
+            }
+        }
+        okd(matched == 4, "and every field of every lamp survived the read",
+            matched, 4);
+
+        /* The reader still has to keep its place through the lamp block.
+           Entities are declared around it, so a parse that went wrong there
+           would eat them.
+           읽기는 등이 앉은 자리를 지나면서도 위치를 지켜야 합니다. 그 둘레에 엔티티가
+           선언되어 있으므로, 그곳에서 잘못된 파싱은 그것들을 먹어 치웁니다. */
         ok(ents > 0,
-           "and the entities around where they were still parsed");
+           "and the entities around them still parsed");
     }
 
     /* --- hazard floors -----------------------------------------------------

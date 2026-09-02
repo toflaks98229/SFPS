@@ -893,6 +893,34 @@ static int level_parse_text(const char *name, Level *out) {
                 L->radius = (short)v[3];
                 L->r = (short)v[4]; L->g = (short)v[5]; L->b = (short)v[6];
                 L->power = (short)v[7];
+
+                /* LIT, WHERE A BRUSH `light` IS NOT, and the difference is who
+                   writes the line. A brush level's `light` is what the importer
+                   emits for every Quake lamp it converts -- thirty-two in one
+                   room on the map this engine learned from -- so it stays dark
+                   until a mapper types `light_` in front of it and takes
+                   responsibility for the count. Nothing emits this line.
+                   levels.txt is typed by a person, one lamp at a time, which is
+                   the same act as choosing the preset in the editor.
+                   ::LVL_LAMP_MAX still bounds it, so a text level that gets
+                   greedy costs no more slots than a brush one.
+                   Steady, not wavering: the eight numbers have no field for it,
+                   and a lamp that started breathing because the format gained a
+                   default would be the format deciding something the author
+                   did not write.
+                   *브러시의 `light`와 달리 켜져 있으며*, 차이는 그 줄을 쓰는 쪽이
+                   누구인가입니다. 브러시 레벨의 `light`는 임포터가 변환하는 모든 Quake 등에
+                   대해 내놓는 것이고(이 엔진이 배운 그 맵에서는 한 방에 서른둘), 제작자가
+                   앞에 `light_`를 타이핑하며 개수를 책임지기 전까지 어두운 채로 있습니다.
+                   이 줄을 내놓는 것은 아무것도 없습니다. levels.txt는 사람이 한 번에 등
+                   하나씩 타이핑하며, 그것은 에디터에서 프리셋을 고르는 것과 같은 행위입니다.
+                   ::LVL_LAMP_MAX가 여전히 묶으므로 욕심을 낸 텍스트 레벨도 브러시 레벨보다
+                   많은 슬롯을 쓰지 못합니다.
+                   일렁이지 않고 고른 이유는, 여덟 개의 수에 그것을 담을 자리가 없기
+                   때문입니다. 형식이 기본값을 얻었다는 이유로 등이 숨쉬기 시작한다면 그것은
+                   제작자가 쓰지 않은 것을 형식이 정하는 일입니다. */
+                L->lit     = 1;
+                L->flicker = 0;
             }
             continue;
         }

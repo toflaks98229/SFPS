@@ -405,7 +405,22 @@ static void check_infight(void) {
         v3 player = v3f(0.0f, PLAYER_EYE, 0.0f);
         int hp0 = enemy_at(&g_pools, 1)->health;
         int hit_at = -1;
+        /* THE BRUTE IS HELD ON THE LINE, because this check is about the
+           BOLT and not about where a brute chooses to stand. It used to be left
+           to walk, and it stood in the line for as long as the only thing it
+           could do was arrive at the player and stop. It has a running attack
+           now: it closes past the player's flank and settles a metre off the
+           line, which is 1.07m against a body 0.81m wide -- so the bolt began
+           missing it and the check went red for a reason that had nothing to do
+           with what it measures.
+           *브루트를 선 위에 붙들어 둡니다.* 이 검사는 *볼트*에 대한 것이지 브루트가 어디에
+           서기로 하는가에 대한 것이 아니기 때문입니다. 예전에는 걷도록 두었고, 할 수 있는 일이
+           플레이어에게 도착해 멈추는 것뿐인 동안에는 선 위에 서 있었습니다. 이제 달리기 공격이
+           있습니다. 플레이어의 옆을 지나쳐 붙고 선에서 1미터쯤 떨어져 자리를 잡는데, 0.81m
+           폭인 몸에 대해 1.07m입니다. 그래서 볼트가 빗나가기 시작했고, 이 검사는 자기가 재는
+           것과 아무 상관 없는 이유로 빨개졌습니다. */
         for (int i = 0; i < 60 * 12; i++) {
+            g_pools.enemy.m[1].pos = v3f(0.0f, 0.0f, -7.0f);
             enemy_update(&g_pools, &L, player, DT);
             if (enemy_at(&g_pools, 1)->health < hp0) { hit_at = i; break; }
         }
@@ -883,14 +898,14 @@ static void check_swing_step(void) {
 
     const MonType *BR = mon_stats(MON_BRUTE);
     const MonAttack *BA = mon_attack(MON_BRUTE, 0);
-    float want = BR->speed * MON_SWING_CLOSE * BA->windup;
+    float want = BR->speed * BA->close * BA->windup;
 
     float got = swing_step("brute", MON_BRUTE, 0);
     printf("      brute closed %.3fm through its wind-up; ai_charge says %.3f\n",
            (double)got, (double)want);
     ok(got >= 0.0f, "the brute reached a swing");
     okf(got > want * 0.6f && got < want * 1.4f,
-        "and closed about what MON_SWING_CLOSE says", got, want);
+        "and closed about what its close column says", got, want);
 
     /* AND A BOLT DOES NOT, which is what makes the line above about the swing
        rather than about ::E_ATTACK having learned to walk. The caster's slot 0
@@ -902,6 +917,86 @@ static void check_swing_step(void) {
     printf("      caster moved %.3fm through its bolt's wind-up\n", (double)bolt);
     ok(bolt >= 0.0f, "the caster reached a bolt");
     ok(bolt >= 0.0f && bolt < 0.02f, "and a bolt leaves from where it stands");
+}
+
+/* --- the knight's running attack ------------------------------------------
+ *
+ * WHAT IT IS FOR is that a brute could only ever answer the range it was
+ * standing in. ::chase_brawler returned before ::pick_attack whenever the
+ * player was further than the monster's own arm, so a slot with a band out
+ * there would have sat in the table and never once been chosen. Quake's knight
+ * decides on its running attack while it is running.
+ *
+ * WHAT MAKES IT FAIR IS THAT IT CAN BE DODGED, and that is the whole of this
+ * check: the same charge is run twice against a player who stands still and a
+ * player who walks. One number from each, and the pair is the claim -- a charge
+ * that hit both would be a tax on being near a brute, and one that hit neither
+ * would be scenery.
+ *
+ * *무엇을 위한 것인가.* 브루트는 자기가 선 사거리에만 답할 수 있었습니다. 플레이어가 몬스터
+ * 자기 팔보다 멀면 ::chase_brawler가 ::pick_attack보다 먼저 돌아갔으므로, 그 바깥에 대역을
+ * 가진 슬롯은 표에 앉아 한 번도 선택되지 않았을 것입니다. Quake의 기사는 *달리는 동안* 달리기
+ * 공격을 정합니다.
+ * *무엇이 그것을 공정하게 만드는가는 피할 수 있다는 것이고*, 이 검사의 전부가 그것입니다. 같은
+ * 돌진을 가만히 선 플레이어와 걷는 플레이어에게 두 번 돌립니다. 각각에서 수 하나씩이며 그 쌍이
+ * 곧 주장입니다. 둘 다 맞히는 돌진은 브루트 근처에 있는 것에 매기는 세금이고, 둘 다 못 맞히는
+ * 돌진은 배경입니다. */
+static int charge_damage(int walking, int *slot_seen) {
+    build();
+    put_kind(&L.ents[0], "brute");
+    L.ents[0].x = 0; L.ents[0].y = 0; L.ents[0].z = -350;
+
+    enemy_reset(&g_pools);
+    g_pools.enemy.rng = 1u;
+    enemy_spawn_level(&g_pools, &L);
+    if (enemy_count(&g_pools) != 1) return -1;
+
+    v3 player = v3f(0.0f, PLAYER_EYE, 0.0f);
+
+    /* ALREADY LOOKING AT THE PLAYER, because this is a check about the charge
+       and not about turning. ::make_monster gives a monster a yaw, not a
+       target, and a brute that has to come 180 degrees round spends 1.4s at
+       130 degrees a second doing it -- longer than the window, so the first
+       cut of this measured the turn and reported zero. One update to let
+       ::ideal_yaw be computed, then the facing is set to it.
+       *이미 플레이어를 보고 있습니다.* 이것은 돌진에 대한 검사이지 회전에 대한 검사가 아니기
+       때문입니다. ::make_monster는 몬스터에게 목표가 아니라 각도를 주며, 180도를 돌아야 하는
+       브루트는 초당 130도로 1.4초를 씁니다. 창보다 길고, 그래서 이 검사의 첫 판은 회전을 재고
+       0을 보고했습니다. ::ideal_yaw가 계산되도록 한 번 갱신한 뒤 바라보는 방향을 그것에
+       맞춥니다. */
+    enemy_update(&g_pools, &L, player, DT);
+    g_pools.enemy.m[0].yaw = g_pools.enemy.m[0].ideal_yaw;
+
+    int dmg = 0;
+    *slot_seen = -1;
+    for (int f = 0; f < 90; f++) {              /* 1.5s: long enough to commit */
+        if (walking) player.x += PLAYER_WALK * DT;
+        dmg += enemy_update(&g_pools, &L, player, DT);
+        const Enemy *m = enemy_at(&g_pools, 0);
+        if (m->state == E_ATTACK && *slot_seen < 0) *slot_seen = m->atk;
+    }
+    return dmg;
+}
+
+static void check_charge(void) {
+    printf("\na brute commits from outside its arm\n");
+
+    const MonAttack *RUN = mon_attack(MON_BRUTE, 1);
+    ok(RUN != 0 && RUN->kind == ATK_SWING && RUN->min > 0.0f,
+       "the brute carries an attack begun from outside its own reach");
+    if (!RUN) return;
+
+    int st_slot = -1, mv_slot = -1;
+    int still = charge_damage(0, &st_slot);
+    int moved = charge_damage(1, &mv_slot);
+
+    printf("      standing still: slot %d, %d damage\n", st_slot, still);
+    printf("      walking away:   slot %d, %d damage\n", mv_slot, moved);
+
+    okf(st_slot == 1, "it is the running attack that is chosen at 3.5m",
+        (float)st_slot, 1.0f);
+    ok(still > 0, "and it lands on somebody who stood still");
+    ok(moved == 0, "and misses somebody who walked");
 }
 
 int main(void) {
@@ -1817,6 +1912,7 @@ int main(void) {
     check_crowd();
     check_close_quarters();
     check_swing_step();
+    check_charge();
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall enemy checks passed\n", fails);
     return fails != 0;

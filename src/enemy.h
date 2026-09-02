@@ -532,56 +532,44 @@ enum MonTypeID {
 #define MON_PUSH_RATE 6.0f
 
 /**
- * @brief What fraction of its walking speed a monster keeps while swinging.
+ * @brief How far off its line a monster may be and still begin a charge, radians.
  *
  * ENGLISH
  * -------
- * QUAKE'S KNIGHT DOES NOT PLANT ITS FEET. `knight_atk` is ten frames and three
- * of them call `ai_charge` -- 7 units, then 4, then 1 on the frame the sword
- * lands -- so the creature is still closing while the swing is in the air. It
- * is about twelve units over the attack, a third of a metre, and it is the
- * difference between a monster that lunges at you and one that stops in front
- * of you to play an animation.
+ * A CHARGE IS COMMITTED TO THE LINE THE MONSTER IS FACING, because that is what
+ * makes it dodgeable: ::change_yaw corrects at ::MonType::yaw_speed and no
+ * faster, so a brute that has picked a line can bend it 130 degrees a second
+ * and no more. It follows that the line must already point at you when the
+ * charge begins. Without this a monster that had only just noticed the player
+ * -- ::make_monster gives it a yaw, not a target -- would commit to whatever
+ * direction it happened to be born looking, and run the other way. That is not
+ * a hypothetical: it is what the first cut did, and the charge dealt zero
+ * damage to a player standing still three and a half metres in front of it.
  *
- * THE ONE THIS GAME HAD STOPPED DEAD. ::E_ATTACK moved nothing at all: a brute
- * that reached its band planted, wound up, and swung at wherever the player had
- * been. A player who took one step back was safe for free, without reading
- * anything -- and the brute's own row calls it "the straightest line in the
- * bestiary", which it could not be while it stopped every time it arrived.
- *
- * FIFTEEN PERCENT, which against the brute's 5.6 m/s over its 0.55s wind-up is
- * about 0.46m -- Quake's third of a metre, scaled to a creature that walks
- * three times as fast as a knight. Small on purpose: this is a step INTO the
- * swing, not a second charge. Enough that stepping back must be a step and not
- * a shuffle, and not so much that the wind-up stops being a window.
- *
- * ONLY A SWING. A bolt leaves from where the monster is standing and closing
- * while firing would undo the band ::chase_caster spent the whole approach
- * establishing.
+ * THIRTY DEGREES, which at the brute's turn rate is under a quarter second of
+ * waiting. Wide enough that the monster does not stand doing nothing while it
+ * lines up, narrow enough that the direction it commits to is one the player
+ * can already read off the sprite.
  *
  * 한국어
  * ------
- * @brief 휘두르는 동안 몬스터가 유지하는 걷기 속도의 비율.
+ * @brief 몬스터가 돌진을 시작할 수 있는, 자기 선에서 벗어난 최대 각(라디안).
  *
- * *Quake의 기사는 발을 심지 않습니다.* `knight_atk`는 열 프레임이고 그중 셋이 `ai_charge`를
- * 부릅니다. 7단위, 그다음 4, 그리고 검이 닿는 프레임에서 1입니다. 그러므로 그 생물은 휘두르기가
- * 공중에 있는 동안에도 계속 붙고 있습니다. 공격 전체에 걸쳐 12단위쯤, 3분의 1미터이며, 그것이
- * 당신에게 달려드는 몬스터와 당신 앞에 서서 애니메이션을 재생하는 몬스터의 차이입니다.
+ * *돌진은 몬스터가 바라보는 선에 자기를 겁니다.* 그것이 돌진을 피할 수 있게 만드는 것이기
+ * 때문입니다. ::change_yaw는 ::MonType::yaw_speed로 수정하고 그보다 빠르지 않으므로, 선을 고른
+ * 브루트는 초당 130도만큼만 그것을 휠 수 있습니다. 따라서 돌진이 시작될 때 그 선은 이미 당신을
+ * 가리키고 있어야 합니다. 이것이 없으면 이제 막 플레이어를 알아챈 몬스터가(::make_monster는
+ * 목표가 아니라 각도를 줍니다) 태어나면서 바라보던 방향에 자기를 걸고 반대쪽으로 달립니다.
+ * 가정이 아닙니다. 첫 판이 그렇게 했고, 3.5미터 앞에 가만히 선 플레이어에게 돌진은 피해 0을
+ * 주었습니다.
  *
- * *이 게임의 것은 멈춰 섰습니다.* ::E_ATTACK은 아무것도 움직이지 않았습니다. 대역에 닿은
- * 브루트는 발을 심고 준비동작을 하고 플레이어가 *있던* 자리를 휘둘렀습니다. 한 걸음 물러난
- * 플레이어는 아무것도 읽지 않고 공짜로 안전했습니다. 그리고 브루트 자신의 행은 그것을 "도감에서
- * 가장 곧은 선"이라 부르는데, 도착할 때마다 멈춘다면 그것일 수 없습니다.
- *
- * *15퍼센트*이며, 브루트의 5.6 m/s에 0.55초 준비동작이면 약 0.46m입니다. Quake의 3분의
- * 1미터를, 기사보다 세 배 빨리 걷는 생물에 맞춘 값입니다. 일부러 작습니다. 이것은 휘두르기
- * *안으로* 내딛는 한 걸음이지 두 번째 돌진이 아닙니다. 물러나는 것이 셔플이 아니라 한 걸음이어야
- * 할 만큼이면 되고, 준비동작이 창이기를 그만둘 만큼이어서는 안 됩니다.
- *
- * *휘두르기에만 해당합니다.* 볼트는 몬스터가 선 자리에서 떠나며, 쏘면서 붙는 것은
- * ::chase_caster가 접근 내내 세운 대역을 스스로 무너뜨리는 일입니다.
+ * *30도*이며, 브루트의 회전 속도로는 4분의 1초가 안 되는 기다림입니다. 몬스터가 줄을 맞추느라
+ * 아무것도 하지 않고 서 있지 않을 만큼 넓고, 자기를 거는 방향을 플레이어가 이미 스프라이트에서
+ * 읽어 낼 수 있을 만큼 좁습니다.
  */
-#define MON_SWING_CLOSE 0.15f
+#define MON_CHARGE_CONE 0.52f
+
+
 
 /**
  * @enum EState
@@ -1028,6 +1016,81 @@ typedef struct {
      * 거절합니다.
      */
     float min, max;
+
+    /**
+     * @brief How far this attack CONNECTS, metres, as against where it starts.
+     *
+     * ENGLISH
+     * -------
+     * ONE NUMBER DID BOTH JOBS AND THEY ARE NOT THE SAME JOB. ::max is where a
+     * monster decides to use this attack; `reach` is where the attack lands.
+     * For everything that stands and swings they are the same figure, which is
+     * why one number sufficed -- you use the attack because you are already in
+     * reach of it.
+     *
+     * A CHARGE SPLITS THEM. Quake's knight has a running attack it begins from
+     * outside its own sword: the band is where the decision is made and the
+     * sword still only cuts as far as a sword. Held as one number, a charge
+     * that began at four metres would also CONNECT at four metres, so a player
+     * who outran it would be hit anyway -- and outrunning it is the entire
+     * counterplay to a telegraphed commitment.
+     *
+     * 한국어
+     * ------
+     * @brief 이 공격이 *닿는* 거리(미터). 시작하는 곳과 구별됩니다.
+     *
+     * *하나의 수가 두 일을 했고 그 둘은 같은 일이 아닙니다.* ::max는 몬스터가 이 공격을 쓰기로
+     * 정하는 곳이고 `reach`는 그 공격이 닿는 곳입니다. 서서 휘두르는 모든 것에 대해 둘은 같은
+     * 값이며, 그래서 수 하나로 충분했습니다. 이미 사거리 안에 있기 때문에 그 공격을 쓰는
+     * 것입니다.
+     * *돌진이 둘을 가릅니다.* Quake의 기사는 자기 검 바깥에서 시작하는 달리기 공격을 가집니다.
+     * 대역은 결정을 내리는 곳이고 검은 여전히 검만큼만 벱니다. 하나의 수로 붙들면 4미터에서
+     * 시작한 돌진이 4미터에서 *닿기도* 하며, 달아나 벗어난 플레이어도 맞습니다. 그리고 달아나
+     * 벗어나는 것이 예고된 결단에 대한 대응의 전부입니다.
+     */
+    float reach;
+
+    /**
+     * @brief What fraction of its walking speed the monster keeps through the
+     *        wind-up of this attack.
+     *
+     * ENGLISH
+     * -------
+     * A STEP AND A CHARGE ARE ONE MECHANISM AT TWO MAGNITUDES, which is why
+     * this is a column and was a constant for exactly one revision.
+     * `MON_SWING_CLOSE` said 15% for every swing -- Quake's knight closing a
+     * third of a metre through `knight_atk` -- and the running attack it was
+     * modelled on closes the whole distance. One number cannot be both.
+     *
+     * ALONG THE FACING, NOT TOWARD THE PLAYER, and that is what makes a charge
+     * dodgeable. ::change_yaw turns a monster at ::MonType::yaw_speed and no
+     * faster, so a brute committed to a line covers 130 degrees a second of
+     * correction and no more. Driving it at the player's live position instead
+     * would make the commitment perfect and the telegraph pointless -- the
+     * same argument ::ai_run_slide already makes about strafing perpendicular
+     * to where a monster is LOOKING rather than to where the player is.
+     *
+     * ZERO FOR A BOLT. It leaves from where the monster stands, and closing
+     * while firing would undo the band ::chase_caster spent the approach
+     * establishing.
+     *
+     * 한국어
+     * ------
+     * @brief 이 공격의 준비동작 동안 몬스터가 유지하는 걷기 속도의 비율.
+     *
+     * *걸음과 돌진은 같은 기구의 두 크기이며*, 그래서 이것이 열이고 딱 한 판 동안 상수였습니다.
+     * `MON_SWING_CLOSE`는 모든 휘두르기에 대해 15%라고 말했습니다. `knight_atk`을 지나며 3분의
+     * 1미터를 붙는 Quake의 기사입니다. 그리고 그것이 본떠진 달리기 공격은 거리 전체를 붙습니다.
+     * 하나의 수가 둘 다일 수는 없습니다.
+     * *플레이어 쪽이 아니라 바라보는 방향으로*이며, 그것이 돌진을 피할 수 있게 만듭니다.
+     * ::change_yaw는 몬스터를 ::MonType::yaw_speed로 돌리고 그보다 빠르지 않으므로, 한 선에
+     * 자기를 건 브루트는 초당 130도의 수정만 할 수 있습니다. 플레이어의 실시간 위치로 몰면 그
+     * 결단은 완벽해지고 예고는 무의미해집니다. ::ai_run_slide가 플레이어가 있는 쪽이 아니라
+     * 몬스터가 *바라보는* 쪽의 직각으로 횡이동한다고 이미 펴는 것과 같은 논증입니다.
+     * *볼트에는 0입니다.* 볼트는 몬스터가 선 자리에서 떠나며, 쏘면서 붙는 것은 ::chase_caster가
+     * 접근 내내 세운 대역을 스스로 무너뜨리는 일입니다.
+     */
+    float close;
 
     int   damage;       /**< Damage ONE BOLT or one swing deals -- see ::burst. / 볼트 *하나* 또는 휘두르기 한 번의 피해량. ::burst를 참조하십시오. */
 

@@ -262,7 +262,7 @@ static const MonType TYPES[MON_TYPES] = {
  * 종류의 수입니다.
  * *슬롯은 첫 ::ATK_NONE까지입니다.* 각 행의 나머지는 지정 초기화가 0으로 채우고 0이 곧
  * *공격 아님*이므로, 맞춰 둘 개수가 없습니다. `ward`는 ::AI_INERT이고 아예 없습니다. */
-/*        kind,      min,    max,  dmg,  wind,  cool,  shot, brst, bmin,  sprd,   gap, weight */
+/*        kind,      min,    max, reach, close,  dmg,  wind,  cool,  shot, brst, bmin,  sprd,   gap, weight */
 static const MonAttack ATTACKS[MON_TYPES][MON_MAX_ATTACKS] = {
     /* THE BOLT STARTS WHERE THE RETREAT ENDS. ::chase_caster backs away below
        `band * CASTER_KEEP` and the band is slot 0's max, so a bolt offered
@@ -274,11 +274,29 @@ static const MonAttack ATTACKS[MON_TYPES][MON_MAX_ATTACKS] = {
        떠나려는 자리에서 쏘게 만듭니다. 그것은 거리 두기를 그만두는 것이고, ::AI_CASTER란
        그것의 전부입니다. 그 곱을 적어 둔 수입니다. 7.5 * 0.55. */
     [MON_WATER_SPIRIT] = {
-        { ATK_BOLT,  4.2f,  7.5f,   3, 0.30f, 0.50f,  9.0f,   10,   5, 0.13f, 0.07f, 1.0f },
-        { ATK_SWING, 0.0f,  1.8f,   6, 0.25f, 0.70f,  0.0f,    1,   1,  0.0f,  0.0f, 1.0f },
+        { ATK_BOLT,  4.2f,  7.5f,  7.5f,  0.0f,   3, 0.30f, 0.50f,  9.0f,   10,   5, 0.13f, 0.07f, 1.0f },
+        { ATK_SWING, 0.0f,  1.8f,  1.8f, 0.15f,   6, 0.25f, 0.70f,  0.0f,    1,   1,  0.0f,  0.0f, 1.0f },
     },
+    /* AND THE SECOND ROW IS THE KNIGHT'S RUNNING ATTACK. It is begun from
+       outside the brute's own arm and closes the whole way at walking speed --
+       `close` 1.0 against the standing swing's 0.15 -- so the band (2.3..4.0)
+       and the reach (2.8) are two different numbers for the first time in this
+       table. A charge that connected wherever it began would make outrunning it
+       pointless, and outrunning it is the whole of the counterplay.
+       0.75s of wind-up against the swing's 0.55, which is what makes it
+       readable: the brute covers 4.2m in that time and the player covers 8.1m,
+       so it is dodged by moving and lands on somebody who stood still or was
+       cornered. 34 damage against 24 is what being dodgeable is worth.
+       *그리고 두 번째 행이 기사의 달리기 공격입니다.* 브루트 자기 팔 바깥에서 시작해 걷기
+       속도로 거리 전체를 붙습니다. 서서 하는 휘두르기의 0.15에 대해 `close`가 1.0이며, 그래서
+       대역(2.3~4.0)과 사거리(2.8)가 이 표에서 처음으로 서로 다른 두 수가 됩니다. 시작한 자리
+       어디에서든 닿는 돌진은 달아나는 것을 무의미하게 만들고, 달아나는 것이 대응의 전부입니다.
+       휘두르기의 0.55에 대해 0.75초의 준비동작이며, 그것이 이것을 읽을 수 있게 만듭니다. 그
+       시간에 브루트는 4.2m를 가고 플레이어는 8.1m를 가므로, 움직이면 피해지고 가만히 섰거나
+       몰린 사람에게 꽂힙니다. 24에 대한 34는 피할 수 있다는 것의 값입니다. */
     [MON_BRUTE] = {
-        { ATK_SWING, 0.0f,  2.3f,  24, 0.55f, 1.50f,  0.0f,    1,   1,  0.0f,  0.0f, 1.0f },
+        { ATK_SWING, 0.0f,  2.3f,  2.3f, 0.15f,  24, 0.55f, 1.50f,  0.0f,    1,   1,  0.0f,  0.0f, 1.0f },
+        { ATK_SWING, 2.3f,  4.0f,  2.8f, 1.00f,  34, 0.75f, 2.20f,  0.0f,    1,   1,  0.0f,  0.0f, 1.0f },
     },
     /* AND THE SWING IS WHAT COSTS YOU FOR CLOSING. A caster that only ever
        backed off could be walked down and killed at leisure by a player who
@@ -292,11 +310,11 @@ static const MonAttack ATTACKS[MON_TYPES][MON_MAX_ATTACKS] = {
        있습니다. 볼트의 12에 대해 12인 것은 의도적입니다. 못한 공격이 아니라 다른 거리에 있는
        같은 생물입니다. */
     [MON_CASTER] = {
-        { ATK_BOLT,  7.2f, 13.0f,  12, 0.85f, 1.40f, 11.0f,    1,   1,  0.0f,  0.0f, 1.0f },
-        { ATK_SWING, 0.0f,  2.2f,  12, 0.40f, 0.95f,  0.0f,    1,   1,  0.0f,  0.0f, 1.0f },
+        { ATK_BOLT,  7.2f, 13.0f, 13.0f,  0.0f,  12, 0.85f, 1.40f, 11.0f,    1,   1,  0.0f,  0.0f, 1.0f },
+        { ATK_SWING, 0.0f,  2.2f,  2.2f, 0.15f,  12, 0.40f, 0.95f,  0.0f,    1,   1,  0.0f,  0.0f, 1.0f },
     },
     [MON_MAW] = {
-        { ATK_BOLT,  0.0f, 40.0f,  14, 0.90f, 1.10f, 14.0f,    5,   5, 0.22f,  0.0f, 1.0f },
+        { ATK_BOLT,  0.0f, 40.0f, 40.0f,  0.0f,  14, 0.90f, 1.10f, 14.0f,    5,   5, 0.22f,  0.0f, 1.0f },
     },
 };
 
@@ -1095,15 +1113,11 @@ int enemy_update(Pools *pl, const Level *l, v3 player_eye, float dt)
                    돌립니다. 그것이 ai_charge의 나머지 절반이고, 빠져 있던 것이 이 절반입니다.
                    준비동작이 끝나기 전까지만입니다. 자기 마무리 동작 내내 계속 붙는 휘두르기는
                    몬스터를 방금 때린 플레이어 너머로 걸어가게 합니다. */
-                if (A->kind == ATK_SWING && m->timer < A->windup)
+                if (A->close > 0.0f && m->timer < A->windup)
                 {
-                    float gx = goal.x - m->pos.x, gz = goal.z - m->pos.z;
-                    float gd = sqrtf(gx * gx + gz * gz);
-                    if (gd > 0.001f)
-                    {
-                        float step = S->speed * MON_SWING_CLOSE * dt / gd;
-                        move_toward(pl, l, S, m, player_eye, gx * step, gz * step);
-                    }
+                    float step = S->speed * A->close * dt;
+                    move_toward(pl, l, S, m, player_eye,
+                                -sinf(m->yaw) * step, -cosf(m->yaw) * step);
                 }
 
                 if (A->kind == ATK_BOLT && !m->swung)
@@ -1162,9 +1176,24 @@ int enemy_update(Pools *pl, const Level *l, v3 player_eye, float dt)
                    *볼트는 언제나 대역으로 돌아가고 사거리 안의 휘두르기는 다시 휘두르며*,
                    어느 쪽인지는 *슬롯*이 말합니다. 코앞의 것에 방금 휘두른 캐스터는 그것이
                    거기 머무는 동안 근접형입니다. */
+                /* AND THE RE-SWING KEEPS THE SLOT ONLY WHILE THE SLOT STILL
+                   FITS. This read `dist <= A->max` and that was the band, not
+                   the arm -- so a charge begun at four metres went on repeating
+                   itself once it had arrived at one, because one metre is still
+                   inside 2.3..4.0's ceiling. The brute stood at touching
+                   distance re-running its running attack for the rest of the
+                   level, which is what the trace showed: state 2, slot 1,
+                   forever. The band is a pair of numbers and both of them mean
+                   something.
+                   *그리고 재휘두르기는 슬롯이 여전히 맞을 때만 그 슬롯을 지킵니다.* 이것은
+                   `dist <= A->max`였고 그것은 팔이 아니라 대역이었습니다. 그래서 4미터에서
+                   시작한 돌진은 1미터에 도착한 뒤에도 자기를 반복했습니다. 1미터는 여전히
+                   2.3~4.0의 천장 안이기 때문입니다. 브루트는 닿는 거리에 서서 레벨이 끝날
+                   때까지 자기 달리기 공격을 다시 돌렸고, 추적이 보여 준 것이 그것입니다.
+                   상태 2, 슬롯 1, 영원히. 대역은 두 개의 수이고 둘 다 뜻이 있습니다. */
                 if (A->kind == ATK_BOLT)
                     m->state = E_CHASE;
-                else if (dist <= A->max)
+                else if (dist >= A->min && dist <= A->reach)
                 {
                     m->timer = 0.0f;
                     m->swung = 0;
@@ -3994,6 +4023,37 @@ static int pick_attack(Pools *pl, Enemy *m, float dist, float rise)
            이것이 눈에 띄지 않은 이유가 그것입니다. */
         if (A->kind == ATK_SWING && rise > A->max) continue;
 
+        /* ARMS IF IT IS ALREADY IN REACH, A DECISION IF IT HAS TO TRAVEL.
+           A monster with its fist already back does not reconsider, which is
+           what the note above says and why a swing skipped the dice. A charge
+           is not that: it is begun from outside the arm, it commits the monster
+           to a line for the length of its wind-up, and whether to spend that is
+           exactly the question ::MON_ODDS_MELEE answers. The two are told apart
+           by ::MonAttack::reach against the distance rather than by a flag, so
+           a slot that stops travelling stops rolling.
+           *이미 사거리 안이면 팔이고, 가야 한다면 결단입니다.* 이미 주먹을 뒤로 뺀 몬스터는
+           다시 생각하지 않습니다. 위의 주석이 말하는 것이고 휘두르기가 주사위를 건너뛴
+           이유입니다. 돌진은 그것이 아닙니다. 팔 바깥에서 시작되고, 준비동작 길이만큼 몬스터를
+           한 선에 묶으며, 그것을 쓸지가 바로 ::MON_ODDS_MELEE가 답하는 질문입니다. 둘은
+           플래그가 아니라 ::MonAttack::reach와 거리를 맞대어 구별되므로, 이동하기를 그만둔
+           슬롯은 굴리기도 그만둡니다. */
+        if (A->kind == ATK_SWING && dist > A->reach)
+        {
+            /* AND IT MUST ALREADY BE POINTED AT YOU. The charge runs along the
+               facing, so committing before the turn has finished commits to the
+               wrong line -- see ::MON_CHARGE_CONE, which this measured at zero
+               damage against a stationary player.
+               *그리고 이미 당신을 향해 있어야 합니다.* 돌진은 바라보는 방향으로 달리므로,
+               회전이 끝나기 전에 자기를 거는 것은 틀린 선에 거는 일입니다. ::MON_CHARGE_CONE을
+               참조하십시오. 가만히 선 플레이어에 대해 피해 0으로 측정된 것입니다. */
+            float off = m->ideal_yaw - m->yaw;
+            while (off >  M_PI_F) off -= 2.0f * M_PI_F;
+            while (off < -M_PI_F) off += 2.0f * M_PI_F;
+            if (fabsf(off) > MON_CHARGE_CONE) continue;
+
+            if (!(frand(&pl->enemy) < chance)) continue;
+        }
+
         if (A->kind == ATK_BOLT && !(frand(&pl->enemy) < chance)) continue;
         mask |= 1u << k;
         total += A->weight;
@@ -4159,6 +4219,31 @@ static void chase_brawler(Pools *pl, const Level *l, const MonType *S, Enemy *m,
     float step = S->speed * dt;
     float band = mon_band(m->type);
 
+    /* ASKED BEFORE THE BAND, WHICH IS WHERE THE KNIGHT ASKS IT. This gate used
+       to return first, so nothing outside a monster's own arm could ever be
+       offered -- a slot with a band further out than slot 0 would sit in the
+       table and never once be chosen. Quake's knight decides on its running
+       attack while it is running; deciding only after arriving is deciding only
+       between standing swings.
+       Nothing changes for a kind whose slots all end inside the band. There is
+       nothing to offer out here, ::pick_attack says so, and the walk below runs
+       exactly as it did.
+       *대역보다 먼저 묻습니다. 기사가 묻는 자리가 그곳입니다.* 이 관문이 먼저 돌아갔으므로,
+       몬스터 자기 팔 바깥의 무엇도 제안될 수 없었습니다. 슬롯 0보다 먼 대역을 가진 슬롯은 표에
+       앉아 한 번도 선택되지 않았을 것입니다. Quake의 기사는 *달리는 동안* 달리기 공격을
+       정합니다. 도착한 뒤에만 정하는 것은 서서 하는 휘두르기 중에서만 정하는 것입니다.
+       슬롯이 전부 대역 안에서 끝나는 종류에게는 달라지는 것이 없습니다. 이 바깥에 내놓을 것이
+       없고 ::pick_attack이 그렇게 말하며, 아래의 걸음은 하던 그대로 돕니다. */
+    {
+        int far = pick_attack(pl, m, dist, fabsf(to.y));
+        if (far >= 0)
+        {
+            m->atk = (short)far;
+            begin_attack(pl, mon_attack(m->type, far), m);
+            return;
+        }
+    }
+
     if (dist > band)
     {
         move_weaving(pl, l, S, m, player_eye, to.x * inv, to.z * inv, step);
@@ -4300,7 +4385,7 @@ static void chase_caster(Pools *pl, const Level *l, const MonType *S, Enemy *m,
  */
 static int release_swing(const MonAttack *A, Enemy *m, float dist)
 {
-    if (dist > A->max + 0.3f)
+    if (dist > A->reach + 0.3f)
         return 0;
     play_at(m->pos, "eatt", 90);
     return A->damage;

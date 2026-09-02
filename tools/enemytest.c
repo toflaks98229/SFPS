@@ -836,6 +836,74 @@ static void check_close_quarters(void) {
     }
 }
 
+/* --- a swing steps into itself -------------------------------------------
+ *
+ * ::E_ATTACK MOVED NOTHING AT ALL, so a brute that reached its band planted,
+ * wound up, and swung at wherever the player had been. Quake's knight calls
+ * ai_charge on three of its ten attack frames and closes about a third of a
+ * metre while the sword is in the air; this measures the same step.
+ *
+ * MEASURED BETWEEN TWO EVENTS, not over a fixed number of frames: from the
+ * frame the monster enters ::E_ATTACK to the frame ::Enemy::swung says the
+ * damage has left. Counting frames would measure the wind-up's length as much
+ * as the step, and the wind-up is a column somebody may tune.
+ *
+ * *::E_ATTACK은 아무것도 움직이지 않았으므로*, 대역에 닿은 브루트는 발을 심고 준비동작을 하고
+ * 플레이어가 *있던* 자리를 휘둘렀습니다. Quake의 기사는 열 개의 공격 프레임 중 셋에서
+ * ai_charge를 부르며 검이 공중에 있는 동안 3분의 1미터쯤 붙습니다. 이것은 그 걸음을 잽니다.
+ * *프레임 수가 아니라 두 사건 사이에서 잽니다.* 몬스터가 ::E_ATTACK에 들어간 프레임부터
+ * ::Enemy::swung이 피해가 떠났다고 말하는 프레임까지입니다. 프레임을 세면 걸음만큼이나
+ * 준비동작의 길이를 재게 되고, 준비동작은 누군가 조정할 수 있는 열입니다. */
+static float swing_step(const char *kind, int type, int slot) {
+    build();
+    put_kind(&L.ents[0], kind);
+    L.ents[0].x = 0; L.ents[0].y = 0; L.ents[0].z = -300;
+
+    enemy_reset(&g_pools);
+    g_pools.enemy.rng = 1u;
+    enemy_spawn_level(&g_pools, &L);
+    if (enemy_count(&g_pools) != 1) return -1.0f;
+
+    v3 player = v3f(0.0f, PLAYER_EYE, 0.0f);
+    v3 start = v3f(0,0,0);
+    int seen = 0;
+    for (int f = 0; f < 60 * 8; f++) {
+        enemy_update(&g_pools, &L, player, DT);
+        const Enemy *m = enemy_at(&g_pools, 0);
+        if (m->state != E_ATTACK || m->atk != slot) { seen = 0; continue; }
+        if (!seen) { seen = 1; start = m->pos; }
+        if (m->swung > 0) return dist_xz(start, m->pos);
+    }
+    (void)type;
+    return -1.0f;
+}
+
+static void check_swing_step(void) {
+    printf("\na swing steps into itself\n");
+
+    const MonType *BR = mon_stats(MON_BRUTE);
+    const MonAttack *BA = mon_attack(MON_BRUTE, 0);
+    float want = BR->speed * MON_SWING_CLOSE * BA->windup;
+
+    float got = swing_step("brute", MON_BRUTE, 0);
+    printf("      brute closed %.3fm through its wind-up; ai_charge says %.3f\n",
+           (double)got, (double)want);
+    ok(got >= 0.0f, "the brute reached a swing");
+    okf(got > want * 0.6f && got < want * 1.4f,
+        "and closed about what MON_SWING_CLOSE says", got, want);
+
+    /* AND A BOLT DOES NOT, which is what makes the line above about the swing
+       rather than about ::E_ATTACK having learned to walk. The caster's slot 0
+       is its bolt; it fires from where it stands.
+       *그리고 볼트는 그러지 않으며*, 그것이 위의 줄을 ::E_ATTACK이 걷기를 배웠다는 이야기가
+       아니라 휘두르기에 대한 이야기로 만듭니다. 캐스터의 슬롯 0은 볼트이고, 선 자리에서
+       쏩니다. */
+    float bolt = swing_step("caster", MON_CASTER, 0);
+    printf("      caster moved %.3fm through its bolt's wind-up\n", (double)bolt);
+    ok(bolt >= 0.0f, "the caster reached a bolt");
+    ok(bolt >= 0.0f && bolt < 0.02f, "and a bolt leaves from where it stands");
+}
+
 int main(void) {
     printf("enemytest\n\n");
     build();
@@ -1748,6 +1816,7 @@ int main(void) {
     check_cast_gather();
     check_crowd();
     check_close_quarters();
+    check_swing_step();
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall enemy checks passed\n", fails);
     return fails != 0;

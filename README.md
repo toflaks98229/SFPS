@@ -22,7 +22,7 @@ Models, materials, sounds and levels are all authored as text and hot-reload
 into the running game.
 
 ```
-1,053,184 / 1,474,560 bytes   (71.42% used)
+1,054,208 / 1,474,560 bytes   (71.49% used)
 ```
 
 ## Build
@@ -1626,15 +1626,25 @@ deliver kept what it owed, `enemy_wave_done` never came true, and the run
 stopped on that wave for good. The push resolves a stacked delivery in a fifth
 of a second and cannot stall anything.
 
-**And the player stops against them too, one way only.** `move_axis` refuses a
-step into an occupied cylinder exactly as it refuses a step into a wall — per
-axis, so brushing a monster on the diagonal slides round it rather than sticking
-flat. Nothing stops a monster walking into a *standing* player, and that
-asymmetry is chosen: a brawler closes to arm's length to swing, and a monster
-the player's own cylinder could hold at bay is a monster the player can never be
-hit by. What it costs is that the player can end up inside one, which is why the
-refusal — like the monsters' — applies only to the cylinders they are not
-already in.
+**And the player stops against them too — both ways, after a correction.**
+`move_axis` refuses a step into an occupied cylinder exactly as it refuses a step
+into a wall — per axis, so brushing a monster on the diagonal slides round it
+rather than sticking flat.
+
+It shipped one-way, and the note defending that was wrong. It argued a brawler
+must close to arm's length, so a monster the player's own cylinder could hold at
+bay would be one the player could never be hit by. The arithmetic says
+otherwise: a brute reaches 2.3 m and the bodies touch at 1.16 m; a caster's
+swing reaches 2.2 m against 0.90 m. **Every melee attack reaches about twice as
+far as contact**, so stopping a monster at contact costs it nothing it needs.
+
+Nothing had a *reason* to walk into the player while a brawler stopped at its
+band, which is further out than contact — so the fault was invisible until the
+swing began to close. `steptest` then measured it: holding forward at a brute
+put the player 0.18 m from its centre, well inside a body 0.81 m wide. It is
+1.156 m now, which is touching exactly. Both halves keep the same rule: you may
+not walk *into* someone, and if you are already inside them you are walking out
+rather than being held there.
 
 **player.c does not know what a monster is.** It takes `Blocker`, a cylinder
 with a radius and a height, and world.c fills the array from the bestiary each

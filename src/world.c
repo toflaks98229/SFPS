@@ -324,12 +324,16 @@ static void step_look_move(World *w, const Input *in, float aspect, float dt) {
        ::E_DEAD's own note: a body you cannot walk over is a body that blocks a
        doorway for the rest of the level.
 
-       ONE WAY ONLY. This stops the player walking into a monster; nothing here
-       stops a monster walking into the player, and that asymmetry is chosen. A
-       brawler closes to arm's length to swing, and a monster the player's own
-       cylinder could hold at bay is a monster the player can never be hit by.
-       What it costs is that the player can end up inside one -- which is why
-       ::move_axis refuses only the cylinders the player is not already in.
+       BOTH WAYS NOW, AND THE NOTE THAT USED TO BE HERE WAS WRONG. It read
+       "one way only", and argued the asymmetry was deliberate: a brawler has to
+       close to arm's length, so a monster the player's own cylinder could hold
+       at bay would be one the player could never be hit by. The arithmetic says
+       otherwise. A brute reaches 2.3m and the bodies touch at 1.16m; a caster's
+       swing reaches 2.2m against 0.90m. Every melee attack in the table reaches
+       about twice as far as contact, so stopping a monster at contact costs it
+       nothing it needs. ::mon_clear carries the other half now, and it holds
+       the same rule: you may not walk INTO someone, and if you are already
+       inside them you are walking out rather than being held there.
 
        *이음매이며, 잇는 것이 이 모듈이기 때문에 이곳에 있습니다.* player.c는 어떤 원기둥이
        찼다는 것만 듣고 거기 서 있는 것이 무엇인지는 듣지 않습니다. ::Blocker를 받을 뿐
@@ -338,12 +342,14 @@ static void step_look_move(World *w, const Input *in, float aspect, float dt) {
        모듈입니다. `m_hash`를 m.h로 옮겨 풀어낸 그 결합입니다.
        *시체는 고체가 아닙니다.* ::mon_clear, ::enemy_hitscan, 그리고 ::E_DEAD 자신의 주석과
        같습니다. 넘어갈 수 없는 시체는 레벨이 끝날 때까지 문간을 막는 시체입니다.
-       *한 방향뿐입니다.* 이것은 플레이어가 몬스터 안으로 걸어 들어가는 것을 막고, 몬스터가
-       플레이어 안으로 걸어 들어오는 것은 이곳의 무엇도 막지 않습니다. 그 비대칭은 고른
-       것입니다. 근접형은 팔 길이까지 붙어야 휘두르고, 플레이어의 원기둥이 밀어낼 수 있는
-       몬스터는 플레이어가 결코 맞을 수 없는 몬스터입니다. 그 대가는 플레이어가 몬스터 안에 있게
-       될 수 있다는 것이고, 그래서 ::move_axis는 플레이어가 아직 안에 있지 않은 원기둥만
-       거절합니다. */
+       *이제 양방향이며, 이곳에 있던 주석은 틀렸습니다.* 그것은 "한 방향뿐"이라고 적고 비대칭이
+       의도적이라고 논했습니다. 근접형은 팔 길이까지 붙어야 하므로, 플레이어의 원기둥이 밀어낼 수
+       있는 몬스터는 플레이어가 결코 맞을 수 없는 몬스터라는 것이었습니다. 산술이 아니라고
+       말합니다. 브루트는 2.3m를 뻗고 몸은 1.16m에서 닿습니다. 캐스터의 휘두르기는 0.90m에 대해
+       2.2m입니다. 표의 모든 근접 공격은 접촉의 두 배쯤을 뻗으므로, 접촉에서 몬스터를 멈추는 것은
+       그것이 필요로 하는 무엇도 앗아가지 않습니다. 나머지 절반은 이제 ::mon_clear이 지니며 같은
+       규칙을 지킵니다. 누군가의 *안으로* 걸어 들어갈 수 없고, 이미 안에 있다면 붙들려 있는 것이
+       아니라 걸어 나오는 중입니다. */
     Blocker solid[ENEMY_MAX];
     int n_solid = 0;
     for (int i = 0; i < enemy_count(&w->pools); i++) {

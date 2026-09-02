@@ -344,11 +344,11 @@ static int air_ok(const Level *l, const MonType *S, float x, float z, float y);
 static int holds_height(const MonType *S, const Enemy *m);
 static void monster_fall(const Level *l, const MonType *S, Enemy *m, float dt);
 static int  mon_clear(const Pools *pl, const MonType *S, const Enemy *self,
-                      float x, float z, float y);
+                      v3 player_eye, float x, float z, float y);
 static void move_toward(const Pools *pl, const Level *l, const MonType *S, Enemy *m,
-                        float dx, float dz);
+                        v3 player_eye, float dx, float dz);
 static void change_yaw(Enemy *m, float yaw_speed_deg, float dt);
-static void ai_run_slide(Pools *pl, const Level *l, const MonType *S, Enemy *m, float dt);
+static void ai_run_slide(Pools *pl, const Level *l, const MonType *S, Enemy *m, v3 player_eye, float dt);
 
 static int can_see(const Level *l, const Enemy *m, v3 player_eye);
 static int sees_player(const Pools *pl, const Level *l, Enemy *m, v3 player_eye);
@@ -376,7 +376,7 @@ static float mon_band(int type)
     return A ? A->max : 0.0f;
 }
 
-static void chase_brawler(Pools *pl, const Level *l, const MonType *S, Enemy *m, v3 to, float dist, float dt);
+static void chase_brawler(Pools *pl, const Level *l, const MonType *S, Enemy *m, v3 to, float dist, v3 player_eye, float dt);
 static void chase_caster(Pools *pl, const Level *l, const MonType *S, Enemy *m, v3 to, float dist, v3 player_eye, float dt);
 static int release_swing(const MonAttack *A, Enemy *m, float dist);
 static void begin_attack(Pools *pl, const MonAttack *A, Enemy *m);
@@ -702,7 +702,7 @@ static v3 foe_point(const Pools *pl, const Enemy *m, v3 player_eye)
  * because ::move_toward already refuses their steps.
  *
  * EACH PAIR ONCE, `j` FROM `i + 1`, and both halves move. Doing it per monster
- * against all others would apply every push twice and make the rate mean half
+ * against all others would applayer_eye every push twice and make the rate mean half
  * of what it says.
  *
  * A LOOP THAT CANNOT RUN AWAY. Each push is capped at half the overlap, so a
@@ -736,7 +736,7 @@ static v3 foe_point(const Pools *pl, const Enemy *m, v3 player_eye)
  * 프레임당 한 번이며 수렴할 때까지 반복하지 않습니다. 모퉁이에 낀 셋은 스스로 정리하는 데 몇
  * 프레임이 걸리고, 몇 프레임의 그것이 어차피 군중의 모습입니다.
  */
-static void separate_monsters(Pools *pl, const Level *l, float dt)
+static void separate_monsters(Pools *pl, const Level *l, v3 player_eye, float dt)
 {
     for (int i = 0; i < pl->enemy.count; i++)
     {
@@ -779,8 +779,8 @@ static void separate_monsters(Pools *pl, const Level *l, float dt)
             if (push > over * 0.5f)
                 push = over * 0.5f;
 
-            move_toward(pl, l, AS, a,  ux * push,  uz * push);
-            move_toward(pl, l, BS, b, -ux * push, -uz * push);
+            move_toward(pl, l, AS, a, player_eye,  ux * push,  uz * push);
+            move_toward(pl, l, BS, b, player_eye, -ux * push, -uz * push);
         }
     }
 }
@@ -1022,7 +1022,7 @@ int enemy_update(Pools *pl, const Level *l, v3 player_eye, float dt)
             if (S->behaviour == AI_CASTER)
                 chase_caster(pl, l, S, m, to, dist, goal, dt);
             else
-                chase_brawler(pl, l, S, m, to, dist, dt);
+                chase_brawler(pl, l, S, m, to, dist, player_eye, dt);
             break;
 
         case E_ATTACK:
@@ -1064,7 +1064,7 @@ int enemy_update(Pools *pl, const Level *l, v3 player_eye, float dt)
                 /* THE CHARGE, WHILE THE POSE IS UP. `caster_attack` and
                    `water_spirit_attack` are drawings of a creature gathering
                    itself -- the caster's has a magic circle in it -- and for
-                   the whole of the wind-up that drawing simply stood there. A
+                   the whole of the wind-up that drawing simplayer_eye stood there. A
                    pose is a still; what says CHARGING is something arriving.
                    BEFORE THE FIRST BOLT AND NOT AFTER. `swung` counts what has
                    left, so `!m->swung` is exactly the window the pose occupies
@@ -1083,6 +1083,29 @@ int enemy_update(Pools *pl, const Level *l, v3 player_eye, float dt)
                    발사한 마법진에 도착하게 됩니다.
                    *발이 아니라 가슴에서*입니다. ::MonType::eye가 탄환이 떠나는 높이이므로,
                    모임은 탄환이 떠나는 자리에 내려앉습니다. */
+                /* THE STEP INTO THE SWING, which is Quake's ai_charge inside
+                   the attack frames. change_yaw above already turns the monster
+                   toward the player every frame whatever it is doing -- that is
+                   ai_charge's other half -- and this is the half that was
+                   missing. Before the wind-up ends only: a swing that kept
+                   closing through its own follow-through would walk the monster
+                   past the player it had just hit.
+                   *휘두르기 안으로 내딛는 걸음*이며, 공격 프레임 안의 Quake ai_charge입니다.
+                   위의 change_yaw는 이미 몬스터가 무엇을 하든 매 프레임 플레이어 쪽으로
+                   돌립니다. 그것이 ai_charge의 나머지 절반이고, 빠져 있던 것이 이 절반입니다.
+                   준비동작이 끝나기 전까지만입니다. 자기 마무리 동작 내내 계속 붙는 휘두르기는
+                   몬스터를 방금 때린 플레이어 너머로 걸어가게 합니다. */
+                if (A->kind == ATK_SWING && m->timer < A->windup)
+                {
+                    float gx = goal.x - m->pos.x, gz = goal.z - m->pos.z;
+                    float gd = sqrtf(gx * gx + gz * gz);
+                    if (gd > 0.001f)
+                    {
+                        float step = S->speed * MON_SWING_CLOSE * dt / gd;
+                        move_toward(pl, l, S, m, player_eye, gx * step, gz * step);
+                    }
+                }
+
                 if (A->kind == ATK_BOLT && !m->swung)
                 {
                     m->cast_timer -= dt;
@@ -1195,7 +1218,7 @@ int enemy_update(Pools *pl, const Level *l, v3 player_eye, float dt)
         monster_fall(l, S, m, dt);
     }
 
-    separate_monsters(pl, l, dt);
+    separate_monsters(pl, l, player_eye, dt);
     return player_damage;
 }
 
@@ -1980,7 +2003,7 @@ static void types_check(void)
            last cycle. ::enemy_hurt clamps at `hp * (CYCLES - cycle - 1)/CYCLES`
            and integer division makes that final boundary non-zero for, say,
            100/3 -- so the maw ends the third groggy window alive at 1hp with no
-           wards left to raise and no fourth boundary to cross. The fight simply
+           wards left to raise and no fourth boundary to cross. The fight simplayer_eye
            stops. Checked here because it is a property of the TABLE, and the
            table is the thing somebody retunes.
            체력이 ::BOSS_CYCLES로 나누어떨어지지 않는 보스는 마지막 사이클을 살아남습니다.
@@ -2354,7 +2377,7 @@ static int spawner_crowded(const Spawner *s, v3 player_eye)
  * @param[in]     dt         Seconds since the last frame.
  * @return Non-zero when at least one monster was made this frame.
  *
- * @note A spawner telegraphs before it delivers, so a group never simply
+ * @note A spawner telegraphs before it delivers, so a group never simplayer_eye
  *       appears on top of the player. ::spawner_crowded is what keeps one from
  *       delivering into the space the player is standing in.
  *
@@ -2664,7 +2687,7 @@ static void shot_fire(Pools *pl, v3 from, v3 at, float speed, int damage,
  * @param[in]     dt         Seconds since the last frame.
  * @return Total damage the shots dealt to the player this frame.
  *
- * @note RETURNS damage rather than applying it, exactly as ::enemy_update
+ * @note RETURNS damage rather than applayer_eyeing it, exactly as ::enemy_update
  *       does. Nothing in this file reaches the player's health.
  * @note The player is tested as a cylinder around `player_eye`, using
  *       ::PLAYER_RADIUS and ::PLAYER_EYE, so a shot cannot pass through a
@@ -3129,7 +3152,7 @@ static int foot_ok(const Level *l, const MonType *S, float x, float z,
        to face the camera, so half of that width swings through whatever the
        monster is standing against. A brute at a wall buried a metre of itself
        in it. The billboard was blamed, and the billboard was right -- there was
-       simply nothing holding the body out of the wall.
+       simplayer_eye nothing holding the body out of the wall.
        다섯 개의 표본이며, ::can_stand가 취하는 바로 그 다섯 개입니다. 이것이 생기기 전까지
        ::MonType::radius는 충돌 크기가 아니었습니다. 이 함수는 기둥 *하나*, 몬스터의 중심만
        물었으므로, 몬스터는 자기 한가운데가 벽면에 닿을 때까지 걸어 들어갈 수 있었고 몸통
@@ -3448,8 +3471,53 @@ static void monster_fall(const Level *l, const MonType *S, Enemy *m, float dt)
  * 밀어내는 ::separate_monsters의 몫이고, 이 함수는 이미 그 상태에 있는 쌍을 넘어갑니다.
  */
 static int mon_clear(const Pools *pl, const MonType *S, const Enemy *self,
-                     float x, float z, float y)
+                     v3 player_eye, float x, float z, float y)
 {
+    /* AND THE PLAYER IS ONE OF THE CYLINDERS, which world.c's note said the
+       opposite of and was wrong about.
+
+       That note argued the asymmetry was deliberate: "a monster the player's
+       own cylinder could hold at bay is a monster the player can never be hit
+       by". The arithmetic says otherwise. A brute reaches 2.3m and its contact
+       distance is 0.35 + 0.806 = 1.16m; a caster's swing reaches 2.2m against
+       0.90m. Every melee attack in the table reaches roughly twice as far as
+       the bodies touch, so being stopped at contact costs a monster nothing it
+       needs. What the asymmetry actually bought was a monster standing INSIDE
+       the player, and until the swing began to close nothing had a reason to
+       walk there -- a brawler stopped at its band, which is further out than
+       contact. ::MON_SWING_CLOSE gave it the reason and steptest measured the
+       result: holding forward at a brute put the player 0.18m from its centre,
+       well inside a body 0.81m wide.
+
+       THE SAME TWO-LINE RULE AS THE MONSTERS'. Already overlapping is not this
+       function's business -- a monster that finds itself inside the player, by
+       a spawn or by this rule arriving mid-fight, must be able to walk out.
+
+       *그리고 플레이어도 그 원기둥 중 하나이며*, world.c의 주석은 그 반대를 말했고 틀렸습니다.
+       그 주석은 비대칭이 의도적이라고 논했습니다. "플레이어의 원기둥이 밀어낼 수 있는 몬스터는
+       플레이어가 결코 맞을 수 없는 몬스터"라고요. 산술이 아니라고 말합니다. 브루트는 2.3m를
+       뻗고 접촉 거리는 0.35 + 0.806 = 1.16m이며, 캐스터의 휘두르기는 0.90m에 대해 2.2m입니다.
+       표의 모든 근접 공격은 몸이 닿는 거리의 두 배쯤을 뻗으므로, 접촉에서 멈추는 것은 몬스터가
+       필요로 하는 무엇도 앗아가지 않습니다. 그 비대칭이 실제로 사 준 것은 *플레이어 안에 선
+       몬스터*였고, 휘두르기가 붙기 시작하기 전까지는 그곳으로 걸어갈 이유가 없었습니다.
+       근접형은 자기 대역에서 멈췄고 그것은 접촉보다 바깥입니다. ::MON_SWING_CLOSE가 이유를
+       주었고 steptest가 결과를 쟀습니다. 브루트에게 전진을 누르고 있으면 플레이어가 그 중심에서
+       0.18m 거리에 놓였고, 그것은 0.81m 폭인 몸의 한참 안쪽입니다.
+       *몬스터끼리와 똑같은 두 줄 규칙입니다.* 이미 겹쳐 있는 것은 이 함수의 일이 아닙니다.
+       생성으로든 이 규칙이 전투 도중 도착해서든 플레이어 안에 있게 된 몬스터는 걸어 나올 수
+       있어야 합니다. */
+    {
+        float pr = S->radius + PLAYER_RADIUS;
+        float pfeet = player_eye.y - PLAYER_EYE;
+        if (y < pfeet + PLAYER_EYE && pfeet < y + S->height)
+        {
+            float cx = self->pos.x - player_eye.x, cz = self->pos.z - player_eye.z;
+            float dx = x - player_eye.x, dz = z - player_eye.z;
+            if (cx * cx + cz * cz >= pr * pr && dx * dx + dz * dz < pr * pr)
+                return 0;
+        }
+    }
+
     for (int i = 0; i < pl->enemy.count; i++)
     {
         const Enemy *o = &pl->enemy.m[i];
@@ -3474,7 +3542,7 @@ static int mon_clear(const Pools *pl, const MonType *S, const Enemy *self,
 }
 
 static void move_toward(const Pools *pl, const Level *l, const MonType *S,
-                        Enemy *m, float dx, float dz)
+                        Enemy *m, v3 player_eye, float dx, float dz)
 {
     /* AN ANCHORED MONSTER REFUSES EVERY STEP, and refusing it HERE is what
        makes the flag mean one thing. The maw is an ::AI_CASTER, which is a
@@ -3508,20 +3576,20 @@ static void move_toward(const Pools *pl, const Level *l, const MonType *S,
     if (S->flags & MON_FLIES)
     {
         if (air_ok(l, S, m->pos.x + dx, m->pos.z + dz, m->pos.y) &&
-            mon_clear(pl, S, m, m->pos.x + dx, m->pos.z + dz, m->pos.y))
+            mon_clear(pl, S, m, player_eye, m->pos.x + dx, m->pos.z + dz, m->pos.y))
         {
             m->pos.x += dx;
             m->pos.z += dz;
             return;
         }
         if (air_ok(l, S, m->pos.x + dx, m->pos.z, m->pos.y) &&
-            mon_clear(pl, S, m, m->pos.x + dx, m->pos.z, m->pos.y))
+            mon_clear(pl, S, m, player_eye, m->pos.x + dx, m->pos.z, m->pos.y))
         {
             m->pos.x += dx;
             return;
         }
         if (air_ok(l, S, m->pos.x, m->pos.z + dz, m->pos.y) &&
-            mon_clear(pl, S, m, m->pos.x, m->pos.z + dz, m->pos.y))
+            mon_clear(pl, S, m, player_eye, m->pos.x, m->pos.z + dz, m->pos.y))
             m->pos.z += dz;
         return;
     }
@@ -3535,7 +3603,7 @@ static void move_toward(const Pools *pl, const Level *l, const MonType *S,
        몬스터는 저 위에 자리가 있는지를 묻고 있지 이 아래를 묻고 있지 않습니다. */
     float f;
     if (foot_ok(l, S, m->pos.x + dx, m->pos.z + dz, m->pos.y, &f) &&
-        mon_clear(pl, S, m, m->pos.x + dx, m->pos.z + dz, f))
+        mon_clear(pl, S, m, player_eye, m->pos.x + dx, m->pos.z + dz, f))
     {
         m->pos.x += dx;
         m->pos.z += dz;
@@ -3543,14 +3611,14 @@ static void move_toward(const Pools *pl, const Level *l, const MonType *S,
         return;
     }
     if (foot_ok(l, S, m->pos.x + dx, m->pos.z, m->pos.y, &f) &&
-        mon_clear(pl, S, m, m->pos.x + dx, m->pos.z, f))
+        mon_clear(pl, S, m, player_eye, m->pos.x + dx, m->pos.z, f))
     {
         m->pos.x += dx;
         m->pos.y = f;
         return;
     }
     if (foot_ok(l, S, m->pos.x, m->pos.z + dz, m->pos.y, &f) &&
-        mon_clear(pl, S, m, m->pos.x, m->pos.z + dz, f))
+        mon_clear(pl, S, m, player_eye, m->pos.x, m->pos.z + dz, f))
     {
         m->pos.z += dz;
         m->pos.y = f;
@@ -3630,7 +3698,7 @@ static float committed_side(Pools *pl, const MonType *S, Enemy *m)
     return m->lefty ? 1.0f : -1.0f;
 }
 
-static void ai_run_slide(Pools *pl, const Level *l, const MonType *S, Enemy *m, float dt)
+static void ai_run_slide(Pools *pl, const Level *l, const MonType *S, Enemy *m, v3 player_eye, float dt)
 {
     float step = S->speed * dt;
 
@@ -3648,7 +3716,7 @@ static void ai_run_slide(Pools *pl, const Level *l, const MonType *S, Enemy *m, 
     float dz = -cosf(side) * step;
 
     float before_x = m->pos.x, before_z = m->pos.z;
-    move_toward(pl, l, S, m, dx, dz);
+    move_toward(pl, l, S, m, player_eye, dx, dz);
 
     /* Blocked: flip, and let the next frame take the other side. Measured by
        whether it actually moved rather than by asking the level again, so the
@@ -3881,7 +3949,7 @@ static int pick_attack(Pools *pl, Enemy *m, float dist, float rise)
     /* QUAKE'S HALVING, WHICH FINALLY HAS SOMETHING TO HALVE. CheckAttack cuts
        the ranged odds of a monster that can also bite, because something which
        prefers to close should shoot less on the way in -- otherwise the melee
-       is a bonus rather than a choice, and the creature is simply better than
+       is a bonus rather than a choice, and the creature is simplayer_eye better than
        it was. ::MON_ODDS_ALSO_MELEE has carried that reasoning since the bands
        arrived and nothing could read it: one attack per kind meant nothing
        could both bite and shoot.
@@ -3954,7 +4022,7 @@ static int pick_attack(Pools *pl, Enemy *m, float dist, float rise)
     if (offered == 1) return only;
 
     /* ONE DRAW ACROSS THE OFFERED WEIGHTS, and over the ones the band and the
-       dice already agreed to -- `mask` is why the loop is not simply run again.
+       dice already agreed to -- `mask` is why the loop is not simplayer_eye run again.
        Walking the slots a second time would re-roll every ::ATK_BOLT chance and
        could offer a slot the first pass refused.
        *제안된 가중치들에 대해 한 번 뽑으며*, 대역과 주사위가 이미 동의한 것들에 대해서입니다.
@@ -4070,7 +4138,7 @@ static void begin_attack(Pools *pl, const MonAttack *A, Enemy *m)
    빠르게 이동해, 아무도 예산에 넣지 않은 각도에서 일찍 도착합니다. 회전은 초당 같은 미터를
    쓰고 다만 다른 곳에 씁니다. 접근 속도로 치르는 값은 `cos(weave)`이며, 속도 열은 그것을
    알고 정해져 있습니다. */
-static void move_weaving(Pools *pl, const Level *l, const MonType *S, Enemy *m,
+static void move_weaving(Pools *pl, const Level *l, const MonType *S, Enemy *m, v3 player_eye,
                          float ux, float uz, float step)
 {
     if (S->weave > 0.0f)
@@ -4081,11 +4149,11 @@ static void move_weaving(Pools *pl, const Level *l, const MonType *S, Enemy *m,
         float rz = ux * sn + uz * c;
         ux = rx; uz = rz;
     }
-    move_toward(pl, l, S, m, ux * step, uz * step);
+    move_toward(pl, l, S, m, player_eye, ux * step, uz * step);
 }
 
 static void chase_brawler(Pools *pl, const Level *l, const MonType *S, Enemy *m,
-                          v3 to, float dist, float dt)
+                          v3 to, float dist, v3 player_eye, float dt)
 {
     float inv = dist > 0.001f ? 1.0f / dist : 0.0f;
     float step = S->speed * dt;
@@ -4093,7 +4161,7 @@ static void chase_brawler(Pools *pl, const Level *l, const MonType *S, Enemy *m,
 
     if (dist > band)
     {
-        move_weaving(pl, l, S, m, to.x * inv, to.z * inv, step);
+        move_weaving(pl, l, S, m, player_eye, to.x * inv, to.z * inv, step);
         return;
     }
 
@@ -4111,7 +4179,7 @@ static void chase_brawler(Pools *pl, const Level *l, const MonType *S, Enemy *m,
     }
     else
     {
-        ai_run_slide(pl, l, S, m, dt);
+        ai_run_slide(pl, l, S, m, player_eye, dt);
     }
 }
 
@@ -4146,7 +4214,7 @@ static void chase_caster(Pools *pl, const Level *l, const MonType *S, Enemy *m,
 
     if (dist > band)
     {
-        move_weaving(pl, l, S, m, to.x * inv, to.z * inv, step);
+        move_weaving(pl, l, S, m, player_eye, to.x * inv, to.z * inv, step);
         return;
     }
     if (dist < band * CASTER_KEEP)
@@ -4169,7 +4237,7 @@ static void chase_caster(Pools *pl, const Level *l, const MonType *S, Enemy *m,
             begin_attack(pl, mon_attack(m->type, slot), m);
             return;
         }
-        move_toward(pl, l, S, m, -to.x * inv * step, -to.z * inv * step);
+        move_toward(pl, l, S, m, player_eye, -to.x * inv * step, -to.z * inv * step);
         return;
     }
 
@@ -4182,7 +4250,7 @@ static void chase_caster(Pools *pl, const Level *l, const MonType *S, Enemy *m,
        검사하며, 벽을 실제로 지키는 것은 그 검사입니다. */
     if (!sees_player(pl, l, m, player_eye))
     {
-        move_toward(pl, l, S, m, to.x * inv * step, to.z * inv * step);
+        move_toward(pl, l, S, m, player_eye, to.x * inv * step, to.z * inv * step);
         return;
     }
 
@@ -4201,7 +4269,7 @@ static void chase_caster(Pools *pl, const Level *l, const MonType *S, Enemy *m,
     }
     else
     {
-        ai_run_slide(pl, l, S, m, dt);
+        ai_run_slide(pl, l, S, m, player_eye, dt);
     }
 }
 

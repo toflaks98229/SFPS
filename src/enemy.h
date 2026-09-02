@@ -532,6 +532,58 @@ enum MonTypeID {
 #define MON_PUSH_RATE 6.0f
 
 /**
+ * @brief What fraction of its walking speed a monster keeps while swinging.
+ *
+ * ENGLISH
+ * -------
+ * QUAKE'S KNIGHT DOES NOT PLANT ITS FEET. `knight_atk` is ten frames and three
+ * of them call `ai_charge` -- 7 units, then 4, then 1 on the frame the sword
+ * lands -- so the creature is still closing while the swing is in the air. It
+ * is about twelve units over the attack, a third of a metre, and it is the
+ * difference between a monster that lunges at you and one that stops in front
+ * of you to play an animation.
+ *
+ * THE ONE THIS GAME HAD STOPPED DEAD. ::E_ATTACK moved nothing at all: a brute
+ * that reached its band planted, wound up, and swung at wherever the player had
+ * been. A player who took one step back was safe for free, without reading
+ * anything -- and the brute's own row calls it "the straightest line in the
+ * bestiary", which it could not be while it stopped every time it arrived.
+ *
+ * FIFTEEN PERCENT, which against the brute's 5.6 m/s over its 0.55s wind-up is
+ * about 0.46m -- Quake's third of a metre, scaled to a creature that walks
+ * three times as fast as a knight. Small on purpose: this is a step INTO the
+ * swing, not a second charge. Enough that stepping back must be a step and not
+ * a shuffle, and not so much that the wind-up stops being a window.
+ *
+ * ONLY A SWING. A bolt leaves from where the monster is standing and closing
+ * while firing would undo the band ::chase_caster spent the whole approach
+ * establishing.
+ *
+ * 한국어
+ * ------
+ * @brief 휘두르는 동안 몬스터가 유지하는 걷기 속도의 비율.
+ *
+ * *Quake의 기사는 발을 심지 않습니다.* `knight_atk`는 열 프레임이고 그중 셋이 `ai_charge`를
+ * 부릅니다. 7단위, 그다음 4, 그리고 검이 닿는 프레임에서 1입니다. 그러므로 그 생물은 휘두르기가
+ * 공중에 있는 동안에도 계속 붙고 있습니다. 공격 전체에 걸쳐 12단위쯤, 3분의 1미터이며, 그것이
+ * 당신에게 달려드는 몬스터와 당신 앞에 서서 애니메이션을 재생하는 몬스터의 차이입니다.
+ *
+ * *이 게임의 것은 멈춰 섰습니다.* ::E_ATTACK은 아무것도 움직이지 않았습니다. 대역에 닿은
+ * 브루트는 발을 심고 준비동작을 하고 플레이어가 *있던* 자리를 휘둘렀습니다. 한 걸음 물러난
+ * 플레이어는 아무것도 읽지 않고 공짜로 안전했습니다. 그리고 브루트 자신의 행은 그것을 "도감에서
+ * 가장 곧은 선"이라 부르는데, 도착할 때마다 멈춘다면 그것일 수 없습니다.
+ *
+ * *15퍼센트*이며, 브루트의 5.6 m/s에 0.55초 준비동작이면 약 0.46m입니다. Quake의 3분의
+ * 1미터를, 기사보다 세 배 빨리 걷는 생물에 맞춘 값입니다. 일부러 작습니다. 이것은 휘두르기
+ * *안으로* 내딛는 한 걸음이지 두 번째 돌진이 아닙니다. 물러나는 것이 셔플이 아니라 한 걸음이어야
+ * 할 만큼이면 되고, 준비동작이 창이기를 그만둘 만큼이어서는 안 됩니다.
+ *
+ * *휘두르기에만 해당합니다.* 볼트는 몬스터가 선 자리에서 떠나며, 쏘면서 붙는 것은
+ * ::chase_caster가 접근 내내 세운 대역을 스스로 무너뜨리는 일입니다.
+ */
+#define MON_SWING_CLOSE 0.15f
+
+/**
  * @enum EState
  * @brief What a monster is currently doing.
  *

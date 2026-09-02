@@ -22,7 +22,7 @@ Models, materials, sounds and levels are all authored as text and hot-reload
 into the running game.
 
 ```
-1,052,672 / 1,474,560 bytes   (71.39% used)
+1,053,184 / 1,474,560 bytes   (71.42% used)
 ```
 
 ## Build
@@ -1542,6 +1542,48 @@ metres in 3.55 s, 1.80 m off the line, turning three times on the way.
 which was a two-metre leg at the old speeds and a seven-metre one at the new:
 the tuned quantity was the *shape* of the zig-zag, and a shape held in seconds
 stretches every time something walks faster.
+
+**A monster's attack is a slot, and a ranged one answers contact.**
+`MonType` used to carry one of each attack column, so a creature could not both
+bite and shoot. `MON_ODDS_ALSO_MELEE` is the proof that was a limit rather than
+a design: it is Quake's rule that something which can also bite shoots less
+while closing, it has been in `enemy.h` with its reasoning since the range bands
+arrived, and nothing had ever been able to read it.
+
+`MonAttack` is three slots per kind, each with its own band. **Slot 0 is also
+where the archetype stands** -- `chase_caster` keeps its distance around slot 0's
+`max` and `chase_brawler` closes to it -- because `MonType::attack` used to
+answer both "where do I want to be" and "how far can I reach", and could only
+give them the same answer.
+
+**What a caster used to be worth was "walk at it."** The retreat has no floor, so
+a player who kept touching one walked it into a wall and killed it at leisure.
+Now the retreat asks before it backs away, and the swing is the only thing the
+table offers that close: the bolt's band starts at 7.2 m, where the retreat ends,
+so nothing makes a caster stand and shoot at point-blank. The gap between 2.2 m
+and 7.2 m is not an oversight -- it is where the caster kites, and the "no hole
+in the bands" rule that would have forbidden it was removed for saying otherwise.
+
+**No slot carries art.** The atlas is a fixed grid on a floppy; every attack a
+kind has is drawn with the one `<name>_attack` frame it already owns. What
+separates a swing from a bolt is that the swing *travels* -- `LUNGE_PIXELS`
+along the line to the viewer, back through the wind-up, out at the instant
+`release_swing` fires, home again over the follow-through. `scenetest` compares
+two moments *inside the same pose window*: the same picture, two places, with
+the bolt's pose as the control.
+
+**An arm reaches in three dimensions**, and until a flyer could swing nothing
+had to say so. Every band in the table is a floor plan, which is right for a
+bolt and wrong for a reach: a caster hovering five metres up is 1.5 m away on
+the plan and cannot touch you.
+
+**And the refactor's first cut moved the whole game.** `pick_attack` rolled for
+the weighted choice unconditionally, and `EnemyPool::rng` is one stream shared by
+the weave, the attack rest and the spawners -- so a brute, which used to draw
+*zero* times to decide it was in reach, was drawing once. Two brutes converging
+came to 2.397 m instead of 1.634 m and the demo golden went red. A choice among
+one is not a choice and must not cost a draw; with the single candidate returned
+before the roll, both numbers came back exactly.
 
 **And they take up room, which for a long time they did not.**
 `MonType::radius` had two readers — what a monster is to shoot at, and what it

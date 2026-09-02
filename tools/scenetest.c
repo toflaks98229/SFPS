@@ -1335,6 +1335,88 @@ int main(void) {
     frame_hash(&w, &scene, 0);
     ok(rd_light_count() == room, "the bolt is gone again");
 
+    /* --- 6c. a swing is motion, because it has no drawing of its own -----
+     *
+     * ::MonAttack CARRIES NO ART ON PURPOSE. The atlas is a fixed grid on a
+     * floppy, so a caster's swing and a caster's bolt are the same
+     * `caster_attack` frame; what separates them is that the swing travels --
+     * scene.c drives the sprite along the line to the viewer, out at the
+     * instant ::release_swing fires and home again over the follow-through.
+     *
+     * THE TWO FRAMES COMPARED HERE ARE THE SAME PICTURE. Both are inside the
+     * swing's pose window, so ::sprite_uv returns identical coordinates for
+     * both and the only thing that can differ is where the quad is. A check
+     * that compared a pose frame against a walk frame would go green on the
+     * frame CHOICE and say nothing about the motion, which is the whole
+     * feature.
+     *
+     * *::MonAttack은 일부러 그림을 지니지 않습니다.* 아틀라스는 플로피 위의 고정 격자이므로
+     * 캐스터의 휘두르기와 캐스터의 볼트는 같은 `caster_attack` 프레임입니다. 둘을 가르는 것은
+     * 휘두르기가 *움직인다*는 것입니다. scene.c가 스프라이트를 보는 쪽으로 향하는 선을 따라
+     * 몰며, ::release_swing이 터지는 순간에 밖으로, 마무리 동안 다시 제자리로 옵니다.
+     * *이곳에서 비교하는 두 프레임은 같은 그림입니다.* 둘 다 휘두르기의 자세 창 안에 있으므로
+     * ::sprite_uv가 둘에 같은 좌표를 돌려주고, 다를 수 있는 것은 그 사각형이 어디에 있는가뿐
+     * 입니다. 자세 프레임과 걷기 프레임을 비교하는 검사는 프레임 *선택*에 대해 초록이 되고
+     * 움직임에 대해서는 아무 말도 하지 않습니다. 그리고 그것이 이 기능의 전부입니다. */
+    printf("\n  --- a swing moves the sprite it shares ---\n");
+
+    clear_state(&w);
+    {
+        int slot = -1;
+        for (int k = 0; k < MON_MAX_ATTACKS; k++) {
+            const MonAttack *A = mon_attack(MON_CASTER, k);
+            if (A && A->kind == ATK_SWING) { slot = k; break; }
+        }
+        const MonAttack *SW = slot >= 0 ? mon_attack(MON_CASTER, slot) : 0;
+        ok(SW != 0, "the caster carries a swing to draw");
+
+        if (SW) {
+            float cy = cosf(w.yaw), sy = sinf(w.yaw);
+            v3 fwd = v3f(-sy, 0.0f, -cy);
+
+            Enemy *m = &w.pools.enemy.m[0];
+            *m = (Enemy){0};
+            m->active = 1;
+            m->type   = MON_CASTER;
+            m->state  = E_ATTACK;
+            m->health = 20;
+            m->atk    = (short)slot;
+            m->pos    = v3add(w.player.pos, v3scale(fwd, 4.0f));
+            m->pos.y  = w.player.pos.y - PLAYER_EYE;
+            w.pools.enemy.count = 1;
+
+            m->timer = SW->windup;                 /* the thrust, fully out */
+            unsigned out = frame_hash(&w, &scene, 0);
+
+            m->timer = SW->windup * 1.98f;         /* home, same picture */
+            unsigned home = frame_hash(&w, &scene, 0);
+
+            printf("      thrust %08x, recovered %08x\n", out, home);
+            ok(out != home, "the same attack frame lands in two places");
+
+            /* AND A BOLT'S POSE DOES NOT TRAVEL, which is what makes the line
+               above about the swing rather than about time passing. Slot 0 is
+               the caster's bolt; its pose window is `timer < windup`, so two
+               instants inside it draw the identical frame in the identical
+               place.
+               *그리고 볼트의 자세는 움직이지 않으며*, 그것이 위의 줄을 시간이 흐른다는
+               이야기가 아니라 휘두르기에 대한 이야기로 만듭니다. 슬롯 0은 캐스터의 볼트이고
+               그 자세 창은 `timer < windup`이므로, 그 안의 두 순간은 같은 프레임을 같은
+               자리에 그립니다. */
+            const MonAttack *BO = mon_attack(MON_CASTER, 0);
+            m->atk   = 0;
+            m->timer = BO->windup * 0.25f;
+            unsigned b0 = frame_hash(&w, &scene, 0);
+            m->timer = BO->windup * 0.75f;
+            unsigned b1 = frame_hash(&w, &scene, 0);
+            printf("      bolt pose %08x then %08x\n", b0, b1);
+            ok(b0 == b1, "a bolt's pose stays where the monster is");
+        }
+
+        w.pools.enemy.count = 0;
+        w.pools.enemy.m[0].active = 0;
+    }
+
     /* --- 7. what the boundary counted -----------------------------------
        Last, so it covers every frame above. A non-zero delta means one of
        those frames drew a world pass after post_end or a UI pass before it,

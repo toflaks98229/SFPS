@@ -546,16 +546,50 @@ static void check_cast_gather(void) {
 static void check_crowd(void) {
     printf("\nmonsters take up room\n");
 
+    /* THE STREAM, PUT BACK WHERE THIS CHECK WAS TUNED AGAINST. ::enemy_reset
+       clears the monsters and the spawners and deliberately does NOT touch
+       ::EnemyPool::rng -- a run is one stream -- so every check in this file
+       inherits whatever the one before it drew. That is invisible until
+       something upstream changes how often it rolls, and then a number here
+       moves for a reason that has nothing to do with what it is measuring:
+       giving the caster a second attack moved the closest approach of two
+       BRUTES from 1.634m to 3.309m, and neither brute had changed at all.
+       Seeded here rather than in ::enemy_reset because the game wants one
+       stream and only the tests want a fresh one.
+       *이 검사가 맞추어 조율된 자리로 스트림을 되돌립니다.* ::enemy_reset은 몬스터와 스포너를
+       비우고 ::EnemyPool::rng는 일부러 건드리지 않습니다. 한 번의 플레이는 하나의 스트림이기
+       때문입니다. 그래서 이 파일의 모든 검사는 앞선 검사가 뽑고 남긴 것을 물려받습니다.
+       위쪽의 무언가가 굴리는 횟수를 바꾸기 전까지는 보이지 않다가, 그때 이곳의 수가 자기가
+       재는 것과 아무 상관 없는 이유로 움직입니다. 캐스터에게 두 번째 공격을 준 것이 *브루트*
+       둘의 최근접 거리를 1.634m에서 3.309m로 옮겼고, 브루트는 아무것도 바뀌지 않았습니다.
+       ::enemy_reset이 아니라 이곳에서 심는 이유는, 게임은 하나의 스트림을 원하고 새 스트림을
+       원하는 것은 검사뿐이기 때문입니다. */
+    g_pools.enemy.rng = 1u;
+
     const MonType *BR = mon_stats(MON_BRUTE);
     const MonType *CA = mon_stats(MON_CASTER);
 
     /* --- two walking at one player do not become one sprite ------------- */
     {
         build();
+        /* ONE BEHIND THE OTHER, NOT ONE EITHER SIDE. The first cut of this put
+           them at opposite corners and asserted they came within touching, and
+           for one revision they did -- by luck of the weave, mid-approach. They
+           have no reason to meet: both stop at the brute's band, which leaves
+           them four and a half metres apart on opposite sides of the player.
+           Behind each other they are walking the same line to the same point,
+           so the one in front stops and the one behind arrives, and the
+           encounter is in the geometry rather than in the dice.
+           *나란히가 아니라 앞뒤로입니다.* 이 검사의 첫 판은 둘을 반대쪽 모서리에 두고 닿는
+           거리까지 왔다고 단언했고, 한 판 동안은 실제로 그랬습니다. 접근 도중 갈지자의 운으로
+           그랬습니다. 둘은 만날 이유가 없습니다. 둘 다 브루트의 대역에서 멈추고, 그것은 둘을
+           플레이어 양쪽에 4.5미터 떨어뜨려 놓습니다. 앞뒤로 두면 같은 점을 향해 같은 선을
+           걷습니다. 앞의 것이 멈추고 뒤의 것이 도착하므로, 만남이 주사위가 아니라 기하 안에
+           있습니다. */
         put_kind(&L.ents[0], "brute");
-        L.ents[0].x = -1100; L.ents[0].z = -1500;
+        L.ents[0].x = 0; L.ents[0].z = -1100;
         Entity *b = &L.ents[L.n_ents++];
-        put_kind(b, "brute"); b->x = 1100; b->z = -1500;
+        put_kind(b, "brute"); b->x = 0; b->z = -1450;
 
         enemy_reset(&g_pools);
         enemy_spawn_level(&g_pools, &L);
@@ -598,7 +632,18 @@ static void check_crowd(void) {
         okf(at0 < touch * 0.25f, "two spawned at one marker start inside each other",
             at0, 0.0f);
 
-        v3 player = v3f(0.0f, PLAYER_EYE, 0.0f);
+        /* THE PLAYER STANDS OUTSIDE THEIR SIGHT, so what is timed here is the
+           PUSH and nothing else. With a player in view the two also chase, and
+           the chase both drags them along a shared line and lets the weave
+           close them again -- the same stack measured 0.18s, 0.48s and 1.73s to
+           clear depending on nothing but where the dice were. A number that
+           moves with the stream is not measuring the thing it is named after.
+           *플레이어는 그들의 시야 밖에 서며*, 그래야 이곳에서 재는 것이 밀기이고 다른 것이
+           아닙니다. 플레이어가 보이면 둘은 추격도 하며, 추격은 둘을 같은 선을 따라 끌고 가는
+           동시에 갈지자가 그들을 다시 붙게 합니다. 같은 더미가 주사위가 어디에 있었는가에만
+           따라 0.18초, 0.48초, 1.73초로 걸렸습니다. 스트림에 따라 움직이는 수는 자기 이름이
+           가리키는 것을 재고 있지 않습니다. */
+        v3 player = v3f(0.0f, PLAYER_EYE, -4000.0f);
         int apart_at = -1, mostly_at = -1;
         for (int i = 0; i < 60 * 5; i++) {
             enemy_update(&g_pools, &L, player, DT);
@@ -651,7 +696,14 @@ static void check_crowd(void) {
         ea->pos = v3f(0.0f, 0.0f, -10.0f);
         eb->pos = v3f(0.0f, BR->height + 0.30f, -10.0f);
 
-        v3 player = v3f(0.0f, PLAYER_EYE, 0.0f);
+        /* OUT OF SIGHT AGAIN, for the reason above and one more: this block
+           asks how far the pair moved, and a monster that has noticed the
+           player moves for reasons of its own. The first cut left the player in
+           view and read that wandering as a push.
+           *다시 시야 밖입니다.* 위와 같은 이유에 하나가 더 있습니다. 이 블록은 그 쌍이 얼마나
+           움직였는지를 묻는데, 플레이어를 알아챈 몬스터는 자기 이유로 움직입니다. 첫 판은
+           플레이어를 시야에 둔 채 그 배회를 밀기로 읽었습니다. */
+        v3 player = v3f(0.0f, PLAYER_EYE, -4000.0f);
         float touch = BR->radius + CA->radius;
         for (int i = 0; i < 8; i++) enemy_update(&g_pools, &L, player, DT);
         float over = dist_xz(enemy_at(&g_pools, 0)->pos,
@@ -679,9 +731,108 @@ static void check_crowd(void) {
         float under = dist_xz(enemy_at(&g_pools, 0)->pos,
                               enemy_at(&g_pools, 1)->pos);
         printf("      and at head height: %.3fm off it\n", (double)under);
-        okf(under > touch * 0.85f,
+        /* EIGHT FRAMES OF A KNOWN DECAY. Each frame closes ::MON_PUSH_RATE * dt
+           of the overlap from both sides, so what is left is 0.8^8 -- about a
+           sixth -- and the pair is 0.83 of touching apart. The threshold is
+           that arithmetic rather than a number that happened to pass: with the
+           chase removed there is nothing else moving them, so the check is now
+           against the constant and will move when somebody changes it.
+           *알려진 감쇠의 여덟 프레임입니다.* 매 프레임 겹침의 ::MON_PUSH_RATE * dt만큼이
+           양쪽에서 닫히므로 남는 것은 0.8^8, 약 6분의 1이고, 그 쌍은 닿는 거리의 0.83만큼
+           떨어집니다. 문턱은 어쩌다 통과한 수가 아니라 그 산술입니다. 추격을 걷어냈으므로
+           그들을 움직이는 다른 것이 없고, 이제 이 검사는 상수에 대한 것이며 누군가 그것을
+           바꾸면 함께 움직입니다. */
+        okf(under > touch * 0.80f,
             "and one down at head height is pushed off it",
             under, touch);
+    }
+}
+
+/* --- a ranged monster answers contact -------------------------------------
+ *
+ * WHAT A CASTER USED TO BE WORTH was "walk at it". ::chase_caster backs away
+ * below `band * CASTER_KEEP` and that retreat has no floor, so a player who
+ * simply kept touching one walked it into a wall and killed it at leisure. It
+ * was not a hard fight badly played; it was the only attack the creature had
+ * being unusable at the range the player chose.
+ *
+ * IT NOW CARRIES A SWING, and this check is the difference. It also checks the
+ * thing the swing must NOT do: a monster three metres up cannot touch you, and
+ * `dist` in this engine is a floor plan.
+ *
+ * *캐스터의 값어치는* "그것을 향해 걸어라"였습니다. ::chase_caster는 `band * CASTER_KEEP`
+ * 아래에서 물러나고 그 물러남에는 바닥이 없으므로, 계속 붙어 있기만 한 플레이어는 그것을
+ * 벽까지 몰아 느긋하게 죽였습니다. 어려운 전투를 잘못 푼 것이 아니라, 그 생물이 가진 유일한
+ * 공격이 플레이어가 고른 거리에서 쓸 수 없었던 것입니다.
+ * *이제 휘두르기를 지니며* 이 검사가 그 차이입니다. 휘두르기가 *해서는 안 되는* 것도 함께
+ * 확인합니다. 3미터 위의 몬스터는 당신을 만질 수 없고, 이 엔진의 `dist`는 평면도입니다. */
+static void check_close_quarters(void) {
+    printf("\nranged monsters answer contact\n");
+
+    static const struct { const char *kind; int type; } WHO[] = {
+        { "caster",       MON_CASTER },
+        { "water_spirit", MON_WATER_SPIRIT },
+    };
+
+    for (int i = 0; i < 2; i++) {
+        build();
+        put_kind(&L.ents[0], WHO[i].kind);
+        L.ents[0].x = 0; L.ents[0].y = 0; L.ents[0].z = -150;
+
+        enemy_reset(&g_pools);
+        g_pools.enemy.rng = 1u;
+        enemy_spawn_level(&g_pools, &L);
+        if (enemy_count(&g_pools) != 1) { ok(0, "the kind spawned"); continue; }
+
+        const MonAttack *sw = mon_attack(WHO[i].type, 1);
+        if (!sw || sw->kind != ATK_SWING) { ok(0, "it carries a swing"); continue; }
+
+        v3 player = v3f(0.0f, PLAYER_EYE, 0.0f);
+        int dmg = 0, swung = 0;
+        for (int f = 0; f < 60 * 5; f++) {
+            dmg += enemy_update(&g_pools, &L, player, DT);
+            const Enemy *m = enemy_at(&g_pools, 0);
+            const MonAttack *A = mon_attack(m->type, m->atk);
+            if (m->state == E_ATTACK && A && A->kind == ATK_SWING) swung = 1;
+        }
+        printf("      %-13s reached for the player %s, dealt %d\n",
+               WHO[i].kind, swung ? "yes" : "no", dmg);
+        ok(swung, "a ranged monster you stand next to reaches for you");
+        ok(dmg > 0, "and the reach lands");
+
+        /* AND THE SAME CREATURE PUT OUT OF ARM'S WAY DOES NOT. Straight up, so
+           the floor plan is unchanged and only the height differs -- the pair
+           is what says the vertical test is doing the work rather than the
+           horizontal one having failed.
+           *그리고 팔이 닿지 않는 곳에 둔 같은 생물은 그러지 않습니다.* 곧장 위로 두어 평면도는
+           그대로이고 높이만 다릅니다. 그 쌍이야말로 수직 검사가 일을 하고 있다는 것을(수평
+           검사가 실패한 것이 아니라는 것을) 말해 줍니다. */
+        /* ONLY A FLYER CAN BE OVERHEAD, so only a flyer is asked. A grounded
+           monster is put back on the floor by ::move_toward on its first step
+           -- it sets `pos.y` from the ground under the destination -- so
+           holding one in the air measures the test's own scaffolding falling
+           over, not the rule. The water spirit floats as a DRAWING
+           (::MON_FLOATS) and walks as a body, which is exactly the distinction
+           ::MON_FLIES exists to make.
+           *비행체만이 머리 위에 있을 수 있으므로* 비행체에게만 묻습니다. 지상의 몬스터는 첫
+           걸음에서 ::move_toward가 바닥으로 되돌립니다. 목적지 아래의 지면에서 `pos.y`를
+           정하기 때문입니다. 그러므로 공중에 붙들어 두는 것은 규칙이 아니라 이 검사의 발판이
+           무너지는 것을 재는 일입니다. 물의 정령은 *그림으로서* 뜨고(::MON_FLOATS) 몸으로서
+           걷습니다. 그것이 바로 ::MON_FLIES가 가르려고 존재하는 구별입니다. */
+        if (!(mon_stats(WHO[i].type)->flags & MON_FLIES)) continue;
+
+        enemy_reset(&g_pools);
+        g_pools.enemy.rng = 1u;
+        enemy_spawn_level(&g_pools, &L);
+        g_pools.enemy.m[0].pos.y = sw->max + 2.0f;
+        int high = 0;
+        for (int f = 0; f < 60 * 2; f++) {
+            high += enemy_update(&g_pools, &L, player, DT);
+            g_pools.enemy.m[0].pos.y = sw->max + 2.0f;   /* held up there */
+        }
+        printf("      %-13s held %.1fm up dealt %d\n",
+               WHO[i].kind, (double)(sw->max + 2.0f), high);
+        ok(high == 0, "and one held out of reach overhead touches nothing");
     }
 }
 
@@ -1596,6 +1747,7 @@ int main(void) {
     check_infight();
     check_cast_gather();
     check_crowd();
+    check_close_quarters();
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall enemy checks passed\n", fails);
     return fails != 0;

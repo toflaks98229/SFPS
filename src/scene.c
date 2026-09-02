@@ -1272,6 +1272,34 @@ static v3 pickup_centre(const Pickup *p) {
 #define HURT_SHAKE_RATE   38.0f
 
 #define BOB_PIXELS      10.0f
+
+/* HOW FAR A SWING CARRIES THE SPRITE, in atlas pixels along the line to the
+   viewer, and how much of that is spent winding back first.
+   FOURTEEN, WHICH IS MORE THAN EITHER OF ITS NEIGHBOURS. The bob is ten and
+   the flinch is six, and both of those are things that HAPPEN to a monster --
+   they read as texture on a creature that is otherwise still. A swing is the
+   creature deciding something, and a deliberate motion that moves less than an
+   idle wobble reads as the monster failing to commit.
+   ALONG THE LINE TO THE EYE, not across it. A billboard shoved sideways reads
+   as a flinch, which is the axis right above this. Toward the viewer it grows
+   as it comes -- the sprite really is nearer -- and growth is what a thing
+   coming at you does.
+   THE WIND-BACK IS A QUARTER OF IT and it is what makes the rest read as a
+   thrust rather than a lurch. Something that moves only forward has no moment
+   you can see it decide.
+   *휘두르기가 스프라이트를 얼마나 옮기는가*(보는 쪽으로 향하는 선 위, 아틀라스 픽셀)와 그중
+   얼마를 먼저 뒤로 빼는 데 쓰는가입니다.
+   *열넷이며, 두 이웃보다 큽니다.* 부유는 열이고 경직은 여섯이며, 둘 다 몬스터에게 *일어나는*
+   일입니다. 그것들은 가만히 있는 생물 위의 결로 읽힙니다. 휘두르기는 생물이 무언가를 정하는
+   것이고, 가만히 있을 때의 흔들림보다 적게 움직이는 의도적인 동작은 몬스터가 마음을 정하지
+   못한 것으로 읽힙니다.
+   *눈으로 향하는 선을 따라서이고 그것을 가로질러서가 아닙니다.* 옆으로 밀린 빌보드는 경직으로
+   읽히며, 그것이 바로 위의 축입니다. 보는 쪽으로 향하면 오면서 커집니다. 스프라이트가 실제로
+   더 가까워지기 때문이고, 커지는 것은 당신에게 다가오는 것이 하는 일입니다.
+   *뒤로 빼는 것은 그 4분의 1*이며, 나머지를 덮치기가 아니라 찌르기로 읽히게 만드는 것이
+   그것입니다. 앞으로만 움직이는 것에는 마음을 정하는 순간이 보이지 않습니다. */
+#define LUNGE_PIXELS    14.0f
+#define LUNGE_WIND      0.25f
 #define BOB_RATE         1.7f
 
 #define HUD_MARGIN      18.0f
@@ -1779,6 +1807,47 @@ void scene_draw_enemies(Scene *s, const Pools *pl, mat4 vp, v3 eye, v3 cam_right
            것으로 읽히고, 옆으로 떠는 것은 맞은 것으로 읽힙니다. `cam_right`는 스프라이트가
            이미 세워져 있는 축입니다. */
         v3 centre = v3f(m->pos.x, m->pos.y + h * 0.5f + bob, m->pos.z);
+
+        /* THE SWING, AS MOTION RATHER THAN AS A SECOND DRAWING. ::MonAttack
+           carries no art on purpose -- the atlas is a fixed grid on a floppy --
+           so what tells a caster's swing from its bolt is that the sprite comes
+           at you and goes back. The same `<name>_attack` frame is up for both;
+           only one of them travels.
+           EVERY SWING, INCLUDING THE BRUTE'S, because "a swing lunges" is one
+           rule and "a swing lunges unless the creature is a brute" is two. The
+           brute's frame is already a drawing of a swing, so on it this reads as
+           weight behind a motion that was there.
+           THE CURVE IS THE POSE'S OWN WINDOW: back through the wind-up, out at
+           the moment the damage lands, and home again over the follow-through.
+           ::release_swing fires at exactly `windup`, which is where this peaks,
+           so what the player sees and what hits them are the same instant.
+           *휘두르기를 두 번째 그림이 아니라 움직임으로 냅니다.* ::MonAttack은 일부러 그림을
+           지니지 않습니다. 아틀라스는 플로피 위의 고정 격자입니다. 그래서 캐스터의 휘두르기를
+           볼트와 가르는 것은 스프라이트가 다가왔다가 돌아간다는 것입니다. 같은
+           `<이름>_attack` 프레임이 둘 다에 올라오고, 움직이는 것은 하나뿐입니다.
+           *브루트를 포함해 모든 휘두르기입니다.* "휘두르기는 찌른다"는 규칙 하나이고
+           "생물이 브루트가 아니면 휘두르기는 찌른다"는 둘이기 때문입니다. 브루트의 프레임은
+           이미 휘두르는 그림이므로, 그 위에서 이것은 있던 동작에 실린 무게로 읽힙니다.
+           *곡선은 그 자세 자신의 창입니다.* 준비동작 동안 뒤로, 피해가 닿는 순간에 밖으로,
+           마무리 동안 다시 제자리로. ::release_swing은 정확히 `windup`에서 터지고 이것이 그
+           자리에서 최고점이므로, 플레이어가 보는 것과 그를 때리는 것은 같은 순간입니다. */
+        if (m->state == E_ATTACK) {
+            const MonAttack *LA = mon_attack(m->type, m->atk);
+            if (LA && LA->kind == ATK_SWING && LA->windup > 0.0f) {
+                float t = m->timer / LA->windup;
+                float k = 0.0f;
+                if (t < 1.0f)      k = -LUNGE_WIND * t;
+                else if (t < 2.0f) k = 2.0f - t;
+                if (k != 0.0f) {
+                    v3 away = v3f(eye.x - m->pos.x, 0.0f, eye.z - m->pos.z);
+                    float d = sqrtf(away.x * away.x + away.z * away.z);
+                    if (d > 0.001f)
+                        centre = v3add(centre,
+                                       v3scale(away, k * (LUNGE_PIXELS / (float)SPR_CW) * w / d));
+                }
+            }
+        }
+
         if (!(S->flags & MON_UNFLINCHING) && m->flash > 0.0f) {
             float k = sinf(m->anim * HURT_SHAKE_RATE) * m->flash
                     * (HURT_SHAKE_PIXELS / (float)SPR_CW) * w;

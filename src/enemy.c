@@ -264,14 +264,36 @@ static const MonType TYPES[MON_TYPES] = {
  * *공격 아님*이므로, 맞춰 둘 개수가 없습니다. `ward`는 ::AI_INERT이고 아예 없습니다. */
 /*        kind,      min,    max,  dmg,  wind,  cool,  shot, brst, bmin,  sprd,   gap, weight */
 static const MonAttack ATTACKS[MON_TYPES][MON_MAX_ATTACKS] = {
+    /* THE BOLT STARTS WHERE THE RETREAT ENDS. ::chase_caster backs away below
+       `band * CASTER_KEEP` and the band is slot 0's max, so a bolt offered
+       inside that distance would have the monster shooting from the place it
+       is trying to leave -- it would stop kiting, which is the whole of what
+       an ::AI_CASTER is. The number is that product, written out: 7.5 * 0.55.
+       *볼트는 물러남이 끝나는 곳에서 시작합니다.* ::chase_caster는 `band * CASTER_KEEP`
+       아래에서 물러나고 대역은 슬롯 0의 max이므로, 그 거리 안에서 제안되는 볼트는 몬스터가
+       떠나려는 자리에서 쏘게 만듭니다. 그것은 거리 두기를 그만두는 것이고, ::AI_CASTER란
+       그것의 전부입니다. 그 곱을 적어 둔 수입니다. 7.5 * 0.55. */
     [MON_WATER_SPIRIT] = {
-        { ATK_BOLT,  0.0f,  7.5f,   3, 0.30f, 0.50f,  9.0f,   10,   5, 0.13f, 0.07f, 1.0f },
+        { ATK_BOLT,  4.2f,  7.5f,   3, 0.30f, 0.50f,  9.0f,   10,   5, 0.13f, 0.07f, 1.0f },
+        { ATK_SWING, 0.0f,  1.8f,   6, 0.25f, 0.70f,  0.0f,    1,   1,  0.0f,  0.0f, 1.0f },
     },
     [MON_BRUTE] = {
         { ATK_SWING, 0.0f,  2.3f,  24, 0.55f, 1.50f,  0.0f,    1,   1,  0.0f,  0.0f, 1.0f },
     },
+    /* AND THE SWING IS WHAT COSTS YOU FOR CLOSING. A caster that only ever
+       backed off could be walked down and killed at leisure by a player who
+       simply kept touching it -- the retreat has no floor, so the whole answer
+       to a caster was "get close". Now getting close is answered. 12 damage
+       against the bolt's 12 is deliberate: it is not a lesser attack, it is the
+       same creature at a different range.
+       *그리고 붙은 값을 치르게 하는 것이 휘두르기입니다.* 물러나기만 하는 캐스터는 계속
+       붙어 있기만 하는 플레이어에게 느긋하게 걸어 죽일 수 있는 것이었습니다. 물러남에는
+       바닥이 없으므로 캐스터에 대한 답 전체가 "붙어라"였습니다. 이제 붙는 것에도 답이
+       있습니다. 볼트의 12에 대해 12인 것은 의도적입니다. 못한 공격이 아니라 다른 거리에 있는
+       같은 생물입니다. */
     [MON_CASTER] = {
-        { ATK_BOLT,  0.0f, 13.0f,  12, 0.85f, 1.40f, 11.0f,    1,   1,  0.0f,  0.0f, 1.0f },
+        { ATK_BOLT,  7.2f, 13.0f,  12, 0.85f, 1.40f, 11.0f,    1,   1,  0.0f,  0.0f, 1.0f },
+        { ATK_SWING, 0.0f,  2.2f,  12, 0.40f, 0.95f,  0.0f,    1,   1,  0.0f,  0.0f, 1.0f },
     },
     [MON_MAW] = {
         { ATK_BOLT,  0.0f, 40.0f,  14, 0.90f, 1.10f, 14.0f,    5,   5, 0.22f,  0.0f, 1.0f },
@@ -330,7 +352,7 @@ static void ai_run_slide(Pools *pl, const Level *l, const MonType *S, Enemy *m, 
 
 static int can_see(const Level *l, const Enemy *m, v3 player_eye);
 static int sees_player(const Pools *pl, const Level *l, Enemy *m, v3 player_eye);
-static int pick_attack(Pools *pl, Enemy *m, float dist);
+static int pick_attack(Pools *pl, Enemy *m, float dist, float rise);
 
 /**
  * The range the archetype keeps, metres: slot 0's upper bound.
@@ -1914,42 +1936,45 @@ static void types_check(void)
                 DIAG(DIAG_MON_TABLE);
         }
 
-        /* NO HOLE IN THE UNION OF THE BANDS. A distance covered by no slot is a
-           distance at which the monster winds nothing up and simply stands
-           there, and the player reads that as the monster being broken rather
-           than as a gap in a table. Checked by walking outward: the slots are
-           sorted by nothing, so this asks whether every slot's `min` is reached
-           by some other slot's `max`, starting from zero.
-           *대역들의 합집합에 구멍이 없어야 합니다.* 어떤 슬롯도 덮지 않는 거리는 몬스터가
-           아무것도 준비하지 않고 그냥 서 있는 거리이며, 플레이어는 그것을 표의 구멍이 아니라
-           몬스터가 고장 난 것으로 읽습니다. 바깥으로 걸으며 확인합니다. 슬롯은 아무 순서도
-           없으므로, 0에서 시작해 모든 슬롯의 `min`이 다른 슬롯의 `max`에 닿는지 묻습니다. */
+        /* SOMETHING MUST ANSWER CONTACT, and this is what replaced the rule
+           that was here one revision ago.
+
+           THAT RULE WAS "NO HOLE IN THE UNION OF THE BANDS", and it was wrong
+           the moment a second attack existed to test it against. It read a gap
+           as a distance at which the monster stands and does nothing. For an
+           ::AI_CASTER a gap is where it BACKS AWAY: the caster's bolt begins at
+           7.2m and its swing ends at 2.2m, and everything between is the range
+           it is trying to leave. The rule would have forced a seven-metre swing
+           or a point-blank bolt, either of which is a monster bent to fit a
+           check.
+
+           WHAT IS WORTH HOLDING IS THE OTHER END. A player can always walk up
+           to a monster, and a monster with nothing at contact is one you kill
+           by touching it -- which is exactly what a caster was until this
+           revision. So: some slot must cover zero. It catches the typo the old
+           rule caught (a band written far from where the kind fights) and it is
+           a design claim rather than an arithmetic one.
+
+           *무언가는 접촉에 답해야 하며*, 이것이 한 판 전 이 자리에 있던 규칙을 대신합니다.
+           *그 규칙은 "대역 합집합에 구멍 없음"이었고*, 그것을 시험할 두 번째 공격이 생긴
+           순간 틀린 것이 되었습니다. 그것은 구멍을 몬스터가 서서 아무것도 하지 않는 거리로
+           읽었습니다. ::AI_CASTER에게 구멍은 *물러나는* 곳입니다. 캐스터의 볼트는 7.2m에서
+           시작하고 휘두르기는 2.2m에서 끝나며, 그 사이 전부가 그것이 떠나려는 거리입니다. 그
+           규칙은 7미터짜리 휘두르기나 코앞의 볼트를 강요했을 것이고, 둘 다 검사에 맞추려고
+           구부린 몬스터입니다.
+           *지킬 값어치가 있는 것은 반대쪽 끝입니다.* 플레이어는 언제나 몬스터에게 걸어갈 수
+           있고, 접촉에 아무것도 없는 몬스터는 만지기만 하면 죽는 몬스터입니다. 이 판 전까지
+           캐스터가 정확히 그러했습니다. 그러므로 어떤 슬롯은 0을 덮어야 합니다. 옛 규칙이
+           잡던 오타(그 종류가 싸우는 곳에서 멀리 적힌 대역)를 잡으면서, 산술이 아니라 설계에
+           대한 주장입니다. */
         if (n_atk > 0)
         {
-            float reach = 0.0f;
-            for (int pass = 0; pass < n_atk; pass++)
-                for (int k = 0; k < n_atk; k++)
-                    if (ATTACKS[i][k].min <= reach && ATTACKS[i][k].max > reach)
-                        reach = ATTACKS[i][k].max;
+            int at_contact = 0;
             for (int k = 0; k < n_atk; k++)
-                if (ATTACKS[i][k].min > reach)
-                    DIAG(DIAG_MON_TABLE);
+                if (ATTACKS[i][k].min <= 0.0f) at_contact = 1;
+            if (!at_contact)
+                DIAG(DIAG_MON_TABLE);
         }
-
-        if (TYPES[i].flags & ~MON_FLAGS_ALL)
-            DIAG(DIAG_MON_TABLE);
-
-        /* AN INERT ROW THAT CAN HURT SOMEBODY is a row that was copied from a
-           fighting one and half-edited. Nothing about ::AI_INERT stops the
-           attack code being reached if a later edit gives it reach, and the
-           failure is a ward that bites -- which reads as a bug in the boss
-           fight rather than as a number in this table.
-           피해를 줄 수 있는 ::AI_INERT 행은 싸우는 행에서 복사해 반쯤 고친 행입니다.
-           나중의 편집이 사거리를 주면 ::AI_INERT의 무엇도 공격 코드에 도달하는 것을 막지
-           않으며, 그 실패는 무는 결계핵입니다. 그것은 이 표의 숫자가 아니라 보스전의 버그로
-           읽힙니다. */
-        if (TYPES[i].behaviour == AI_INERT && n_atk != 0)
-            DIAG(DIAG_MON_TABLE);
 
         /* A BOSS WHOSE HEALTH DOES NOT DIVIDE BY ::BOSS_CYCLES survives its
            last cycle. ::enemy_hurt clamps at `hp * (CYCLES - cycle - 1)/CYCLES`
@@ -3818,7 +3843,7 @@ static int sees_player(const Pools *pl, const Level *l, Enemy *m, v3 player_eye)
  * 근접 공격도 가진 몬스터에 대한 절반 감소도 포함합니다. 물 수 있는 것은 거리를 좁히기를
  * 선호하므로 다가오는 동안 덜 쏩니다. 우리의 `shot_speed > 0`이 이미 "원거리"를 말하는
  * 필드이므로, 두 번째 플래그가 아니라 그것이 여기서도 결정합니다. */
-static int pick_attack(Pools *pl, Enemy *m, float dist)
+static int pick_attack(Pools *pl, Enemy *m, float dist, float rise)
 {
     if (m->attack_wait > 0.0f)
         return -1;
@@ -3852,6 +3877,30 @@ static int pick_attack(Pools *pl, Enemy *m, float dist)
        `behaviour != AI_CASTER`로 말하던 것과 정확히 같습니다. 달라진 것은 이것이 이제
        *공격*의 성질이라는 점이며, 캐스터의 휘두르기도 브루트의 것과 같은 확실함을 얻습니다. */
     int n = mon_attack_count(m->type);
+
+    /* QUAKE'S HALVING, WHICH FINALLY HAS SOMETHING TO HALVE. CheckAttack cuts
+       the ranged odds of a monster that can also bite, because something which
+       prefers to close should shoot less on the way in -- otherwise the melee
+       is a bonus rather than a choice, and the creature is simply better than
+       it was. ::MON_ODDS_ALSO_MELEE has carried that reasoning since the bands
+       arrived and nothing could read it: one attack per kind meant nothing
+       could both bite and shoot.
+       NOT AT ARM'S LENGTH. Quake exempts the melee band and so does this. The
+       question there is not "shoot or close" -- the closing is done.
+       *Quake의 절반 감소이며, 드디어 반으로 줄일 것이 생겼습니다.* CheckAttack은 물 수도 있는
+       몬스터의 원거리 확률을 깎습니다. 붙기를 선호하는 것은 들어오는 동안 덜 쏘아야 하기
+       때문입니다. 그러지 않으면 근접은 선택이 아니라 덤이 되고, 그 생물은 그냥 예전보다 나은
+       것이 됩니다. ::MON_ODDS_ALSO_MELEE는 대역이 생긴 이래 그 근거를 지녀 왔고 무엇도 그것을
+       읽을 수 없었습니다. 종류당 공격 하나는 물면서 쏘는 것이 없다는 뜻이었습니다.
+       *팔 길이에서는 아닙니다.* Quake가 근접 대역을 면제하고 이것도 그렇게 합니다. 그곳의
+       질문은 "쏠까 붙을까"가 아닙니다. 붙는 일은 이미 끝났습니다. */
+    if (dist > MON_RANGE_MELEE)
+        for (int k = 0; k < n; k++)
+            if (ATTACKS[m->type][k].kind == ATK_SWING) {
+                chance *= MON_ODDS_ALSO_MELEE;
+                break;
+            }
+
     float total = 0.0f;
     int offered = 0, only = -1;
     unsigned mask = 0;
@@ -3860,6 +3909,23 @@ static int pick_attack(Pools *pl, Enemy *m, float dist)
     {
         const MonAttack *A = &ATTACKS[m->type][k];
         if (dist < A->min || dist > A->max) continue;
+
+        /* AN ARM REACHES IN THREE DIMENSIONS, and until a flyer could swing
+           nothing had to say so. `dist` is horizontal -- every band in this
+           table is a floor plan -- which is right for a bolt, aimed in three
+           dimensions once it leaves. It is not right for a reach: a caster
+           hovering five metres over the player is 1.5m away on the plan and
+           cannot touch them. Grounded monsters are unaffected, which is why
+           this went unnoticed while the only things that swung stood on the
+           floor.
+           *팔은 3차원으로 뻗으며*, 비행체가 휘두를 수 있게 되기 전까지는 그것을 말해야 할
+           것이 없었습니다. `dist`는 수평이며 이 표의 모든 대역은 평면도입니다. 볼트에는 옳은
+           일입니다. 떠난 뒤 3차원으로 겨냥되기 때문입니다. 닿는 거리에는 옳지 않습니다.
+           플레이어 5미터 위에 떠 있는 캐스터는 평면도상 1.5m 떨어져 있고 그를 만질 수
+           없습니다. 지상의 몬스터는 영향을 받지 않으며, 휘두르는 것이 바닥에 선 것들뿐인 동안
+           이것이 눈에 띄지 않은 이유가 그것입니다. */
+        if (A->kind == ATK_SWING && rise > A->max) continue;
+
         if (A->kind == ATK_BOLT && !(frand(&pl->enemy) < chance)) continue;
         mask |= 1u << k;
         total += A->weight;
@@ -4037,7 +4103,7 @@ static void chase_brawler(Pools *pl, const Level *l, const MonType *S, Enemy *m,
        사거리 안입니다. 여기의 굴림은 근접 대역에서 Quake의 0.9입니다. 거리를 좁히는 것이
        여전히 치명적일 만큼 높고, 몬스터가 코앞에서 공격 타이머만 돌리는 대신 이따금 자리를
        바꿀 만큼 낮습니다. */
-    int slot = pick_attack(pl, m, dist);
+    int slot = pick_attack(pl, m, dist, fabsf(to.y));
     if (slot >= 0)
     {
         m->atk = (short)slot;
@@ -4085,6 +4151,24 @@ static void chase_caster(Pools *pl, const Level *l, const MonType *S, Enemy *m,
     }
     if (dist < band * CASTER_KEEP)
     {
+        /* CORNERED, IT ASKS BEFORE IT BACKS AWAY. The retreat has no floor: a
+           player who simply kept touching a caster walked it into a wall and
+           killed it at leisure, because this branch returned before anything
+           could be offered. It asks now, and the only thing the table offers
+           this close is the swing -- the bolt's band starts where this retreat
+           ends, so nothing here makes a caster stand and shoot at point-blank.
+           *궁지에 몰리면 물러나기 전에 묻습니다.* 물러남에는 바닥이 없었습니다. 계속 붙어
+           있기만 한 플레이어는 캐스터를 벽까지 몰아 느긋하게 죽였습니다. 이 분기가 무엇이든
+           제안되기 전에 돌아갔기 때문입니다. 이제 묻습니다. 이렇게 가까운 곳에서 표가 내놓는
+           것은 휘두르기뿐입니다. 볼트의 대역은 이 물러남이 끝나는 곳에서 시작하므로, 이곳의
+           무엇도 캐스터를 코앞에서 서서 쏘게 만들지 않습니다. */
+        int slot = pick_attack(pl, m, dist, fabsf(to.y));
+        if (slot >= 0)
+        {
+            m->atk = (short)slot;
+            begin_attack(pl, mon_attack(m->type, slot), m);
+            return;
+        }
         move_toward(pl, l, S, m, -to.x * inv * step, -to.z * inv * step);
         return;
     }
@@ -4109,7 +4193,7 @@ static void chase_caster(Pools *pl, const Level *l, const MonType *S, Enemy *m,
        선호하는 대역 안에서 플레이어를 정면으로 보고 있으면서도, 여전히 *가끔만* 쏩니다.
        나머지 시간에는 원을 그립니다. 그것이 캐스터를 포탑에서 방 안을 쫓아다녀야 하는
        무언가로 바꿉니다. */
-    int slot = pick_attack(pl, m, dist);
+    int slot = pick_attack(pl, m, dist, fabsf(to.y));
     if (slot >= 0)
     {
         m->atk = (short)slot;

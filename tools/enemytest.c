@@ -513,6 +513,176 @@ static void check_cast_gather(void) {
     }
 }
 
+/* --- monsters take up room ------------------------------------------------
+ *
+ * THREE CLAIMS AND EACH ONE HAS A WAY OF PASSING FOR NOTHING, which is most of
+ * why they are written the way they are.
+ *
+ * "They never overlap" passes perfectly for two monsters that never met. So
+ * the closest approach is asserted from BOTH sides: near enough to have
+ * touched, and never nearer than touching. Only the pair says anything.
+ *
+ * "They separate" passes for two that were never together. So the pair is
+ * stacked at one point on purpose and the overlap at frame zero is asserted
+ * before the separation is.
+ *
+ * "A flyer passes over a walker" cannot be driven reliably by the AI -- where
+ * a caster chooses to be is the caster's business -- so that one puts the
+ * bodies where it wants them and steps a single frame. It is the only check
+ * here that would notice ::mon_clear comparing centres instead of spans.
+ *
+ * *주장이 셋이고 각각 헛되이 통과하는 길을 가지고 있으며*, 이들이 이렇게 쓰인 이유의
+ * 대부분이 그것입니다.
+ * "겹치지 않는다"는 만난 적 없는 둘에 대해 완벽하게 통과합니다. 그래서 최근접 거리를 *양쪽*
+ * 에서 단언합니다. 닿았을 만큼 가까웠고, 닿는 것보다 가깝지는 않았다는 것입니다. 그 쌍만이
+ * 무언가를 말합니다.
+ * "떨어진다"는 함께였던 적 없는 둘에 대해 통과합니다. 그래서 쌍을 한 점에 일부러 쌓고,
+ * 분리를 단언하기 전에 0프레임의 겹침을 단언합니다.
+ * "비행체가 보행체 위를 지난다"는 AI로 안정되게 몰 수 없으므로(캐스터가 어디에 있기로 하는지는
+ * 캐스터의 일입니다) 그 하나는 몸을 원하는 자리에 놓고 한 프레임만 진행시킵니다. 이곳에서
+ * ::mon_clear가 구간이 아니라 중심을 비교하는 것을 알아챌 검사는 이것뿐입니다. */
+static void check_crowd(void) {
+    printf("\nmonsters take up room\n");
+
+    const MonType *BR = mon_stats(MON_BRUTE);
+    const MonType *CA = mon_stats(MON_CASTER);
+
+    /* --- two walking at one player do not become one sprite ------------- */
+    {
+        build();
+        put_kind(&L.ents[0], "brute");
+        L.ents[0].x = -1100; L.ents[0].z = -1500;
+        Entity *b = &L.ents[L.n_ents++];
+        put_kind(b, "brute"); b->x = 1100; b->z = -1500;
+
+        enemy_reset(&g_pools);
+        enemy_spawn_level(&g_pools, &L);
+        okf(enemy_count(&g_pools) == 2, "two brutes stand in the room",
+            (float)enemy_count(&g_pools), 2.0f);
+
+        v3 player = v3f(0.0f, PLAYER_EYE, 0.0f);
+        float touch = BR->radius * 2.0f;
+        float closest = 1e9f;
+        for (int i = 0; i < 60 * 30; i++) {
+            enemy_update(&g_pools, &L, player, DT);
+            float d = dist_xz(enemy_at(&g_pools, 0)->pos,
+                              enemy_at(&g_pools, 1)->pos);
+            if (d < closest) closest = d;
+        }
+        printf("      closest approach %.3fm; touching is %.3fm\n",
+               (double)closest, (double)touch);
+        ok(closest < touch + 0.40f,
+           "two brutes walking at one player do come together");
+        okf(closest >= touch - 0.02f,
+            "and neither ever stands inside the other",
+            closest, touch);
+    }
+
+    /* --- and a pair spawned in one spot pushes itself apart -------------- */
+    {
+        build();
+        put_kind(&L.ents[0], "brute");
+        L.ents[0].x = 0; L.ents[0].z = -1000;
+        Entity *b = &L.ents[L.n_ents++];
+        put_kind(b, "brute"); b->x = 0; b->z = -1000;
+
+        enemy_reset(&g_pools);
+        enemy_spawn_level(&g_pools, &L);
+        if (enemy_count(&g_pools) != 2) { ok(0, "two spawned at one marker"); return; }
+
+        float at0 = dist_xz(enemy_at(&g_pools, 0)->pos,
+                            enemy_at(&g_pools, 1)->pos);
+        float touch = BR->radius * 2.0f;
+        okf(at0 < touch * 0.25f, "two spawned at one marker start inside each other",
+            at0, 0.0f);
+
+        v3 player = v3f(0.0f, PLAYER_EYE, 0.0f);
+        int apart_at = -1, mostly_at = -1;
+        for (int i = 0; i < 60 * 5; i++) {
+            enemy_update(&g_pools, &L, player, DT);
+            float d = dist_xz(enemy_at(&g_pools, 0)->pos,
+                              enemy_at(&g_pools, 1)->pos);
+            if (mostly_at < 0 && d >= touch * 0.90f) mostly_at = i;
+            if (d >= touch - 0.02f) { apart_at = i; break; }
+        }
+        printf("      %.3fm apart at spawn; 90%% clear after %.2fs, fully after %.2fs\n",
+               (double)at0,
+               mostly_at < 0 ? -1.0 : (double)(mostly_at * DT),
+               apart_at  < 0 ? -1.0 : (double)(apart_at  * DT));
+        ok(apart_at >= 0, "and they push themselves apart");
+
+        /* TWO THRESHOLDS BECAUSE THE APPROACH IS EXPONENTIAL, which is what a
+           push proportional to the overlap makes it. Nine tenths of the overlap
+           is gone in a fifth of a second and the last two centimetres take a
+           second and a half -- the push shrinks with the overlap while the
+           chase keeps nudging them together, so the two meet asymptotically.
+           The fast number is the one a player sees; the slow one is written
+           down so nobody reads the fast one as the whole story.
+           *접근이 지수적이므로 문턱이 둘입니다.* 겹침에 비례하는 밀기가 그렇게 만듭니다.
+           겹침의 10분의 9는 5분의 1초에 사라지고 마지막 2센티미터는 1초 반이 걸립니다. 밀기는
+           겹침과 함께 작아지는데 추격은 계속 둘을 붙이므로, 둘은 점근적으로 만납니다. 빠른
+           수는 플레이어가 보는 것이고, 느린 수는 빠른 수를 이야기의 전부로 읽지 않도록 적어
+           둡니다. */
+        ok(mostly_at >= 0 && mostly_at * DT < 0.25f,
+           "with nine tenths of the overlap gone in a quarter second");
+    }
+
+    /* --- a flyer and a walker may share a column of floor ---------------- */
+    {
+        build();
+        put_kind(&L.ents[0], "brute");
+        L.ents[0].x = 0; L.ents[0].z = -1000;
+        Entity *b = &L.ents[L.n_ents++];
+        put_kind(b, "caster"); b->x = 400; b->z = -1000;
+
+        enemy_reset(&g_pools);
+        enemy_spawn_level(&g_pools, &L);
+        if (enemy_count(&g_pools) != 2) { ok(0, "a brute and a caster spawned"); return; }
+
+        /* Placed rather than driven: see the note above. The brute stands on
+           the floor and the caster hovers with its FEET above the brute's head,
+           which is the arrangement a span test allows and a distance test does
+           not.
+           몰지 않고 놓습니다. 브루트는 바닥에 서고 캐스터는 *발*이 브루트의 머리 위에 오도록
+           떠 있습니다. 구간 검사가 허용하고 거리 검사가 허용하지 않는 배치입니다. */
+        Enemy *ea = &g_pools.enemy.m[0], *eb = &g_pools.enemy.m[1];
+        ea->pos = v3f(0.0f, 0.0f, -10.0f);
+        eb->pos = v3f(0.0f, BR->height + 0.30f, -10.0f);
+
+        v3 player = v3f(0.0f, PLAYER_EYE, 0.0f);
+        float touch = BR->radius + CA->radius;
+        for (int i = 0; i < 8; i++) enemy_update(&g_pools, &L, player, DT);
+        float over = dist_xz(enemy_at(&g_pools, 0)->pos,
+                             enemy_at(&g_pools, 1)->pos);
+        printf("      caster %.2fm up: %.3fm off the brute's line, touching is %.3f\n",
+               (double)enemy_at(&g_pools, 1)->pos.y, (double)over, (double)touch);
+        ok(over < touch * 0.5f,
+           "a caster clear of a brute's head keeps standing over it");
+
+        /* MEASURED AGAINST TOUCHING, NOT AGAINST THE OTHER CASE. The first cut
+           of this asserted `under > over` and it passed with the whole feature
+           deleted: a caster at head height drifts a little on its own, a caster
+           three metres up drifts differently, and the comparison read that
+           difference as a push. Two arrangements that differ for reasons of
+           their own cannot tell you which one was pushed. Both numbers are held
+           against the distance at which the two would touch instead.
+           *다른 경우가 아니라 닿는 거리에 대해 잽니다.* 첫 판은 `under > over`를 단언했고
+           기능을 통째로 지워도 통과했습니다. 머리 높이의 캐스터는 스스로 조금 움직이고, 3미터
+           위의 캐스터는 다르게 움직이며, 비교는 그 차이를 밀기로 읽었습니다. 자기 이유로 다른
+           두 배치는 어느 쪽이 밀렸는지 말해 줄 수 없습니다. 두 수 모두를 둘이 닿게 되는
+           거리에 대해 재는 것으로 바꿉니다. */
+        ea->pos = v3f(0.0f, 0.0f, -10.0f);
+        eb->pos = v3f(0.0f, BR->height - 0.60f, -10.0f);
+        for (int i = 0; i < 8; i++) enemy_update(&g_pools, &L, player, DT);
+        float under = dist_xz(enemy_at(&g_pools, 0)->pos,
+                              enemy_at(&g_pools, 1)->pos);
+        printf("      and at head height: %.3fm off it\n", (double)under);
+        okf(under > touch * 0.85f,
+            "and one down at head height is pushed off it",
+            under, touch);
+    }
+}
+
 int main(void) {
     printf("enemytest\n\n");
     build();
@@ -1412,6 +1582,7 @@ int main(void) {
     check_weave();
     check_infight();
     check_cast_gather();
+    check_crowd();
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall enemy checks passed\n", fails);
     return fails != 0;

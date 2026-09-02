@@ -263,7 +263,10 @@ static int foot_ok(const Level *l, const MonType *S, float x, float z, float fee
 static int air_ok(const Level *l, const MonType *S, float x, float z, float y);
 static int holds_height(const MonType *S, const Enemy *m);
 static void monster_fall(const Level *l, const MonType *S, Enemy *m, float dt);
-static void move_toward(const Level *l, const MonType *S, Enemy *m, float dx, float dz);
+static int  mon_clear(const Pools *pl, const MonType *S, const Enemy *self,
+                      float x, float z, float y);
+static void move_toward(const Pools *pl, const Level *l, const MonType *S, Enemy *m,
+                        float dx, float dz);
 static void change_yaw(Enemy *m, float yaw_speed_deg, float dt);
 static void ai_run_slide(Pools *pl, const Level *l, const MonType *S, Enemy *m, float dt);
 
@@ -571,6 +574,112 @@ static v3 foe_point(const Pools *pl, const Enemy *m, v3 player_eye)
     if (!f->active || f->state == E_DEAD)
         return player_eye;
     return v3f(f->pos.x, f->pos.y + TYPES[f->type].eye, f->pos.z);
+}
+
+/**
+ * Pushes apart any two monsters standing inside each other.
+ *
+ * ENGLISH
+ * -------
+ * THE OTHER HALF OF ::mon_clear, and the half that makes it safe. Refusing a
+ * step stops a monster walking into another; nothing about it can get two
+ * apart that are already together, and monsters arrive together for reasons
+ * that never involved walking -- a spawner putting two at one ward in the same
+ * second, ::enemy_boss_summon putting a handful at the maw at once. Without
+ * this, that pair is welded for the rest of the level, because every direction
+ * out of an overlap is still an overlap.
+ *
+ * IT MOVES THROUGH ::move_toward RATHER THAN SETTING THE POSITION, which is
+ * the whole reason it is short. A push has to respect everything a step
+ * respects -- the walls, the lava ::floor_safe refuses, the height a flyer
+ * holds, the ::MON_ANCHORED that means the maw does not budge -- and every one
+ * of those is already in that function. Writing to `pos` here would be a
+ * second mover with its own opinion about which of those it had remembered.
+ * The maw and the wards get pushed by nothing and push everything, for free,
+ * because ::move_toward already refuses their steps.
+ *
+ * EACH PAIR ONCE, `j` FROM `i + 1`, and both halves move. Doing it per monster
+ * against all others would apply every push twice and make the rate mean half
+ * of what it says.
+ *
+ * A LOOP THAT CANNOT RUN AWAY. Each push is capped at half the overlap, so a
+ * pair closes the gap exactly at most and can never cross to the far side of
+ * each other -- which is what would turn a crowd into a vibration. One pass per
+ * frame, not iterated to convergence: three monsters wedged in a corner take a
+ * few frames to sort themselves out, and a few frames of that is what a crowd
+ * looks like anyway.
+ *
+ * 한국어
+ * ------
+ * *::mon_clear의 나머지 절반이며*, 그것을 안전하게 만드는 절반입니다. 걸음을 거절하는 것은
+ * 몬스터가 다른 몬스터 안으로 걸어 들어가는 것을 막습니다. 이미 함께 있는 둘을 떼어놓는 일은
+ * 그것으로 할 수 없고, 몬스터는 걷는 것과 무관한 이유로 함께 도착합니다. 스포너가 같은 초에 한
+ * 워드에 둘을 놓고, ::enemy_boss_summon이 아귀 자리에 여럿을 한꺼번에 놓습니다. 이것이 없으면
+ * 그 쌍은 레벨이 끝날 때까지 용접됩니다. 겹침에서 나가는 모든 방향이 여전히 겹침이기
+ * 때문입니다.
+ *
+ * *위치를 직접 쓰지 않고 ::move_toward를 통해 움직이며*, 그것이 이 함수가 짧은 이유의
+ * 전부입니다. 밀기는 걸음이 존중하는 모든 것을 존중해야 합니다. 벽, ::floor_safe가 거절하는
+ * 용암, 비행체가 유지하는 고도, 아귀가 꿈쩍하지 않는다는 뜻의 ::MON_ANCHORED. 그 전부가 이미
+ * 그 함수 안에 있습니다. 이곳에서 `pos`에 쓰는 것은 그중 무엇을 기억했는지에 대해 자기 의견을
+ * 가진 두 번째 이동자를 만드는 일입니다. 아귀와 워드는 아무것에도 밀리지 않고 모든 것을
+ * 밀어냅니다. 공짜로 그렇습니다. ::move_toward가 이미 그들의 걸음을 거절하기 때문입니다.
+ *
+ * *쌍마다 한 번*, `j`는 `i + 1`부터이며 양쪽이 다 움직입니다. 몬스터마다 나머지 전부에 대해
+ * 하면 모든 밀기가 두 번 적용되어 비율이 적힌 것의 절반을 뜻하게 됩니다.
+ *
+ * *달아날 수 없는 반복.* 각 밀기는 겹침의 절반으로 제한되므로 한 쌍은 간격을 정확히 닫는 것이
+ * 최대이고 서로의 반대편으로 건너갈 수 없습니다. 그것이 군중을 진동으로 바꾸는 일입니다.
+ * 프레임당 한 번이며 수렴할 때까지 반복하지 않습니다. 모퉁이에 낀 셋은 스스로 정리하는 데 몇
+ * 프레임이 걸리고, 몇 프레임의 그것이 어차피 군중의 모습입니다.
+ */
+static void separate_monsters(Pools *pl, const Level *l, float dt)
+{
+    for (int i = 0; i < pl->enemy.count; i++)
+    {
+        Enemy *a = &pl->enemy.m[i];
+        if (!a->active || a->state == E_DEAD)
+            continue;
+        const MonType *AS = &TYPES[a->type];
+
+        for (int j = i + 1; j < pl->enemy.count; j++)
+        {
+            Enemy *b = &pl->enemy.m[j];
+            if (!b->active || b->state == E_DEAD)
+                continue;
+            const MonType *BS = &TYPES[b->type];
+
+            if (a->pos.y >= b->pos.y + BS->height ||
+                b->pos.y >= a->pos.y + AS->height)
+                continue;
+
+            float dx = a->pos.x - b->pos.x, dz = a->pos.z - b->pos.z;
+            float r  = AS->radius + BS->radius;
+            float d2 = dx * dx + dz * dz;
+            if (d2 >= r * r)
+                continue;
+
+            /* EXACTLY ON TOP OF EACH OTHER HAS NO DIRECTION, and two monsters
+               spawned at one marker are exactly that. Any fixed direction
+               would do; index order is the one that is the same on every
+               machine, which is what a demo replaying needs.
+               *정확히 서로 위에 있는 것에는 방향이 없으며*, 한 표식에 생성된 둘이 바로
+               그것입니다. 고정된 방향이면 무엇이든 되고, 인덱스 순서는 어느 기계에서나 같은
+               것입니다. 데모의 재생이 필요로 하는 것이 그것입니다. */
+            float d = sqrtf(d2);
+            float ux, uz;
+            if (d > 1e-4f) { ux = dx / d; uz = dz / d; }
+            else           { ux = 1.0f;  uz = 0.0f; d = 0.0f; }
+
+            float over = r - d;
+            float push = over * MON_PUSH_RATE * dt;
+            if (push > over * 0.5f)
+                push = over * 0.5f;
+
+            move_toward(pl, l, AS, a,  ux * push,  uz * push);
+            move_toward(pl, l, BS, b, -ux * push, -uz * push);
+        }
+    }
 }
 
 int enemy_update(Pools *pl, const Level *l, v3 player_eye, float dt)
@@ -957,6 +1066,8 @@ int enemy_update(Pools *pl, const Level *l, v3 player_eye, float dt)
 
         monster_fall(l, S, m, dt);
     }
+
+    separate_monsters(pl, l, dt);
     return player_damage;
 }
 
@@ -3081,8 +3192,95 @@ static void monster_fall(const Level *l, const MonType *S, Enemy *m, float dt)
  * @note 비행체는 ::air_ok를 통해 높이를 유지하고, 그 밖의 모든 것은 ::foot_ok가 찾은 바닥에
  *       놓입니다.
  */
-static void move_toward(const Level *l, const MonType *S, Enemy *m,
-                        float dx, float dz)
+/**
+ * Is `self` free to stand at (x, z) with its feet at `y`, as far as the OTHER
+ * monsters are concerned?
+ *
+ * ENGLISH
+ * -------
+ * THE THIRD READER OF ::MonType::radius. That field's own note says two halves
+ * of it are true -- it is what a monster is to shoot at, and what it is to the
+ * level's geometry -- and this is the half that was missing: what it is to
+ * another monster. Until now four of them converging on the player arrived as
+ * one sprite with four healths, because nothing anywhere asked whether the
+ * space was taken.
+ *
+ * CYLINDERS, NOT SPHERES, because a flyer and a walker are allowed to share a
+ * column of floor. The caster crosses the room six metres up and the brute
+ * walks under it; a sphere test would have them shove each other through the
+ * ceiling of the fight. The vertical test is the exact one -- two spans overlap
+ * unless one ends before the other starts -- rather than a distance between
+ * centres, because ::MonType::height ranges from the ward's 1.1 to the maw's
+ * 3.6 and a single margin cannot be right for both.
+ *
+ * A CORPSE IS NOT IN THE WAY. ::E_DEAD is skipped for the reason
+ * ::enemy_hitscan skips it: what is left is a sprite on the floor, and a body
+ * you cannot walk over is a body that blocks a doorway forever.
+ *
+ * AND A PAIR THAT ALREADY OVERLAPS IS NOT THIS FUNCTION'S BUSINESS, which is
+ * the subtle half and the one a naive version gets wrong. If being inside
+ * another monster made every step illegal, then two that started inside each
+ * other could never separate -- every direction out of an overlap is still an
+ * overlap until the last centimetre of it, so the refusal would weld them
+ * together permanently. Spawners stack monsters at one ward and the maw summons
+ * a handful at one point, so that state is ordinary rather than exotic. It
+ * belongs to ::separate_monsters, which pushes rather than refuses, and this
+ * function steps over any pair already in it.
+ *
+ * 한국어
+ * ------
+ * *::MonType::radius의 세 번째 독자입니다.* 그 필드의 주석은 두 절반이 참이라고 말합니다.
+ * 쏘아 맞히기에 얼마나 넓은가와 레벨 지오메트리에 대해 얼마나 넓은가입니다. 빠져 있던 절반이
+ * 이것입니다. *다른 몬스터에 대해* 얼마나 넓은가. 지금까지 플레이어에게 모여드는 넷은
+ * 체력이 넷인 스프라이트 하나로 도착했습니다. 어디에서도 그 자리가 찼는지 묻지 않았기
+ * 때문입니다.
+ *
+ * *구가 아니라 원기둥*인 이유는 비행체와 보행체가 같은 바닥 기둥을 나눠 써도 되기
+ * 때문입니다. 캐스터는 6미터 위로 방을 가로지르고 브루트는 그 아래를 걷습니다. 구 검사는
+ * 둘이 서로를 전투의 천장 너머로 밀어내게 만듭니다. 수직 검사는 중심 사이의 거리가 아니라
+ * 정확한 것(한쪽이 다른 쪽이 시작하기 전에 끝나지 않는 한 두 구간은 겹칩니다)입니다.
+ * ::MonType::height가 워드의 1.1에서 아귀의 3.6까지 걸쳐 있고, 하나의 여유값이 둘 다에게
+ * 맞을 수는 없기 때문입니다.
+ *
+ * *시체는 길을 막지 않습니다.* ::E_DEAD를 건너뛰는 이유는 ::enemy_hitscan이 건너뛰는 이유와
+ * 같습니다. 남은 것은 바닥의 스프라이트이고, 넘어갈 수 없는 시체는 문간을 영원히 막는
+ * 시체입니다.
+ *
+ * *그리고 이미 겹쳐 있는 쌍은 이 함수의 일이 아니며*, 그것이 미묘한 절반이자 순진한 판이
+ * 틀리는 곳입니다. 다른 몬스터 안에 있다는 것이 모든 걸음을 불법으로 만든다면, 서로 안에서
+ * 시작한 둘은 결코 떨어질 수 없습니다. 겹침에서 나가는 모든 방향은 마지막 1센티미터까지
+ * 여전히 겹침이므로, 거절은 그들을 영구히 용접합니다. 스포너는 한 워드에 몬스터를 쌓고
+ * 아귀는 한 점에 여럿을 소환하므로, 그 상태는 예외가 아니라 일상입니다. 그것은 거절이 아니라
+ * 밀어내는 ::separate_monsters의 몫이고, 이 함수는 이미 그 상태에 있는 쌍을 넘어갑니다.
+ */
+static int mon_clear(const Pools *pl, const MonType *S, const Enemy *self,
+                     float x, float z, float y)
+{
+    for (int i = 0; i < pl->enemy.count; i++)
+    {
+        const Enemy *o = &pl->enemy.m[i];
+        if (o == self || !o->active || o->state == E_DEAD)
+            continue;
+
+        const MonType *OS = &TYPES[o->type];
+        if (y >= o->pos.y + OS->height || o->pos.y >= y + S->height)
+            continue;
+
+        float r = S->radius + OS->radius;
+
+        float cx = self->pos.x - o->pos.x, cz = self->pos.z - o->pos.z;
+        if (cx * cx + cz * cz < r * r)
+            continue;                      /* already inside it: see above */
+
+        float dx = x - o->pos.x, dz = z - o->pos.z;
+        if (dx * dx + dz * dz < r * r)
+            return 0;
+    }
+    return 1;
+}
+
+static void move_toward(const Pools *pl, const Level *l, const MonType *S,
+                        Enemy *m, float dx, float dz)
 {
     /* AN ANCHORED MONSTER REFUSES EVERY STEP, and refusing it HERE is what
        makes the flag mean one thing. The maw is an ::AI_CASTER, which is a
@@ -3115,37 +3313,50 @@ static void move_toward(const Level *l, const MonType *S, Enemy *m,
        가정이었습니다. */
     if (S->flags & MON_FLIES)
     {
-        if (air_ok(l, S, m->pos.x + dx, m->pos.z + dz, m->pos.y))
+        if (air_ok(l, S, m->pos.x + dx, m->pos.z + dz, m->pos.y) &&
+            mon_clear(pl, S, m, m->pos.x + dx, m->pos.z + dz, m->pos.y))
         {
             m->pos.x += dx;
             m->pos.z += dz;
             return;
         }
-        if (air_ok(l, S, m->pos.x + dx, m->pos.z, m->pos.y))
+        if (air_ok(l, S, m->pos.x + dx, m->pos.z, m->pos.y) &&
+            mon_clear(pl, S, m, m->pos.x + dx, m->pos.z, m->pos.y))
         {
             m->pos.x += dx;
             return;
         }
-        if (air_ok(l, S, m->pos.x, m->pos.z + dz, m->pos.y))
+        if (air_ok(l, S, m->pos.x, m->pos.z + dz, m->pos.y) &&
+            mon_clear(pl, S, m, m->pos.x, m->pos.z + dz, m->pos.y))
             m->pos.z += dz;
         return;
     }
 
+    /* `f` AND NOT `m->pos.y` IN THE MONSTER TEST, because the step may change
+       the height it stands at and the cylinder it is asking about is the one it
+       would occupy AFTER the step. A monster stepping up onto a ledge beside
+       another one is asking whether it fits up there, not down here.
+       몬스터 검사에서 `m->pos.y`가 아니라 `f`인 이유는, 걸음이 서 있는 높이를 바꿀 수 있고
+       묻고 있는 원기둥은 걸음 *뒤에* 차지할 그것이기 때문입니다. 다른 하나 옆의 턱으로 올라서는
+       몬스터는 저 위에 자리가 있는지를 묻고 있지 이 아래를 묻고 있지 않습니다. */
     float f;
-    if (foot_ok(l, S, m->pos.x + dx, m->pos.z + dz, m->pos.y, &f))
+    if (foot_ok(l, S, m->pos.x + dx, m->pos.z + dz, m->pos.y, &f) &&
+        mon_clear(pl, S, m, m->pos.x + dx, m->pos.z + dz, f))
     {
         m->pos.x += dx;
         m->pos.z += dz;
         m->pos.y = f;
         return;
     }
-    if (foot_ok(l, S, m->pos.x + dx, m->pos.z, m->pos.y, &f))
+    if (foot_ok(l, S, m->pos.x + dx, m->pos.z, m->pos.y, &f) &&
+        mon_clear(pl, S, m, m->pos.x + dx, m->pos.z, f))
     {
         m->pos.x += dx;
         m->pos.y = f;
         return;
     }
-    if (foot_ok(l, S, m->pos.x, m->pos.z + dz, m->pos.y, &f))
+    if (foot_ok(l, S, m->pos.x, m->pos.z + dz, m->pos.y, &f) &&
+        mon_clear(pl, S, m, m->pos.x, m->pos.z + dz, f))
     {
         m->pos.z += dz;
         m->pos.y = f;
@@ -3243,7 +3454,7 @@ static void ai_run_slide(Pools *pl, const Level *l, const MonType *S, Enemy *m, 
     float dz = -cosf(side) * step;
 
     float before_x = m->pos.x, before_z = m->pos.z;
-    move_toward(l, S, m, dx, dz);
+    move_toward(pl, l, S, m, dx, dz);
 
     /* Blocked: flip, and let the next frame take the other side. Measured by
        whether it actually moved rather than by asking the level again, so the
@@ -3574,7 +3785,7 @@ static void move_weaving(Pools *pl, const Level *l, const MonType *S, Enemy *m,
         float rz = ux * sn + uz * c;
         ux = rx; uz = rz;
     }
-    move_toward(l, S, m, ux * step, uz * step);
+    move_toward(pl, l, S, m, ux * step, uz * step);
 }
 
 static void chase_brawler(Pools *pl, const Level *l, const MonType *S, Enemy *m,
@@ -3640,7 +3851,7 @@ static void chase_caster(Pools *pl, const Level *l, const MonType *S, Enemy *m,
     }
     if (dist < S->attack * CASTER_KEEP)
     {
-        move_toward(l, S, m, -to.x * inv * step, -to.z * inv * step);
+        move_toward(pl, l, S, m, -to.x * inv * step, -to.z * inv * step);
         return;
     }
 
@@ -3653,7 +3864,7 @@ static void chase_caster(Pools *pl, const Level *l, const MonType *S, Enemy *m,
        검사하며, 벽을 실제로 지키는 것은 그 검사입니다. */
     if (!sees_player(pl, l, m, player_eye))
     {
-        move_toward(l, S, m, to.x * inv * step, to.z * inv * step);
+        move_toward(pl, l, S, m, to.x * inv * step, to.z * inv * step);
         return;
     }
 

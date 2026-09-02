@@ -22,7 +22,7 @@ Models, materials, sounds and levels are all authored as text and hot-reload
 into the running game.
 
 ```
-1,050,112 / 1,474,560 bytes   (71.22% used)
+1,051,648 / 1,474,560 bytes   (71.32% used)
 ```
 
 ## Build
@@ -1542,6 +1542,47 @@ metres in 3.55 s, 1.80 m off the line, turning three times on the way.
 which was a two-metre leg at the old speeds and a seven-metre one at the new:
 the tuned quantity was the *shape* of the zig-zag, and a shape held in seconds
 stretches every time something walks faster.
+
+**And they take up room, which for a long time they did not.**
+`MonType::radius` had two readers — what a monster is to shoot at, and what it
+is to the level's geometry — and no third. Four converging on the player arrived
+as one sprite with four healths, because nothing anywhere asked whether the
+space was taken.
+
+It is two rules, and each is wrong without the other:
+
+- **A step into another monster is refused**, and it slides along one axis
+  first, exactly as a step into a wall does. `move_toward` is the one place
+  every kind of movement passes through — chase, strafe, weave, retreat — so
+  the rule is stated once.
+- **An overlap already standing is pushed apart**, `MON_PUSH_RATE` per second
+  of it. Refusal alone cannot fix that state: every direction out of an overlap
+  is still an overlap, so refusing every step *welds the pair together for the
+  rest of the level*. And monsters arrive inside each other for reasons that
+  never involved walking — a spawner delivers its whole group at one point, the
+  maw summons at one point.
+
+The push is proportional to the overlap, so the approach is exponential:
+**nine tenths of a full stack is gone in 0.18 s** and the last two centimetres
+take 1.7 s, because near contact the push is tiny while the chase keeps nudging
+them together. The fast number is what a player sees. Each half is capped at
+half the overlap, which is what makes it stable without a damping term — a push
+that can overshoot is a push that can oscillate.
+
+**Cylinders, not spheres**, so a caster crossing the room six metres up and a
+brute walking under it do not shove each other. The vertical test is the exact
+span overlap rather than a margin, because heights run from the ward's 1.1 m to
+the maw's 3.6 m. Corpses are not in the way, for the reason `enemy_hitscan`
+already ignores them. `MON_ANCHORED` gets all of this for free in the right
+direction: the maw and the wards are pushed by nothing and block everything,
+because `move_toward` already refuses their steps.
+
+**Spawning is deliberately not part of it.** Refusing to place a monster on an
+occupied spot is one line, and `enemy.c` has the note explaining why it would be
+a mistake — *a refusal that costs nothing never ends*: a spawner that could not
+deliver kept what it owed, `enemy_wave_done` never came true, and the run
+stopped on that wave for good. The push resolves a stacked delivery in a fifth
+of a second and cannot stall anything.
 | **caster** | ranged, and *off the floor* — never closes, shoots across the room | violet robe, no legs, cold cyan eyes |
 
 **It used to be five, and the two that went were the two that were adjectives.**

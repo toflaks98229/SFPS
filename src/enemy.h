@@ -480,6 +480,58 @@ enum MonTypeID {
 #define MON_SLIDE_HOLD(spd) (MON_SLIDE_LEG / ((spd) > 0.1f ? (spd) : 0.1f))
 
 /**
+ * @brief How fast two monsters standing in each other push apart, per second
+ *        of overlap.
+ *
+ * ENGLISH
+ * -------
+ * A SEPARATION, NOT A COLLISION, and the two solve different halves. Refusing
+ * a step keeps a monster from walking INTO another one; it does nothing for
+ * two that are already inside each other, and on its own it makes that state
+ * permanent -- every direction out of an overlap still overlaps, so a refusal
+ * welds the pair together for the rest of the level. Monsters arrive inside
+ * each other for reasons that have nothing to do with walking: a spawner puts
+ * two at one ward in the same second, and ::enemy_boss_summon puts a handful
+ * at the maw at once.
+ *
+ * SO THE OVERLAP IS WHAT IS PUSHED, and the speed is proportional to it: deep
+ * overlaps resolve in a few frames, a graze is a nudge. Each of the pair takes
+ * half, and each half is capped at half the overlap, so the pair can close the
+ * gap exactly and never past it. That cap is what makes this stable without a
+ * damping term -- a push that can overshoot is a push that can oscillate, and
+ * two monsters vibrating against each other is worse than two overlapping.
+ *
+ * SIX PER SECOND is about a third of a second for a brute and a caster stacked
+ * at one point (1.35m of overlap), and under a tenth for the overlaps that
+ * actually happen while walking. Slower reads as monsters melting apart;
+ * faster reads as a shove, which is the wrong word for what is going on -- the
+ * shove is the refused step, this is only the tidying up.
+ *
+ * 한국어
+ * ------
+ * @brief 서로 안에 선 몬스터 둘이 겹친 만큼에 대해 초당 얼마나 밀려나는가.
+ *
+ * *충돌이 아니라 분리이며*, 둘은 서로 다른 절반을 풉니다. 걸음을 거절하는 것은 몬스터가 다른
+ * 몬스터 *안으로* 걸어 들어가는 것을 막습니다. 이미 서로 안에 있는 둘에 대해서는 아무것도 하지
+ * 않으며, 그것만으로는 그 상태를 영구적으로 만듭니다. 겹침에서 나가는 모든 방향이 여전히
+ * 겹치므로, 거절은 그 쌍을 레벨이 끝날 때까지 용접합니다. 몬스터는 걷는 것과 무관한 이유로
+ * 서로 안에 도착합니다. 스포너가 같은 초에 한 워드에 둘을 놓고, ::enemy_boss_summon이 아귀
+ * 자리에 여럿을 한꺼번에 놓습니다.
+ *
+ * *그래서 밀리는 것은 겹침 자체이고* 속도는 그것에 비례합니다. 깊은 겹침은 몇 프레임에
+ * 풀리고 스치는 것은 살짝 밀칩니다. 쌍의 각각이 절반씩 가져가며 각 절반은 겹침의 절반으로
+ * 제한되므로, 그 쌍은 간격을 정확히 닫을 수 있고 그 너머로는 갈 수 없습니다. 그 제한이
+ * 감쇠 항 없이 이것을 안정되게 만듭니다. 지나칠 수 있는 밀기는 진동할 수 있는 밀기이고,
+ * 서로에 대해 떠는 몬스터 둘은 겹친 둘보다 나쁩니다.
+ *
+ * *초당 6*은 브루트와 캐스터가 한 점에 쌓였을 때(겹침 1.35m) 3분의 1초쯤이고, 걷는 동안
+ * 실제로 생기는 겹침에 대해서는 10분의 1초 미만입니다. 더 느리면 몬스터가 녹아 떨어지는
+ * 것처럼 읽히고, 더 빠르면 떠미는 것처럼 읽히는데 그것은 여기서 벌어지는 일에 맞지 않는
+ * 말입니다. 떠미는 것은 거절된 걸음이고 이것은 뒷정리일 뿐입니다.
+ */
+#define MON_PUSH_RATE 6.0f
+
+/**
  * @enum EState
  * @brief What a monster is currently doing.
  *

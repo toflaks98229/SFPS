@@ -1410,6 +1410,84 @@ static void step_push(World *w) {
  *       ::TriggerDef와 ::HazardDef에 대해 이미 쓰는 것이며, 이곳에서만 다른 것을 쓰면 같은
  *       크기로 그려진 텔레포터와 트리거가 다르게 행동하게 됩니다.
  */
+/**
+ * Marks each teleporter's mouth, so the player can see one before standing in it.
+ *
+ * ENGLISH
+ * -------
+ * A TRIGGER VOLUME IS INVISIBLE AND ALWAYS WAS. `trigger_teleport` is a brush
+ * with no drawn faces; what a player sees is whatever the mapper built around
+ * it, and if they built nothing then the room contains a rectangle of floor
+ * that moves you somewhere else for no reason anybody can see. Quake answers
+ * with the `*teleport` texture -- animated, fullbright, unmistakable -- and
+ * this engine has no animated textures, so the answer has to be particles.
+ *
+ * THE RING IS THE VOLUME, not an ornament near it. The radius comes from the
+ * brush's own bounding box through ::fx_spawn_arc, so what the player is
+ * looking at is the footprint that will actually take them: step inside the
+ * ring and you go. A recipe naming its own size would be a promise the effect
+ * could not keep, because the mapper chooses the brush.
+ *
+ * THE SMALLER HALF-WIDTH, because a long thin trigger drawn at its long radius
+ * puts most of the ring outside itself, and a ring you can stand in without
+ * being taken is worse than no ring. Under-drawing is honest; over-drawing is a
+ * lie about where the edge is.
+ *
+ * PACED OFF THE CLOCK RATHER THAN A TIMER FIELD. `(int)(t * RATE)` changing is
+ * exactly "a tick boundary was crossed this frame", which needs no state to
+ * remember and cannot drift. A per-frame spray would fill the pool: two mouths
+ * at sixty frames a second against ::FX_MAX_PARTICLES is the whole budget spent
+ * on scenery nobody is looking at.
+ *
+ * 한국어
+ * ------
+ * *트리거 부피는 보이지 않으며 언제나 그랬습니다.* `trigger_teleport`는 그려지는 면이 없는
+ * 브러시입니다. 플레이어가 보는 것은 제작자가 그 둘레에 지은 것이고, 아무것도 짓지 않았다면 그
+ * 방에는 아무도 볼 수 없는 이유로 사람을 옮기는 바닥 사각형이 있습니다. Quake는 `*teleport`
+ * 텍스처로 답합니다. 움직이고, 풀브라이트이고, 착각할 수 없습니다. 이 엔진에는 움직이는
+ * 텍스처가 없으므로 답은 입자여야 합니다.
+ *
+ * *고리가 곧 부피*이며 그 근처의 장식이 아닙니다. 반지름은 ::fx_spawn_arc을 통해 브러시 자신의
+ * 바운딩 박스에서 옵니다. 그러므로 플레이어가 보고 있는 것은 실제로 자기를 데려갈 발자국입니다.
+ * 고리 안으로 들어서면 갑니다. 자기 크기를 이름 짓는 레시피는 이펙트가 지킬 수 없는 약속입니다.
+ * 브러시를 고르는 것은 제작자이기 때문입니다.
+ *
+ * *더 작은 반너비*입니다. 길고 가는 트리거를 긴 반지름으로 그리면 고리의 대부분이 자기 바깥에
+ * 놓이고, 들어가 서도 데려가지지 않는 고리는 고리가 없는 것보다 나쁩니다. 덜 그리는 것은
+ * 정직하고, 더 그리는 것은 가장자리가 어디인지에 대한 거짓말입니다.
+ *
+ * *필드가 아니라 시계로 속도를 맞춥니다.* `(int)(t * RATE)`가 바뀌는 것이 곧 "이번 프레임에 틱
+ * 경계를 넘었다"이며, 기억할 상태가 필요 없고 어긋날 수도 없습니다. 프레임마다 뿌리면 풀이
+ * 찹니다. 입 둘이 초당 예순 프레임이면 ::FX_MAX_PARTICLES 예산 전체를 아무도 보지 않는 배경에
+ * 쓰는 일입니다.
+ */
+#define TELE_MOUTH_RATE 7.0f    /* rings a second, per mouth */
+
+static void step_teleport_mouths(World *w, float dt) {
+    const Level *l = &w->level;
+    if (!l->brushes || l->n_teleports < 1) return;
+
+    float now = w->run.world_time;
+    if ((int)(now * TELE_MOUTH_RATE) == (int)((now - dt) * TELE_MOUTH_RATE))
+        return;
+
+    for (int i = 0; i < l->n_teleports; i++) {
+        const TeleportDef *t = &l->teleports[i];
+        if (t->first_brush < 0 || t->n_brushes < 1) continue;
+
+        const Brush *b = &l->brushes->brushes[t->first_brush];
+        float hx = (b->max.x - b->min.x) * 0.5f;
+        float hz = (b->max.z - b->min.z) * 0.5f;
+        float r  = hx < hz ? hx : hz;
+        if (r < 0.1f) continue;
+
+        v3 at = v3f((b->min.x + b->max.x) * 0.5f,
+                    b->min.y + 0.05f,
+                    (b->min.z + b->max.z) * 0.5f);
+        fx_spawn_arc(&w->pools, "telemouth", at, v3f(0.0f, 0.0f, -1.0f), r, 180);
+    }
+}
+
 static void step_teleport(World *w) {
     const Level *l = &w->level;
     if (!l->brushes) return;
@@ -1419,6 +1497,7 @@ static void step_teleport(World *w) {
         if (!brush_point_in(l->brushes, t->first_brush, t->n_brushes,
                             w->player.pos)) continue;
 
+        v3 from = w->player.pos;
         float turn = t->yaw - w->yaw;
         float c = cosf(turn), s = sinf(turn);
         float vx = w->player.vel.x, vz = w->player.vel.z;
@@ -1440,14 +1519,33 @@ static void step_teleport(World *w) {
         w->player.vel.x = vx * c - vz * s;
         w->player.vel.z = vx * s + vz * c;
 
-        /* The landing thump, because there is no teleport sound in the recipe
-           table and this is the closest thing in it to arriving somewhere. A
-           silent teleport reads as a rendering glitch: the room changes and
-           nothing says the game did it on purpose.
-           착지음입니다. 레시피 표에 텔레포트 소리가 없고, 그 안에서 *어딘가에 도착하는 것*에
-           가장 가까운 것이 이것이기 때문입니다. 소리 없는 텔레포트는 렌더링 결함으로
-           읽힙니다. 방이 바뀌는데 게임이 일부러 그랬다고 말하는 것이 아무것도 없습니다. */
-        audio_play_at("hland", 90, w->player.pos);
+        /* BOTH ENDS, WHICH IS QUAKE'S WHOLE TRICK. `teleport_touch` calls
+           spawn_tfog at the point you left and again at the point you arrive.
+           One burst is a puff; two of them thirty metres apart are a JOURNEY,
+           and the one behind you is the one doing the work -- it is the only
+           evidence the room did not simply change. The sound goes with each,
+           so the ear hears it twice, once close and once away.
+
+           THE STAND-IN IS GONE. This played `hland`, the landing thump, under
+           a comment admitting "there is no teleport sound in the recipe table
+           and this is the closest thing in it". A borrowed sound is one the
+           player learns wrongly: a thump says you hit the floor, and hitting
+           the floor is not what happened. `tele` is a recipe now.
+
+           *양쪽 끝이며, 그것이 Quake의 요령 전부입니다.* `teleport_touch`는 떠난 자리에서 한
+           번, 도착한 자리에서 다시 한 번 spawn_tfog을 부릅니다. 한 번의 폭발은 연기 한
+           모금이고, 30미터 떨어진 두 번은 *여정*입니다. 일하는 쪽은 뒤에 남은 것입니다. 방이
+           그냥 바뀐 것이 아니라는 유일한 증거이기 때문입니다. 소리가 각각에 따라붙으므로 귀는
+           그것을 두 번, 한 번은 가까이 한 번은 멀리서 듣습니다.
+           *대역품은 사라졌습니다.* 이곳은 `hland`(착지 소리)를 재생하며 "레시피 표에 텔레포트
+           소리가 없어서 그중 가장 가까운 것"이라고 인정하는 주석을 달고 있었습니다. 빌려 온
+           소리는 플레이어가 잘못 배우는 소리입니다. 쿵 소리는 바닥에 닿았다는 뜻이고, 바닥에
+           닿는 것은 일어난 일이 아닙니다. 이제 `tele`은 레시피입니다. */
+        v3 up = v3f(0.0f, 1.0f, 0.0f);
+        fx_spawn(&w->pools, "telefog", from, up);
+        fx_spawn(&w->pools, "telefog", w->player.pos, up);
+        audio_play_at("tele", 95, from);
+        audio_play_at("tele", 95, w->player.pos);
         return;
     }
 }
@@ -2935,6 +3033,7 @@ int world_step(World *w, const Input *in, float aspect, float dt) {
        던져집니다. */
     if (!frozen) step_push(w);
     if (!frozen) step_teleport(w);
+    step_teleport_mouths(w, dt);
 
     /* AFTER the monsters were stepped and BEFORE the exit.
        After, because "is the wave clear" is a question about the state this

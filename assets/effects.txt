@@ -1578,3 +1578,77 @@ e warded
   gravity 0              # no fall; this is a surface refusing, not a thing shed
   blend add
   face camera
+
+# QUAKE'S spawn_tfog, WHICH FIRES TWICE. `teleport_touch` calls it at the point
+# you left and again in front of where you arrive, and the pair is the whole
+# trick: one burst is a puff, two bursts thirty metres apart are a journey. The
+# one behind you is the one that matters -- it is the only evidence the room did
+# not simply change.
+#
+# COLD AND RISING, against everything else in this file. Blast, ember, muzzle
+# and lava all fall and all run warm, because they are combustion. This is not:
+# it goes up and it goes blue, and that is the whole of what tells a player at a
+# glance that what happened to them was not an explosion.
+#
+# *Quake의 spawn_tfog이며, 두 번 발동합니다.* `teleport_touch`가 떠난 자리에서 한 번,
+# 도착하는 자리 앞에서 다시 한 번 부르며, 그 쌍이 요령의 전부입니다. 한 번의 폭발은 연기 한
+# 모금이고, 30미터 떨어진 두 번의 폭발은 여정입니다. 중요한 것은 뒤에 남은 쪽입니다. 방이 그냥
+# 바뀐 것이 아니라는 유일한 증거이기 때문입니다.
+# *차갑고 올라갑니다.* 이 파일의 다른 모든 것과 반대입니다. 폭발도 잉걸도 총구도 용암도 전부
+# 떨어지고 전부 따뜻합니다. 그것들은 연소이기 때문입니다. 이것은 아닙니다. 위로 가고 푸르게
+# 가며, 그것이 자기에게 일어난 일이 폭발이 아니었다는 것을 플레이어에게 한눈에 말하는 것의
+# 전부입니다.
+e telefog
+  count 44
+  life 560
+  size 12 3
+  rgb 200 220 255
+  rgb2 90 70 200
+  alpha 225 0
+  spawn 45
+  speed 3.4 1.1
+  gravity -55            # RISES: negative gravity, and the only recipe here
+                         # that uses it. See the note above
+  drag 3
+  blend 1
+  face 1
+
+# WHAT MAKES A TELEPORTER LOOK LIKE ONE BEFORE YOU STEP IN IT.
+#
+# THE TRIGGER IS INVISIBLE AND ALWAYS WAS. A `trigger_teleport` is a brush with
+# no drawn faces; what the player sees is whatever the mapper built around it,
+# and if they built nothing then the room contains a rectangle of floor that
+# teleports you for no reason a player can see. Quake answers this with the
+# `*teleport` texture -- animated, fullbright, unmistakable -- and this engine
+# has no such thing, so the answer has to be the particles.
+#
+# DRAWN AT THE VOLUME'S OWN RADIUS, through ::fx_spawn_arc, so the ring is not
+# an ornament near the teleporter: it IS the teleporter, traced. Step inside the
+# ring and you go. That is a promise the effect can only keep because the caller
+# measures the brush rather than the recipe naming a size.
+#
+# *무엇이 텔레포터를 들어가기 전에 텔레포터처럼 보이게 하는가.*
+# *트리거는 보이지 않으며 언제나 그랬습니다.* `trigger_teleport`는 그려지는 면이 없는
+# 브러시입니다. 플레이어가 보는 것은 제작자가 그 둘레에 지은 것이고, 아무것도 짓지 않았다면 그
+# 방에는 플레이어가 볼 수 있는 어떤 이유도 없이 순간이동시키는 바닥 사각형이 있는 것입니다.
+# Quake는 `*teleport` 텍스처로 답합니다. 움직이고, 풀브라이트이고, 착각할 수 없습니다. 이
+# 엔진에는 그런 것이 없으므로 답은 입자여야 합니다.
+# *::fx_spawn_arc을 통해 부피 자신의 반지름에 그려지므로*, 그 고리는 텔레포터 *근처의* 장식이
+# 아니라 텔레포터 자체를 따라 그린 것입니다. 고리 안으로 들어서면 갑니다. 레시피가 크기를
+# 이름 짓는 대신 호출자가 브러시를 재기 때문에만 지킬 수 있는 약속입니다.
+e telemouth
+  count 3
+  life 1100              # long, because the ring has to be there when the
+                         # player looks up -- a mouth that blinks is a hazard
+  size 5 2
+  rgb 150 195 255
+  rgb2 60 45 170
+  alpha 0 130            # fades IN as it climbs, so the eye is drawn upward
+                         # from the floor rather than to the floor
+  spawn 0                # set by the caller: the volume's own half-width
+  arc 0                  # set by the caller: 180, a full ring
+  speed 0.8 0.25
+  gravity -22            # a slow rise
+  drag 1
+  blend 1
+  face 1

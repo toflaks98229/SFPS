@@ -759,6 +759,78 @@ static void check_teleport(void) {
     float away = v3len(v3sub(mid, dest));
     ok(away > 1.0f, "and the destination is somewhere else");
 
+    /* --- and it is visibly a teleporter, at both ends ---------------------
+     *
+     * QUAKE FIRES spawn_tfog TWICE, at the point you left and the point you
+     * arrive, and the pair is the whole trick: one burst is a puff, two of them
+     * a room apart are a journey. The one BEHIND you is the one doing the work
+     * -- without it the room simply changed, which is what a rendering fault
+     * looks like.
+     *
+     * COUNTED AT EACH END rather than in total. A total goes green for an
+     * effect fired twice in the same place, which is precisely the mistake
+     * worth catching: the departure burst is the easy one to forget, because
+     * by the time it is drawn the player is not looking at it.
+     *
+     * *Quake는 spawn_tfog을 두 번, 떠난 자리와 도착한 자리에서 발동합니다.* 그 쌍이 요령의
+     * 전부입니다. 한 번의 폭발은 연기 한 모금이고, 방 하나를 사이에 둔 두 번은 여정입니다.
+     * 일하는 것은 *뒤에 남은* 쪽입니다. 그것이 없으면 방이 그냥 바뀐 것이고, 그것은 렌더링
+     * 결함처럼 보입니다.
+     * *총합이 아니라 양쪽 끝에서 셉니다.* 총합은 같은 자리에서 두 번 발동한 이펙트에 대해서도
+     * 초록이 되며, 그것이야말로 잡을 값어치가 있는 실수입니다. 출발 쪽 폭발이 잊기 쉬운
+     * 쪽입니다. 그것이 그려질 때 플레이어는 그것을 보고 있지 않기 때문입니다. */
+    fx_reload(&w.pools);
+    w.player.pos = v3f(mid.x, mid.y, mid.z);
+    w.player.vel = v3f(0.0f, 0.0f, 0.0f);
+    Input tin = {0};
+    world_step(&w, &tin, 1.777f, 0.016f);
+
+    int at_from = 0, at_to = 0;
+    for (int i = 0; i < FX_MAX_PARTICLES; i++) {
+        const FxParticle *q = &w.pools.fx.parts[i];
+        if (q->life <= 0.0f) continue;
+        /* NEAR ONE END AND FAR FROM THE OTHER. Counting "within 2m of where
+           they left" and "within 3m of where they arrived" separately goes
+           green for a single burst fired twice in the same place, if the two
+           ends happen to be close -- and a teleporter whose destination is a
+           few metres away is a perfectly ordinary teleporter. The exclusion is
+           what makes the pair mean two ends.
+           *한쪽 끝에 가깝고 다른 쪽에서는 먼 것.* "떠난 자리에서 2m 안"과 "도착한 자리에서
+           3m 안"을 따로 세면, 두 끝이 가까울 경우 같은 자리에서 두 번 터진 하나의 폭발에
+           대해서도 초록이 됩니다. 목적지가 몇 미터 떨어진 텔레포터는 지극히 평범한
+           텔레포터입니다. 배제가 그 쌍을 두 끝으로 만듭니다. */
+        float df = v3len(v3sub(q->pos, mid));
+        float dt2 = v3len(v3sub(q->pos, dest));
+        if (df < 2.0f && dt2 > 4.0f) at_from++;
+        if (dt2 < 3.0f && df > 4.0f) at_to++;
+    }
+    printf("      %d particle(s) where the player left, %d where they arrived\n",
+           at_from, at_to);
+    ok(at_from > 0, "stepping in leaves something behind");
+    ok(at_to   > 0, "and puts something where the player came out");
+
+    /* AND THE MOUTH IS MARKED BEFORE ANYBODY STEPS IN IT. A trigger volume has
+       no drawn faces, so an unmarked teleporter is a rectangle of floor that
+       moves you for no visible reason. Stepped with the player far away, so
+       what is counted is the mouth and not the arrival burst.
+       *그리고 아무도 들어서기 전에 입이 표시됩니다.* 트리거 부피에는 그려지는 면이 없으므로,
+       표시되지 않은 텔레포터는 보이는 이유 없이 사람을 옮기는 바닥 사각형입니다. 플레이어를
+       멀리 둔 채 진행시키므로, 세어지는 것은 도착 폭발이 아니라 입입니다. */
+    fx_reload(&w.pools);
+    w.player.pos = v3f(dest.x, dest.y + PLAYER_EYE, dest.z);
+    int ring = 0;
+    for (int f = 0; f < 30; f++) {
+        world_step(&w, &tin, 1.777f, 0.016f);
+        for (int i = 0; i < FX_MAX_PARTICLES; i++) {
+            const FxParticle *q = &w.pools.fx.parts[i];
+            if (q->life <= 0.0f) continue;
+            float dx = q->pos.x - mid.x, dz = q->pos.z - mid.z;
+            if (sqrtf(dx * dx + dz * dz) < 4.0f) { ring++; break; }
+        }
+    }
+    printf("      the mouth was drawn on %d of 30 frames\n", ring);
+    ok(ring > 0, "an unoccupied teleporter marks itself");
+
     /* Stand in it and let one frame happen. */
     Input in; memset(&in, 0, sizeof in);
     w.player.pos      = mid;

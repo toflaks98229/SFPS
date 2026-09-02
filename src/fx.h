@@ -135,7 +135,23 @@ typedef struct MeshBuf MeshBuf;
    자랐습니다. 그것이 답해야 하는 새 질문(얼마나 큰가, 얼마나 뜨거운가, 얼마나 먼가, 얼마나
    지났는가)마다 한 겹이 들기 때문입니다. 이 배열은 .bss이므로, 이곳에서 더한 여덟은 플로피가
    결코 보지 않는 여덟입니다. */
-#define FX_MAX_DEFS      48   ///< @brief Effect definitions the text may hold. / 텍스트가 담을 수 있는 이펙트 정의 수.
+/**
+ * @brief Effect definitions the text may hold.
+ *
+ * ENGLISH: Sixty-four, raised from 48 the day the file reached 49. The
+ * forty-ninth recipe was parsed, counted, and dropped -- ::DIAG_FX_CAP says so
+ * and nobody was reading it -- and what that looks like from inside the game is
+ * an effect that spawns nothing, which is indistinguishable from a name spelled
+ * wrongly. It cost a debugging session that ended at the wrong end of the
+ * pipeline. The array is `static` and therefore `.bss`, so the sixteen spare
+ * rows are free on the floppy and cost only address space.
+ * 한국어: 64이며, 파일이 49개에 이른 날 48에서 올렸습니다. 마흔아홉 번째 레시피는 파싱되고,
+ * 세어지고, 버려졌습니다. ::DIAG_FX_CAP이 그렇게 말했고 아무도 그것을 읽고 있지 않았습니다.
+ * 게임 안에서 그것은 아무것도 뿌리지 않는 이펙트로 보이며, 이름을 잘못 적은 것과 구별되지
+ * 않습니다. 파이프라인의 엉뚱한 끝에서 끝난 디버깅 한 판을 치렀습니다. 배열은 `static`이므로
+ * `.bss`이고, 남는 열여섯 행은 플로피에서 공짜이며 주소 공간만 씁니다.
+ */
+#define FX_MAX_DEFS      64
 
 /**
  * @brief Particles alive at once, across every effect.

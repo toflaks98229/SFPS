@@ -274,3 +274,38 @@ s bossward
 l 2 260  900   90 1100  900  92    # the same climb, run backwards
 l 1 140  760   70  520  760  68    # and its saw, likewise
 l 0 120  260   40  200  520  46    # square settling low: the thing has shut
+
+# THE TELEPORTER, and it is here because step_teleport said out loud that it was
+# not. That function played `hland` -- the landing thump -- with a comment
+# admitting "there is no teleport sound in the recipe table and this is the
+# closest thing in it". A borrowed sound is a sound the player learns wrongly:
+# a thump says you hit the floor, and hitting the floor is not what happened.
+#
+# QUAKE PLAYS ONE SOUND AT BOTH ENDS. `spawn_tfog` fires at the point you left
+# and again at the point you arrive, and the same clip plays at each -- so the
+# ear hears it twice, once close and once behind, and the two together are what
+# say a distance was crossed rather than a room swapped. Quake picks one of five
+# recordings; one recipe does the same job here, because the variety was against
+# repetition in a corridor of teleporters and this game has two.
+#
+# THE SWEEP GOES UP. Every other rising sound in this file is a threat (the
+# monster's `sight` snarl) and every falling one is an impact. This is neither:
+# it is a thing being taken, and up is the direction nothing here has used for
+# an event that happens TO the player without hurting them.
+#
+# *텔레포터*이며, step_teleport가 스스로 없다고 말했기 때문에 이곳에 있습니다. 그 함수는
+# `hland`(착지 소리)를 재생하며 "레시피 표에 텔레포트 소리가 없어서 그중 가장 가까운 것"이라고
+# 적어 두었습니다. 빌려 온 소리는 플레이어가 잘못 배우는 소리입니다. 쿵 소리는 바닥에 닿았다는
+# 뜻이고, 바닥에 닿는 것은 일어난 일이 아닙니다.
+# *Quake는 양쪽 끝에서 하나의 소리를 재생합니다.* `spawn_tfog`이 떠난 자리와 도착한 자리에서
+# 각각 발동하고 같은 클립이 양쪽에서 울립니다. 그래서 귀는 그것을 두 번, 한 번은 가까이 한 번은
+# 뒤에서 듣고, 그 둘이 함께 방이 바뀐 것이 아니라 거리가 건너졌다고 말합니다. Quake는 다섯 중
+# 하나를 고르는데, 이곳에서는 레시피 하나가 같은 일을 합니다. 그 다양함은 텔레포터가 늘어선
+# 복도의 반복에 맞선 것이고, 이 게임에는 둘뿐입니다.
+# *휩쓰는 방향은 위*입니다. 이 파일의 다른 모든 상승음은 위협이고(몬스터의 `sight` 으르렁),
+# 모든 하강음은 충격입니다. 이것은 둘 다 아닙니다. *가져가지는 것*이고, 위는 플레이어를 다치게
+# 하지 않으면서 플레이어*에게* 일어나는 사건에 아직 아무도 쓰지 않은 방향입니다.
+s tele
+l 2 420  180  980   8 380  70     # a sine climbing away: the taking
+l 1 260  90   540   4 240  40     # a saw under it, so it has a body
+l 3 180  600 2600   0 170  30     # air rushing into the space left behind

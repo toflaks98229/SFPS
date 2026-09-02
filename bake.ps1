@@ -16,6 +16,11 @@ $ErrorActionPreference = 'Stop'
 $root   = $PSScriptRoot
 $outFile = Join-Path $root 'src\gen_assets.h'
 
+# Assets whose symbol ships but whose bytes do not. See the note beside the
+# `$mini = ''` below for what that means and what it costs.
+# 심볼은 출하되지만 바이트는 출하되지 않는 에셋입니다.
+$setsNotBaked = @('ASSET_LEVELS')
+
 $sets = @(
     @{ Name = 'ASSET_MODELS';  File = 'assets\models.txt'   },
     @{ Name = 'ASSET_RECIPES'; File = 'assets\textures.txt' },
@@ -370,6 +375,54 @@ foreach ($s in $sets) {
 
     $raw  = Get-Content $path -Raw
     $mini = ConvertTo-Minified $raw
+
+    # THE GAME SHIPS ONE MAP, AND levels.txt DESCRIBES THREE OTHER LEVELS.
+    #
+    # `arena`, `vault` and `dm03` are the old campaign, in the sector format
+    # that came before brush maps. src/world.h says what became of them: "The
+    # old campaign levels still load by name; nothing reaches them by walking
+    # forward." No shipped source names one -- WORLD_START_DEFAULT and
+    # WORLD_BOSS_ARENA are both `lqdm4`, and WORLD_CHAIN_ROOT is read only by
+    # tools/leveltrans.c and tools/steptest.c. A release binary was carrying a
+    # campaign it could not reach.
+    #
+    # THE FILE STAYS AND THE BLOB DOES NOT, which is exactly what $mapsNotBaked
+    # does for atrium and for the same reason: the three levels are the fixture
+    # leveltest walks for sectors, outlines, caps, hazards and the four `light`
+    # lines, and steptest drives the progression machinery through them.
+    # FILENAMES[DATA_LEVELS] is "assets\levels.txt", so every tool -- which is
+    # every HOT_RELOAD build -- reads them from disk exactly as before.
+    #
+    # WHAT IT COSTS, said plainly: about 2KB deflated, a fifth of a percent, and
+    # a RELEASE build compiled with -DWORLD_START_LEVEL='"arena"' now starts on
+    # nothing. That override is documented and stays available to the authoring
+    # build; if it is ever wanted in a shipped one, take this entry out.
+    #
+    # The symbol stays, empty. DataAsset indexes g_baked and FILENAMES and both
+    # carry a _Static_assert on their length, so removing the row would not
+    # shrink the binary -- it would shift every asset after it onto the wrong
+    # bytes, which data.c's own note calls "a level that inflates as a sprite
+    # sheet".
+    #
+    # *게임은 맵 하나를 출하하고, levels.txt는 다른 레벨 셋을 서술합니다.* `arena`, `vault`,
+    # `dm03`은 브러시 맵 이전의 섹터 형식으로 된 옛 캠페인입니다. src/world.h가 그 결말을
+    # 적어 두었습니다. "옛 캠페인 레벨은 여전히 이름으로 불러들여지지만, 앞으로 걸어서 그곳에
+    # 닿는 것은 없다." 출하 소스는 그중 하나도 이름 대지 않습니다. WORLD_START_DEFAULT와
+    # WORLD_BOSS_ARENA는 둘 다 `lqdm4`이고, WORLD_CHAIN_ROOT는 tools/leveltrans.c와
+    # tools/steptest.c만 읽습니다. 릴리스 바이너리가 닿을 수 없는 캠페인을 지고 있었습니다.
+    # *파일은 남고 블롭은 남지 않습니다.* $mapsNotBaked가 atrium에 대해 하는 일과 같고 이유도
+    # 같습니다. 그 셋은 leveltest가 섹터·외곽선·용량·해저드와 네 개의 `light` 줄을 위해 걷는
+    # 픽스처이며, steptest가 진행 기계를 몰아 보는 곳입니다. FILENAMES[DATA_LEVELS]가
+    # "assets\levels.txt"이므로 모든 도구(곧 모든 HOT_RELOAD 빌드)는 예전 그대로 디스크에서
+    # 읽습니다.
+    # *무엇을 치르는가.* 압축 후 2KB쯤, 0.2%이며, -DWORLD_START_LEVEL='"arena"'로 컴파일한
+    # 릴리스 빌드는 이제 아무것도 시작하지 못합니다. 그 오버라이드는 문서화되어 있고 저작
+    # 빌드에서는 그대로 쓸 수 있습니다. 출하 빌드에서 필요해지면 이 항목을 빼십시오.
+    # *심볼은 빈 채로 남습니다.* DataAsset이 g_baked와 FILENAMES를 색인하며 둘 다 길이에
+    # _Static_assert가 걸려 있으므로, 행을 지우는 것은 바이너리를 줄이는 것이 아니라 그 뒤의
+    # 모든 에셋을 엉뚱한 바이트로 밀어내는 일입니다. data.c 자신의 표현으로는 "스프라이트
+    # 시트로 펼쳐지는 레벨"입니다.
+    if ($setsNotBaked -contains $s.Name) { $mini = '' }
     # The recipe's own size, before the samples are appended: they are reported
     # on their own row, and counting them twice would put 84KB into the total
     # that is not there.

@@ -13,6 +13,7 @@
 #include "txt.h"    /* txt_is, and txt_to_int, which every number below goes through */
 #include <limits.h> /* INT_MAX / INT_MIN, the two values the saturation lands on */
 #include <string.h>   /* strlen -- an entity kind is a plain C string */
+#include "data.h"    /* data_baked / data_text: the blob and the file, told apart */
 #include "player.h"
 #include "pickup.h"  /* pickup_kind_for_n -- is the artifact IN the level */
 /* Builds real geometry to check winding and spans, so it needs the renderer's
@@ -1348,6 +1349,48 @@ int main(void) {
         okf(disagreed == 0,
             "the box rejects only points the crossing test rejects anyway",
             (float)disagreed, 0.0f);
+    }
+
+    /* --- the levels are a fixture and not a shipment ----------------------
+     *
+     * THE GAME SHIPS ONE MAP. `arena`, `vault` and `dm03` are the old campaign
+     * in the sector format that came before brush maps, and world.h says what
+     * became of them: "the old campaign levels still load by name; nothing
+     * reaches them by walking forward". No shipped source names one. So
+     * bake.ps1 keeps the file and drops the bytes, which is what $mapsNotBaked
+     * already does for atrium.
+     *
+     * NOTHING WOULD HAVE NOTICED, which is why this is here. Every tool is a
+     * HOT_RELOAD build and reads `assets\levels.txt` from disk, so the whole
+     * suite goes on passing whether the blob holds the campaign or nothing at
+     * all -- the exclusion could be reverted, or silently stop working, and the
+     * only evidence would be a binary two kilobytes larger than anybody meant.
+     * ::data_baked reads the blob in either build, which is exactly the hole it
+     * exists to reach through; ::data_text reads the file. The pair is the
+     * claim: the fixture survives and the shipment does not carry it.
+     *
+     * *게임은 맵 하나를 출하합니다.* `arena`, `vault`, `dm03`은 브러시 맵 이전의 섹터 형식으로
+     * 된 옛 캠페인이고, world.h가 그 결말을 적었습니다. "옛 캠페인 레벨은 여전히 이름으로
+     * 불러들여지지만, 앞으로 걸어서 그곳에 닿는 것은 없다." 출하 소스는 그중 하나도 이름 대지
+     * 않습니다. 그래서 bake.ps1은 파일을 남기고 바이트를 버립니다. $mapsNotBaked가 atrium에
+     * 대해 이미 하는 일입니다.
+     * *무엇도 알아채지 못했을 것이고*, 그것이 이 검사가 있는 이유입니다. 모든 도구는 HOT_RELOAD
+     * 빌드이고 `assets\levels.txt`를 디스크에서 읽으므로, 블롭이 캠페인을 담든 아무것도 담지
+     * 않든 스위트 전체가 계속 통과합니다. 제외가 되돌려지거나 조용히 작동을 멈춰도, 증거는
+     * 아무도 의도하지 않은 2킬로바이트 큰 바이너리뿐입니다. ::data_baked는 어느 빌드에서나
+     * 블롭을 읽으며, 그것이 이 함수가 닿으라고 존재하는 구멍입니다. ::data_text는 파일을
+     * 읽습니다. 그 쌍이 곧 주장입니다. 픽스처는 살아남고 출하물은 그것을 지고 가지 않습니다. */
+    {
+        const char *blob = data_baked(DATA_LEVELS);
+        const char *file = data_text(DATA_LEVELS);
+        int blob_len = blob ? (int)strlen(blob) : 0;
+        int file_len = file ? (int)strlen(file) : 0;
+
+        printf("      levels: %d byte(s) baked, %d read from disk\n",
+               blob_len, file_len);
+        okd(blob_len == 0, "the shipped blob carries no sector level",
+            blob_len, 0);
+        ok(file_len > 1000, "and the authoring build still reads them from disk");
     }
 
     /* --- the eight integers of a `light` line ------------------------------

@@ -59,79 +59,129 @@
 #define PLAYER_STEP    (PLAYER_EYE / 3.0f)
 
 /**
- * @brief How far above the feet a ledge may be and still be pulled onto, metres.
+ * @brief How fast a wall climb rises, m/s.
  *
  * ENGLISH
  * -------
- * WHAT IT FIXES, MEASURED. ::can_stand refuses a horizontal move onto anything
- * more than ::PLAYER_STEP above the feet, airborne or not, so getting onto a
- * shelf means being ABOVE it at the moment you press forward. Jumping at a wall
- * and holding forward tops out at 1.75m and fails at 2.00m -- and at 2.00m the
- * player does not merely fail, they end up pushed back off the wall. The hook's
- * arrival launch reaches 3.00m, which is why this only ever bit when the hook
- * was not involved: you could be carried up but not climb.
+ * WHAT THIS REPLACED, AND WHY IT HAD TO. The first version of this was a
+ * pull-up that probed for a standable top within a hand's reach and rose only
+ * when it found one. Its own note called that the whole design -- "you may
+ * climb exactly what you can see the top of" -- and in the shipped arena that
+ * sentence is the bug. Measured over `lqdm4`: of the walls standing beside a
+ * spot the player can stand on, 48% have their top within 1.5m, and then
+ * NOTHING until 4.5m, with the real mass at 6.5-8.5m and 13m. A player at the
+ * foot of a wall is usually at the foot of one whose top is three or six
+ * metres up, not one metre. The probe was answering a question the map almost
+ * never asks, so it almost never fired.
  *
- * ONE-THIRTY, which is a hand's reach over the head of somebody 1.70 tall. It
- * is deliberately under ::PLAYER_EYE: a ledge you can see the top of is a ledge
- * you can get your arms over, and one above your eyeline is a wall. With the
- * jump's own 1.28m of rise it puts a plain jump onto shelves a little under
- * three metres, which is the hook launch's reach -- the two ways up now agree
- * about how high the world is.
+ * SO THE WALL IS CLIMBED WITHOUT LOOKING AT ITS TOP, which is Overwatch's
+ * rule and the reason it works on maps nobody authored for it: hold into a
+ * surface while airborne and you go up, and where you end up is wherever you
+ * ran out. Nothing is probed, so nothing can fail to be found.
  *
- * NO STATE, AND THAT IS THE WHOLE DESIGN. There is no climb timer and no climb
- * flag: the rise happens on any frame where the player is airborne, pressing
- * into something that refused them, and a standable top is within this reach.
- * The climb ENDS BY ITSELF, because once the feet clear the top ::can_stand
- * accepts the move and the ordinary walk carries them on. What bounds it is not
- * a duration but the world -- you may climb exactly what you can see the top
- * of, and a wall with no top in reach is a wall.
+ * FOUR AND A HALF IS BRISK ON PURPOSE. Slower and the player hangs on the face
+ * long enough to wonder whether they are stuck; faster and the climb is over
+ * before the eye can see it, which makes a wall look like something that
+ * sometimes lets you through. It is a SPEED and not an impulse because the
+ * rise has to last as long as the wall does -- an impulse launches and then
+ * leaves the rest of the climb to gravity.
  *
  * 한국어
  * ------
- * @brief 발보다 얼마나 높은 턱까지 끌어올라 설 수 있는가(미터).
+ * @brief 벽 등반이 상승하는 속도(m/s).
  *
- * *무엇을 고치는가, 측정으로.* ::can_stand는 공중이든 아니든 발보다 ::PLAYER_STEP 넘게 높은
- * 것으로의 수평 이동을 거절하므로, 선반에 올라선다는 것은 앞으로 누르는 순간 이미 그것보다
- * *위에* 있다는 뜻입니다. 벽을 향해 점프하며 전진을 누르면 1.75m가 한계이고 2.00m에서
- * 실패합니다. 그리고 2.00m에서는 그냥 실패하는 것이 아니라 벽에서 뒤로 밀려납니다. 훅의 도달
- * 도약은 3.00m에 닿으며, 그래서 이것이 훅이 관여하지 않을 때만 물었습니다. 실려 올라갈 수는
- * 있어도 기어오를 수는 없었습니다.
+ * *무엇을 대체했고 왜 그래야 했는가.* 이것의 첫 판은 손 닿는 거리 안에서 설 수 있는 꼭대기를
+ * 탐사하고 그것을 찾았을 때만 상승하는 끌어올림이었습니다. 그 주석은 스스로 그것을 설계의
+ * 전부라고 불렀습니다. "꼭대기가 보이는 만큼만 오른다." 그리고 출하 아레나에서 그 문장이 곧
+ * 결함입니다. `lqdm4`에서 측정하면, 플레이어가 설 수 있는 자리 옆에 선 벽들 가운데 48%는
+ * 꼭대기가 1.5m 안에 있고, 그다음은 4.5m까지 *아무것도 없으며*, 실제 덩어리는 6.5~8.5m와
+ * 13m에 있습니다. 벽 앞에 선 플레이어는 보통 꼭대기가 1미터가 아니라 3미터나 6미터 위에 있는
+ * 벽 앞에 섭니다. 탐사는 맵이 거의 묻지 않는 질문에 답하고 있었고, 그래서 거의 발동하지
+ * 않았습니다.
  *
- * *1.30*이며, 키 1.70인 사람의 머리 위로 손이 닿는 거리입니다. 일부러 ::PLAYER_EYE보다
- * 아래입니다. 꼭대기가 보이는 턱은 팔을 걸칠 수 있는 턱이고, 눈높이보다 위에 있는 것은
- * 벽입니다. 점프 자신의 1.28m 상승과 합치면 그냥 점프로 3미터에 조금 못 미치는 선반에
- * 올라서게 되며, 그것이 훅 도약의 사거리입니다. 올라가는 두 길이 이제 세계의 높이에 대해 같은
- * 말을 합니다.
+ * *그래서 벽은 꼭대기를 보지 않고 오릅니다.* 그것이 오버워치의 규칙이며, 그것을 위해 만들어진
+ * 적 없는 맵에서도 통하는 이유입니다. 공중에서 면을 향해 누르고 있으면 올라가고, 도착지는
+ * 힘이 다한 그 자리입니다. 탐사하는 것이 없으므로 찾지 못해 실패할 것도 없습니다.
  *
- * *상태가 없고, 그것이 설계의 전부입니다.* 등반 타이머도 등반 플래그도 없습니다. 상승은
- * 플레이어가 공중에 있고, 자기를 거절한 무언가를 향해 누르고 있고, 설 수 있는 꼭대기가 이
- * 거리 안에 있는 프레임마다 일어납니다. 등반은 *스스로 끝납니다.* 발이 꼭대기를 넘는 순간
- * ::can_stand가 이동을 받아들이고 평범한 걷기가 그를 데려가기 때문입니다. 그것을 묶는 것은
- * 지속 시간이 아니라 세계입니다. 꼭대기가 보이는 만큼만 오를 수 있고, 손 닿는 곳에 꼭대기가
- * 없는 벽은 벽입니다.
+ * *4.5는 일부러 빠릅니다.* 더 느리면 플레이어가 벽면에 매달린 채 자기가 걸린 것인지 의심할
+ * 만큼 시간이 흐르고, 더 빠르면 눈이 알아채기 전에 등반이 끝나 벽이 이따금 통과시켜 주는
+ * 것처럼 보입니다. 충격량이 아니라 *속도*인 이유는 상승이 벽이 이어지는 동안 계속되어야 하기
+ * 때문입니다. 충격량은 쏘아 올린 뒤 나머지 등반을 중력에 맡깁니다.
  */
-#define PLAYER_MANTLE_REACH 1.30f
+#define PLAYER_CLIMB_SPEED 4.5f
 
 /**
- * @brief How fast the pull-up rises, m/s.
+ * @brief Seconds of wall climb one trip through the air buys.
  *
- * ENGLISH: Four is brisk -- ::PLAYER_MANTLE_REACH in a third of a second -- and
- * brisk is what keeps it from reading as flight. Slower and the player hangs on
- * the face long enough to wonder whether they are stuck; faster and the climb
- * is over before the eye can see it happen, which makes a wall look like a
- * thing that sometimes lets you through. It is set as a SPEED rather than as an
- * impulse because the rise has to continue for as long as the wall does: an
- * impulse would launch and then be at gravity's mercy for the rest of the
- * climb.
+ * ENGLISH
+ * -------
+ * THIS IS THE ONLY THING BOUNDING THE CLIMB, now that no top is looked for,
+ * and it is spent rather than checked: it refills when the feet are on a floor
+ * and at no other moment, so a wall cannot be taken in two bites by letting go
+ * and pressing again. That is the whole of what stops a wall being a ladder.
  *
- * 한국어: @brief 끌어올림이 상승하는 속도(m/s). 4는 빠릅니다. ::PLAYER_MANTLE_REACH를 3분의
- * 1초에 오릅니다. 그리고 빠른 것이 이것을 비행으로 읽히지 않게 합니다. 더 느리면 플레이어가
- * 벽면에 매달린 채 자기가 걸린 것인지 의심할 만큼 시간이 흐르고, 더 빠르면 눈이 알아채기 전에
- * 등반이 끝나 벽이 이따금 통과시켜 주는 것처럼 보입니다. 충격량이 아니라 *속도*로 두는 이유는
- * 상승이 벽이 이어지는 동안 계속되어야 하기 때문입니다. 충격량은 쏘아 올린 뒤 나머지 등반을
- * 중력에 맡깁니다.
+ * THREE TENTHS OF A SECOND, AND THE NUMBER CAME FROM TWO PLACES AGREEING.
+ * At ::PLAYER_CLIMB_SPEED it is 1.35m of rise, which measures out as a jump
+ * held into a wall mounting a 3.00m shelf and failing at 3.25m -- against
+ * 1.75m and 2.00m before any of this existed.
+ *
+ * 3.00m is the hook's arrival launch, exactly. That is the first place: the
+ * grapple is a weapon slot with a cooldown, and a free movement rule that beat
+ * it for height would make the expensive way up the worse one. The two ways up
+ * should agree about how tall the world is, and now they do.
+ *
+ * The second is the map. Everything `lqdm4` offers as one storey is under
+ * 2.5m, and the next thing up is 4.5m, with NOTHING in between -- so a ceiling
+ * of 3.00m sits inside an empty band. It reaches every low wall completely and
+ * cannot reach a single high one, which means it opens no route an author did
+ * not draw. Anything from 0.28 to 0.32 lands on the same 3.00m; the middle of
+ * that range is taken rather than its edge, so a small retune of the speed or
+ * of gravity does not quietly move the ceiling.
+ *
+ * 1,312 of the walls measured have no standable top within twenty metres at
+ * all -- those are the boundary -- and against them the budget simply runs out
+ * and the player falls off. That is the correct answer and needs no special
+ * case.
+ *
+ * IT IS A DURATION AND NOT A HEIGHT even though a height is what was reasoned
+ * about, because the player is not always starting from the same place. Climb
+ * begins wherever the body met the wall, which is high after a jump and low
+ * after a fall, and a height budget would silently give the falling player the
+ * bigger climb. Seconds cost the same everywhere.
+ *
+ * 한국어
+ * ------
+ * @brief 공중에 한 번 뜨는 것이 사 주는 벽 등반의 초.
+ *
+ * *꼭대기를 찾지 않게 된 지금 등반을 묶는 것은 이것뿐이며*, 검사되는 것이 아니라 *소모*됩니다.
+ * 발이 바닥에 있을 때 채워지고 다른 어느 순간에도 채워지지 않으므로, 손을 뗐다가 다시 눌러
+ * 벽을 두 번에 나누어 먹을 수 없습니다. 벽이 사다리가 되지 않게 막는 것은 그것이 전부입니다.
+ *
+ * *0.3초이며, 그 수는 두 곳이 같은 말을 해서 나왔습니다.* ::PLAYER_CLIMB_SPEED에서 1.35m의
+ * 상승이고, 실측으로는 벽을 향해 누른 점프가 3.00m 선반에 올라서고 3.25m에서 실패합니다. 이
+ * 모든 것이 있기 전의 1.75m와 2.00m에 견주어서 말입니다.
+ *
+ * 3.00m는 훅의 도달 도약과 정확히 같습니다. 그것이 첫 번째 곳입니다. 갈고리는 재사용 대기가
+ * 있는 무기 슬롯이고, 높이에서 그것을 이기는 공짜 이동 규칙은 비싼 길을 더 나쁜 길로 만듭니다.
+ * 올라가는 두 길은 세계가 얼마나 높은지에 대해 같은 말을 해야 하고, 이제 그렇습니다.
+ *
+ * 두 번째는 맵입니다. `lqdm4`가 한 층으로 내놓는 것은 모두 2.5m 아래에 있고 그다음 것은
+ * 4.5m이며 그 사이에는 *아무것도 없으므로*, 3.00m의 상한은 빈 띠 안에 앉습니다. 낮은 벽은
+ * 남김없이 닿고 높은 벽은 하나도 닿지 못하며, 그것은 제작자가 긋지 않은 길을 열지 않는다는
+ * 뜻입니다. 0.28부터 0.32까지 어느 값이든 같은 3.00m에 닿습니다. 그 구간의 가장자리가 아니라
+ * 가운데를 취한 것은, 속도나 중력의 작은 재조정이 상한을 슬그머니 옮기지 않도록 하기
+ * 위함입니다.
+ *
+ * 측정된 벽 가운데 1,312개는 20미터 안에 설 수 있는 꼭대기가 아예 없습니다. 그것들이
+ * 경계이고, 그 앞에서는 예산이 그냥 바닥나 플레이어가 떨어집니다. 그것이 옳은 답이며 특별
+ * 취급이 필요 없습니다.
+ *
+ * *따져 본 것은 높이인데도 높이가 아니라 지속 시간인 이유는* 플레이어가 늘 같은 자리에서
+ * 시작하지 않기 때문입니다. 등반은 몸이 벽에 닿은 그 자리에서 시작하며, 점프 뒤에는 높고 낙하
+ * 뒤에는 낮습니다. 높이 예산은 떨어지는 플레이어에게 조용히 더 큰 등반을 줍니다. 초는 어디서나
+ * 같은 값을 치릅니다.
  */
-#define PLAYER_MANTLE_CLIMB 4.0f
+#define PLAYER_CLIMB_TIME 0.30f
 
 #define PLAYER_MAX_HP  100     ///< @brief Health at spawn and the cap pickups top up to. / 스폰 시 체력이자 아이템으로 회복 가능한 상한값.
 
@@ -455,6 +505,25 @@ typedef struct {
      *       안 되며, 열쇠가 레벨에 저장된 적이 없다면 그럴 수 없습니다.
      */
     int   keys;
+
+    /**
+     * @brief Seconds of wall climb left before the feet touch a floor again.
+     *
+     * The one piece of state the climb has, and it is here rather than derived
+     * because a budget that is SPENT cannot be recomputed from the world the
+     * way ::grounded is -- how much is left depends on what the player has
+     * already done this trip through the air, and nothing in the level
+     * remembers that. Refilled while grounded, counted down while climbing;
+     * see ::PLAYER_CLIMB_TIME for why refilling only there is the whole rule.
+     *
+     * @brief 발이 다시 바닥에 닿기까지 남은 벽 등반의 초.
+     * @note 등반이 가진 유일한 상태이며, 유도되지 않고 이곳에 있습니다. *소모되는* 예산은
+     *       ::grounded처럼 세계로부터 다시 계산할 수 없기 때문입니다. 얼마가 남았는지는
+     *       이번에 공중에 뜬 동안 플레이어가 이미 무엇을 했는지에 달렸고, 레벨의 무엇도
+     *       그것을 기억하지 않습니다. 접지 중에 채워지고 등반 중에 줄어듭니다. 그곳에서만
+     *       채우는 것이 왜 규칙의 전부인지는 ::PLAYER_CLIMB_TIME을 보십시오.
+     */
+    float climb;
 } Player;
 
 /* --- Public function prototypes / 공개 함수 프로토타입 --- */

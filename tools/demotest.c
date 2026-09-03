@@ -502,14 +502,49 @@ static void digest_print(const Digest *d) {
    *움직이지 않은 것이 증거입니다.* `px`, `vx`, `yaw`, `pitch`, `world_time`, `wrng`, `srng`가
    비트 단위로 그대로입니다. 녹화본이 플레이어를 똑같이 구동하고 플레이어 자신의 프레임은
    손대지 않았습니다. 다른 것은 전투뿐이며, 이 변경이 닿을 수 있어야 하는 유일한 것입니다. */
+/* THE NINTH MOVED THE BODY, AND EVERYTHING THAT MOVED IS DOWNSTREAM OF THAT.
+   The player can now climb a wall, so a recorded input that used to end up
+   stopped against one ends up on top of it: `py` goes 2.84 to 5.38 and `vy`
+   goes +2.00 to -8.77 -- the run used to finish settling onto something and
+   now finishes falling off it. `px` and `pz` follow, `health` goes 100 to 94.
+   THE FIGHT DID NOT GET HARDER, IT GOT MISSED. `enemies hp` goes -2 to 40:
+   the monster used to be killed and now survives untouched, which is what
+   recorded input does when the body firing it is two and a half metres higher
+   than the shots were aimed from. A demo does not adapt. The eighth entry
+   above makes the same point in the other direction and for the same reason.
+   `yaw` AND `pitch` MOVED AND THE RECORDING DID NOT. The look deltas replay
+   bit-for-bit; what changed is how many frames applied them, because
+   ::wp_hook_locks_aim skips the application while a hook is out and a body on
+   a different path throws its hooks on a different schedule. That is position
+   reaching the view, not input changing.
+   WHAT DID NOT MOVE IS THE CLAIM. `wrng`, `srng` and `world_time` are
+   bit-for-bit what they were: the weapon's generator and the smoke's are
+   untouched, so nothing about what was fired or what was drawn changed. Only
+   `erng` and `frng` follow the fight, and the fight follows the body.
+   *아홉 번째는 몸을 움직였고, 움직인 나머지는 모두 그것의 하류입니다.* 플레이어가 이제 벽을
+   오를 수 있으므로, 예전에는 벽에 막혀 멈추던 녹화된 입력이 이제 그 위에서 끝납니다. `py`가
+   2.84에서 5.38로, `vy`가 +2.00에서 -8.77로 갑니다. 이 구동은 무언가에 내려앉으며 끝나곤
+   했는데 이제 그것에서 떨어지며 끝납니다. `px`와 `pz`가 따라오고 `health`가 100에서 94로
+   갑니다.
+   *전투가 어려워진 것이 아니라 빗나간 것입니다.* `enemies hp`가 -2에서 40으로 갑니다.
+   몬스터는 죽곤 했는데 이제 아무것도 맞지 않고 살아남습니다. 그것은 사격을 쏘는 몸이 그
+   사격이 겨누어진 곳보다 2.5미터 높을 때 녹화된 입력이 하는 일입니다. 데모는 적응하지
+   않습니다. 위의 여덟 번째 항목이 같은 이야기를 반대 방향으로, 같은 이유로 합니다.
+   *`yaw`와 `pitch`가 움직였고 녹화본은 움직이지 않았습니다.* 시선 변화량은 비트 단위로 다시
+   재생됩니다. 바뀐 것은 그것을 *적용한 프레임 수*입니다. ::wp_hook_locks_aim이 훅이 나가 있는
+   동안 적용을 건너뛰고, 다른 경로를 가는 몸은 다른 일정으로 훅을 던지기 때문입니다. 그것은
+   위치가 시야에 닿은 것이지 입력이 바뀐 것이 아닙니다.
+   *움직이지 않은 것이 주장입니다.* `wrng`, `srng`, `world_time`이 비트 단위로 그대로입니다.
+   무기의 생성기와 연기의 생성기가 손대지 않은 채이므로, 무엇이 발사되었고 무엇이 그려졌는지에
+   대해 바뀐 것이 없습니다. 오직 `erng`와 `frng`만이 전투를 따라가고, 전투는 몸을 따라갑니다. */
 static const Digest GOLDEN = {
-    /* px py pz */ -12.2013168f, 2.84367466f, -14.8857975f,
-    /* vx vy vz */ -0.312936455f, 1.9998908f, 0.38904506f,
-    /* yaw pitch */ 0.382800102f, 0.534599602f,
-    /* health keys grounded */ 100, 0, 0,
+    /* px py pz */ -13.2162313f, 5.37935257f, -15.8549528f,
+    /* vx vy vz */ -0.692886651f, -8.77007961f, -0.742757797f,
+    /* yaw pitch */ 0.360800147f, 0.662199795f,
+    /* health keys grounded */ 94, 0, 0,
     /* cur ammo */ 0, 0,
-    /* wrng srng erng frng */ 2972006077u, 3888997821u, 685668312u, 1063135996u,
-    /* enemies hp */ 1, -2,
+    /* wrng srng erng frng */ 2972006077u, 3888997821u, 286724173u, 908997448u,
+    /* enemies hp */ 1, 40,
     /* proj marks */ 0, 0,
     /* world_time */ 29.9002438f
 };

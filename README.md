@@ -948,6 +948,20 @@ Contact positions are placed a 2mm `SKIN` clear of the surface: feet landed
 `pos.y = top + PLAYER_EYE` and back, and the overlap test then re-fires and
 cancels every step-up.
 
+**A wall is climbed without looking at its top.** Hold into a surface while
+airborne and you rise for `PLAYER_CLIMB_TIME`, spent from a budget that refills
+only when your feet are on a floor — Overwatch's rule, and the reason it works
+on geometry nobody authored for it. The version before it probed for a standable
+lip within a hand's reach and rose only when it found one, which sounds like the
+careful choice and is exactly why it almost never fired: of the walls standing
+beside a spot you can stand on in `lqdm4`, 48% have their top within 1.5m and
+then there is *nothing* until 4.5m. A player at the foot of a wall is usually at
+the foot of the second kind, and a 1.30m reach reaches into the gap between
+them. The budget puts the ceiling at 3.00m — the hook's arrival launch to the
+centimetre, so the cheap way up and the expensive one agree about how tall the
+world is, and it lands inside that empty band so it opens no route the map never
+drew.
+
 `build\movetest.exe` steps the simulation headlessly and checks all of it,
 including 4000 randomised frames that must never end inside a box.
 

@@ -94,6 +94,17 @@ float player_spawn(Player *p, const Level *l) {
 void player_move(Player *p, const Level *l,
                  const Blocker *solid, int n_solid,
                  v3 wish, float speed, int jump, float dt) {
+    /* The climb budget refills on the flag as it ARRIVES, before the jump
+       clears it and before the vertical pass derives it afresh. Refilling
+       later -- from the flag this frame ends with -- would mean the frame you
+       leap in is a frame you were never grounded for, and the climb would be
+       unavailable for exactly the jump that wanted it.
+       등반 예산은 접지 플래그가 *들어온* 그대로에서 채워집니다. 점프가 그것을 지우기 전이자
+       수직 처리가 다시 유도하기 전입니다. 더 나중에, 이 프레임이 끝날 때의 플래그로 채우면,
+       도약하는 프레임은 접지된 적이 없는 프레임이 되고 등반은 정확히 그것을 원한 그 점프에
+       쓸 수 없게 됩니다. */
+    if (p->grounded) p->climb = PLAYER_CLIMB_TIME;
+
     /* Jump before gravity, so the upward velocity gets a full frame of
        travel before being pulled back.
        중력보다 점프를 먼저 처리하여, 상승 속도가 되돌아가기 전에 온전한 한
@@ -143,54 +154,51 @@ void player_move(Player *p, const Level *l,
     int walked = move_axis(p, l, solid, n_solid, 0, dir.x * speed * dt);
     walked    &= move_axis(p, l, solid, n_solid, 2, dir.z * speed * dt);
 
-    /* THE PULL-UP, and it is a rule rather than a state.
+    /* THE WALL CLIMB, and what it does NOT do is the point.
      *
-     * WHAT IT ANSWERS: ::can_stand refuses a horizontal move onto anything more
-     * than ::PLAYER_STEP above the feet, airborne or not, so getting onto a
-     * shelf means already being above it when you press forward. Jumping at a
-     * wall tops out at 1.75m; the hook's arrival launch reaches 3.00m. You
-     * could be CARRIED up and not CLIMB, and the gap between those two numbers
-     * is where a player who had just arrived somewhere found they could go no
-     * further.
+     * It never asks what is on top. The version this replaced probed for a
+     * standable lip within a hand's reach and rose only when it found one,
+     * which sounds like the careful choice and is the reason it almost never
+     * fired: the arena's walls are 1m or they are 6m, and a player at the foot
+     * of one is usually at the foot of the second kind. ::PLAYER_CLIMB_SPEED
+     * carries the measurement. Overwatch's climb looks at nothing either, and
+     * that is precisely why it works on geometry nobody drew for it.
      *
-     * THREE CONDITIONS AND NO FOURTH. Off the ground -- so this is something a
-     * jump or a fall begins, never a way to walk up a wall. Pushing into
+     * THREE CONDITIONS. Off the ground, so this is something a jump or a fall
+     * begins and never a way to walk up a wall from standing. Pushing into
      * something that refused the step, which is what `walked` reports and the
-     * only reason ::move_axis now returns anything. And a standable top within
-     * ::PLAYER_MANTLE_REACH, probed one radius ahead: the place the player was
-     * trying to go, not the place they are.
+     * only reason ::move_axis returns anything. And budget left.
      *
-     * IT ENDS BY ITSELF. Nothing here stops the climb, because nothing has to:
-     * once the feet clear the top, ::can_stand accepts the move on the next
-     * frame and the ordinary walk carries the player on. What the rise is
-     * bounded by is the world -- you climb exactly what you can see the top of.
-     * Let go of forward and `dir` is zero, the probe never runs, and gravity
-     * has the player back.
+     * IT ENDS THREE WAYS AND ALL OF THEM ARE THE SAME LINE. The budget runs
+     * out; or the wall does, and ::can_stand accepts the step so `walked` is
+     * true and the ordinary walk carries the player over the top; or forward
+     * is released, `dir` is zero, and gravity has them back. There is no
+     * separate hop at the lip because ::move_axis already performs one -- its
+     * "walked up onto something: rise with it" is the top-out, and a second
+     * impulse there would throw the player off the far side of the ledge they
+     * just reached.
      *
-     * *끌어올림이며, 상태가 아니라 규칙입니다.*
-     * *무엇에 답하는가.* ::can_stand는 공중이든 아니든 발보다 ::PLAYER_STEP 넘게 높은 것으로의
-     * 수평 이동을 거절하므로, 선반에 올라선다는 것은 앞으로 누를 때 이미 그 위에 있다는
-     * 뜻입니다. 벽을 향한 점프는 1.75m가 한계이고 훅의 도달 도약은 3.00m에 닿습니다. *실려*
-     * 올라갈 수는 있어도 *기어오를* 수는 없었고, 그 두 수 사이가 방금 어딘가에 도착한
-     * 플레이어가 더 갈 수 없음을 발견하는 구간이었습니다.
-     * *조건은 셋이고 넷째는 없습니다.* 땅에서 떨어져 있을 것. 그래야 이것이 점프나 낙하가
-     * 시작하는 것이지 벽을 걸어 오르는 방법이 아닙니다. 자기를 거절한 무언가를 향해 누르고
-     * 있을 것. 그것이 `walked`가 보고하는 것이고 ::move_axis가 이제 무언가를 돌려주는 유일한
-     * 이유입니다. 그리고 ::PLAYER_MANTLE_REACH 안에 설 수 있는 꼭대기가 있을 것. 반경 하나
-     * 앞에서 재며, 플레이어가 있는 자리가 아니라 가려던 자리입니다.
-     * *스스로 끝납니다.* 이곳의 무엇도 등반을 멈추지 않습니다. 멈출 필요가 없기 때문입니다.
-     * 발이 꼭대기를 넘으면 다음 프레임에 ::can_stand가 이동을 받아들이고 평범한 걷기가
-     * 데려갑니다. 상승을 묶는 것은 지속 시간이 아니라 세계입니다. 꼭대기가 보이는 만큼만
-     * 오릅니다. 전진에서 손을 떼면 `dir`이 0이 되어 탐사가 돌지 않고, 중력이 플레이어를 도로
-     * 가져갑니다. */
-    if (!walked && !p->grounded && (dir.x != 0.0f || dir.z != 0.0f)) {
-        float feet = p->pos.y - PLAYER_EYE;
-        float ax   = p->pos.x + dir.x * PLAYER_RADIUS;
-        float az   = p->pos.z + dir.z * PLAYER_RADIUS;
-        float top;
-        if (can_stand(l, ax, az, feet + PLAYER_MANTLE_REACH, &top) &&
-            top > feet + PLAYER_STEP && top <= feet + PLAYER_MANTLE_REACH)
-            p->vel.y = PLAYER_MANTLE_CLIMB;
+     * *벽 등반이며, 하지 않는 일이 핵심입니다.*
+     * 이것은 위에 무엇이 있는지 결코 묻지 않습니다. 이것이 대체한 판은 손 닿는 거리 안에서 설
+     * 수 있는 턱을 탐사하고 찾았을 때만 상승했으며, 그것은 신중한 선택처럼 들리지만 거의
+     * 발동하지 않은 이유 그 자체입니다. 아레나의 벽은 1미터이거나 6미터이고, 그 앞에 선
+     * 플레이어는 보통 두 번째 종류 앞에 섭니다. 측정은 ::PLAYER_CLIMB_SPEED가 나릅니다.
+     * 오버워치의 등반도 아무것도 보지 않으며, 바로 그래서 그것을 위해 그려지지 않은 기하에서도
+     * 통합니다.
+     * *조건은 셋입니다.* 땅에서 떨어져 있을 것. 그래야 이것이 점프나 낙하가 시작하는 것이지 선
+     * 채로 벽을 걸어 오르는 방법이 아닙니다. 자기를 거절한 무언가를 향해 누르고 있을 것.
+     * `walked`가 보고하는 것이고 ::move_axis가 무언가를 돌려주는 유일한 이유입니다. 그리고
+     * 예산이 남아 있을 것.
+     * *끝나는 길은 셋이고 모두 같은 줄입니다.* 예산이 바닥나거나, 벽이 끝나 ::can_stand가
+     * 걸음을 받아들여 `walked`가 참이 되고 평범한 걷기가 플레이어를 꼭대기 너머로 데려가거나,
+     * 전진에서 손을 떼어 `dir`이 0이 되고 중력이 도로 가져갑니다. 턱에서의 별도 도약이 없는
+     * 이유는 ::move_axis가 이미 하나를 수행하기 때문입니다. 그것의 "무언가 위로 올라섰다.
+     * 함께 올린다"가 곧 정상 넘기이며, 그곳의 두 번째 충격량은 방금 닿은 턱의 반대쪽으로
+     * 플레이어를 던져 버립니다. */
+    if (!walked && !p->grounded && p->climb > 0.0f &&
+        (dir.x != 0.0f || dir.z != 0.0f)) {
+        p->vel.y = PLAYER_CLIMB_SPEED;
+        p->climb -= dt;
     }
 
     /* External momentum rides on top of the walk above rather than replacing

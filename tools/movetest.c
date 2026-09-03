@@ -229,36 +229,50 @@ int main(void) {
               (float)sunk, 0.0f);
     }
 
-    /* --- the pull-up: what a jump can get onto ---------------------------
+    /* --- the wall climb: how high, and what still stops it ---------------
      *
-     * ::can_stand REFUSES A HORIZONTAL MOVE onto anything more than
-     * ::PLAYER_STEP above the feet, airborne or not, so mounting a shelf meant
-     * already being above it at the moment forward was pressed. Measured before
-     * the pull-up existed: a jump held into a wall topped out at 1.75m and
-     * failed at 2.00m -- and at 2.00m the player did not merely fail to mount,
-     * they ended up pushed back off the face. The hook's arrival launch reached
-     * 3.00m over the same fixture, which is why this only bit when the hook was
-     * not involved. You could be carried up and not climb.
+     * WHAT THIS REPLACED. The first attempt probed for a standable top within
+     * a hand's reach and rose only when it found one, and it passed a test
+     * that looked much like this one -- an infinite flat shelf approached
+     * head-on -- while failing almost everywhere in the shipped arena. The
+     * fixture was not wrong about the code; the code was answering a question
+     * the map does not ask. Of the walls standing beside a spot the player can
+     * stand on in `lqdm4`, 48% have their top within 1.5m and then there is
+     * nothing until 4.5m. A reach of 1.30m is a reach into a gap.
      *
-     * THREE CASES, AND THE TWO NEGATIVES ARE THE DESIGN. A rule that only ever
-     * says yes is not a rule: what makes this a pull-up rather than flight is
-     * that a wall whose top is out of reach stays a wall, and that it takes a
-     * jump to begin -- otherwise it is a way to walk up anything.
+     * SO THE CEILING IS THE THING TO TEST, not a probe. The climb looks at
+     * nothing, so what it can be wrong about is only how far it goes: too
+     * little and the complaint that started this is unfixed, too much and it
+     * reaches the 4.5m storey and opens routes the map never drew.
      *
-     * *::can_stand는 공중이든 아니든 발보다 ::PLAYER_STEP 넘게 높은 것으로의 수평 이동을
-     * 거절하므로*, 선반에 올라선다는 것은 앞으로 누르는 순간 이미 그 위에 있다는 뜻이었습니다.
-     * 끌어올림이 생기기 전 측정: 벽을 향해 누른 점프는 1.75m가 한계이고 2.00m에서 실패했으며,
-     * 2.00m에서는 올라서지 못하는 정도가 아니라 벽면에서 뒤로 밀려났습니다. 같은 픽스처에서
-     * 훅의 도달 도약은 3.00m에 닿았고, 그래서 이것이 훅이 관여하지 않을 때만 물었습니다.
-     * 실려 올라갈 수는 있어도 기어오를 수는 없었습니다.
-     * *경우가 셋이고 부정 둘이 곧 설계입니다.* 언제나 예라고만 하는 규칙은 규칙이 아닙니다.
-     * 이것을 비행이 아니라 끌어올림으로 만드는 것은, 손 닿는 곳에 꼭대기가 없는 벽은 벽으로
-     * 남는다는 것과, 시작하려면 점프가 필요하다는 것입니다. 아니라면 무엇이든 걸어 오르는
-     * 방법입니다. */
+     * FOUR CASES, AND THREE OF THEM SAY NO. A rule that only ever says yes is
+     * not a rule. 3.00m is the mount, which is the hook's arrival launch to
+     * the centimetre; 3.25m is a wall and stays one; standing against a wall
+     * climbs nothing, because the climb needs air under the feet; and a second
+     * press in mid-air buys nothing, because the budget refills on the floor
+     * and nowhere else. That last one is what keeps a wall from being a
+     * ladder, and it is the only case that would still pass if the budget were
+     * merely large.
+     *
+     * *무엇을 대체했는가.* 첫 시도는 손 닿는 거리 안에서 설 수 있는 꼭대기를 탐사하고 찾았을
+     * 때만 상승했으며, 이것과 매우 비슷해 보이는 검사(정면에서 접근하는 무한한 평평한 선반)를
+     * 통과하면서도 출하 아레나에서는 거의 모든 곳에서 실패했습니다. 픽스처가 코드에 대해 틀린
+     * 것이 아니라, 코드가 맵이 하지 않는 질문에 답하고 있었습니다. `lqdm4`에서 플레이어가 설
+     * 수 있는 자리 옆에 선 벽 가운데 48%는 꼭대기가 1.5m 안에 있고 그다음은 4.5m까지
+     * 없습니다. 1.30m의 도달 거리는 빈 구간을 향해 뻗은 손입니다.
+     * *그래서 검사할 것은 탐사가 아니라 상한입니다.* 등반은 아무것도 보지 않으므로 틀릴 수 있는
+     * 것은 얼마나 멀리 가느냐뿐입니다. 모자라면 이것을 시작한 불만이 그대로이고, 넘치면 4.5m의
+     * 층에 닿아 맵이 긋지 않은 길을 엽니다.
+     * *경우가 넷이고 그중 셋이 아니라고 말합니다.* 언제나 예라고만 하는 규칙은 규칙이 아닙니다.
+     * 3.00m는 올라서며 그것은 훅 도달 도약과 센티미터까지 같습니다. 3.25m는 벽이고 벽으로
+     * 남습니다. 벽에 붙어 서 있는 것은 아무것도 오르지 않습니다. 등반에는 발밑의 공기가
+     * 필요하기 때문입니다. 그리고 공중에서 다시 누르는 것은 아무것도 사지 못합니다. 예산은
+     * 바닥에서 채워지고 다른 어디에서도 채워지지 않기 때문입니다. 마지막 것이 벽을 사다리가
+     * 되지 않게 막는 것이며, 예산이 그저 크기만 해도 여전히 통과할 유일한 경우입니다. */
     {
         struct { float shelf; int jump; int want_on; const char *what; } CASE[] = {
-            { 2.50f, 1, 1, "a jump pulls up onto a shelf a jump could not reach" },
-            { 3.50f, 1, 0, "and a wall whose top is out of reach stays a wall" },
+            { 3.00f, 1, 1, "a jump and a climb mount a 3.00m wall" },
+            { 3.25f, 1, 0, "and a quarter-metre higher is still a wall" },
             { 1.20f, 0, 0, "and standing against one climbs nothing" },
         };
 
@@ -282,6 +296,41 @@ int main(void) {
                    (double)feet, on ? "on it" : "below it");
             check(on == CASE[k].want_on, CASE[k].what,
                   (float)on, (float)CASE[k].want_on);
+        }
+
+        /* THE LADDER CASE. A wall taller than anything can mount, and forward
+           released for a moment in mid-air before being pressed again. If the
+           budget came back the player would keep going for as long as they
+           kept tapping; it does not, so the highest they ever get is one
+           climb's worth and the second press buys nothing.
+           *사다리 경우입니다.* 무엇으로도 올라설 수 없는 벽이며, 공중에서 잠시 전진을 놓았다가
+           다시 누릅니다. 예산이 돌아온다면 플레이어는 두드리는 동안 계속 올라갈 것입니다.
+           돌아오지 않으므로 가장 높이 닿는 곳은 한 번의 등반만큼이고 두 번째 누름은 아무것도
+           사지 못합니다. */
+        {
+            Level z = {0};
+            L = z;
+            box(&L, -2000, -2000, 2000, 2000, 0, 3000);
+            box(&L,     0, -2000, 2000, 2000, 1200, 3000);
+
+            Player p = {0};
+            p.pos = v3f(-2.0f, PLAYER_EYE, 0.0f);
+            p.grounded = 1;
+
+            float peak = 0.0f;
+            for (int i = 0; i < 240; i++) {
+                /* Pressed, released for four frames, pressed again -- and the
+                   release is placed after the first climb has been spent. */
+                int hold = !(i >= 40 && i < 44);
+                player_move(&p, &L, 0, 0, hold ? v3f(1, 0, 0) : v3f(0, 0, 0),
+                            PLAYER_WALK, i == 0, DT);
+                float f = p.pos.y - PLAYER_EYE;
+                if (f > peak) peak = f;
+            }
+            printf("      12m wall, forward tapped twice -> peaked at %.2f\n",
+                   (double)peak);
+            check(peak < 3.2f, "and letting go in mid-air does not buy a second climb",
+                  peak, 3.2f);
         }
     }
 

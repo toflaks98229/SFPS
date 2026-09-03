@@ -2582,6 +2582,52 @@ both true, and the second one *was* the bug. It pins the negative half now, with
 the wave held open for a full second so the gate is what is under test rather
 than a wave that happened not to clear.
 
+**A ring of columns in the lava, so the grapple has something to grab.**
+Psychofuge's courtyard is a sea of lava with the fortress standing in the
+middle: past the central structure there is nothing out there to hook, and
+nothing the lava rule will let a monster stand on. Sixteen — then twenty-eight —
+columns were drawn into the perimeter to give the grapple anchors and the
+spawners ground. They are **not invented geometry**: hand-drawn boxes were the
+first attempt and looked like boxes, so the column is lifted verbatim from
+`lq_e1m5` ("Gloomliths"), the one other LibreQuake map that shares Psychofuge's
+walls — measured at **82% of its faces** using the arena's own texture set, the
+closest sister in the whole set. A three-metre-square banded pier, `med_tmpl_trim3`
+rings on a `med_csl_brk18b` shaft, every face a texture the arena already ships.
+Its shaft is stretched down into the lava slab so it reads as rising *out* of the
+sea, and its cap sits at −8 m, flat and standable.
+
+**The spacing was the hook's, and the hook is about to get shorter.** The
+placement put twenty-eight columns **ten metres apart** around the ring — far
+under the grapple's current forty-metre reach on purpose, because the reach is
+being cut and a ring that only crosses at forty metres is a ring the cut would
+strand a player on. Ten-metre hops leave the loop crossable down to about a
+twelve-metre hook.
+
+`steptest` reads that off the map rather than trusting anybody's word for it: it
+scans the courtyard for standable, dry caps out over the lava, clusters them into
+columns, and asserts they form **one connected loop at a twelve-metre link
+distance**. The fortress's own underbelly supports are ignored — a column counts
+only if it has lava on all four sides, which the ring has and an attached ledge
+does not.
+
+**And that check is red as this is written, which is the check doing its job.**
+The ring was afterwards edited in TrenchBroom down to **thirteen columns**, moved,
+with a longest gap of **twenty metres**. That crosses fine at the hook's present
+forty and is exactly what the planned cut would break, so the assertion is
+reporting a real conflict between the layout as saved and the reason the spacing
+was chosen — not a stale number. Either the columns come back together or the
+cut has to stop above twenty metres; the check is what makes that a decision
+rather than a surprise.
+
+**Four of them carry a caster spawner, because only a caster can stand there.**
+The lava refuses a walking monster its footing — `make_monster` will not place
+one on a hazard floor — so a ground spawner on a lava column would spawn nothing.
+The caster is the one monster that flies, so the four corner columns get caster
+spawners and the sea becomes a place the fight reaches rather than scenery. Seven
+spawners now, under the cap of eight; `steptest` asserts every authored spawner
+is a running spawner and that the cap counter stayed silent, the same shape that
+went unread when the effect table filled.
+
 **How a DM map is picked, twice, and why the second answer is different.** All
 thirteen LibreQuake deathmatch maps were run through the importer and measured
 against the engine's caps rather than guessed at from file size. Against the

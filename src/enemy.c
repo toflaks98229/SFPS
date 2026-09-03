@@ -184,41 +184,60 @@ static const struct { const char *was; int now; } MON_LEGACY[] = {
  *       검사하지 *않습니다.* `eye`가 `hgt`보다 높아도 잡히지 않고 그대로 플레이됩니다.
  */
 /*    name,           behaviour,   hp,  spd, weave,   rad,   hgt,   eye, sight, aspct,    yaw, pain, cap, flags      */
-/* THE HEALTH COLUMN IS MEASURED IN SHOTGUN BLASTS, and that is a dependency
-   rather than a coincidence. One blast is ::WEAPONS' shotgun row: seven pellets
-   of ten, so 70 with every pellet in. The three fightable rows are one blast,
-   two and six -- 70, 140, 420 -- and a player learns the bestiary by how many
-   times they have to pull the trigger, which only works if the numbers are
-   exact multiples rather than nearly them.
-   SO RETUNING THE SHOTGUN RETUNES THE BESTIARY. Change the pellet count or the
-   pellet damage and these three stop being 1, 2 and 6 of anything; 60 a blast
-   would make the water spirit a two-blast monster and the brute a seven-blast
-   one, which is a different game. tools/enemytest.c pins the three ratios so
-   the coupling cannot be broken silently from either end.
-   *체력 열은 샷건 발수로 재어져 있으며*, 그것은 우연이 아니라 의존입니다. 한 발은 ::WEAPONS의
-   샷건 행입니다. 10짜리 펠릿 일곱이므로 전부 맞으면 70입니다. 싸울 수 있는 세 행은 한 발, 두
-   발, 여섯 발이며 70, 140, 420입니다. 플레이어는 방아쇠를 몇 번 당겨야 하는지로 도감을
-   익히고, 그것은 수가 *거의* 배수가 아니라 정확한 배수일 때만 통합니다.
-   *그러므로 샷건을 다시 조율하면 도감을 다시 조율하는 것입니다.* 펠릿 수나 펠릿 피해를 바꾸면
-   이 셋은 무엇의 1, 2, 6도 아니게 됩니다. 한 발 60이면 물의 정령은 두 발 몬스터가 되고
-   브루트는 일곱 발 몬스터가 되며, 그것은 다른 게임입니다. tools/enemytest.c가 세 비율을 못
-   박아 두어 이 결합이 어느 쪽에서도 조용히 깨지지 않게 합니다. */
+/* THE HEALTH COLUMN IS QUAKE 1'S LADDER, ROW BY ROW. It was briefly a ladder of
+   shotgun blasts -- 70, 140, 420 for one, two and six -- and that had the gun
+   setting the bestiary, which is backwards: a blast ladder has to be re-derived
+   every time the gun is retuned, and it gave the arena three rungs where Quake
+   built five. So each row takes the health of the Quake creature it answers to:
+     water_spirit  <-  grunt (army)      30
+     caster        <-  scrag (wizard)    80
+     brute         <-  ogre             200
+     maw           <-  shambler         600
+   THE MAPPING IS BY LADDER POSITION AND ROLE, not by silhouette. The grunt is
+   the thing you kill without thinking about it; the scrag is the one that
+   flies and shoots and so has to be worth two of the first; the ogre is melee
+   plus a lobbed grenade, which is why the brute is the ogre and not the knight.
+   THE BOSS IS THE SHAMBLER because Quake's actual bosses have no health to
+   borrow: Chthon is 3 and dies to scripted lightning, Shub-Niggurath is 40000
+   and dies only to a telefrag. Neither is a thing you shoot. The shambler is
+   the heaviest creature in Quake that you do shoot, and 600 divides by
+   ::BOSS_CYCLES, which ::types_check requires of anything wearing ::MON_BOSS.
+   WHAT EACH RUNG COSTS IN BLASTS is now an OUTPUT rather than the design: one,
+   two, three and nine of the DOOM shotgun. The brute was six under the old
+   scheme and is three under this one -- Quake's ogre is 200 and the arithmetic
+   is the arithmetic.
+   *체력 열은 Quake 1의 사다리이며 행마다 대응합니다.* 잠시 샷건 발수의 사다리였습니다. 한 발,
+   두 발, 여섯 발에 대해 70, 140, 420이었고, 그것은 총이 도감을 정하는 것이라 거꾸로였습니다.
+   발수 사다리는 총을 조율할 때마다 다시 유도해야 하고, Quake가 다섯 단을 쌓은 자리에 아레나에
+   세 단을 주었습니다. 그래서 각 행은 자기가 대응하는 Quake 생물의 체력을 취합니다.
+   *대응은 실루엣이 아니라 사다리 위치와 역할로 합니다.* 그런트는 생각하지 않고 죽이는 것이고,
+   스크래그는 날면서 쏘므로 첫째의 두 배 값이 있어야 하며, 오거는 근접에 던지는 유탄을 더한
+   것입니다. 그래서 브루트는 나이트가 아니라 오거입니다.
+   *보스가 샴블러인 이유는* Quake의 실제 보스에게 빌릴 체력이 없기 때문입니다. 크톤은 3이고
+   스크립트된 번개로 죽으며, 슈브니구라스는 40000이고 텔레프래그로만 죽습니다. 둘 다 쏘는
+   대상이 아닙니다. 샴블러는 Quake에서 실제로 쏘는 가장 무거운 생물이고, 600은
+   ::BOSS_CYCLES로 나뉩니다. ::types_check가 ::MON_BOSS를 걸친 것에 요구하는 바입니다.
+   *각 단이 몇 발인지는* 이제 설계가 아니라 *산출*입니다. DOOM 샷건으로 1, 2, 3, 9발입니다.
+   브루트는 옛 방식에서 여섯이었고 이 방식에서 셋입니다. Quake의 오거는 200이고 계산은
+   계산입니다. */
 static const MonType TYPES[MON_TYPES] = {
     /* the baseline: the fastest thing in the bestiary and the loosest weave,
        at 65% of ::PLAYER_WALK -- it cannot catch you, but it can be there
        when you turn round.
-       ONE BLAST, WITH EVERY PELLET IN IT. 70 is the whole blast, so this is the
-       row where the shotgun's spread is the difficulty: at any range past
-       point blank a pellet or two goes wide, 60 lands, and the thing lives with
-       10 left and keeps coming. The old 40 died to five of seven and so died at
-       any range, which made the spread decoration.
+       QUAKE'S GRUNT, at 30. Three of seven pellets kill it, so it dies at any
+       range the shotgun reaches and the spread is not what decides. It was
+       briefly 70 -- a whole blast, so a pellet going wide left it standing --
+       and that made the baseline the row where aim mattered most, which is the
+       wrong row for it: the thing you kill without thinking should not be the
+       thing you have to line up.
        기준선. 도감에서 가장 빠르고 갈지자가 가장 큽니다. ::PLAYER_WALK의 65%이며,
        따라잡지는 못하지만 돌아섰을 때 거기 있을 수는 있습니다.
-       *한 발이지만, 펠릿이 전부 들어가야 합니다.* 70은 한 발 전체이므로, 이 행은 샷건의
-       산포가 곧 난이도인 행입니다. 바짝 붙지 않은 어느 거리에서든 펠릿 하나둘이 빗나가
-       60이 들어가고, 그것은 10을 남긴 채 살아서 계속 옵니다. 옛 40은 일곱 중 다섯에
-       죽었으므로 어느 거리에서든 죽었고, 그래서 산포가 장식이었습니다. */
-    { "water_spirit",   AI_CASTER, 70, 7.0f, 0.62f, 0.52f, 1.70f, 1.30f, 34.0f, 0.70f, 260.0f, 0.6f, 8, MON_FLOATS },
+       *Quake의 그런트이며 30입니다.* 일곱 중 셋이면 죽으므로 샷건이 닿는 어느 거리에서든
+       죽고, 산포가 결정하지 않습니다. 잠시 70이었습니다. 한 발 전체였으므로 펠릿 하나가
+       빗나가면 살아 있었고, 그것은 기준선을 조준이 가장 중요한 행으로 만들었습니다. 그것은
+       이 행에 어울리지 않습니다. 생각하지 않고 죽이는 것이 겨냥해야 하는 것일 수는
+       없습니다. */
+    { "water_spirit",   AI_CASTER, 30, 7.0f, 0.62f, 0.52f, 1.70f, 1.30f, 34.0f, 0.70f, 260.0f, 0.6f, 8, MON_FLOATS },
     /* a wall with health -- hits hard, cannot be stun-locked, and closes at
        half your walking speed on the straightest line in the bestiary. Heavy
        is the small weave, not the speed: it commits to a direction and comes,
@@ -226,7 +245,7 @@ static const MonType TYPES[MON_TYPES] = {
        체력이 높은 벽. 강하게 때리고, 스턴 락에 걸리지 않으며, 도감에서 가장 곧은 선으로
        걷기 속도의 절반으로 다가옵니다. 무거움은 속도가 아니라 작은 갈지자입니다. 방향을
        정하고 오며, 살아남을 수 있게 하는 것은 그것이 어디로 올지 읽을 수 있다는 점입니다. */
-    { "brute",          AI_BRAWLER, 420, 5.6f, 0.30f, 0.806f, 2.35f, 1.80f, 34.0f, 0.85f, 130.0f, 2.2f, 3, MON_UNFLINCHING },
+    { "brute",          AI_BRAWLER, 200, 5.6f, 0.30f, 0.806f, 2.35f, 1.80f, 34.0f, 0.85f, 130.0f, 2.2f, 3, MON_UNFLINCHING },
     /* holds its range instead of closing, and holds it in the AIR -- so cover
        and angles matter, and so does the ceiling. Nothing about the numbers
        changed when MON_FLIES arrived: this is the same creature, no longer
@@ -236,7 +255,7 @@ static const MonType TYPES[MON_TYPES] = {
        천장의 문제이기도 합니다. MON_FLIES가 붙을 때 수치는 하나도 바뀌지 않았습니다. 아무것도
        딛고 있지 않게 되었을 뿐 같은 생물입니다. 이것이 대신한 행("wraith")은 여기서 체력 4점과
        사거리 1미터를 뺀 것이었고, 그것은 별개의 몬스터가 아닙니다. */
-    { "caster",         AI_CASTER, 140, 5.8f, 0.46f, 0.546f, 1.90f, 1.45f, 40.0f, 0.80f, 180.0f, 0.9f, 4, MON_FLIES | MON_FLOATS },
+    { "caster",         AI_CASTER, 80, 5.8f, 0.46f, 0.546f, 1.90f, 1.45f, 40.0f, 0.80f, 180.0f, 0.9f, 4, MON_FLIES | MON_FLOATS },
     /* the boss: a caster with the footwork taken away. Its hp is spent in
        BOSS_CYCLES equal thirds and must divide by it -- types_check says so.
        The pain lock is effectively infinite because a boss that flinches is a
@@ -254,7 +273,7 @@ static const MonType TYPES[MON_TYPES] = {
        한 뼘까지 닿는 보스는 큰 적이 아니라 모델링 오류로 읽히고, 탑 위에 걸린 결계핵은 있을
        자리가 없어집니다. 신장을 내리면서 반경, 시선, 사거리를 함께 내렸습니다. MonType의 치수
        블록이 이곳의 모든 행에 대해 진술하는 규칙입니다. */
-    { "maw",            AI_CASTER, 900, 0.0f, 0.0f, 1.20f, 3.60f, 2.00f, 60.0f, 1.10f, 90.0f, 99.0f, 1, MON_BOSS | MON_ANCHORED },
+    { "maw",            AI_CASTER, 600, 0.0f, 0.0f, 1.20f, 3.60f, 2.00f, 60.0f, 1.10f, 90.0f, 99.0f, 1, MON_BOSS | MON_ANCHORED },
     /* what guards it: no sight, no reach, no damage, and the only monster in
        the game that never acts. Ninety health is three WARD_SUMMON_DMG chunks,
        so a ward pays out exactly three times on its way down whatever kills it.

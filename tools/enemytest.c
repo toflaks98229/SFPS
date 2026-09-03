@@ -1130,63 +1130,68 @@ static void check_ledge(void) {
         worst, TOP * 0.5f);
 }
 
-/* --- the bestiary is a ladder of shotgun blasts -------------------------
+/* --- the bestiary is a ladder with steps you can feel -------------------
  *
- * WHY THIS IS A TEST AND NOT A COMMENT. The health column is not three
- * independent numbers, it is one blast, two and six -- and the blast is the
- * shotgun's row in ::WEAPONS, not a constant anybody wrote down. So the
- * relationship spans two tables in two files and can be broken from either
- * end without touching the other: retuning the pellet damage from 10 to 8
- * leaves every health value untouched and silently turns 1/2/6 into 2/3/8.
+ * WHAT THIS REPLACED, AND WHY. It used to assert that health was an exact
+ * multiple of one shotgun blast -- 70, 140, 420 for one, two and six. That put
+ * the GUN in charge of the bestiary: retune a pellet and every health value is
+ * wrong, and the check was really pinning a coincidence between two tables.
+ * The column is Quake 1's ladder now (grunt 30, scrag 80, ogre 200, shambler
+ * 600), so blast counts are an OUTPUT and there is nothing exact left to pin.
  *
- * WHAT IT PINS is the RATIO, not the numbers. Both tables may be retuned
- * together and this stays green; either one alone turns it red. That is the
- * whole point -- it is a check on a coupling, and a check that named 70, 140
- * and 420 would just be the table written twice.
+ * SO WHAT IS PINNED IS THE SHAPE. A ladder is only a ladder if the player can
+ * tell one rung from the next, and the failure this guards is flattening --
+ * four rows within a blast or two of each other, which reads as one monster
+ * wearing four sprites. Each rung must be at least twice the one below, which
+ * Quake's own ladder clears comfortably (2.67, 2.50, 3.00) and which a nudge
+ * toward the middle would not.
  *
- * AND THE WATER SPIRIT'S PELLET COUNT, which is the sharper half of its row:
- * it must take EVERY pellet, so one short must leave it alive. That is what
- * makes the shotgun's spread the difficulty at that rung rather than
- * decoration, and it is a claim about hp vs pellet damage that nothing else
- * would notice going false.
+ * IT DOES NOT NAME A NUMBER, deliberately. Retune the whole ladder and this
+ * stays green; squash it and it goes red. A check listing 30/80/200/600 would
+ * be the table written twice, which is what the blast version had become.
  *
- * *왜 주석이 아니라 검사인가.* 체력 열은 독립된 세 수가 아니라 한 발, 두 발, 여섯 발이며,
- * 그 한 발은 누가 적어 둔 상수가 아니라 ::WEAPONS의 샷건 행입니다. 그래서 이 관계는 두
- * 파일의 두 표에 걸쳐 있고, 한쪽을 건드리지 않고 다른 쪽에서 깨질 수 있습니다. 펠릿 피해를
- * 10에서 8로 조율하면 체력 값은 하나도 그대로인 채 1/2/6이 조용히 2/3/8이 됩니다.
- * *못 박는 것은 비율이고 수가 아닙니다.* 두 표를 함께 조율하면 이것은 초록으로 남고, 한쪽만
- * 조율하면 빨개집니다. 그것이 핵심입니다. 결합에 대한 검사이며, 70과 140과 420을 적어 둔
- * 검사는 표를 두 번 쓴 것일 뿐입니다.
- * *그리고 물의 정령의 펠릿 수입니다.* 그 행의 더 날카로운 절반입니다. 펠릿이 *전부* 들어가야
- * 하므로 하나 모자라면 살아 있어야 합니다. 그것이 그 단에서 샷건의 산포를 장식이 아니라
- * 난이도로 만드는 것이며, 거짓이 되어도 다른 무엇도 알아채지 못할 주장입니다. */
-static void check_blast_ladder(void) {
-    printf("\nthe bestiary is a ladder of shotgun blasts\n");
+ * THE BLAST COUNTS ARE PRINTED AND NOT ASSERTED, because they are what a player
+ * experiences but they belong to the gun -- and ::types_check already owns the
+ * one hard health rule, that a ::MON_BOSS divides by ::BOSS_CYCLES.
+ *
+ * *무엇을 대체했고 왜인가.* 예전에는 체력이 샷건 한 발의 정확한 배수라고 단언했습니다. 한 발,
+ * 두 발, 여섯 발에 대해 70, 140, 420이었습니다. 그것은 *총*에게 도감을 맡기는 일이었습니다.
+ * 펠릿 하나를 조율하면 모든 체력 값이 틀리고, 검사는 실은 두 표 사이의 우연을 못 박고
+ * 있었습니다. 이제 그 열은 Quake 1의 사다리이므로 발수는 *산출*이고 못 박을 정확한 것이
+ * 남아 있지 않습니다.
+ * *그래서 못 박는 것은 모양입니다.* 사다리는 플레이어가 한 단과 다음 단을 구별할 수 있을 때만
+ * 사다리이며, 이것이 막는 실패는 *평평해지는 것*입니다. 네 행이 한두 발 안에 몰리는 것이고,
+ * 그것은 스프라이트 넷을 걸친 한 마리로 읽힙니다. 각 단은 아래 단의 최소 두 배여야 하며,
+ * Quake 자신의 사다리는 여유롭게 넘고(2.67, 2.50, 3.00) 가운데로 조금 밀면 넘지 못합니다.
+ * *일부러 수를 적지 않습니다.* 사다리 전체를 조율하면 초록으로 남고 짜부라뜨리면 빨개집니다.
+ * 30/80/200/600을 나열한 검사는 표를 두 번 쓴 것이며, 발수 판이 그렇게 되어 있었습니다.
+ * *발수는 찍고 단언하지 않습니다.* 플레이어가 체험하는 것이지만 총에 속하고, 하나뿐인 단단한
+ * 체력 규칙(::MON_BOSS는 ::BOSS_CYCLES로 나뉜다)은 이미 ::types_check가 갖고 있습니다. */
+static void check_health_ladder(void) {
+    printf("\nthe bestiary is a ladder with steps you can feel\n");
 
     const WeaponType *sg = wp_stats(WP_SHOTGUN);
     int blast = sg->damage * sg->pellets;
-    printf("      one blast is %d x %d = %d\n", sg->pellets, sg->damage, blast);
-    if (blast <= 0) { ok(0, "the shotgun deals damage at all"); return; }
 
-    struct { const char *name; int type; int blasts; } RUNG[] = {
-        { "water_spirit", MON_WATER_SPIRIT, 1 },
-        { "caster",       MON_CASTER,       2 },
-        { "brute",        MON_BRUTE,        6 },
+    struct { const char *name; int type; } RUNG[] = {
+        { "water_spirit", MON_WATER_SPIRIT },
+        { "caster",       MON_CASTER       },
+        { "brute",        MON_BRUTE        },
+        { "maw",          MON_MAW          },
     };
-    for (int i = 0; i < 3; i++) {
+    int prev = 0;
+    for (int i = 0; i < 4; i++) {
         int hp = mon_stats(RUNG[i].type)->hp;
-        int want = RUNG[i].blasts * blast;
-        printf("      %-13s hp %3d, wants %d blast(s) = %d\n",
-               RUNG[i].name, hp, RUNG[i].blasts, want);
-        okf(hp == want, RUNG[i].name, (float)hp, (float)want);
+        int blasts = blast > 0 ? (hp + blast - 1) / blast : 0;
+        printf("      %-13s hp %3d  = %d blast(s) of %d%s\n", RUNG[i].name, hp,
+               blasts, blast, prev ? "" : "   (baseline)");
+        if (prev) {
+            printf("                    %.2fx the rung below\n", (double)hp / prev);
+            ok(hp >= prev * 2, RUNG[i].name);
+        }
+        prev = hp;
     }
-
-    /* One pellet short of the water spirit must not kill it. */
-    int hp1 = mon_stats(MON_WATER_SPIRIT)->hp;
-    int short_one = (sg->pellets - 1) * sg->damage;
-    printf("      six of seven pellets is %d against %d\n", short_one, hp1);
-    ok(short_one < hp1,
-       "and one pellet short leaves the water spirit standing");
+    ok(prev > 0, "and the ladder has a top");
 }
 
 int main(void) {
@@ -1325,7 +1330,7 @@ int main(void) {
         ok(brute_a->damage > spirit_a->damage,  "and hits harder");
         ok(brute->speed < spirit->speed,    "but is slower");
         /* TOUGHER THAN THE BASELINE, and it used to be frailer. The bestiary is
-           a ladder of shotgun blasts now (see check_blast_ladder) and the
+           Quake 1's ladder now (see check_health_ladder) and the
            caster's rung is two -- so the one monster that flies is also the one
            you cannot delete with a single blast, which is what stops "shoot it
            once" being the whole answer to something holding the air. The claim
@@ -1333,7 +1338,7 @@ int main(void) {
            side of it: a flyer with the same health as the thing on the floor is
            the same monster twice.
            *기준선보다 단단하며*, 예전에는 더 약했습니다. 도감은 이제 샷건 발수의 사다리이고
-           (check_blast_ladder 참조) 캐스터의 단은 둘입니다. 그래서 유일하게 나는 몬스터가
+           (check_health_ladder 참조) 캐스터는 그 위 단입니다. 그래서 유일하게 나는 몬스터가
            한 발로 지울 수 없는 몬스터이기도 하며, 그것이 공중을 잡은 것에 대한 답 전체가
            "한 번 쏴라"가 되지 않게 막습니다. 지킬 값어치가 있는 주장은 기준선과 *갈라져*
            있다는 것이고 어느 쪽인지가 아닙니다. 바닥의 것과 체력이 같은 비행체는 같은
@@ -2119,7 +2124,7 @@ int main(void) {
     check_charge();
     check_behind();
     check_ledge();
-    check_blast_ladder();
+    check_health_ladder();
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall enemy checks passed\n", fails);
     return fails != 0;

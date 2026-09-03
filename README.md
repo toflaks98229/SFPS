@@ -22,7 +22,7 @@ Models, materials, sounds and levels are all authored as text and hot-reload
 into the running game.
 
 ```
-1,062,912 / 1,474,560 bytes   (72.08% used)
+1,073,152 / 1,474,560 bytes   (72.78% used)
 ```
 
 ## Build
@@ -1417,19 +1417,60 @@ health could exist. DOOM's per-pellet roll (`5*(rnd%3+1)`, so 35–105 a blast) 
 detail, and seven extra rng draws a shot would make every golden hostage to a
 variance nobody asked for.
 
-**So the health column is measured in blasts.** The three fightable rows are one
-blast, two and six — **70, 140, 420** — because a player learns a bestiary by how
-many times they have to pull the trigger, and that only works if the numbers are
-exact multiples rather than nearly them. The water spirit's rung is the sharp
-one: 70 is the *whole* blast, so past point-blank a pellet goes wide, 60 lands,
-and it lives with ten left and keeps coming. At the old 40 it died to five of
-seven and so died at any range, which made the spread decoration.
+**Then the health column became Quake 1's ladder, row by row.** It was briefly
+a ladder of shotgun blasts — 70, 140, 420 for one, two and six — and that had
+the gun in charge of the bestiary: a blast ladder has to be re-derived every
+time the gun is retuned, and it gave the arena three rungs where Quake built
+five. Each row now takes the health of the Quake creature it answers to.
 
-That coupling spans two tables in two files and can be broken from either end
-without touching the other, so `enemytest` pins the **ratio** rather than the
-numbers. Retune both together and it stays green; retune either alone and it
-goes red. A check that named 70, 140 and 420 would just be the table written
-twice.
+| row | Quake 1 | health | blasts | ×below |
+|---|---|---|---|---|
+| water spirit | grunt (army) | 30 | 1 | — |
+| caster | scrag (wizard) | 80 | 2 | 2.67 |
+| brute | **ogre** | 200 | 3 | 2.50 |
+| maw | shambler | 600 | 9 | 3.00 |
+
+The mapping is by ladder position and role, not silhouette. The grunt is what
+you kill without thinking; the scrag flies and shoots, so it is worth two of the
+first; the ogre is melee plus a lobbed grenade, which is why the brute is the
+ogre and not the knight. **The boss is the shambler** because Quake's actual
+bosses have no health to borrow — Chthon is 3 and dies to scripted lightning,
+Shub-Niggurath is 40000 and dies only to a telefrag, and neither is a thing you
+shoot. 600 also divides by `BOSS_CYCLES`, which `types_check` requires.
+
+That also fixed something the blast ladder had broken: at brute 420 the boss was
+only **2.1×** the brute and three brutes outweighed it. At Quake's numbers it is
+**3.0×**, and the hardest thing in the room is the boss again.
+
+**Three of the four weapons took Quake 1's numbers too.** The shotgun stays
+DOOM's — it was set there deliberately and it is the gun the blast counts above
+are quoted against.
+
+| weapon | Quake 1 | damage | refire | DPS | was |
+|---|---|---|---|---|---|
+| shotgun | *DOOM's, kept* | 7 × 10 | 1.05 s | 66.7 | — |
+| rapid | nailgun | 9 | 0.10 s | 90 | 9 / 0.085 s |
+| grenade | grenade launcher | 120 in 5.0 m | 0.60 s | 200 | 55 / 0.85 s / 4.2 m |
+| axe | axe | 20 | 0.50 s | 40 | 45 / 0.42 s |
+
+Quake fires the nailgun, super nailgun and lightning gun at exactly 10 Hz
+because the player animation frame is 0.1 s and overwrites the weapon's own
+timer, so matching 0.10 is matching the gun rather than rounding it. The
+grenade's 5.0 m is derived the way Quake derives it — `T_RadiusDamage` reaches
+`damage + 40` units, so 120 damage reaches 160 units. And the axe going 45 → 20
+puts melee back where both reference games keep it: something to hold when the
+shells are gone, not a reason to close.
+
+**What the grenade now costs you.** 120 in five metres with `PROJ_SELF_DAMAGE`
+keeping half is **60 against 100 health and no armour pool**. Quake charges the
+same and hands you 200 armour absorbing 80% of it; this game hands you nothing,
+so the 1.6-second fuse is the whole counterplay.
+
+`enemytest` no longer pins the health numbers — with the column set from Quake
+there is nothing exact left to pin, and a check listing 30/80/200/600 would be
+the table written twice. It pins the **shape**: every rung at least twice the one
+below, which Quake's ladder clears at 2.67, 2.50 and 3.00 and which flattening
+the bestiary would not.
 
 **A wave is a length of time now, not a room to empty.** Spawners used to be
 handed a quota — `4 + 2*(wave-1)` each — and a wave ended when every one of them
@@ -1457,11 +1498,13 @@ few seconds of any wave: the rate was never the binding constraint.
 
 `ENEMY_MAX` is a cap that binds now rather than a number nothing could reach.
 
-**What this leaves open.** The maw is 900 and did not move, so the boss is only
-**2.1×** the brute where it was 7.5× — three brutes are 1,260 health against its
-900, which makes the hardest thing in the room not the boss. And the rapid gun
-needs **47 rounds** to fell one brute against a 200-round belt. Both are
-decisions, recorded here rather than left to be discovered.
+**What this leaves open.** The brute is Quake's ogre by health and by name, but
+it does not yet throw the ogre's grenade — that is the half of the pattern that
+is a mechanic rather than a number. The projectile pool has no owner: `proj_blast`
+damages monsters and nothing else, because the pool has always meant *the
+player's* projectiles. A hostile grenade needs that concept added, or a second
+grenade grown in the monster shot path duplicating the fuse, bounce and blast
+that already exist a file away. It is the next change, not a table edit.
 
 ## Monsters
 

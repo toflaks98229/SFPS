@@ -183,19 +183,59 @@ static const WeaponType WEAPONS[WP_TYPES] = {
        feet is your problem.
        곡선을 그리며 튕기므로 보이지 않는 것에 닿습니다. 도화선은 벽에 튕겨 넣을 만큼
        길고, 발밑의 유탄이 스스로의 문제가 될 만큼 짧습니다. */
-    { "grenade", "shotgun", "launch", 0   ,    0   ,        6,  20,   3,  55, 0.85f, 0.010f,  0, 26.0f, 26.0f, 0.0f, 0.075f, 0.130f, 1 },
+    /* QUAKE'S GRENADE LAUNCHER. 120 to everything in the blast, 0.60s between
+       shots, and 600 units/s of throw -- 18.75 m/s at this project's 32 units
+       to the metre. It was 55 at 0.85s, which made the explosive weaker than a
+       single shotgun blast: in both reference games the explosive is the heavy
+       answer and this one was a sidearm with a fuse.
+       THE SELF-DAMAGE IS THE PRICE and it is now real. ::PROJ_SELF_DAMAGE keeps
+       half, so a grenade at your own feet is 60 against 100 health and no
+       armour pool. Quake charges the same and hands you 200 armour to absorb
+       80% of it; this game hands you nothing, so the fuse is the counterplay
+       and ::PROJ_FUSE is 1.6s to make that a decision rather than a reflex.
+       *Quake의 유탄 발사기입니다.* 폭발 범위의 모든 것에 120, 발사 간격 0.60초, 던지는 속도
+       600 units/s이며 이 프로젝트의 미터당 32 units에서 18.75 m/s입니다. 55에 0.85초였고,
+       그것은 폭발물을 샷건 한 발보다 약하게 만들었습니다. 두 참조작 모두 폭발물이 중량
+       해답인데 이것은 도화선 달린 보조무기였습니다.
+       *자기 피해가 그 값이며* 이제 실제입니다. ::PROJ_SELF_DAMAGE가 절반을 남기므로 자기 발밑의
+       유탄은 방어구 없는 체력 100에 대해 60입니다. Quake도 같은 값을 물리지만 그 80%를 흡수할
+       방어구 200을 함께 줍니다. 이 게임은 아무것도 주지 않으므로 도화선이 대응 수단이고,
+       ::PROJ_FUSE 1.6초가 그것을 반사가 아니라 판단으로 만듭니다. */
+    { "grenade", "shotgun", "launch", 0   ,    0   ,        6,  20,   3, 120, 0.60f, 0.010f,  0, 18.75f, 26.0f, 0.0f, 0.075f, 0.130f, 1 },
 
     /* No hitscan: the bolts travel, so a moving target has to be led. That is
        the cost of the highest sustained damage in the roster.
        히트스캔이 아닙니다. 탄이 날아가므로 움직이는 표적은 예측 사격이 필요합니다.
        구성 내 최고 지속 피해량의 대가입니다. */
-    { "rapid",   "shotgun", "plasma", 0   ,    0   ,       80, 200,  40,   9, 0.085f, 0.030f, 0, 70.0f,  0.0f, 0.0f, 0.012f, 0.022f, 1 },
+    /* QUAKE'S NAILGUN, to the tenth. 9 a nail at 0.10s is 90 DPS, and it was
+       already 9 at 0.085s -- the damage was Quake's and the cadence was not.
+       Quake's nailgun, super nailgun and lightning gun all fire at exactly
+       10Hz because the player animation frame is 0.1s and overwrites the
+       weapon's own timer; matching it is matching the gun, not rounding it.
+       *Quake의 네일건이며 소수점까지 맞춥니다.* 네일당 9, 0.10초면 90 DPS입니다. 이미 0.085초에
+       9였으므로 피해는 Quake의 것이었고 박자는 아니었습니다. Quake의 네일건과 슈퍼 네일건과
+       번개총은 모두 정확히 10Hz로 발사됩니다. 플레이어 애니메이션 프레임이 0.1초이고 무기 자신의
+       타이머를 덮어쓰기 때문입니다. 그것에 맞추는 것은 반올림이 아니라 그 총에 맞추는 것입니다. */
+    { "rapid",   "shotgun", "plasma", 0   ,    0   ,       80, 200,  40,   9, 0.100f, 0.030f, 0, 70.0f,  0.0f, 0.0f, 0.012f, 0.022f, 1 },
 
     /* Melee, and the only row with no hook: right-click leaps instead. Its
        "ammo" is slam charges, which is why it is not simply free.
        근접이며 훅이 없는 유일한 행입니다. 우클릭이 대신 도약합니다. "탄약"은 내려찍기
        충전량이며, 그래서 완전히 공짜는 아닙니다. */
-    { "axe",     "shotgun", "saw",    "sawup", 0   ,        3,   6,   2,  45, 0.42f, 0.0f,    0, 0.0f,  0.0f, 2.2f, 0.090f, 0.150f, 0 },
+    /* QUAKE'S AXE: 20 a swing at 0.50s. It was 45 at 0.42s -- 107 DPS, which
+       made melee the second-best gun in the roster and beat Quake's axe by
+       nearly three times. In both reference games melee is the desperation
+       option: something to hold when the shells are gone, not a reason to
+       close. 40 DPS against the shotgun's 66.7 puts it back there.
+       THE SLAM IS NOT QUAKE'S and keeps its 70 in 5.5m, because Quake's axe
+       has no second attack to borrow one from. It stays this project's own.
+       *Quake의 도끼입니다.* 한 번 휘두르는 데 20, 0.50초입니다. 45에 0.42초였고 107 DPS로
+       근접을 구성 내 두 번째로 좋은 총으로 만들었으며 Quake의 도끼를 세 배 가까이 넘었습니다.
+       두 참조작 모두 근접은 궁여지책입니다. 탄이 떨어졌을 때 들 것이고 붙을 이유가 아닙니다.
+       샷건의 66.7에 대한 40 DPS가 그것을 제자리로 돌립니다.
+       *내려찍기는 Quake의 것이 아니며* 5.5m의 70을 유지합니다. Quake의 도끼에는 빌려올 두
+       번째 공격이 없습니다. 그것은 이 프로젝트 자신의 것으로 남습니다. */
+    { "axe",     "shotgun", "saw",    "sawup", 0   ,        3,   6,   2,  20, 0.50f, 0.0f,    0, 0.0f,  0.0f, 2.2f, 0.090f, 0.150f, 0 },
 };
 
 const WeaponType *wp_stats(int type) {

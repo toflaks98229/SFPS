@@ -587,6 +587,32 @@ static void digest_print(const Digest *d) {
    *그 필드가 이곳에 있는 값어치의 전부가 그것입니다.* `erng`를 움직인 체력 조율이었다면
    몬스터가 *하는 일*을 바꾼 체력 조율이었을 것이고, 이것은 그 행동을 전혀 건드리지
    않았습니다. */
+/* THE TWELFTH IS THE SAME ONE FIELD AGAIN, AND THAT IS THE INTERESTING PART.
+   `enemy hp` 70 -> 30, nothing else -- and this time the change was much larger
+   than the one before it. The bestiary went from a ladder of shotgun blasts to
+   Quake 1's own numbers (30, 80, 200, 600 for the grunt, scrag, ogre and
+   shambler), and three of the four weapons took Quake's damage: the nailgun's
+   0.10s cadence, the grenade launcher's 120 in five metres, the axe's 20.
+   NOT ONE OF THOSE WEAPON CHANGES SHOWS UP HERE, and the reason is worth
+   keeping: the demo's recorded input fires the SHOTGUN and only the shotgun.
+   `wrng` is untouched because the shotgun's own row did not move; the grenade,
+   rapid and axe rows are never read by this recording, so retuning them is
+   invisible to it. A golden is only evidence about the code paths its input
+   actually walks, and this one walks one gun.
+   SO WHAT WOULD CATCH A GRENADE RETUNE is weapontest, and the health ladder's
+   shape is enemytest's check_health_ladder. Neither is this file's job.
+   *열두 번째는 다시 같은 필드 하나이며, 그것이 흥미로운 지점입니다.* `enemy hp`가 70에서
+   30이 되었고 그 외에는 없습니다. 그런데 이번 변경은 그 전 것보다 훨씬 큽니다. 도감이 샷건
+   발수의 사다리에서 Quake 1 자신의 수치로 갔고(그런트·스크래그·오거·샴블러에 대해 30, 80,
+   200, 600), 네 무기 중 셋이 Quake의 피해를 취했습니다. 네일건의 0.10초 박자, 유탄 발사기의
+   5미터 안 120, 도끼의 20입니다.
+   *그 무기 변경 중 어느 것도 이곳에 나타나지 않으며*, 그 이유는 적어 둘 값어치가 있습니다.
+   데모의 녹화된 입력은 *샷건*만 발사합니다. 샷건 자신의 행이 움직이지 않았으므로 `wrng`는
+   그대로이고, 유탄과 래피드와 도끼의 행은 이 녹화가 결코 읽지 않으므로 그것을 조율하는 것은
+   이 녹화에게 보이지 않습니다. 골든은 자기 입력이 실제로 걷는 코드 경로에 대한 증거일 뿐이며,
+   이것은 총 하나를 걷습니다.
+   *그래서 유탄 조율을 잡는 것은* weapontest이고, 체력 사다리의 모양은 enemytest의
+   check_health_ladder입니다. 어느 쪽도 이 파일의 일이 아닙니다. */
 static const Digest GOLDEN = {
     /* px py pz */ -1.2484479f, 10.1944284f, -16.661293f,
     /* vx vy vz */ 1.41563582f, -7.84683609f, -3.07291222f,
@@ -594,7 +620,7 @@ static const Digest GOLDEN = {
     /* health keys grounded */ 97, 0, 0,
     /* cur ammo */ 0, 0,
     /* wrng srng erng frng */ 3867911461u, 3888997821u, 286724173u, 3550271801u,
-    /* enemies hp */ 1, 70,
+    /* enemies hp */ 1, 30,
     /* proj marks */ 0, 0,
     /* world_time */ 29.9002438f
 };

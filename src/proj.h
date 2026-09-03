@@ -60,8 +60,32 @@
 
 
 
-/** @brief Metres a grenade's blast reaches. / 유탄 폭발이 도달하는 거리 (미터). */
-#define PROJ_BLAST_RADIUS 4.2f
+/**
+ * @brief Metres a grenade's blast reaches.
+ *
+ * QUAKE'S, AND DERIVED THE WAY QUAKE DERIVES IT. `T_RadiusDamage` takes the
+ * damage and reaches `damage + 40` units, so 120 damage reaches 160 units --
+ * five metres at this project's 32 to the metre. It was 4.2, which happened to
+ * sit between Xonotic's mortar (3.6) and Quake 3's grenade (5.06) and was
+ * chosen against neither.
+ *
+ * IT IS STILL A CONSTANT, not `damage + 40` computed here, because the two are
+ * only linked in Quake by a helper every explosive in that game shares. This
+ * game's other explosive is the axe slam, which has its own radius and its own
+ * reason for it (::AXE_SLAM_RADIUS), so a shared formula would be inventing a
+ * relationship rather than recording one.
+ *
+ * @brief 유탄 폭발이 도달하는 거리 (미터).
+ * @note *Quake의 값이며 Quake가 유도하는 방식으로 유도했습니다.* `T_RadiusDamage`는 피해량을
+ *       받아 `피해 + 40` units까지 도달하므로, 피해 120은 160 units에 닿습니다. 이 프로젝트의
+ *       미터당 32 units에서 5미터입니다. 4.2였고, 그것은 우연히 Xonotic 박격포(3.6)와 Quake 3
+ *       유탄(5.06) 사이에 앉았으며 어느 쪽에 대해서도 고른 값이 아니었습니다.
+ * @note *여전히 상수이며* 이곳에서 `피해 + 40`을 계산하지 않습니다. 둘은 Quake에서 그 게임의
+ *       모든 폭발물이 공유하는 보조 함수로만 이어져 있습니다. 이 게임의 다른 폭발물은 도끼
+ *       내려찍기이고 자기 반경과 자기 이유(::AXE_SLAM_RADIUS)를 갖고 있으므로, 공유 공식은
+ *       관계를 기록하는 것이 아니라 만들어 내는 일입니다.
+ */
+#define PROJ_BLAST_RADIUS 5.0f
 
 /**
  * @brief Seconds a grenade burns before going off on its own.

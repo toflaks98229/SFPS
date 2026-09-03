@@ -2106,6 +2106,21 @@ typedef struct {
     short max_alive;  /**< Ceiling on monsters in the level; 0 is none. / 레벨 내 몬스터 상한. 0이면 없음. */
 
     /**
+     * @brief The ceiling the LEVEL authored, before the wave grew it.
+     *
+     * ::max_alive is rewritten every wave, so the authored number has to
+     * survive somewhere or wave 2 would compute its ceiling from wave 1's
+     * answer and the growth would compound. Exactly ::base_interval's problem
+     * and exactly its solution.
+     *
+     * @brief 웨이브가 키우기 전에 *레벨이* 제작한 상한입니다.
+     * @note ::max_alive는 웨이브마다 다시 쓰이므로 제작된 수가 어딘가 남아야 합니다. 아니면
+     *       웨이브 2가 웨이브 1의 답에서 자기 상한을 계산해 증가가 복리로 붙습니다.
+     *       ::base_interval의 문제와 그 해법이 정확히 같습니다.
+     */
+    short base_alive;
+
+    /**
      * @brief How many to make each time it fires. One is the old behaviour.
      *
      * ENGLISH: An arena wants a GROUP to arrive, not a queue of individuals --
@@ -2245,12 +2260,53 @@ typedef struct {
  * 평평해집니다. 어디서 평평해지는가가 이 게임의 실제 난이도이고, 거기까지 얼마나 빨리
  * 가는가가 경사입니다. */
 
-/** @brief Monsters one spawner sends in wave 1. / 웨이브 1에서 스포너 하나가 보내는 몬스터 수. */
-#define WAVE_BUDGET_BASE 4
-/** @brief Added to that budget each wave. / 웨이브마다 그 예산에 더해지는 수. */
-#define WAVE_BUDGET_STEP 2
-/** @brief Where the budget stops growing. / 예산이 커지기를 멈추는 지점. */
-#define WAVE_BUDGET_MAX  24
+/**
+ * @brief How much higher the level's monster ceiling goes with each wave.
+ *
+ * ENGLISH
+ * -------
+ * THE WAVE BUDGET USED TO BE HERE and it is gone, because the thing it counted
+ * no longer exists. A wave was a QUOTA: every spawner was handed
+ * `4 + 2*(wave-1)` monsters and the wave ended when all of them had been
+ * spent. That is a fine model for a room you clear, and the wrong one for the
+ * game this became -- spawners run continuously now and the wave advances on a
+ * clock (::WORLD_WAVE_TIME), so nothing is ever "spent" and there is no quota
+ * to size.
+ *
+ * WHAT RAMPS INSTEAD IS THE CEILING, and it has to, because ::Spawner::max_alive
+ * is a LEVEL-WIDE count and not a per-spawner one. The arena authors 8, 6, 4, 2,
+ * 2, 2, 2 -- so the room fills to the highest of them, EIGHT, and every spawner
+ * under that threshold is a top-up that only fires when the room is nearly
+ * empty. Shrinking the interval alone would therefore have changed nothing
+ * after the first few seconds of any wave: the rate was never the binding
+ * constraint, the ceiling was.
+ *
+ * TWO, because it has to be felt over a run and cannot run away. Against the
+ * arena's authored 8 it reaches 28 by wave 11 and 46 by wave 20, and
+ * ::ENEMY_MAX clamps it at 64 -- which is now a cap that binds rather than a
+ * number nothing could reach.
+ *
+ * 한국어
+ * ------
+ * @brief 웨이브마다 레벨의 몬스터 천장이 얼마나 더 올라가는지.
+ *
+ * *웨이브 예산이 이곳에 있었고 사라졌습니다.* 그것이 세던 것이 더는 존재하지 않기 때문입니다.
+ * 웨이브는 *할당량*이었습니다. 스포너마다 `4 + 2*(웨이브-1)`마리를 받고 그것이 모두 소진되면
+ * 웨이브가 끝났습니다. 정리하는 방에는 좋은 모델이고, 이 게임이 된 것에는 틀린 모델입니다.
+ * 이제 스포너는 계속 돌고 웨이브는 시계로 넘어가므로(::WORLD_WAVE_TIME) 소진되는 것이 없고
+ * 크기를 정할 할당량도 없습니다.
+ *
+ * *대신 오르는 것은 천장이며*, 그래야 합니다. ::Spawner::max_alive가 스포너별이 아니라
+ * *레벨 전체* 수이기 때문입니다. 아레나는 8, 6, 4, 2, 2, 2, 2를 제작했으므로 방은 그중 가장
+ * 높은 *여덟*까지 차고, 그 아래 임계값을 가진 스포너는 방이 거의 비었을 때만 발동하는
+ * 채움용입니다. 그러므로 간격만 줄이는 것은 어느 웨이브든 처음 몇 초 뒤로는 아무것도 바꾸지
+ * 못했을 것입니다. 묶는 제약은 속도가 아니라 천장이었습니다.
+ *
+ * *2인 이유는* 한 판 동안 체감되어야 하고 동시에 폭주하지 않아야 하기 때문입니다. 아레나가
+ * 제작한 8에 대해 웨이브 11에서 28, 웨이브 20에서 46에 닿고, ::ENEMY_MAX가 64에서 자릅니다.
+ * 그것은 이제 아무것도 닿을 수 없던 수가 아니라 실제로 무는 상한입니다.
+ */
+#define WAVE_ALIVE_STEP 2
 /** @brief Waves between each increase of the group size. / 무리 크기가 한 번 커지는 데 걸리는 웨이브 수. */
 #define WAVE_BURST_EVERY 3
 /** @brief Largest group one spawner delivers at once. / 스포너 하나가 한 번에 배달하는 최대 무리. */

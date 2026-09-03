@@ -1840,7 +1840,7 @@ static void wave_reward(World *w) {
  * ENGLISH
  * -------
  * Paced rather than spawned once, for the reason ::altar_light gives: a burst is
- * over in half a second and the breather is ::WORLD_WAVE_BREAK long. The
+ * over in half a second and the shrine burns for as long as loot.txt says. The
  * interval is a constant here rather than in loot.txt because it is a property
  * of the EFFECT -- how dense a column of motes reads -- and effects.txt is where
  * a person tunes how that column looks. What loot.txt owns is how long it lasts,
@@ -2201,37 +2201,37 @@ static void step_wave(World *w, float dt) {
         return;
     }
 
-    /* --- the breather ----------------------------------------------------
-       Counted down BEFORE the clear test, so the frame the break ends is the
-       frame the next wave arms rather than one that could also notice the new
-       wave is already clear -- it is, for the instant before its spawners run.
-       정리 판정보다 *먼저* 감소시킵니다. 휴식이 끝나는 프레임이 다음 웨이브를 장전하는
-       프레임이 되게 하기 위함이며, 그러지 않으면 그 프레임이 새 웨이브가 이미 정리되었다고
-       알아챌 수도 있습니다. 스포너가 돌기 직전 한순간 실제로 그러합니다. */
-    if (w->run.wave_break > 0.0f) {
-        w->run.wave_break -= dt;
-        if (w->run.wave_break > 0.0f) return;
-
-        w->run.wave_break = 0.0f;
-        w->run.wave++;
-        if (w->run.wave > w->run.wave_best) w->run.wave_best = w->run.wave;
-        w->run.wave_time = 0.0f;
-        enemy_wave_arm(&w->pools, w->run.wave);
-        return;
-    }
-
+    /* --- the wave clock -------------------------------------------------- */
     w->run.wave_time += dt;
+    if (w->run.wave_time < WORLD_WAVE_TIME) return;
 
-    /* Paid on the frame the wave is noticed to be over, not when the breather
-       ends: the reward has to be in the air while the room is going quiet,
-       which is the moment it reads as payment for what just happened.
-       휴식이 끝날 때가 아니라 웨이브가 끝났음을 알아챈 프레임에 지급합니다. 보상은 방이
-       조용해지는 동안 공중에 있어야 하며, 그때가 방금 일어난 일에 대한 대가로 읽히는
-       순간입니다. */
-    if (enemy_wave_done(&w->pools)) {
-        w->run.wave_break = WORLD_WAVE_BREAK;
-        wave_reward(w);
-    }
+    /* THE CLOCK IS THE ONLY THING THAT ADVANCES A WAVE. It used to be
+       ::enemy_wave_done -- nothing left to send and nothing still walking --
+       and that question has no answer once spawners are unlimited: they are
+       never done sending, so the counter would sit on wave 1 forever.
+       SUBTRACTED, NOT ZEROED, so a frame that overshoots the mark by 3ms does
+       not throw those 3ms away. Over a run of forty waves a zeroing loses most
+       of a wave to rounding, and the boss cadence rides on this counter.
+       THE PURSE STILL LANDS, and it lands here because this is the only moment
+       left that means anything -- there is no clear to pay for now, so it pays
+       for having survived the step. ::wave_reward drops it at the altar, which
+       is a place the player has to break off and go to; that walk is what the
+       six-second break used to be, except the room does not stop.
+       *웨이브를 넘기는 것은 시계뿐입니다.* 예전에는 ::enemy_wave_done이었습니다. 보낼 것도
+       걸어 다니는 것도 없다는 것인데, 스포너가 무제한이 되면 그 질문에는 답이 없습니다.
+       결코 다 보내지 않으므로 계수기가 웨이브 1에 영원히 앉아 있게 됩니다.
+       *0으로 만들지 않고 빼는 이유는*, 3밀리초를 넘긴 프레임이 그 3밀리초를 버리지 않게 하기
+       위함입니다. 40웨이브짜리 한 판이면 0으로 만드는 쪽은 반올림으로 거의 한 웨이브를 잃고,
+       보스 주기가 이 계수기 위에 얹혀 있습니다.
+       *지급은 여전히 있으며* 이곳에 있는 이유는 이제 의미가 남은 유일한 순간이기 때문입니다.
+       값을 치를 정리가 없으니, 그 단계를 살아남은 것에 대해 치릅니다. ::wave_reward는 그것을
+       제단에 떨어뜨리고, 그곳은 플레이어가 하던 것을 끊고 가야 하는 자리입니다. 그 걸음이
+       예전의 6초 휴식이 하던 일입니다. 다만 방은 멈추지 않습니다. */
+    w->run.wave_time -= WORLD_WAVE_TIME;
+    w->run.wave++;
+    if (w->run.wave > w->run.wave_best) w->run.wave_best = w->run.wave;
+    enemy_wave_arm(&w->pools, w->run.wave);
+    wave_reward(w);
 }
 
 /* Advances the between-levels screen, and loads when it is done.

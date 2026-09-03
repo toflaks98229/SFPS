@@ -22,7 +22,7 @@ Models, materials, sounds and levels are all authored as text and hot-reload
 into the running game.
 
 ```
-1,054,208 / 1,474,560 bytes   (71.49% used)
+1,062,912 / 1,474,560 bytes   (72.08% used)
 ```
 
 ## Build
@@ -1393,6 +1393,75 @@ problem**, and at 7.4% of the budget it is not. If it ever becomes one, the
 order is: cut generated code first (`sprite_atlas`, `mb_extrude_taper` and
 `mb_box` are the three largest symbols), and only then reach for a packer. The
 roadmap entry says "if the budget ever gets tight" for exactly this reason.
+
+## Balance: one gun sets the ladder, and a clock sets the pressure
+
+Three tables used to be tuned independently and were measured against each
+other for the first time in September 2026, against the public numbers of
+Quake 1, DOOM 1993, Xonotic, Quake 3 and Warfork. Two of them moved.
+
+**The shotgun had two sets of numbers and the wrong one was live.** Its row in
+`WEAPONS` said seven pellets of eight; `weapon.c` said six of seven in
+`#define`s a metre away — and the defines were what fired. The row's `pellets`
+was read by `attack` as a boolean and its `damage` by nobody at all, so anyone
+tuning the shotgun from the table was tuning a value the game does not read,
+and every measurement taken from the table was wrong by a third. `fire_hitscan`
+takes the row now, the way `fire_projectile` and `fire_melee` already did.
+
+**Then the gun became DOOM's.** Seven pellets of ten on a 1.05-second cycle —
+DOOM's 37-tic shotgun at its 35 Hz — which is 70 a blast and **66.7 DPS against
+DOOM's own 66.2**. It replaced 42 at 0.50 s, which was 84 DPS: a pump shotgun
+out-damaging Quake's *super* shotgun, and the reason nothing heavier than 120
+health could exist. DOOM's per-pellet roll (`5*(rnd%3+1)`, so 35–105 a blast) is
+**not** copied. The mean is the balance; the roll is a 1993 implementation
+detail, and seven extra rng draws a shot would make every golden hostage to a
+variance nobody asked for.
+
+**So the health column is measured in blasts.** The three fightable rows are one
+blast, two and six — **70, 140, 420** — because a player learns a bestiary by how
+many times they have to pull the trigger, and that only works if the numbers are
+exact multiples rather than nearly them. The water spirit's rung is the sharp
+one: 70 is the *whole* blast, so past point-blank a pellet goes wide, 60 lands,
+and it lives with ten left and keeps coming. At the old 40 it died to five of
+seven and so died at any range, which made the spread decoration.
+
+That coupling spans two tables in two files and can be broken from either end
+without touching the other, so `enemytest` pins the **ratio** rather than the
+numbers. Retune both together and it stays green; retune either alone and it
+goes red. A check that named 70, 140 and 420 would just be the table written
+twice.
+
+**A wave is a length of time now, not a room to empty.** Spawners used to be
+handed a quota — `4 + 2*(wave-1)` each — and a wave ended when every one of them
+had spent it. Vampire Survivors' model replaced that: spawners are handed −1 and
+never go quiet, and the wave advances on a **45-second clock**. Nothing clears,
+so the six-second breather went with the model that had one; the purse still
+lands, at the altar, on the frame the wave steps, and the walk to fetch it is
+what the breather used to be except the room does not stop.
+
+**What ramps is the ceiling, and it had to be.** `Spawner::max_alive` is a
+**level-wide** count, not a per-spawner one — the arena authors 8, 6, 4, 2, 2, 2,
+2, so the room fills to the highest of them, **eight**, and every spawner under
+that threshold is a top-up that only fires when the room is nearly empty. Which
+means shrinking the interval alone would have changed nothing after the first
+few seconds of any wave: the rate was never the binding constraint.
+`WAVE_ALIVE_STEP` raises the ceiling two a wave from the authored value, so:
+
+| wave | clock | alive | interval | burst |
+|---|---|---|---|---|
+| 1 | 0:45 | 8 | 9.0 s | 1 |
+| 5 | 3:45 | 16 | 7.6 s | 2 |
+| 11 | 8:15 | 28 | 5.5 s | 4 |
+| 20 | 15:00 | 46 | 2.4 s | 5 |
+| 29 | 21:45 | **64** (`ENEMY_MAX`) | 1.2 s | 5 |
+
+`ENEMY_MAX` is a cap that binds now rather than a number nothing could reach.
+
+**What this leaves open.** The maw is 900 and did not move, so the boss is only
+**2.1×** the brute where it was 7.5× — three brutes are 1,260 health against its
+900, which makes the hardest thing in the room not the boss. And the rapid gun
+needs **47 rounds** to fell one brute against a 200-round belt. Both are
+decisions, recorded here rather than left to be discovered.
 
 ## Monsters
 

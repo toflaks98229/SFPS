@@ -184,14 +184,41 @@ static const struct { const char *was; int now; } MON_LEGACY[] = {
  *       검사하지 *않습니다.* `eye`가 `hgt`보다 높아도 잡히지 않고 그대로 플레이됩니다.
  */
 /*    name,           behaviour,   hp,  spd, weave,   rad,   hgt,   eye, sight, aspct,    yaw, pain, cap, flags      */
+/* THE HEALTH COLUMN IS MEASURED IN SHOTGUN BLASTS, and that is a dependency
+   rather than a coincidence. One blast is ::WEAPONS' shotgun row: seven pellets
+   of ten, so 70 with every pellet in. The three fightable rows are one blast,
+   two and six -- 70, 140, 420 -- and a player learns the bestiary by how many
+   times they have to pull the trigger, which only works if the numbers are
+   exact multiples rather than nearly them.
+   SO RETUNING THE SHOTGUN RETUNES THE BESTIARY. Change the pellet count or the
+   pellet damage and these three stop being 1, 2 and 6 of anything; 60 a blast
+   would make the water spirit a two-blast monster and the brute a seven-blast
+   one, which is a different game. tools/enemytest.c pins the three ratios so
+   the coupling cannot be broken silently from either end.
+   *체력 열은 샷건 발수로 재어져 있으며*, 그것은 우연이 아니라 의존입니다. 한 발은 ::WEAPONS의
+   샷건 행입니다. 10짜리 펠릿 일곱이므로 전부 맞으면 70입니다. 싸울 수 있는 세 행은 한 발, 두
+   발, 여섯 발이며 70, 140, 420입니다. 플레이어는 방아쇠를 몇 번 당겨야 하는지로 도감을
+   익히고, 그것은 수가 *거의* 배수가 아니라 정확한 배수일 때만 통합니다.
+   *그러므로 샷건을 다시 조율하면 도감을 다시 조율하는 것입니다.* 펠릿 수나 펠릿 피해를 바꾸면
+   이 셋은 무엇의 1, 2, 6도 아니게 됩니다. 한 발 60이면 물의 정령은 두 발 몬스터가 되고
+   브루트는 일곱 발 몬스터가 되며, 그것은 다른 게임입니다. tools/enemytest.c가 세 비율을 못
+   박아 두어 이 결합이 어느 쪽에서도 조용히 깨지지 않게 합니다. */
 static const MonType TYPES[MON_TYPES] = {
     /* the baseline: the fastest thing in the bestiary and the loosest weave,
        at 65% of ::PLAYER_WALK -- it cannot catch you, but it can be there
-       when you turn round. One point-blank blast kills it.
+       when you turn round.
+       ONE BLAST, WITH EVERY PELLET IN IT. 70 is the whole blast, so this is the
+       row where the shotgun's spread is the difficulty: at any range past
+       point blank a pellet or two goes wide, 60 lands, and the thing lives with
+       10 left and keeps coming. The old 40 died to five of seven and so died at
+       any range, which made the spread decoration.
        기준선. 도감에서 가장 빠르고 갈지자가 가장 큽니다. ::PLAYER_WALK의 65%이며,
-       따라잡지는 못하지만 돌아섰을 때 거기 있을 수는 있습니다. 근접 샷건 한 방에
-       죽습니다. */
-    { "water_spirit",   AI_CASTER, 40, 7.0f, 0.62f, 0.52f, 1.70f, 1.30f, 34.0f, 0.70f, 260.0f, 0.6f, 8, MON_FLOATS },
+       따라잡지는 못하지만 돌아섰을 때 거기 있을 수는 있습니다.
+       *한 발이지만, 펠릿이 전부 들어가야 합니다.* 70은 한 발 전체이므로, 이 행은 샷건의
+       산포가 곧 난이도인 행입니다. 바짝 붙지 않은 어느 거리에서든 펠릿 하나둘이 빗나가
+       60이 들어가고, 그것은 10을 남긴 채 살아서 계속 옵니다. 옛 40은 일곱 중 다섯에
+       죽었으므로 어느 거리에서든 죽었고, 그래서 산포가 장식이었습니다. */
+    { "water_spirit",   AI_CASTER, 70, 7.0f, 0.62f, 0.52f, 1.70f, 1.30f, 34.0f, 0.70f, 260.0f, 0.6f, 8, MON_FLOATS },
     /* a wall with health -- hits hard, cannot be stun-locked, and closes at
        half your walking speed on the straightest line in the bestiary. Heavy
        is the small weave, not the speed: it commits to a direction and comes,
@@ -199,7 +226,7 @@ static const MonType TYPES[MON_TYPES] = {
        체력이 높은 벽. 강하게 때리고, 스턴 락에 걸리지 않으며, 도감에서 가장 곧은 선으로
        걷기 속도의 절반으로 다가옵니다. 무거움은 속도가 아니라 작은 갈지자입니다. 방향을
        정하고 오며, 살아남을 수 있게 하는 것은 그것이 어디로 올지 읽을 수 있다는 점입니다. */
-    { "brute",          AI_BRAWLER, 120, 5.6f, 0.30f, 0.806f, 2.35f, 1.80f, 34.0f, 0.85f, 130.0f, 2.2f, 3, MON_UNFLINCHING },
+    { "brute",          AI_BRAWLER, 420, 5.6f, 0.30f, 0.806f, 2.35f, 1.80f, 34.0f, 0.85f, 130.0f, 2.2f, 3, MON_UNFLINCHING },
     /* holds its range instead of closing, and holds it in the AIR -- so cover
        and angles matter, and so does the ceiling. Nothing about the numbers
        changed when MON_FLIES arrived: this is the same creature, no longer
@@ -209,7 +236,7 @@ static const MonType TYPES[MON_TYPES] = {
        천장의 문제이기도 합니다. MON_FLIES가 붙을 때 수치는 하나도 바뀌지 않았습니다. 아무것도
        딛고 있지 않게 되었을 뿐 같은 생물입니다. 이것이 대신한 행("wraith")은 여기서 체력 4점과
        사거리 1미터를 뺀 것이었고, 그것은 별개의 몬스터가 아닙니다. */
-    { "caster",         AI_CASTER, 26, 5.8f, 0.46f, 0.546f, 1.90f, 1.45f, 40.0f, 0.80f, 180.0f, 0.9f, 4, MON_FLIES | MON_FLOATS },
+    { "caster",         AI_CASTER, 140, 5.8f, 0.46f, 0.546f, 1.90f, 1.45f, 40.0f, 0.80f, 180.0f, 0.9f, 4, MON_FLIES | MON_FLOATS },
     /* the boss: a caster with the footwork taken away. Its hp is spent in
        BOSS_CYCLES equal thirds and must divide by it -- types_check says so.
        The pain lock is effectively infinite because a boss that flinches is a
@@ -592,8 +619,30 @@ void enemy_wave_arm(Pools *pl, int wave)
            previous wave is exactly the one this has to bring back.
            활성 슬롯만이 아니라 모든 슬롯입니다. 이전 웨이브가 은퇴시킨 스포너가 바로 이것이
            되살려야 할 대상입니다. */
-        int budget = WAVE_BUDGET_BASE + step * WAVE_BUDGET_STEP;
-        if (budget > WAVE_BUDGET_MAX) budget = WAVE_BUDGET_MAX;
+        /* NOTHING IS EVER SPENT. A spawner used to be handed a quota and to
+           retire when it ran out, which is what made a wave a room you empty.
+           Spawners run continuously now -- the clock in ::step_wave is what
+           ends a wave -- so the debt is unlimited and the spawner never goes
+           quiet. -1 is the value ::spawners_update already understood for
+           "unlimited"; this is the level authoring it for every wave.
+           *소진되는 것이 없습니다.* 스포너는 할당량을 받고 그것이 떨어지면 은퇴했으며, 그것이
+           웨이브를 비워야 하는 방으로 만들던 것입니다. 이제 스포너는 계속 돌고 웨이브를
+           끝내는 것은 ::step_wave의 시계이므로, 빚은 무제한이고 스포너는 결코 조용해지지
+           않습니다. -1은 ::spawners_update가 이미 "무제한"으로 알던 값입니다. */
+        int budget = -1;
+
+        /* AND THE CEILING IS WHAT CLIMBS. See ::WAVE_ALIVE_STEP for why this
+           and not the interval is the ramp that can be felt: `max_alive` is a
+           level-wide count, so the room fills to the highest one authored and
+           the rate stops mattering the moment it does.
+           *그리고 오르는 것은 천장입니다.* 왜 간격이 아니라 이것이 체감되는 경사인지는
+           ::WAVE_ALIVE_STEP을 보십시오. `max_alive`는 레벨 전체 수이므로 방은 제작된 것 중
+           가장 높은 값까지 차고, 그 순간부터 속도는 의미를 잃습니다. */
+        if (s->base_alive > 0) {
+            int ceil = s->base_alive + step * WAVE_ALIVE_STEP;
+            if (ceil > ENEMY_MAX) ceil = ENEMY_MAX;
+            s->max_alive = (short)ceil;
+        }
 
         int burst = 1 + step / WAVE_BURST_EVERY;
         if (burst > WAVE_BURST_MAX) burst = WAVE_BURST_MAX;
@@ -2399,6 +2448,7 @@ static void spawners_of(Pools *pl, const Level *l)
         s->type      = (short)type;
         s->left      = e->p[1] > 0 ? e->p[1] : -1;      /* 0 authored means unlimited */
         s->max_alive = e->p[2];
+        s->base_alive    = s->max_alive;
         s->interval  = e->p[0] > 0 ? e->p[0] * 0.1f : 5.0f;
         s->base_interval = s->interval;
         s->burst     = 1;

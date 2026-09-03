@@ -384,10 +384,22 @@ static void check_shake(void) {
  * 5분을 버틴 플레이어에게 20초를 버텼다고 말하게 되며, 그런 일은 가장 잘한 플레이어에게만
  * 일어납니다. */
 /* --- a monster the level put there, four metres in front of the player --- */
-static void put_monster(World *w, short x, short z) {
+/* NAMED, because two callers want different creatures and used to share one.
+   The quad check needs something that SURVIVES a plain blast so the quadded
+   one has somewhere to differ; the shadow check needs something that SHOOTS.
+   A water spirit was both until the shotgun became DOOM's -- 70 a blast
+   against its 40 health made "one blast leaves the monster standing" false,
+   and the check went red for a reason that had nothing to do with powerups.
+   *이름을 받습니다.* 두 호출자가 서로 다른 생물을 원하는데 하나를 공유하고 있었습니다.
+   쿼드 검사는 평범한 한 발을 *살아남는* 것이 필요하고(그래야 쿼드가 달라질 자리가 있습니다),
+   그림자 검사는 *쏘는* 것이 필요합니다. 샷건이 DOOM의 것이 되기 전까지는 물의 정령이 둘 다
+   였습니다. 한 발 70 대 체력 40이 "한 발은 몬스터를 살려 둔다"를 거짓으로 만들었고, 검사는
+   파워업과 아무 상관 없는 이유로 빨개졌습니다. */
+static void put_monster(World *w, const char *kind, short x, short z) {
     Entity *e = &w->level.ents[w->level.n_ents++];
-    e->kind[0]='s'; e->kind[1]='p'; e->kind[2]='a'; e->kind[3]='w';
-    e->kind[4]='n'; e->kind[5]=0;
+    int i = 0;
+    while (kind[i] && i < (int)sizeof e->kind - 1) { e->kind[i] = kind[i]; i++; }
+    e->kind[i] = 0;
     e->x = x; e->z = z;
     enemy_spawn_level(&w->pools, &w->level);
 }
@@ -545,7 +557,7 @@ static void check_power(void) {
     int hp_plain, hp_quad;
     for (int quad = 0; quad < 2; quad++) {
         fixture(&w, 0);
-        put_monster(&w, 0, -400);
+        put_monster(&w, "brute", 0, -400);
         if (quad) w.player.power[PW_QUAD] = PLAYER_POWER_TIME;
 
         in = idle();
@@ -604,7 +616,7 @@ static void check_power(void) {
     int shot_plain, shot_shadow;
     for (int shadow = 0; shadow < 2; shadow++) {
         fixture(&w, 0);
-        put_monster(&w, 0, -800);
+        put_monster(&w, "spawn", 0, -800);
         if (shadow) w.player.power[PW_SHADOW] = PLAYER_POWER_TIME;
 
         int before = w.player.health;
@@ -965,6 +977,135 @@ static void check_lava(void) {
     ok(cols > 0, "the sea covers ground the level actually has");
     ok(standable * 2 > cols,
        "and most of it is a floor a body could be standing on");
+
+    /* --- the ring of perimeter pillars is there and it crosses -------------
+     *
+     * WHY THIS CAN BE WATCHED NOW when the "islands" version could not. That
+     * first attempt asked only "is there ground above the sea" and passed with
+     * the pillars deleted, because the lava slab spans the whole footprint and
+     * every ledge in the fortress is technically above it. The pillars have a
+     * signature the fortress does not: standable, dry tops at ONE height, out
+     * over the lava, spaced in a ring. So this scans the courtyard for tops at
+     * PILLAR_TOP, clusters the hits into columns, and reads the count and the
+     * spacing off the map itself -- delete the pillars or widen them and it
+     * goes red, which is the only edit it should have an opinion about.
+     *
+     * THE SPACING IS THE POINT, given the hook is being shortened. Neighbouring
+     * columns sit about ten metres apart, so the ring is crossable by a hook
+     * well under its current forty-metre reach -- the check demands the longest
+     * gap stay inside RING_HOP_MAX, which is set at the reach a shortened hook
+     * is expected to keep. A ring that only crosses at the current range is a
+     * ring the planned nerf would strand a player on.
+     *
+     * *섬 버전은 지켜볼 수 없었지만 이것은 지켜볼 수 있는 이유.* 그 첫 시도는 "바다 위에 땅이
+     * 있는가"만 물었고 기둥을 지운 채로도 통과했습니다. 용암 슬래브가 전체 footprint에 걸쳐
+     * 있어 성채의 모든 턱이 엄밀히는 그 위이기 때문입니다. 기둥에는 성채에 없는 시그니처가
+     * 있습니다. 용암 위에, *한* 높이에, 링으로 배치된, 설 수 있는 마른 꼭대기입니다. 그래서
+     * 안뜰에서 PILLAR_TOP 높이의 꼭대기를 스캔해 기둥으로 묶고, 개수와 간격을 맵 자체에서
+     * 읽습니다. 기둥을 지우거나 벌리면 빨개지며, 그것이 이 검사가 의견을 가져야 할 유일한
+     * 편집입니다.
+     * *간격이 핵심입니다.* 갈고리가 짧아질 예정이기 때문입니다. 이웃한 기둥은 약 10미터
+     * 떨어져 있어, 링은 현재 40미터 사거리보다 훨씬 짧은 갈고리로도 건널 수 있습니다. 검사는
+     * 가장 긴 틈이 RING_HOP_MAX 안에 머무를 것을 요구하며, 그 값은 짧아진 갈고리가 유지할
+     * 것으로 보는 사거리입니다. 현재 사거리에서만 건널 수 있는 링은 계획된 너프가 플레이어를
+     * 고립시킬 링입니다. */
+    {
+        /* Engine y of the columns' tops (map z=-256 / 32) and the widest hop a
+           shortened hook must still make. Both are metres. */
+        const float PILLAR_TOP = -8.0f, RING_HOP_MAX = 12.0f;
+        /* A column's cap is 3 m across, so grid hits 1 m apart must fold into
+           one; neighbours are ~10 m apart, so a 5 m fold radius merges a cap
+           without ever joining two columns. Averaged in, so a centre lands in
+           the middle of its cap rather than on the first cell scanned. */
+        float cx[128], cz[128]; int cn[128], nc = 0;
+        for (float x = -44.0f; x <= 44.0f; x += 1.0f)
+            for (float z = -44.0f; z <= 44.0f; z += 1.0f) {
+                float f, c;
+                if (!level_ground(&w.level, x, z, PILLAR_TOP + 0.3f, 0.6f, &f, &c)) continue;
+                if (fabsf(f - PILLAR_TOP) > 0.1f) continue;      /* not a cap */
+                if (c - f < PLAYER_EYE) continue;                /* no headroom */
+                if (level_hazard_at(&w.level, x, f + 0.1f, z) > 0) continue;
+                /* FREESTANDING IN THE SEA: lava on all four sides three metres
+                   out. The ring columns are isolated in the open courtyard and
+                   pass; the fortress's own -8 m ledges are joined to the wall
+                   on at least one side and are excluded, which is what keeps
+                   this counting the ring and not the architecture. */
+                if (level_hazard_at(&w.level, x + 3.0f, -18.7f, z) <= 0) continue;
+                if (level_hazard_at(&w.level, x - 3.0f, -18.7f, z) <= 0) continue;
+                if (level_hazard_at(&w.level, x, -18.7f, z + 3.0f) <= 0) continue;
+                if (level_hazard_at(&w.level, x, -18.7f, z - 3.0f) <= 0) continue;
+                int hit = -1;
+                for (int k = 0; k < nc; k++) {
+                    float mx = cx[k] / cn[k], mz = cz[k] / cn[k];
+                    if ((mx-x)*(mx-x) + (mz-z)*(mz-z) < 25.0f) { hit = k; break; }
+                }
+                if (hit < 0 && nc < 128) { hit = nc; cx[nc] = 0; cz[nc] = 0; cn[nc] = 0; nc++; }
+                if (hit >= 0) { cx[hit] += x; cz[hit] += z; cn[hit]++; }
+            }
+        for (int k = 0; k < nc; k++) { cx[k] /= cn[k]; cz[k] /= cn[k]; }
+
+        /* CONNECTIVITY, NOT NEAREST-NEIGHBOUR. Two columns are linked if a hook
+           of RING_HOP_MAX could span them; the ring is the largest set of
+           columns joined into one chain by those links. Measuring the single
+           longest hop instead would be fooled by anything else standing in the
+           lava -- the fortress keeps its own isolated supports down in the
+           underbelly, and they are not the ring and need not join it. What must
+           hold is that the perimeter columns form ONE loop still crossable
+           after the hook is cut. Flood from each column; keep the largest. */
+        int comp[128], best_comp = 0;
+        for (int s = 0; s < nc; s++) {
+            for (int k = 0; k < nc; k++) comp[k] = 0;
+            comp[s] = 1; int grew = 1, size = 1;
+            while (grew) {
+                grew = 0;
+                for (int i = 0; i < nc; i++) {
+                    if (!comp[i]) continue;
+                    for (int j = 0; j < nc; j++) {
+                        if (comp[j]) continue;
+                        float d = sqrtf((cx[i]-cx[j])*(cx[i]-cx[j]) + (cz[i]-cz[j])*(cz[i]-cz[j]));
+                        if (d <= RING_HOP_MAX) { comp[j] = 1; grew = 1; size++; }
+                    }
+                }
+            }
+            if (size > best_comp) best_comp = size;
+        }
+        printf("      %d columns over the sea; largest chain linked at <=%.0f m is %d\n",
+               nc, (double)RING_HOP_MAX, best_comp);
+        ok(nc >= 24, "the arena has a ring of pillars standing in the lava");
+        okf(best_comp >= 24,
+            "and they form one loop a shortened hook can still cross",
+            (float)best_comp, 24.0f);
+    }
+
+    /* --- every spawner the map wrote is a spawner that runs ----------------
+     *
+     * ::ENEMY_MAX_SPAWNERS is eight and the arena now writes seven. The ninth
+     * would not fail loudly -- it raises DIAG_ENEMY_CAP and is dropped, exactly
+     * the shape that cost an afternoon when FX_MAX_DEFS filled and nothing was
+     * reading the counter. So the two numbers are asked directly: as many
+     * spawners running as the level authored, and the counter silent.
+     * ::ENEMY_MAX_SPAWNERS는 8이고 아레나는 일곱을 씁니다. 아홉 번째는 요란하게 실패하지
+     * 않고 DIAG_ENEMY_CAP을 올린 뒤 버려집니다. FX_MAX_DEFS가 찼는데 계수기를 아무도 읽지
+     * 않아 오후 하나를 치른 것과 같은 모양입니다. 그래서 두 수를 직접 묻습니다. 레벨이 제작한
+     * 만큼 스포너가 돌고 있는가, 그리고 계수기는 조용한가. */
+    {
+        int authored = 0;
+        for (int i = 0; i < w.level.n_ents; i++) {
+            const Entity *e = &w.level.ents[i];
+            if (e->kind[0] == 's' && e->kind[1] == 'p') authored++;
+        }
+        int running = enemy_spawner_count(&w.pools);
+        printf("      %d spawners authored, %d running, cap %d\n",
+               authored, running, ENEMY_MAX_SPAWNERS);
+        ok(authored > 0, "the arena authors spawners at all");
+        okf(running == authored,
+            "and every one of them fits under ENEMY_MAX_SPAWNERS",
+            (float)running, (float)authored);
+        okf(diag_count(DIAG_ENEMY_CAP) == 0,
+            "with the cap counter silent, not merely the count matching",
+            (float)diag_count(DIAG_ENEMY_CAP), 0.0f);
+    }
+
 
     okf(level_hazard_at(&w.level, sx, top, sz) == LVL_HURT_LAVA,
         "its surface reports lava damage, felt through LVL_HAZARD_UNDERFOOT",

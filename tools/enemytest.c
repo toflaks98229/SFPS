@@ -14,6 +14,7 @@
 #include "enemy.h"
 #include "fx.h"   /* fx_live_count -- what a wind-up puts in the air */
 #include "level.h"
+#include "weapon.h"  /* wp_stats -- the health ladder is measured in shotgun blasts */
 #include "pools.h"
 /* The pools this file drives, owned here the way a ::World owns its own. The
    five modules that used to keep these in file-scope arrays hand them back
@@ -1129,6 +1130,65 @@ static void check_ledge(void) {
         worst, TOP * 0.5f);
 }
 
+/* --- the bestiary is a ladder of shotgun blasts -------------------------
+ *
+ * WHY THIS IS A TEST AND NOT A COMMENT. The health column is not three
+ * independent numbers, it is one blast, two and six -- and the blast is the
+ * shotgun's row in ::WEAPONS, not a constant anybody wrote down. So the
+ * relationship spans two tables in two files and can be broken from either
+ * end without touching the other: retuning the pellet damage from 10 to 8
+ * leaves every health value untouched and silently turns 1/2/6 into 2/3/8.
+ *
+ * WHAT IT PINS is the RATIO, not the numbers. Both tables may be retuned
+ * together and this stays green; either one alone turns it red. That is the
+ * whole point -- it is a check on a coupling, and a check that named 70, 140
+ * and 420 would just be the table written twice.
+ *
+ * AND THE WATER SPIRIT'S PELLET COUNT, which is the sharper half of its row:
+ * it must take EVERY pellet, so one short must leave it alive. That is what
+ * makes the shotgun's spread the difficulty at that rung rather than
+ * decoration, and it is a claim about hp vs pellet damage that nothing else
+ * would notice going false.
+ *
+ * *왜 주석이 아니라 검사인가.* 체력 열은 독립된 세 수가 아니라 한 발, 두 발, 여섯 발이며,
+ * 그 한 발은 누가 적어 둔 상수가 아니라 ::WEAPONS의 샷건 행입니다. 그래서 이 관계는 두
+ * 파일의 두 표에 걸쳐 있고, 한쪽을 건드리지 않고 다른 쪽에서 깨질 수 있습니다. 펠릿 피해를
+ * 10에서 8로 조율하면 체력 값은 하나도 그대로인 채 1/2/6이 조용히 2/3/8이 됩니다.
+ * *못 박는 것은 비율이고 수가 아닙니다.* 두 표를 함께 조율하면 이것은 초록으로 남고, 한쪽만
+ * 조율하면 빨개집니다. 그것이 핵심입니다. 결합에 대한 검사이며, 70과 140과 420을 적어 둔
+ * 검사는 표를 두 번 쓴 것일 뿐입니다.
+ * *그리고 물의 정령의 펠릿 수입니다.* 그 행의 더 날카로운 절반입니다. 펠릿이 *전부* 들어가야
+ * 하므로 하나 모자라면 살아 있어야 합니다. 그것이 그 단에서 샷건의 산포를 장식이 아니라
+ * 난이도로 만드는 것이며, 거짓이 되어도 다른 무엇도 알아채지 못할 주장입니다. */
+static void check_blast_ladder(void) {
+    printf("\nthe bestiary is a ladder of shotgun blasts\n");
+
+    const WeaponType *sg = wp_stats(WP_SHOTGUN);
+    int blast = sg->damage * sg->pellets;
+    printf("      one blast is %d x %d = %d\n", sg->pellets, sg->damage, blast);
+    if (blast <= 0) { ok(0, "the shotgun deals damage at all"); return; }
+
+    struct { const char *name; int type; int blasts; } RUNG[] = {
+        { "water_spirit", MON_WATER_SPIRIT, 1 },
+        { "caster",       MON_CASTER,       2 },
+        { "brute",        MON_BRUTE,        6 },
+    };
+    for (int i = 0; i < 3; i++) {
+        int hp = mon_stats(RUNG[i].type)->hp;
+        int want = RUNG[i].blasts * blast;
+        printf("      %-13s hp %3d, wants %d blast(s) = %d\n",
+               RUNG[i].name, hp, RUNG[i].blasts, want);
+        okf(hp == want, RUNG[i].name, (float)hp, (float)want);
+    }
+
+    /* One pellet short of the water spirit must not kill it. */
+    int hp1 = mon_stats(MON_WATER_SPIRIT)->hp;
+    int short_one = (sg->pellets - 1) * sg->damage;
+    printf("      six of seven pellets is %d against %d\n", short_one, hp1);
+    ok(short_one < hp1,
+       "and one pellet short leaves the water spirit standing");
+}
+
 int main(void) {
     printf("enemytest\n\n");
     build();
@@ -1264,7 +1324,21 @@ int main(void) {
         ok(brute->hp > spirit->hp * 2,      "the brute is far tougher than the water spirit");
         ok(brute_a->damage > spirit_a->damage,  "and hits harder");
         ok(brute->speed < spirit->speed,    "but is slower");
-        ok(cast->hp < spirit->hp,           "the caster is frailer than the baseline");
+        /* TOUGHER THAN THE BASELINE, and it used to be frailer. The bestiary is
+           a ladder of shotgun blasts now (see check_blast_ladder) and the
+           caster's rung is two -- so the one monster that flies is also the one
+           you cannot delete with a single blast, which is what stops "shoot it
+           once" being the whole answer to something holding the air. The claim
+           worth keeping is that it is SEPARATED from the baseline, not which
+           side of it: a flyer with the same health as the thing on the floor is
+           the same monster twice.
+           *기준선보다 단단하며*, 예전에는 더 약했습니다. 도감은 이제 샷건 발수의 사다리이고
+           (check_blast_ladder 참조) 캐스터의 단은 둘입니다. 그래서 유일하게 나는 몬스터가
+           한 발로 지울 수 없는 몬스터이기도 하며, 그것이 공중을 잡은 것에 대한 답 전체가
+           "한 번 쏴라"가 되지 않게 막습니다. 지킬 값어치가 있는 주장은 기준선과 *갈라져*
+           있다는 것이고 어느 쪽인지가 아닙니다. 바닥의 것과 체력이 같은 비행체는 같은
+           몬스터를 두 번 놓은 것입니다. */
+        ok(cast->hp > spirit->hp,           "the caster is tougher than the baseline");
         ok(cast_a->max > spirit_a->max,   "and reaches further");
         ok(cast->flags & MON_FLIES,         "and it is the one that is not on the floor");
 
@@ -1374,7 +1448,7 @@ int main(void) {
            안에 나란히 살며, 그것이 `shot_gap`이 플래그가 아니라 수인 이유입니다. */
         ok(maw_a->burst > 1 && maw_a->shot_gap == 0.0f,
            "while the maw still throws its five together");
-        ok(cast->hp < spirit->hp,    "but it is frailer than a water spirit");
+        ok(cast->hp > spirit->hp,    "and outlasts a water spirit rather than dying faster");
         ok(cast_a->windup > spirit_a->windup,
            "and telegraphs longer, so the bolt can be avoided");
     }
@@ -2045,6 +2119,7 @@ int main(void) {
     check_charge();
     check_behind();
     check_ledge();
+    check_blast_ladder();
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall enemy checks passed\n", fails);
     return fails != 0;

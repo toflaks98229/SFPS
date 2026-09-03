@@ -83,34 +83,47 @@
 #define WORLD_BETWEEN_TIME 2.6f
 
 /**
- * @brief How long the breather between two waves lasts, seconds.
+ * @brief Seconds a wave lasts before the clock advances it.
  *
  * ENGLISH
  * -------
- * Longer than ::WORLD_BETWEEN_TIME because it is not a screen to read, it is
- * time to USE: the wave's reward is on the floor and the player has to go and
- * get it. Short enough that it is a breath rather than an interlude -- an arena
- * that stops being tense between waves has waves that are separate fights
- * instead of one accelerating one.
+ * A WAVE IS A LENGTH OF TIME NOW, not a room to empty. The break this constant
+ * replaced (::WORLD_WAVE_BREAK, six seconds) went with the model that had one:
+ * spawners were handed a quota, the wave ended when the room went quiet, and
+ * the break was the quiet. Nothing goes quiet any more -- spawners run
+ * continuously and pressure only steps up -- so there is nothing to pause
+ * between and nothing to pause for.
  *
- * Public because the banner counts down against it, for the reason
- * ::WORLD_BETWEEN_TIME is public: a second constant on the drawing side is a
- * number that can disagree with the one that actually ends it.
+ * FORTY-FIVE, and the number is doing three jobs at once. It is long enough
+ * that a step in the ceiling is felt as a change rather than as noise; short
+ * enough that the boss every ::WORLD_BOSS_EVERY waves lands under four minutes
+ * apart; and it puts the ceiling's climb -- eight at wave one, twenty-eight by
+ * eleven -- across about eight minutes, which is the length of a run this
+ * arena can hold without repeating itself.
+ *
+ * WHAT IT IS NOT is Vampire Survivors' minute. That game escalates for thirty
+ * minutes against a player who is also escalating; nothing here levels up, so
+ * the same slope has to arrive faster or the middle of a run is flat.
  *
  * 한국어
  * ------
- * @brief 두 웨이브 사이의 휴식이 지속되는 시간 (초).
+ * @brief 시계가 웨이브를 넘기기까지의 초.
  *
- * ::WORLD_BETWEEN_TIME보다 긴 이유는, 그것이 읽을 화면이 아니라 *쓸* 시간이기 때문입니다.
- * 웨이브의 보상이 바닥에 있고 플레이어는 가서 주워야 합니다. 그러면서도 막간이 아니라 한
- * 숨이 되도록 짧습니다. 웨이브 사이에 팽팽함이 풀리는 아레나는, 하나의 가속하는 전투가 아니라
- * 서로 분리된 전투들을 가진 아레나입니다.
+ * *이제 웨이브는 비워야 할 방이 아니라 시간의 길이입니다.* 이 상수가 대신한 휴식
+ * (::WORLD_WAVE_BREAK, 6초)은 그것을 가졌던 모델과 함께 사라졌습니다. 스포너가 할당량을 받고,
+ * 방이 조용해지면 웨이브가 끝나고, 그 조용함이 휴식이었습니다. 이제 조용해지는 것이 없으므로
+ * 사이를 둘 것도 없고 둘 이유도 없습니다.
  *
- * 공개하는 이유는 배너가 이 값에 맞춰 카운트다운하기 때문이며, ::WORLD_BETWEEN_TIME을
- * 공개하는 이유와 같습니다. 그리는 쪽의 두 번째 상수는 실제로 그것을 끝내는 값과 어긋날 수
- * 있는 숫자입니다.
+ * *45이며, 이 수는 한꺼번에 세 가지 일을 합니다.* 천장의 한 단이 잡음이 아니라 변화로 느껴질
+ * 만큼 길고, ::WORLD_BOSS_EVERY 웨이브마다의 보스가 4분 안쪽 간격으로 오도록 짧으며,
+ * 천장의 상승(웨이브 1에 8, 11에 28)을 약 8분에 걸쳐 놓습니다. 그것이 이 아레나가 스스로를
+ * 반복하지 않고 버틸 수 있는 한 판의 길이입니다.
+ *
+ * *이것이 아닌 것은* 뱀파이어 서바이버즈의 1분입니다. 그 게임은 함께 성장하는 플레이어를
+ * 상대로 30분을 상승합니다. 이곳에서는 아무것도 레벨업하지 않으므로, 같은 경사가 더 빨리
+ * 도착하지 않으면 한 판의 중반이 평평해집니다.
  */
-#define WORLD_WAVE_BREAK 6.0f
+#define WORLD_WAVE_TIME 45.0f
 
 /**
  * @brief How much slower the spawners run while a boss stands.

@@ -537,14 +537,64 @@ static void digest_print(const Digest *d) {
    *움직이지 않은 것이 주장입니다.* `wrng`, `srng`, `world_time`이 비트 단위로 그대로입니다.
    무기의 생성기와 연기의 생성기가 손대지 않은 채이므로, 무엇이 발사되었고 무엇이 그려졌는지에
    대해 바뀐 것이 없습니다. 오직 `erng`와 `frng`만이 전투를 따라가고, 전투는 몸을 따라갑니다. */
+/* THE TENTH IS THE SHOTGUN, AND THE FIGHT DID NOT MOVE. The gun became DOOM's
+   -- seven pellets of ten on a 1.05s cycle, against six of seven on 0.50s --
+   so `wrng` draws seven spreads a shot where it drew six, and every shot lands
+   the player somewhere slightly different through the recoil kick. `px`, `vx`,
+   `yaw`, `pitch` and `health` all follow the body, and `frng` follows the
+   shots that drew the effects.
+   WHAT DID NOT MOVE IS THE WHOLE CLAIM, and it is a stronger one than usual:
+   `srng`, `erng`, `enemies hp` and `world_time` are bit-for-bit what they
+   were. The monster took the same damage on the same frames from a gun whose
+   every number changed -- because the demo's recorded shots miss it either
+   way, and 40 is the health it was spawned with.
+   THE WAVE MODEL CHANGED IN THE SAME COMMIT AND LEFT NO MARK HERE, which is
+   worth stating rather than leaving to be noticed. Spawners are unlimited now
+   and the wave advances on a 45-second clock; the demo is thirty seconds, so
+   it never reaches the first step, and wave 1's ceiling is the authored number
+   before any growth. A recording shorter than one wave cannot see the model
+   that governs waves. Do not read this golden as evidence the spawn change is
+   inert -- read wavetest for that.
+   *열 번째는 샷건이고, 전투는 움직이지 않았습니다.* 총이 DOOM의 것이 되었습니다. 0.50초의 7짜리
+   여섯에 대해 1.05초 주기의 10짜리 일곱입니다. 그래서 `wrng`는 한 발에 여섯 번 뽑던 산포를
+   일곱 번 뽑고, 발사마다 반동이 플레이어를 조금씩 다른 곳에 놓습니다. `px`, `vx`, `yaw`,
+   `pitch`, `health`가 모두 몸을 따라가고, `frng`는 효과를 그린 사격을 따라갑니다.
+   *움직이지 않은 것이 주장 전체이며*, 평소보다 강한 주장입니다. `srng`, `erng`,
+   `enemies hp`, `world_time`이 비트 단위로 그대로입니다. 모든 수가 바뀐 총에 대해 몬스터는
+   같은 프레임에 같은 피해를 받았습니다. 녹화된 사격이 어느 쪽으로도 그것을 빗나가고, 40은
+   그것이 스폰된 체력이기 때문입니다.
+   *웨이브 모델이 같은 커밋에서 바뀌었고 이곳에 흔적을 남기지 않았습니다.* 알아채도록 두지
+   않고 적어 둘 값어치가 있습니다. 이제 스포너는 무제한이고 웨이브는 45초 시계로 넘어갑니다.
+   데모는 30초이므로 첫 단계에 닿지 못하고, 웨이브 1의 천장은 성장 이전의 제작값입니다. 한
+   웨이브보다 짧은 녹화는 웨이브를 다스리는 모델을 볼 수 없습니다. 이 골든을 스폰 변경이
+   무력하다는 증거로 읽지 마십시오. 그것은 wavetest가 봅니다. */
+/* THE ELEVENTH MOVED ONE FIELD AND IT IS THE SHORTEST REPORT IN THIS FILE.
+   `enemy hp` 40 -> 70, and nothing else: not a position, not a velocity, not
+   one of the four generators, not `health`, not `world_time`. The bestiary's
+   health column became a ladder of shotgun blasts -- 70, 140, 420 for one, two
+   and six -- and the only thing thirty seconds of recorded input can see of
+   that is the number the water spirit is spawned with, because the demo's
+   shots miss it from beginning to end.
+   THAT IS THE WHOLE VALUE OF THE FIELD BEING HERE. A health retune that moved
+   `erng` would have been a health retune that changed what the monsters DID,
+   and this one did not touch their behaviour at all.
+   *열한 번째는 필드 하나를 움직였고 이 파일에서 가장 짧은 보고입니다.* `enemy hp`가 40에서
+   70이 되었고 그 외에는 없습니다. 위치도, 속도도, 네 생성기 중 하나도, `health`도,
+   `world_time`도 아닙니다. 도감의 체력 열이 샷건 발수의 사다리가 되었습니다. 한 발, 두 발,
+   여섯 발에 대해 70, 140, 420입니다. 그리고 30초의 녹화된 입력이 그것에 대해 볼 수 있는
+   것은 물의 정령이 스폰되는 수뿐입니다. 데모의 사격이 처음부터 끝까지 그것을 빗나가기
+   때문입니다.
+   *그 필드가 이곳에 있는 값어치의 전부가 그것입니다.* `erng`를 움직인 체력 조율이었다면
+   몬스터가 *하는 일*을 바꾼 체력 조율이었을 것이고, 이것은 그 행동을 전혀 건드리지
+   않았습니다. */
 static const Digest GOLDEN = {
-    /* px py pz */ -13.2162313f, 5.37935257f, -15.8549528f,
-    /* vx vy vz */ -0.692886651f, -8.77007961f, -0.742757797f,
-    /* yaw pitch */ 0.360800147f, 0.662199795f,
-    /* health keys grounded */ 94, 0, 0,
+    /* px py pz */ -1.2484479f, 10.1944284f, -16.661293f,
+    /* vx vy vz */ 1.41563582f, -7.84683609f, -3.07291222f,
+    /* yaw pitch */ -0.347599864f, 0.387200117f,
+    /* health keys grounded */ 97, 0, 0,
     /* cur ammo */ 0, 0,
-    /* wrng srng erng frng */ 2972006077u, 3888997821u, 286724173u, 908997448u,
-    /* enemies hp */ 1, 40,
+    /* wrng srng erng frng */ 3867911461u, 3888997821u, 286724173u, 3550271801u,
+    /* enemies hp */ 1, 70,
     /* proj marks */ 0, 0,
     /* world_time */ 29.9002438f
 };

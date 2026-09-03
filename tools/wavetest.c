@@ -416,45 +416,92 @@ int main(void) {
         ok(enemy_alive(&w.pools) > 0, "and fires once the player leaves");
     }
 
-    /* --- clearing a wave -------------------------------------------------- */
-    printf("\nclearing a wave\n");
+    /* --- the clock advances the wave -------------------------------------
+     *
+     * WHAT THIS REPLACED. This block used to run a spawner until its budget
+     * was spent, kill everything by hand, and watch the wave clear and a
+     * six-second breather run out. None of that exists: spawners are handed
+     * -1 and never finish sending, so ::enemy_wave_done can no longer become
+     * true in an arena and the wave has to be advanced by ::WORLD_WAVE_TIME
+     * or not at all.
+     *
+     * THE OLD TEST WOULD HAVE HUNG rather than failed -- `step_alive(&w, 2000)`
+     * waiting on a budget that is now unlimited. That is worth saying because
+     * a hang reads as a broken harness, not as a model that changed.
+     *
+     * *무엇을 대체했는가.* 이 구획은 스포너의 할당량이 소진될 때까지 돌리고, 손으로 전부
+     * 죽이고, 웨이브가 정리되며 6초 휴식이 끝나는 것을 지켜보았습니다. 그중 무엇도 존재하지
+     * 않습니다. 스포너는 -1을 받고 결코 다 보내지 않으므로 아레나에서 ::enemy_wave_done은
+     * 더는 참이 될 수 없고, 웨이브는 ::WORLD_WAVE_TIME으로 넘어가거나 넘어가지 않습니다.
+     * *옛 검사는 실패가 아니라 멈췄을 것입니다.* 무제한이 된 할당량을 `step_alive`가
+     * 기다리기 때문입니다. 멈춤은 바뀐 모델이 아니라 고장 난 장치로 읽히므로 적어 둡니다. */
+    printf("\nthe wave clock\n");
     {
         fixture(&w);
         add_spawner(&w.level, "spawner_water_spirit", 2000, 0, 5, 0, 0);
         enemy_spawn_level(&w.pools, &w.level);
         step_n(&w, 1);
+        oki(w.run.wave == 1, "the arena opens on wave 1", w.run.wave, 1);
 
-        /* Run until the spawner's budget is spent. */
-        step_alive(&w, 2000);
+        step_alive(&w, 600);
         ok(enemy_alive(&w.pools) > 0, "monsters are out");
         ok(!enemy_wave_done(&w.pools),
-           "the wave is not done while they are still walking");
+           "and a spawner with unlimited debt is never 'done'");
 
-        /* Kill them where they stand. Reaching into the pool rather than
-           shooting: what is being checked is the wave rule, and routing it
-           through the weapon would make this a test of two things.
-           쏘는 대신 풀에 직접 손을 넣습니다. 검사 대상은 웨이브 규칙이며, 무기를 거치게
-           하면 이것이 두 가지에 대한 검사가 됩니다. */
-        for (int i = 0; i < w.pools.enemy.count; i++)
-            w.pools.enemy.m[i].active = 0;
-
-        ok(enemy_wave_done(&w.pools), "and is done once the last one falls");
-
+        /* Stepped against the clock the world is actually keeping, not a
+           frame count guessed from it -- 600 frames of settling have already
+           gone by above, and a fixed count would be measuring those too. */
         int was = w.run.wave;
-        step_alive(&w, 1);
-        ok(w.run.wave_break > 0.0f, "which starts the breather");
-        oki(w.run.wave == was, "without advancing the wave yet",
+        while (w.run.wave == was && w.run.wave_time < WORLD_WAVE_TIME - 1.0f)
+            step_alive(&w, 1);
+        oki(w.run.wave == was, "the wave holds while the clock runs",
             w.run.wave, was);
-
-        /* The breather does NOT freeze the world -- it is when the reward is
-           collected, so it has to be playable. */
-        ok(!world_frozen(&w, 0), "and the world keeps running through it");
-
-        step_alive(&w, (int)(WORLD_WAVE_BREAK * 60.0f) + 4);
-        oki(w.run.wave == was + 1, "then the next wave begins",
+        step_alive(&w, 120);
+        oki(w.run.wave == was + 1, "and steps once the clock passes",
             w.run.wave, was + 1);
-        oki(w.run.wave_best == was + 1, "and the best reached follows it",
+        oki(w.run.wave_best == was + 1, "with the best reached following it",
             w.run.wave_best, was + 1);
+
+        /* Nothing stops. The old model paused for six seconds here. */
+        ok(!world_frozen(&w, 0), "and the room never pauses between waves");
+        ok(enemy_alive(&w.pools) > 0, "monsters are still arriving across the step");
+    }
+
+    /* --- the ceiling is what climbs ---------------------------------------
+     *
+     * The rate alone cannot carry the ramp: ::Spawner::max_alive is a
+     * LEVEL-WIDE count, so the room fills to the highest one authored and the
+     * interval stops mattering. ::WAVE_ALIVE_STEP is the answer and this is
+     * the check that it is applied to the AUTHORED value each wave rather than
+     * compounding on last wave's -- ::Spawner::base_alive's whole reason,
+     * exactly as ::base_interval below.
+     *
+     * *속도만으로는 경사를 나를 수 없습니다.* ::Spawner::max_alive는 *레벨 전체* 수이므로
+     * 방은 제작된 것 중 가장 높은 값까지 차고 간격은 의미를 잃습니다. ::WAVE_ALIVE_STEP이
+     * 그 답이며, 이것은 그것이 매 웨이브 *제작된* 값에 적용되는지(지난 웨이브 답에 복리로
+     * 붙지 않는지)를 보는 검사입니다. ::Spawner::base_alive의 존재 이유입니다. */
+    printf("\nthe ceiling climbs with the wave\n");
+    {
+        fixture(&w);
+        add_spawner(&w.level, "spawner_water_spirit", 2000, 0, 5, 0, 6);
+        enemy_spawn_level(&w.pools, &w.level);
+        step_n(&w, 1);
+
+        const Spawner *sp = enemy_spawner_at(&w.pools, 0);
+        oki(sp->base_alive == 6, "the authored ceiling is kept", sp->base_alive, 6);
+        oki(sp->max_alive == 6, "and wave 1 is the authored number",
+            sp->max_alive, 6);
+
+        for (int k = 0; k < 4; k++) {
+            int want = w.run.wave + 1;
+            enemy_wave_arm(&w.pools, want);
+            w.run.wave = (short)want;
+        }
+        int want = 6 + (w.run.wave - 1) * WAVE_ALIVE_STEP;
+        printf("      wave %d ceiling %d (authored 6, step %d)\n",
+               w.run.wave, sp->max_alive, WAVE_ALIVE_STEP);
+        oki(sp->max_alive == want, "and it grows from the authored value, not the last",
+            sp->max_alive, want);
     }
 
     /* --- the curve --------------------------------------------------------
@@ -468,19 +515,27 @@ int main(void) {
     printf("\nthe difficulty curve\n");
     {
         fixture(&w);
-        add_spawner(&w.level, "spawner_water_spirit", 2000, 0, 40, 0, 0);   /* 4.0s */
+        /* WITH A CEILING AUTHORED, because 0 means "no ceiling" and a ramp
+           applied to no ceiling is still no ceiling -- the growth is skipped
+           on purpose so a level that declined to cap the room keeps declining.
+           *천장을 제작한 채로.* 0은 "상한 없음"을 뜻하고 상한 없음에 적용된 경사는 여전히
+           상한 없음입니다. 방에 뚜껑을 덮지 않기로 한 레벨이 계속 그러도록 일부러 건너뜁니다. */
+        add_spawner(&w.level, "spawner_water_spirit", 2000, 0, 40, 0, 6);   /* 4.0s, ceiling 6 */
         enemy_spawn_level(&w.pools, &w.level);
 
         enemy_wave_arm(&w.pools, 1);
         float i1 = w.pools.enemy.spawner[0].interval;
-        int   b1 = w.pools.enemy.spawner[0].left;
+        int   c1 = w.pools.enemy.spawner[0].max_alive;
 
         enemy_wave_arm(&w.pools, 2);
         float i2 = w.pools.enemy.spawner[0].interval;
-        int   b2 = w.pools.enemy.spawner[0].left;
+        int   c2 = w.pools.enemy.spawner[0].max_alive;
 
         ok(i2 < i1, "a later wave comes faster");
-        ok(b2 > b1, "and sends more");
+        ok(c2 > c1, "and holds more of them at once");
+        oki(w.pools.enemy.spawner[0].left == -1,
+            "while the debt stays unlimited, so nothing ever retires",
+            w.pools.enemy.spawner[0].left, -1);
 
         /* Arming the same wave twice must give the same answer. If interval
            were derived from itself this would shrink on the second call.
@@ -494,15 +549,15 @@ int main(void) {
         enemy_wave_arm(&w.pools, 500);
         ok(w.pools.enemy.spawner[0].interval >= WAVE_INTERVAL_MIN,
            "a very deep wave still has a positive interval");
-        ok(w.pools.enemy.spawner[0].left <= WAVE_BUDGET_MAX,
-           "and a bounded budget");
+        ok(w.pools.enemy.spawner[0].max_alive <= ENEMY_MAX,
+           "and a ceiling the pool can actually hold");
         ok(w.pools.enemy.spawner[0].burst <= WAVE_BURST_MAX,
            "and a bounded group");
     }
 
     /* --- arming clears a telegraph in flight ------------------------------
-       A wave that ended while a spawn was warned must not deliver that group
-       into the breather.
+       A wave that stepped while a spawn was warned must not deliver that group
+       against the previous wave's numbers.
        생성이 예고된 채로 끝난 웨이브가 그 무리를 휴식 시간으로 배달해서는 안 됩니다. */
     printf("\nre-arming\n");
     {
@@ -533,21 +588,25 @@ int main(void) {
         w.weapon.ammo[WP_SHOTGUN]  = 0;
         step_alive(&w, 1);
 
+        /* PAID BY THE CLOCK, not by an empty room. Nothing clears any more --
+           see "the wave clock" above -- so the purse lands on the frame the
+           wave steps, and the way to reach it is to run the clock out.
+           *정리가 아니라 시계가 지급합니다.* 이제 정리되는 것이 없으므로(위의 "the wave
+           clock" 참조) 지갑은 웨이브가 넘어가는 프레임에 떨어지고, 그곳에 닿는 방법은
+           시계를 끝까지 돌리는 것입니다. */
         int before = pickup_count(&w.pools);
-        step_alive(&w, 2000);
-        for (int i = 0; i < w.pools.enemy.count; i++)
-            w.pools.enemy.m[i].active = 0;
-        step_alive(&w, 1);
+        int was_w  = w.run.wave;
+        while (w.run.wave == was_w) step_alive(&w, 1);
 
         int after = pickup_count(&w.pools);
-        ok(after > before, "clearing a wave throws items down");
+        ok(after > before, "the wave stepping throws items down");
         /* The whole purse. `held` goes round-robin over the weapons actually
            held, so a player with one gun gets all of its boxes for that gun
            rather than one box and two nothings.
            몫 전체입니다. `held`는 실제로 보유한 무기를 돌아가며 배정되므로, 총 한 자루를 든
            플레이어는 상자 하나와 빈자리 둘이 아니라 그 총의 상자를 모두 받습니다. */
         oki(after - before == reward_size(&w),
-            "everything loot.txt asks a cleared wave to pay",
+            "everything loot.txt asks a wave to pay",
             after - before, reward_size(&w));
 
         /* IN THE AIR. The player is standing exactly where they were thrown

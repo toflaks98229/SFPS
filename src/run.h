@@ -365,21 +365,6 @@ typedef struct {
     /** @brief Seconds the current wave has been fought. / 현재 웨이브를 싸운 시간 (초). */
     float wave_time;
 
-    /**
-     * @brief Seconds left in the breather between waves; 0 while fighting.
-     *
-     * ENGLISH: DOES NOT FREEZE THE WORLD, unlike every other pause in this
-     * struct. The breather is when the player runs around picking up what the
-     * wave dropped, so it has to be played rather than watched -- see
-     * ::world_frozen for the list of things that do stop, and note that this is
-     * deliberately not on it.
-     *
-     * 한국어: 이 구조체의 다른 모든 멈춤과 달리 *월드를 정지시키지 않습니다*. 휴식은
-     * 플레이어가 웨이브가 떨어뜨린 것을 주우러 돌아다니는 시간이므로, 보는 것이 아니라
-     * 플레이하는 것이어야 합니다. 무엇이 실제로 멈추는지는 ::world_frozen의 목록을
-     * 참조하십시오. 이것이 의도적으로 그 목록에 없다는 점에 유의하십시오.
-     */
-    float wave_break;
 
     /** @brief Highest wave reached this run: what a death screen has to report. / 이번 플레이에서 도달한 최고 웨이브. 사망 화면이 보고해야 할 값. */
     int   wave_best;

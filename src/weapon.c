@@ -75,11 +75,20 @@
 
 /* ------------------------------------------------------------------ tuning */
 
-/* Quake 1 shotgun: a slow, heavy, six-pellet hitscan blast. The pellets are
-   what make it a shotgun -- a single ray with a wide spread would just feel
-   like an inaccurate rifle. */
-#define PELLETS        6
-#define PELLET_DAMAGE  7        /* six of these -- one point-blank blast -- kills */
+/* THE PELLET COUNT, DAMAGE AND SPREAD USED TO LIVE HERE, and they were a second
+   set of numbers for a gun that already had a row in ::WEAPONS. The row said 7
+   pellets of 8; these said 6 of 7, and THESE were the ones that fired -- the
+   row's `pellets` was read as a boolean by ::attack and its `damage` by nobody
+   at all. Anyone tuning the shotgun from the table was tuning a value the game
+   does not read, and any measurement taken from the table was wrong by a third.
+   ::fire_hitscan takes the row now, the way ::fire_projectile and ::fire_melee
+   already did.
+   *펠릿 수와 피해와 산포가 이곳에 있었고*, 이미 ::WEAPONS에 행을 가진 총에 대한 두 번째
+   수치 묶음이었습니다. 행은 8짜리 펠릿 7개라 했고 이곳은 7짜리 6개라 했으며, *발사된 것은
+   이곳*이었습니다. 행의 `pellets`는 ::attack이 불리언으로 읽었고 `damage`는 아무도 읽지
+   않았습니다. 표를 보고 샷건을 조율한 사람은 게임이 읽지 않는 값을 조율한 것이고, 표에서 잰
+   수치는 3분의 1만큼 틀렸습니다. 이제 ::fire_hitscan이 행을 받습니다.
+   ::fire_projectile과 ::fire_melee가 이미 그러던 대로입니다. */
 #define FIRE_INTERVAL  0.50f
 
 /* How much of a weapon's cooldown its recovery animation runs for.
@@ -100,7 +109,7 @@
    한 쌍이 초당 35틱 중 8틱이며, 깜빡임이 아니라 눈에 보이는 떨림이 됩니다. */
 #define IDLE_CYCLE_TIME (8.0f / 35.0f)
 #define RANGE         120.0f
-#define PELLET_SPREAD  0.040f   /* fixed cone, not a growing bloom */
+
 
 /**
  * @brief The roster. One row per weapon; see ::WeaponType for the rules.
@@ -141,7 +150,33 @@ static const WeaponType WEAPONS[WP_TYPES] = {
        임시방편이기를 그만두고 적극적으로 거짓말을 시작했습니다. 샷건처럼 터지는 전기톱은
        플레이어에게 자기 무기가 아닌 것을 말하며, 도끼의 총구 섬광과 같은 결함입니다. */
     /* name       model      snd      draw     reload  start max pick dmg  cool   spread  pel  spd   grav  melee  recoil punch hook */
-    { "shotgun", "shotgun", "shot",   0   ,    "pump",     20,  50,   8,   7, 0.50f, 0.040f,  6, 0.0f,  0.0f, 0.0f, 0.055f, 0.085f, 1 },
+    /* DOOM'S SHOTGUN, TO THE NUMBER. Seven pellets, ten a pellet, and a 37-tic
+       cycle -- 1.057s at DOOM's 35Hz, rounded to 1.05. That is 70 a blast and
+       66.7 DPS against DOOM's own 66, and it replaces 42 at 0.50s (84 DPS).
+       WHY DOOM'S AND NOT QUAKE'S. The old gun was the outlier that set the
+       ceiling for everything else: at 84 DPS it out-damaged Quake's super
+       shotgun (80) on a pump shotgun's cadence, and the whole bestiary sat in
+       the bottom three rungs of an eight-rung health ladder because nothing
+       heavier could survive it. Cutting to 66.7 is what makes room upward.
+       THE PER-PELLET ROLL IS NOT COPIED. DOOM rolls 5*(rnd%3+1) per pellet --
+       5, 10 or 15, mean 10, so a blast is 35 to 105. This is the mean, flat.
+       Two reasons: the value is what a table row means everywhere else here,
+       and demotest hashes the weapon rng, so seven extra draws a shot would
+       make every golden hostage to a variance nobody asked for. The mean is
+       the balance; the roll is a 1993 implementation detail.
+       *DOOM의 샷건을 수치 그대로.* 펠릿 일곱, 펠릿당 십, 37틱 주기입니다. DOOM의 35Hz에서
+       1.057초이며 1.05로 반올림했습니다. 한 발에 70이고 66.7 DPS로 DOOM 자신의 66에
+       맞닿으며, 0.50초의 42(84 DPS)를 대체합니다.
+       *왜 퀘이크가 아니라 DOOM인가.* 옛 총이 나머지 전부의 천장을 정하던 이상치였습니다.
+       84 DPS는 펌프 샷건의 박자로 퀘이크 슈퍼샷건(80)을 넘어섰고, 그보다 무거운 것이 살아남을
+       수 없어 도감 전체가 여덟 단 체력 사다리의 아래 세 단에 앉아 있었습니다. 66.7로 내리는
+       것이 위쪽에 자리를 만드는 일입니다.
+       *펠릿마다의 주사위는 옮기지 않았습니다.* DOOM은 펠릿당 5*(rnd%3+1)을 굴립니다. 5, 10,
+       15이고 평균 10이므로 한 발이 35에서 105입니다. 이곳은 그 평균이며 고정입니다. 이유는
+       둘입니다. 표의 행이 이곳 어디에서나 뜻하는 것이 그 값이고, demotest가 무기 rng를
+       해시하므로 한 발에 일곱 번의 추가 추첨은 아무도 청하지 않은 분산에 모든 골든을 볼모로
+       잡습니다. 밸런스는 평균이고, 주사위는 1993년의 구현 세부입니다. */
+    { "shotgun", "shotgun", "shot",   0   ,    "pump",     20,  50,   8,  10, 1.05f, 0.040f,  7, 0.0f,  0.0f, 0.0f, 0.055f, 0.085f, 1 },
 
     /* Arcs and bounces, so it reaches what you cannot see. The fuse is long
        enough to bank a shot off a wall and short enough that a grenade at your
@@ -525,6 +560,7 @@ v3 wp_hook_muzzle(const Weapon *w) {
  *       보입니다.
  */
 static void fire_hitscan(Weapon *w, Pools *pl, const Level *l,
+                         const WeaponType *S,
                          v3 eye, float yaw, float pitch,
                          v3 *player_vel, int player_grounded) {
     float cy = cosf(yaw), sy = sinf(yaw);
@@ -554,10 +590,10 @@ static void fire_hitscan(Weapon *w, Pools *pl, const Level *l,
        시작하지만, 빗나가면 아무 소리도 나지 않습니다. */
     v3 hit_at = eye;
 
-    for (int i = 0; i < PELLETS; i++) {
+    for (int i = 0; i < S->pellets; i++) {
         v3 dir = v3norm(v3add(fwd,
-                    v3add(v3scale(right, frand_signed(w) * PELLET_SPREAD),
-                          v3scale(up,    frand_signed(w) * PELLET_SPREAD))));
+                    v3add(v3scale(right, frand_signed(w) * S->spread),
+                          v3scale(up,    frand_signed(w) * S->spread))));
 
         float t; v3 n;
         int hit = trace(l, eye, dir, &t, &n);
@@ -569,7 +605,7 @@ static void fire_hitscan(Weapon *w, Pools *pl, const Level *l,
         int blood = enemy_hitscan(pl, eye, dir, hit ? t : RANGE, &et, &eidx);
 
         if (blood) {
-            enemy_hurt(pl, eidx, PELLET_DAMAGE * wp_mul(w), dir);
+            enemy_hurt(pl, eidx, S->damage * wp_mul(w), dir);
             t = et;
             hit = 1;
         }
@@ -850,7 +886,7 @@ static void attack(Weapon *w, Pools *pl, const Level *l,
                    v3 *player_vel, int player_grounded) {
     const WeaponType *S = wp_stats(w->cur);
 
-    if (S->pellets > 0)          fire_hitscan(w, pl, l, eye, yaw, pitch, player_vel, player_grounded);
+    if (S->pellets > 0)          fire_hitscan(w, pl, l, S, eye, yaw, pitch, player_vel, player_grounded);
     else if (S->proj_speed > 0)  fire_projectile(w, pl, S, eye, yaw, pitch);
     else if (S->melee_range > 0) fire_melee(w, pl, S, eye, yaw, pitch, player_vel);
 

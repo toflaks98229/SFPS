@@ -14,6 +14,18 @@
  * the recipe rather than the result. A .ttf would cost more in the binary than
  * the renderer does.
  *
+ * HANGUL IS THE SAME TRADE TAKEN FURTHER. The 11,172 syllables are not stored;
+ * 360 jamo are, in eight shapes of each initial, four of each medial and four
+ * of each final, and a syllable is assembled from two or three of them at the
+ * moment it is drawn. 11,520 bytes buys the whole writing system, where the
+ * precomposed set at the same size would have cost 357,504. The glyphs are
+ * 둥근모꼴, drawn for DOS in 1990 and public domain -- see
+ * docs/LICENSE-Dunggeunmo.txt.
+ *
+ * The syllable is sixteen pixels square drawn at half a glyph pixel, which is
+ * not a compromise but an alignment: it lands exactly ::FONT_CH tall, on the
+ * same line as the Latin, with strokes exactly as thick.
+ *
  * @note Every call here needs a current GL context, ::font_width excepted.
  * @note This module owns exactly one GL texture and never frees it; it lives
  *       for the process. See ::font_init.
@@ -28,6 +40,16 @@
  * 시작 시 한 번 텍스처 아틀라스로 구우면 이후 각 문자는 쿼드 하나가 됩니다. 결과 대신
  * 레시피를 저장하는, 재질과 사운드가 택한 것과 동일한 절충입니다. .ttf 하나면 렌더러보다
  * 많은 바이너리 용량을 차지했을 것입니다.
+ *
+ * 한글은 같은 절충을 더 멀리 밀어붙인 것입니다. 11,172개 음절을 저장하지 않습니다. 저장하는
+ * 것은 자모 360개이며, 초성은 여덟 벌, 중성은 네 벌, 종성은 네 벌씩 있습니다. 음절은 그리는
+ * 순간 그중 두셋을 조립해 만듭니다. 11,520바이트로 문자 체계 전체를 사는 셈이며, 같은
+ * 크기의 완성형이었다면 357,504바이트가 들었을 것입니다. 글리프는 1990년 도스용으로 그려진
+ * 퍼블릭 도메인 둥근모꼴입니다. docs/LICENSE-Dunggeunmo.txt를 참조하십시오.
+ *
+ * 음절은 16픽셀 정사각형을 글리프 픽셀의 절반 크기로 그린 것인데, 이는 타협이 아니라
+ * 맞물림입니다. 높이가 정확히 ::FONT_CH가 되어 라틴과 같은 줄에 놓이고 획 굵기도 정확히
+ * 같아집니다.
  *
  * @note ::font_width를 제외한 이곳의 모든 호출은 현재 GL 컨텍스트를 필요로 합니다.
  * @note 이 모듈은 GL 텍스처를 정확히 하나 소유하며 결코 해제하지 않습니다. 프로세스와
@@ -65,6 +87,38 @@
  *       놓이는 위치뿐 아니라 표본으로 삼는 영역도 바뀝니다.
  */
 #define FONT_CW 6
+
+/**
+ * @brief How far the pen advances per Hangul syllable, in glyph pixels.
+ *
+ * ENGLISH
+ * -------
+ * Eight against ::FONT_CW's six, so a syllable is a third wider than a letter
+ * rather than twice as wide. The source cell is sixteen pixels square and is
+ * drawn at half a glyph pixel each, which is what makes a syllable exactly
+ * ::FONT_CH tall -- the same line as the Latin -- and its two-pixel strokes
+ * exactly as thick as the Latin's one-pixel ones.
+ *
+ * @note There is no gutter inside this advance. The DOS font filled its square
+ *       edge to edge, so two syllables can touch where a vowel's right stem
+ *       meets the next initial's left. It reads, and widening the advance to
+ *       open a gap would put Hangul and Latin on different grids.
+ *
+ * 한국어
+ * ------
+ * @brief 한글 음절 하나당 펜이 전진하는 폭. 글리프 픽셀 단위입니다.
+ *
+ * ::FONT_CW의 6에 대해 8이므로, 음절은 글자의 두 배가 아니라 3분의 1만큼 넓습니다. 원본
+ * 칸은 16픽셀 정사각형이고 한 픽셀을 글리프 픽셀의 절반 크기로 그립니다. 그래서 음절의
+ * 높이가 정확히 ::FONT_CH가 되어 라틴과 같은 줄에 놓이고, 2픽셀짜리 획이 라틴의 1픽셀짜리
+ * 획과 정확히 같은 굵기가 됩니다.
+ *
+ * @note 이 전진 폭 안에 여백은 없습니다. 도스 글꼴은 네모를 가장자리까지 채워 그렸으므로,
+ *       모음의 오른쪽 줄기와 다음 초성의 왼쪽이 만나는 곳에서 두 음절이 닿을 수 있습니다.
+ *       읽는 데 지장이 없으며, 간격을 벌리려고 전진 폭을 늘리면 한글과 라틴이 서로 다른
+ *       격자에 놓이게 됩니다.
+ */
+#define FONT_KW 8
 
 /**
  * @brief Line height, in glyph pixels.
@@ -148,9 +202,12 @@ GLuint font_texture(void);
  *         for the same arguments.
  *
  * @note Needs no GL context and no atlas, so a layout pass may run before
- *       ::font_init. Every character advances by ::FONT_CW whichever glyph it
- *       is -- the font is fixed-pitch, and an unmappable character still
- *       occupies its cell.
+ *       ::font_init. Two pitches, not one: ::FONT_KW for a Hangul syllable and
+ *       ::FONT_CW for everything else, including an unmappable character,
+ *       which still occupies its cell.
+ * @note `s` is read as UTF-8. The count that matters is characters, not bytes,
+ *       so a Hangul syllable costs one advance rather than the three its
+ *       encoding takes.
  *
  * 한국어
  * ------
@@ -162,8 +219,10 @@ GLuint font_texture(void);
  *         같습니다.
  *
  * @note GL 컨텍스트도 아틀라스도 필요하지 않으므로 ::font_init 이전에 레이아웃 패스를
- *       수행할 수 있습니다. 어떤 글리프인지와 무관하게 모든 문자가 ::FONT_CW만큼
- *       전진합니다. 이 폰트는 고정폭이며, 대응되지 않는 문자도 자기 셀을 차지합니다.
+ *       수행할 수 있습니다. 폭은 하나가 아니라 둘입니다. 한글 음절은 ::FONT_KW, 그 밖의
+ *       모든 것은 ::FONT_CW만큼 전진하며, 대응되지 않는 문자도 자기 셀을 차지합니다.
+ * @note `s`는 UTF-8로 읽습니다. 세는 단위는 바이트가 아니라 문자이므로, 한글 음절 하나는
+ *       그 인코딩이 차지하는 3바이트가 아니라 전진 폭 하나에 해당합니다.
  */
 float font_width(float size, const char *s);
 
@@ -184,9 +243,13 @@ float font_width(float size, const char *s);
  *       knows nothing about screens. Text grows DOWNWARD in y, which is what
  *       makes it upright under the y-down projection the UI uses.
  * @note A line is `FONT_CH * size` tall.
- * @note Characters outside the printable ASCII range are drawn as `?` rather
- *       than skipped, so a bad byte is visible instead of silently shortening
- *       the line.
+ * @note `s` is read as UTF-8. Printable ASCII and the 11,172 precomposed
+ *       Hangul syllables (U+AC00..U+D7A3) draw; everything else, a malformed
+ *       sequence included, is drawn as `?` rather than skipped, so a bad
+ *       string is visible instead of silently shortening the line.
+ * @note A syllable is emitted as two or three overlapping quads, one per jamo,
+ *       so a line of Hangul costs about three times the vertices a line of
+ *       Latin does. Nothing is cached between calls.
  * @note Appends only -- it does not bind the texture, set a shader or upload
  *       anything. Bind ::font_texture and flush `b` yourself.
  * @warning ::mb_vtx drops vertices once `b` is full and raises
@@ -210,8 +273,12 @@ float font_width(float size, const char *s);
  *       못합니다. 텍스트는 y의 *아래* 방향으로 자라며, 그래서 UI가 쓰는 y-down 투영
  *       아래에서 똑바로 서게 됩니다.
  * @note 한 줄의 높이는 `FONT_CH * size`입니다.
- * @note 출력 가능한 ASCII 범위를 벗어난 문자는 건너뛰지 않고 `?`로 그립니다. 그래야 잘못된
- *       바이트가 줄을 조용히 짧게 만드는 대신 눈에 보입니다.
+ * @note `s`는 UTF-8로 읽습니다. 출력 가능한 ASCII와 미리 조합된 한글 음절 11,172자
+ *       (U+AC00..U+D7A3)를 그립니다. 잘못된 시퀀스를 포함해 그 밖의 모든 것은 건너뛰지 않고
+ *       `?`로 그립니다. 그래야 잘못된 문자열이 줄을 조용히 짧게 만드는 대신 눈에 보입니다.
+ * @note 음절 하나는 자모마다 하나씩 겹치는 쿼드 두세 개로 생성됩니다. 따라서 한글 한 줄은
+ *       라틴 한 줄의 약 세 배에 해당하는 정점을 소비합니다. 호출 사이에 캐시하는 것은
+ *       없습니다.
  * @note 덧붙이기만 합니다. 텍스처를 바인딩하거나 셰이더를 설정하거나 무엇을 업로드하지
  *       않습니다. ::font_texture 바인딩과 `b`의 플러시는 직접 하십시오.
  * @warning `b`가 가득 차면 ::mb_vtx가 정점을 버리고 ::DIAG_VERTEX_BUF를 올립니다. 반환값은

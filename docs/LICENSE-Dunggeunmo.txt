@@ -1,0 +1,60 @@
+둥근모꼴 (Dunggeunmo)
+A 16x16 johab bitmap Hangul font by 김중태 (Kim Jungtae), IT문화원.
+
+Drawn between 1990 and 1993 while running the 한글사랑 BBS '멋', released to
+the public as each face was finished, and still distributed by its author at
+http://ith.kr/about/font.html as fontmeot.zip. The file this project uses is
+H04.FNT, the face he named 둥근모꼴 -- "아름다움과 가독성에 가장 중점을 둔
+글꼴", the corners rounded, which is where the name comes from.
+
+The grant, in the author's own words, from read_ks.txt in that archive:
+
+    (2) 제가 만들어 배포한 글꼴은 모두 공개용으로, 상업적 사용 포함하여 모든
+        사용에 아무 제한이 없으며 수정 변형해 사용하는 것도 제한이 없습니다.
+
+    "All of the fonts I have made and distributed are public. There is no
+     restriction of any kind on any use, commercial use included, and no
+     restriction on modifying or altering them either."
+
+And again in fontmeot/read_ks.txt, alongside the catalogue of the fifteen
+faces:
+
+    지금 올리는 글꼴파일은 어떠한 목적으로 사용하셔도 좋으며, 자유롭게 변형
+    사용해도 됩니다.
+
+    "The font files posted here may be used for any purpose whatsoever, and
+     may be freely altered."
+
+NOTHING IS REQUIRED OF THIS PROJECT. No attribution, no notice, no license
+propagation -- the font is public domain and this file is not a condition of
+using it. It is here because a table of 11,520 hex bytes cannot say where it
+came from, and someone will eventually need to know.
+
+WHAT WE SHIP. tools/font/H04.FNT is the original file, unmodified:
+
+    sha256  576e5bacd1d73b459c8fa84b9815fd2be7d5b9d82f974eff62e7c78ebc0efda9
+    size    11,520 bytes -- 360 glyphs of 16x16, two bytes per row, no header
+
+src/font_hangul.h is that file rewritten as a C array by tools/fnt2c.py and is
+byte-identical to it, so the table can be verified against the original by hash
+rather than by reading it.
+
+Two of the author's own documents come with it, both converted from EUC-KR to
+UTF-8 and otherwise untouched:
+
+    tools/font/GRANT-ko.txt   the archive's readme, and where the grant quoted
+                              above is written
+    tools/font/read_ks.txt    his catalogue of the fifteen faces, which is what
+                              identifies H04.FNT as 둥근모꼴 and E2.FNT as the
+                              Latin drawn to go with it
+
+The catalogue also records the format, in his words: "도깨비용 흑백 글꼴로 16벌에
+360개의 글꼴로 되어 있고 헤더가 없으니" -- sixteen sets, 360 glyphs, no header.
+That sentence is the whole file specification, and font.c's reader is built on
+it. What it does NOT say is which set goes with which vowel; those three tables
+were measured from the bitmaps and are checked by tools/fonttest.c.
+
+THE OTHER FOURTEEN FACES are in the same archive and under the same grant --
+달꼴, 뫼꼴, 중태세모꼴, 뻗음꼴, 삐침꼴, 풀잎꼴, 대나무꼴, 포갬꼴 and their
+variants, plus eight Latin faces of which E2.FNT is 영문둥근모꼴, the one drawn
+to sit beside this Hangul. We take only H04.FNT today.

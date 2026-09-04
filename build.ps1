@@ -21,6 +21,7 @@ param(
     [switch]$Tools,   # also build tools\*.c
     [switch]$Test,    # build tools\*.c and RUN the self-checking ones; fail on any
     [string]$Tool,    # build and launch just this tool, e.g. -Tool modelview
+    [string]$SignWith, # Authenticode cert thumbprint; SFPS_SIGN_THUMBPRINT if unset
     [switch]$Portable # check which src\*.c still need windows.h, and nothing else
 )
 
@@ -633,6 +634,90 @@ foreach ($src in $sources) {
 
 & $gcc @flags @objs -o $exe @libs
 if ($LASTEXITCODE -ne 0) { throw "Link failed (exit $LASTEXITCODE)" }
+
+# --- Authenticode, if there is a certificate to use -------------------------
+#
+# OPTIONAL, AND SILENT WHEN THERE IS NOTHING TO SIGN WITH. A hobby build on a
+# machine with no certificate has to work exactly as it did, so no thumbprint is
+# not an error and not a warning -- it is the ordinary case. Pass -SignWith
+# <thumbprint>, or set SFPS_SIGN_THUMBPRINT once and forget it.
+#
+# BEFORE THE BUDGET IS MEASURED, and that is the whole reason this sits here
+# rather than at the end. Authenticode APPENDS the signature to the PE, so a
+# signed game.exe is bigger than the one the linker wrote -- measured on this
+# tree, a self-signed certificate with an RFC 3161 timestamp added 7,441 bytes,
+# and a real one is larger still because the chain it carries is longer.
+# Signing after size.ps1 ran would print a budget for a file that is not the one
+# shipped, which is the one number in this project that must never be a guess.
+#
+# TIMESTAMPED, because a signature without one dies with the certificate. The
+# countersignature says the file was signed while the certificate was valid, so
+# it keeps verifying after the certificate expires -- which for a game somebody
+# downloads in three years is the difference between a signature and a warning.
+#
+# RELEASE ONLY. A -Debug build is not distributed, and the tools under build\
+# are not either; signing them would spend time and bytes on binaries that never
+# leave the machine.
+#
+# 서명할 인증서가 있으면 서명합니다.
+#
+# *선택 사항이며 서명할 것이 없으면 조용합니다.* 인증서가 없는 기계의 취미 빌드는 예전과
+# 똑같이 동작해야 하므로, 지문이 없는 것은 오류도 경고도 아니고 평범한 경우입니다.
+# -SignWith <지문>을 주거나 SFPS_SIGN_THUMBPRINT를 한 번 설정해 두십시오.
+#
+# *용량을 재기 전입니다.* 이것이 이 자리에 있는 이유 전부입니다. Authenticode는 서명을 PE에
+# *덧붙이므로* 서명된 game.exe는 링커가 쓴 것보다 큽니다. 이 트리에서 측정했습니다. 자체 서명
+# 인증서에 RFC 3161 타임스탬프를 붙였더니 7,441바이트가 늘었고, 실제 인증서는 실어 나르는
+# 사슬이 더 길어 그보다 큽니다. size.ps1 뒤에 서명하면
+# 출하되지 않는 파일의 예산을 출력하게 되며, 그것은 이 프로젝트에서 결코 추측이어서는 안 되는
+# 유일한 숫자입니다.
+#
+# *타임스탬프를 찍습니다.* 그것이 없는 서명은 인증서와 함께 죽기 때문입니다. 반대 서명이 그
+# 파일이 인증서가 유효할 때 서명되었다고 말하므로, 인증서가 만료된 뒤에도 검증이 유지됩니다.
+# 삼 년 뒤에 누군가 내려받는 게임에게 그것은 서명이냐 경고냐의 차이입니다.
+#
+# *릴리스만입니다.* -Debug 빌드는 배포되지 않고 build\ 아래의 도구들도 마찬가지입니다.
+# 그것들에 서명하는 것은 기계를 떠나지 않는 바이너리에 시간과 바이트를 쓰는 일입니다.
+$thumb = if ($SignWith) { $SignWith } else { $env:SFPS_SIGN_THUMBPRINT }
+if (-not $Debug -and $thumb) {
+    # The newest SDK signtool on the machine. Ordered by version and not by
+    # first hit, because several Windows Kits versions live side by side and the
+    # oldest is the one that sorts first.
+    # 기계에 있는 가장 새로운 SDK signtool입니다. 첫 번째 것이 아니라 버전 순으로 고릅니다.
+    # 여러 Windows Kits 버전이 나란히 살고, 가장 오래된 것이 먼저 정렬되기 때문입니다.
+    $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe' `
+                    -ErrorAction SilentlyContinue |
+                Sort-Object { [version]$_.Directory.Parent.Name } |
+                Select-Object -Last 1
+    if (-not $signtool) {
+        throw ("A thumbprint was given but signtool.exe is not on this machine. " +
+               "It ships with the Windows SDK: install it, or drop the thumbprint " +
+               "to build unsigned.")
+    }
+
+    $before = (Get-Item $exe).Length
+    # /fd and /td are the file and timestamp digest algorithms; both SHA-256
+    # because SHA-1 signatures have not been accepted for years. /tr is an
+    # RFC 3161 server -- DigiCert's is free and needs no account.
+    # /fd와 /td는 파일과 타임스탬프의 해시 알고리즘이며 둘 다 SHA-256입니다. SHA-1 서명은
+    # 여러 해 전부터 받아들여지지 않기 때문입니다. /tr은 RFC 3161 서버이고, DigiCert의 것은
+    # 무료이며 계정이 필요 없습니다.
+    & $signtool.FullName sign /sha1 $thumb /fd SHA256 `
+        /tr http://timestamp.digicert.com /td SHA256 $exe | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw ("signtool failed (exit $LASTEXITCODE). Two things cause this. The " +
+               "thumbprint has to name a code-signing certificate this user can " +
+               "reach -- check ``Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert``. " +
+               "And 0x800700e1 is not a signing fault at all: it is the antivirus " +
+               "holding the file. Defender's ML heuristic flags this binary as " +
+               "Wacatac!ml -- small unsigned PE, no reputation, a large baked blob " +
+               "in .rdata -- and signtool cannot write a signature into a file it " +
+               "is not allowed to open. Exclude build\ first.")
+    }
+    $after = (Get-Item $exe).Length
+    Write-Host ("  signed: +{0:N0} bytes of signature and timestamp" -f ($after - $before)) `
+               -ForegroundColor DarkGray
+}
 
 if ($Debug) {
     # The budget only ever describes the shipped binary, so a dev build does

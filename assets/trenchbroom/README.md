@@ -246,6 +246,21 @@ Set the **default face scale to 0.5**. At scale 1.0 a 128px texture spans 4m; at
 `src/brush.h`'s `BRUSH_UNIT` records the argument for 1/32 over the
 alternatives, and is the one number to change if this ever needs revisiting.
 
+## Ward slots, and the prefab
+
+The boss fight raises its wards at `info_ward_air` / `info_ward_ground`
+markers, a few per ward round, never the same ones twice in a row. They are
+point entities like any other: move one, delete one, duplicate one, and the
+fight follows. The box the editor draws is the ward's own size (0.7 × 3.0 m,
+standing on the origin), so what you place is what stands there. An air slot
+keeps the height you place it at; a ground slot settles onto the floor.
+
+`prefabs/ward_ring.map` is a ready ring of eight — four air, four ground — as
+one TrenchBroom group. Open it as a second document, Select All, Copy, switch
+to your map, Paste, and drag the group to the maw. Ungroup to move slots one by
+one. Keep at least eight so "somewhere new" can be satisfied each round; up to
+32 are read, and the 33rd is dropped and counted (see below).
+
 ## Limits, and how you find out you hit one
 
 Nothing here fails on a map that is too big — the surplus is **dropped**, which
@@ -268,6 +283,7 @@ with a `!` in front:
 | Doors | 16 | `door` |
 | Trigger volumes | 16 | — |
 | Hurt volumes | 8 | — |
+| Ward slots (`info_ward_*`) | 32 | `wardcand` |
 
 A brush whose faces do not close a solid is dropped too, and counted as
 `unclosed` — that is the one on this list you can cause by dragging a face

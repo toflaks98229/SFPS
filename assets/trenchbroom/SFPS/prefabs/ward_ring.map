@@ -1,0 +1,79 @@
+// Game: SFPS
+// Format: Valve
+//
+// WARD RING -- a prefab for the boss fight. Eight ward slots in a ring of
+// 8 m around the origin: four air (4 m up, kept at that height) alternating
+// with four ground (settle onto the floor). One TrenchBroom group, so it
+// pastes and drags as a unit.
+//
+// Use: open this file in TrenchBroom as a second document, Select All, Copy,
+// switch to your map, Paste, and drag the group to where the maw stands. The
+// fight raises a few of these each ward round and avoids the ones it used
+// last time, so keep at least eight. Up to 32 slots are read.
+//
+// 결계석 고리 -- 보스전용 프리팹. 원점 둘레 8m 고리에 결계석 자리 여덟 개입니다. 공중 넷(4m 위,
+// 그 높이를 유지)과 지상 넷(바닥으로 내려앉음)이 번갈아 있습니다. 트렌치블룸 그룹 하나이므로
+// 한 덩어리로 붙여 넣고 끌 수 있습니다.
+// 쓰는 법: 이 파일을 두 번째 문서로 열고, 전체 선택, 복사, 자기 맵으로 가서 붙여넣기, 그룹을
+// 아귀가 선 자리로 끌어다 놓습니다. 전투는 결계석 회차마다 이 중 몇을 세우고 지난번 쓴 자리는
+// 피하므로 최소 여덟 개를 두십시오. 자리는 32개까지 읽습니다.
+// entity 0
+{
+"classname" "worldspawn"
+"_tb_textures" "textures"
+}
+// entity 1
+{
+"classname" "func_group"
+"_tb_type" "_tb_group"
+"_tb_name" "ward ring"
+"_tb_id" "1"
+}
+// entity 2
+{
+"classname" "info_ward_air"
+"origin" "256 0 128"
+"_tb_group" "1"
+}
+// entity 3
+{
+"classname" "info_ward_ground"
+"origin" "181 181 0"
+"_tb_group" "1"
+}
+// entity 4
+{
+"classname" "info_ward_air"
+"origin" "0 256 128"
+"_tb_group" "1"
+}
+// entity 5
+{
+"classname" "info_ward_ground"
+"origin" "-181 181 0"
+"_tb_group" "1"
+}
+// entity 6
+{
+"classname" "info_ward_air"
+"origin" "-256 0 128"
+"_tb_group" "1"
+}
+// entity 7
+{
+"classname" "info_ward_ground"
+"origin" "-181 -181 0"
+"_tb_group" "1"
+}
+// entity 8
+{
+"classname" "info_ward_air"
+"origin" "0 -256 128"
+"_tb_group" "1"
+}
+// entity 9
+{
+"classname" "info_ward_ground"
+"origin" "181 -181 0"
+"_tb_group" "1"
+}

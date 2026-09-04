@@ -251,14 +251,27 @@
 // level directly.
 //
 // A map with NO ward candidates does not break: the maw is simply open from
-// the moment it arrives and the fight is whatever the player's damage is. The
-// `wardcand` counter says so in a debug build.
+// the moment it arrives and the fight is whatever the player's damage is.
+//
+// UP TO 32 SLOTS. A thirty-third is dropped and counted as `wardcand` in a
+// debug build. The box drawn for a slot is the ward's own footprint and
+// height -- 0.7 x 3.0 m, standing on the origin -- so what you see in the
+// editor is what will stand there.
+//
+// THE PREFAB. prefabs/ward_ring.map holds a ready ring of eight slots (four
+// air, four ground) as one TrenchBroom group. Open it as a second document,
+// select all, copy, paste into your map and drag the group where the fight
+// is; ungroup to move slots one by one, or add more by duplicating one.
 
-@PointClass size(-48 -48 0, 48 48 192) color(200 40 40) = monster_maw : "The Maw. A stationary boss embedded in a wall. Invulnerable while any ward stands. PLACED HEIGHT IS KEPT. Place one." []
+@PointClass size(-38 -38 0, 38 38 115) color(200 40 40) = monster_maw : "The Maw. A stationary boss. Arrives open and fights; each third of health it loses raises a shield of wards, and each standing ward runs a beam to it and fires one of its patterns. Dies the old way: bursts, shakes, sinks. PLACED HEIGHT IS KEPT. Place one." []
 
-@PointClass size(-16 -16 -16, 16 16 16) color(255 200 40) = info_ward_air : "Ward slot (air). Summons casters and water spirits -- the only marker in the game that can put a flyer in the room. PLACED HEIGHT IS KEPT -- put it where the ward should hang. Place several; a few are used each cycle." []
+// The ward's own size: 0.7 x 3.0 m at 1/32 m per unit, standing on the origin.
+// Change the ward's height or aspect in enemy.c and this line moves with it.
+@baseclass size(-11 -11 0, 11 11 96) color(255 160 40) = Ward []
 
-@PointClass size(-16 -16 -16, 16 16 16) color(255 120 40) = info_ward_ground : "Ward slot (ground). Summons brutes and water spirits; never a flyer. Place several; a few are used each cycle." []
+@PointClass base(Ward) color(255 200 40) = info_ward_air : "Ward slot (air). Summons casters and water spirits -- the only marker in the game that can put a flyer in the room. PLACED HEIGHT IS KEPT -- put it where the ward should hang. Place several; a few are used each of the two ward rounds. See prefabs/ward_ring.map." []
+
+@PointClass base(Ward) color(255 120 40) = info_ward_ground : "Ward slot (ground). Summons brutes and water spirits; never a flyer. Settles onto the floor under it. Place several; a few are used each of the two ward rounds. See prefabs/ward_ring.map." []
 
 // --- Spawners ------------------------------------------------------------
 //
@@ -310,20 +323,33 @@
 // --- Items ---------------------------------------------------------------
 //
 // Same rule as the monsters: `item_` is stripped and pickup.c claims the rest.
-// Weapon ammo is `<weapon>ammo`, which is how pickup.c reads it.
+//
+// The player carries one wand. A weapon is the magic circle set into it, so
+// `item_<weapon>` is that circle lying on the floor, and what it consumes is
+// mana: `item_<weapon>mana`. The `*ammo` names below are the same kinds under
+// the spelling the authored maps still carry; pickup.c reads both, the editor
+// offers the current one first.
 
 @baseclass size(-12 -12 -12, 12 12 12) color(60 200 255) = Item []
 
 @PointClass base(Item) = item_health : "Health." []
-@PointClass base(Item) = item_ammo : "Ammo for whatever is held." []
-@PointClass base(Item) = item_shotgun : "The shotgun." []
-@PointClass base(Item) = item_shotgunammo : "Shells." []
-@PointClass base(Item) = item_rapid : "The rapid gun." []
-@PointClass base(Item) = item_rapidammo : "Rapid ammunition." []
-@PointClass base(Item) = item_grenade : "The grenade launcher." []
-@PointClass base(Item) = item_grenadeammo : "Grenades." []
-@PointClass base(Item) = item_axe : "The axe." []
-@PointClass base(Item) = item_axeammo : "Axe charges." []
+@PointClass base(Item) = item_mana : "Mana for the shotgun circle." []
+@PointClass base(Item) = item_shotgun : "The shotgun's magic circle." []
+@PointClass base(Item) = item_shotgunmana : "Shotgun mana." []
+@PointClass base(Item) = item_rapid : "The rapid gun's magic circle." []
+@PointClass base(Item) = item_rapidmana : "Rapid mana." []
+@PointClass base(Item) = item_grenade : "The grenade launcher's magic circle." []
+@PointClass base(Item) = item_grenademana : "Grenade mana." []
+@PointClass base(Item) = item_axe : "The axe's magic circle." []
+@PointClass base(Item) = item_axemana : "Axe mana." []
+
+// Legacy spellings. Same kinds as the `*mana` entries above; kept so the
+// shipped maps keep loading and the editor does not flag them.
+@PointClass base(Item) color(60 120 160) = item_ammo : "Legacy name for item_mana." []
+@PointClass base(Item) color(60 120 160) = item_shotgunammo : "Legacy name for item_shotgunmana." []
+@PointClass base(Item) color(60 120 160) = item_rapidammo : "Legacy name for item_rapidmana." []
+@PointClass base(Item) color(60 120 160) = item_grenadeammo : "Legacy name for item_grenademana." []
+@PointClass base(Item) color(60 120 160) = item_axeammo : "Legacy name for item_axemana." []
 
 @PointClass base(Item) color(220 40 40) = item_redkey : "Red keycard." []
 @PointClass base(Item) color(40 80 220) = item_bluekey : "Blue keycard." []

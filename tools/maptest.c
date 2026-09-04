@@ -24,6 +24,7 @@
 #include <stdio.h>
 #include <math.h>
 #include "brush.h"
+#include "plat.h"
 #include "data.h"
 #include "diag.h"
 #include "render.h"
@@ -1331,6 +1332,53 @@ static void test_roundtrip(void) {
     checki(same_box, M2.n_brushes, "and every brush occupies the same space");
 }
 
+/* The ward-ring prefab: it is a real .map, it parses, it is one TrenchBroom
+   group, and every slot in it belongs to that group -- so what a mapper pastes
+   arrives as one draggable unit and not as eight loose markers.
+   결계석 고리 프리팹. 진짜 .map이고, 파싱되며, 트렌치블룸 그룹 하나이고, 그 안의 모든 자리가
+   그 그룹에 속합니다. 그래야 매퍼가 붙여 넣은 것이 헐거운 표식 여덟이 아니라 끌 수 있는 한
+   덩어리로 도착합니다. */
+static void test_prefab(void) {
+    printf("\n  --- the ward-ring prefab ---\n");
+    char path[512];
+    int n = plat_exe_dir(path, (int)sizeof path);
+    txt_copy(path + n, (int)sizeof path - n,
+             "assets\\trenchbroom\\SFPS\\prefabs\\ward_ring.map", -1);
+    FILE *f = fopen(path, "rb");
+    if (!f) { check(0, "the prefab file exists"); return; }
+    static char text[65536];
+    int len = (int)fread(text, 1, sizeof text - 1, f);
+    fclose(f);
+    text[len] = 0;
+
+    int ents = brush_parse(text, len, &M);
+    checki(ents, 10, "it parses: a world, a group and eight slots");
+
+    const char *gid = 0;
+    int air = 0, ground = 0, linked = 0, slots = 0;
+    for (int i = 0; i < M.n_ents; i++) {
+        const char *cn = brush_ent_value(&M.ents[i], "classname");
+        if (!cn) continue;
+        if (str_same(cn, "func_group")) {
+            const char *ty = brush_ent_value(&M.ents[i], "_tb_type");
+            if (ty && str_same(ty, "_tb_group")) gid = brush_ent_value(&M.ents[i], "_tb_id");
+        }
+    }
+    check(gid != 0, "it carries one TrenchBroom group");
+    for (int i = 0; i < M.n_ents; i++) {
+        const char *cn = brush_ent_value(&M.ents[i], "classname");
+        if (!cn) continue;
+        int is_air = str_same(cn, "info_ward_air"), is_gnd = str_same(cn, "info_ward_ground");
+        if (!is_air && !is_gnd) continue;
+        slots++; air += is_air; ground += is_gnd;
+        const char *g = brush_ent_value(&M.ents[i], "_tb_group");
+        if (gid && g && str_same(g, gid)) linked++;
+    }
+    checki(air, 4, "four air slots");
+    checki(ground, 4, "and four ground slots");
+    checki(linked, slots, "every slot is in that group");
+}
+
 int main(void) {
     printf("maptest\n");
     printf("  1 map unit = %g m   (grid 32 = %g m)\n",
@@ -1343,6 +1391,7 @@ int main(void) {
     test_uv_travels();
     test_slope();
     test_entities();
+    test_prefab();
     test_unbounded();
     test_malformed();
     test_hostile_numbers();

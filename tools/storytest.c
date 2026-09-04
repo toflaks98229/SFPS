@@ -30,6 +30,7 @@
 #include "story.h"
 #include "diag.h"
 #include "txt.h"
+#include "font.h"   /* font_width: the width budget is measured, not counted */
 
 static int fails;
 
@@ -63,19 +64,36 @@ int main(void) {
         printf("    %-8s %s\n", story_moment_name(m), c ? "authored" : "MISSING");
         if (!c) { ok(0, "every moment world.c can reach is authored"); continue; }
 
-        int bad_pages = 0, bad_lines = 0, empty = 0;
+        int bad_pages = 0, bad_lines = 0, empty = 0, widest = 0;
         for (int p = 0; p < c->n_pages; p++) {
             const StoryPage *pg = &c->page[p];
             if (pg->n_lines < 1 || pg->n_lines > STORY_LINES) bad_lines++;
             if (pg->hold < STORY_PAGE_MIN) bad_pages++;
-            for (int i = 0; i < pg->n_lines; i++)
+            for (int i = 0; i < pg->n_lines; i++) {
                 if (!pg->line[i][0]) empty++;
+
+                /* MEASURED, not counted. STORY_LINE_MAX used to make these the
+                   same thing -- one byte, one letter, six glyph pixels -- and
+                   Hangul ended that: a syllable is three bytes and eight
+                   pixels, so the buffer stopped saying anything about the
+                   width. font_width is the renderer's own answer to the
+                   question, which is the only answer worth testing.
+                   세는 것이 아니라 *재는* 것입니다. STORY_LINE_MAX가 이 둘을 같은 것으로
+                   만들던 시절이 있었습니다. 1바이트에 1글자, 6글리프 픽셀이었습니다. 한글이
+                   그것을 끝냈습니다. 음절 하나가 3바이트에 8픽셀이므로 버퍼는 너비에 대해
+                   아무 말도 하지 않게 되었습니다. font_width는 그 질문에 대한 렌더러 자신의
+                   답이며, 시험할 가치가 있는 답은 그것뿐입니다. */
+                int w = (int)font_width(1.0f, pg->line[i]);
+                if (w > widest) widest = w;
+            }
         }
 
         ok(c->n_pages > 0 && c->n_pages <= STORY_PAGES, "it has pages, within the cap");
         ok(!bad_lines, "every page has between one line and the cap");
         ok(!bad_pages, "every page holds long enough to be read");
         ok(!empty,     "and no line is blank");
+        oki(widest <= STORY_LINE_W, "and none is wider than the budget",
+            widest, STORY_LINE_W);
     }
 
     /* THE DEFEAT CUT IS ONE PAGE, and it is asserted rather than left to

@@ -1381,13 +1381,19 @@ static const char *FS_SRC =
  * the fog colour whatever the projection allows. The arena is 82m across, so
  * the far plane has never been what a player runs into.
  *
- * DOUBLED FROM 30. At 30 a room 82m across was mostly fog, and the fog is
- * mixed toward a FIXED colour -- vec3(0.05,0.06,0.09), luminance 0.067 -- which
- * is brighter than a dark wall under ambient alone (albedo 0.126 x AMBIENT 0.32
- * = 0.040). So distance was LIFTING the far half of the room toward a flat
- * navy instead of dropping it into shadow, and the banded light it was washing
- * out is the whole mechanism by which a lamp reads as a pool. 60 puts the
- * arena's far wall at f=0.7 of the ramp rather than past its end.
+ * 120, AND IT WAS 30 BEFORE IT WAS 60. The fog is mixed toward a FIXED colour --
+ * vec3(0.05,0.06,0.09), luminance 0.067 -- which is brighter than a dark wall
+ * under ambient alone (albedo 0.126 x AMBIENT 0.32 = 0.040). So distance does not
+ * drop the far half of a room into shadow, it LIFTS it toward a flat navy, and the
+ * banded light it washes out is the whole mechanism by which a lamp reads as a
+ * pool. Every raise since has been away from that.
+ *
+ * WHAT EACH VALUE PUT ON THE ARENA'S FAR WALL, about 42m from where a player
+ * stands: 30 was past the end of the ramp, fully fogged. 60 was f=0.70, so f*f
+ * mixed 49% of the navy over it. 120 is f=0.35 and 12%, which is the room being
+ * visible to its corners with the distance still readable. Full fog now sits at
+ * 120m, further than anything the map contains -- the ramp is what is seen now,
+ * not its end.
  *
  * ONE CONSTANT, TWO USERS. The world branch and the sprite branch both fog,
  * and they have to agree: a monster fogged on a different curve from the wall
@@ -1400,16 +1406,23 @@ static const char *FS_SRC =
  * 안개가 FOG_FAR에서 *가득* 차므로, 그 너머는 투영이 무엇을 허락하든 안개 색입니다. 아레나는
  * 82m 폭이므로 원거리 평면은 플레이어가 부딪히는 것이었던 적이 없습니다.
  *
- * *30에서 두 배로.* 30에서는 82m짜리 방의 대부분이 안개였고, 안개는 *고정된* 색
- * vec3(0.05,0.06,0.09)로 섞입니다. 그 휘도 0.067은 주변광만 받는 어두운 벽(알베도 0.126 x
- * AMBIENT 0.32 = 0.040)보다 *밝습니다.* 그래서 거리는 방의 먼 절반을 그림자로 떨어뜨리는
+ * *120이며, 60 이전에는 30이었습니다.* 안개는 *고정된* 색 vec3(0.05,0.06,0.09)로 섞이고,
+ * 그 휘도 0.067은 주변광만 받는 어두운 벽(알베도 0.126 x AMBIENT 0.32 = 0.040)보다
+ * *밝습니다.* 그래서 거리는 방의 먼 절반을 그림자로 떨어뜨리는 대신 평평한 남색으로 들어
+ * 올리며, 그것이 씻어 내는 띠 모양의 빛이 램프를 빛웅덩이로 읽히게 하는 기구 전부입니다.
+ * 이후의 모든 상향은 그것에서 멀어지는 방향이었습니다.
+ *
+ * *플레이어가 서는 자리에서 약 42m인 아레나 먼 벽에 각 값이 무엇을 칠했는가.* 30은 경사
+ * 바깥이라 안개로 가득 찼고, 60은 f=0.70이라 f*f로 남색을 49% 덮었으며, 120은 f=0.35에
+ * 12%입니다. 방이 구석까지 보이면서 거리감은 남는 값입니다. 가득 찬 안개는 이제 120m에
+ * 놓이며 맵에 그만큼 먼 것은 없습니다. 이제 보이는 것은 경사이지 그 끝이 아닙니다.
  * 대신 평평한 남색으로 *들어 올리고* 있었고, 그것이 씻어 내던 계단화된 빛이야말로 등이
  * 웅덩이로 읽히게 하는 기법 전부입니다.
  *
  * *상수 하나, 사용처 둘.* 월드 갈래와 스프라이트 갈래가 모두 안개를 칠하며 둘은 일치해야
  * 합니다. 뒤의 벽과 다른 곡선으로 안개가 낀 몬스터는 멀어질수록 벽에서 떨어져 나옵니다. */
 static const char *FS_FOG =
-"const float FOG_FAR = 60.0;\n"
+"const float FOG_FAR = 120.0;\n"
 "vec3 fogged(vec3 c, vec3 p, vec3 eye){\n"
 "  float f=clamp(length(p-eye)/FOG_FAR,0.0,1.0);\n"
 "  return mix(c, vec3(0.05,0.06,0.09), f*f);\n"

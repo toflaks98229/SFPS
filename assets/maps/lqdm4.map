@@ -1,19 +1,6 @@
 // Game: SFPS
 // Format: Valve
 // Generator: TrenchBroom 2026.2 (Build v2026.2 Release Win64)
-//
-// lqdm4, from LibreQuake, under the 3-clause BSD licence.
-// Converted by assets/maps/import-librequake.py -- see that file for
-// what the crossing costs and why this map gained spawners it did not
-// ship with. The licence text is in docs/LICENSE-LibreQuake.txt.
-//
-// PUT BACK BY HAND after a TrenchBroom save dropped it. The editor rewrites
-// this file from its own model and keeps only the three lines it wrote, so
-// anything a human put at the top goes. Two things depend on these five:
-// the BSD-3 notice, which has to travel with the work, and the converter's
-// refusal to run on its own output -- import-librequake.py looks for its own
-// name in the first 1024 bytes, and without it a re-import would silently
-// strip every spawner, ward and maw this map was given.
 // entity 0
 {
 "classname" "worldspawn"
@@ -11565,7 +11552,7 @@
 // entity 8
 {
 "classname" "item_aegis"
-"origin" "-0 -0 -64"
+"origin" "0 0 -48"
 }
 // entity 9
 {
@@ -11582,7 +11569,7 @@
 // entity 11
 {
 "classname" "item_rapid"
-"origin" "928 -0 -320"
+"origin" "928 32 -320"
 }
 // entity 12
 {
@@ -11592,7 +11579,7 @@
 // entity 13
 {
 "classname" "item_rapid"
-"origin" "-432 -48 -576"
+"origin" "-416 -48 -576"
 }
 // entity 14
 {
@@ -11661,12 +11648,12 @@
 // entity 26
 {
 "classname" "item_health"
-"origin" "-112 256 -576"
+"origin" "-144 256 -576"
 }
 // entity 27
 {
 "classname" "item_health"
-"origin" "-464 -464 -448"
+"origin" "-416 -480 -448"
 "spawnflags" "2"
 }
 // entity 28
@@ -11702,42 +11689,37 @@
 }
 // entity 34
 {
-"classname" "item_shotgun"
-"origin" "640 0 -192"
-}
-// entity 35
-{
 "classname" "info_player_start"
 "origin" "96 -32 -40"
 "angle" "90"
 }
-// entity 36
+// entity 35
 {
 "classname" "item_shotgunammo"
 "origin" "-688 -112 -576"
 }
-// entity 37
+// entity 36
 {
 "classname" "item_rapidammo"
 "origin" "-640 -32 -576"
 }
-// entity 38
+// entity 37
 {
 "classname" "item_health"
 "origin" "304 160 -320"
 "spawnflags" "2"
 }
-// entity 39
+// entity 38
 {
 "classname" "item_health"
 "origin" "320 224 -320"
 }
-// entity 40
+// entity 39
 {
 "classname" "item_shadow"
-"origin" "-456 888 -552"
+"origin" "-504 576 -520"
 }
-// entity 41
+// entity 40
 {
 "classname" "monster_spawner_water_spirit"
 "origin" "-48 -224 -168"
@@ -11745,7 +11727,7 @@
 "count" "0"
 "maxalive" "8"
 }
-// entity 42
+// entity 41
 {
 "classname" "monster_spawner_caster"
 "origin" "560 -256 -360"
@@ -11753,7 +11735,7 @@
 "count" "0"
 "maxalive" "6"
 }
-// entity 43
+// entity 42
 {
 "classname" "monster_spawner_brute"
 "origin" "-352 224 -552"
@@ -11761,97 +11743,92 @@
 "count" "0"
 "maxalive" "4"
 }
-// entity 44
+// entity 43
 {
 "classname" "info_altar"
 "origin" "160 496 -296"
 }
-// entity 45
+// entity 44
 {
 "classname" "monster_maw"
-"origin" "-320 -336 -424"
+"origin" "1376 0 -24"
 }
-// entity 46
+// entity 45
 {
 "classname" "info_ward_ground"
 "origin" "672 496 -576"
 }
-// entity 47
+// entity 46
 {
 "classname" "info_ward_ground"
 "origin" "-688 -112 -576"
 }
-// entity 48
+// entity 47
 {
 "classname" "info_ward_ground"
 "origin" "64 -448 -448"
 }
-// entity 49
+// entity 48
 {
 "classname" "info_ward_ground"
-"origin" "-112 256 -576"
+"origin" "-344 344 -312"
 }
-// entity 50
+// entity 49
 {
 "classname" "info_ward_ground"
 "origin" "448 -32 -576"
 }
-// entity 51
+// entity 50
 {
 "classname" "info_ward_ground"
-"origin" "-464 -464 -448"
+"origin" "-592 -528 -448"
 }
-// entity 52
+// entity 51
 {
 "classname" "info_ward_ground"
 "origin" "-0 -80 -448"
 }
-// entity 53
-{
-"classname" "info_ward_ground"
-"origin" "-432 -48 -576"
-}
-// entity 54
+// entity 52
 {
 "classname" "info_ward_air"
 "origin" "928 -0 -320"
 }
-// entity 55
+// entity 53
 {
 "classname" "info_ward_air"
 "origin" "-384 352 -320"
 }
-// entity 56
+// entity 54
 {
 "classname" "info_ward_air"
 "origin" "112 -256 -192"
 }
-// entity 57
+// entity 55
 {
 "classname" "info_ward_air"
 "origin" "224 736 -116"
 }
-// entity 58
+// entity 56
 {
 "classname" "info_ward_air"
 "origin" "320 224 -320"
 }
-// entity 59
+// entity 57
 {
 "classname" "info_ward_air"
 "origin" "-0 320 -168"
 }
-// entity 60
+// entity 58
 {
 "classname" "info_ward_air"
 "origin" "-416 32 -320"
 }
-// entity 61
+// entity 59
 {
 "classname" "info_ward_air"
 "origin" "640 0 -192"
 }
-// entity 62
+// entity 60
 {
 "classname" "light_day"
 "origin" "-448 -448 -304"
@@ -11860,7 +11837,7 @@
 "power" "100"
 "flicker" "35"
 }
-// entity 63
+// entity 61
 {
 "classname" "light_day"
 "origin" "872 0 -264"
@@ -11869,7 +11846,7 @@
 "power" "100"
 "flicker" "35"
 }
-// entity 64
+// entity 62
 {
 "classname" "light_day"
 "origin" "-104 400 -272"
@@ -11878,7 +11855,7 @@
 "power" "100"
 "flicker" "35"
 }
-// entity 65
+// entity 63
 {
 "classname" "light_day"
 "origin" "0 -184 -32"
@@ -11887,7 +11864,7 @@
 "power" "100"
 "flicker" "35"
 }
-// entity 66
+// entity 64
 {
 "classname" "light_day"
 "origin" "416 -216 -288"
@@ -11896,7 +11873,7 @@
 "power" "100"
 "flicker" "35"
 }
-// entity 67
+// entity 65
 {
 "classname" "light_day"
 "origin" "-208 200 -520"
@@ -11905,7 +11882,7 @@
 "power" "100"
 "flicker" "35"
 }
-// entity 68
+// entity 66
 {
 "classname" "light_day"
 "origin" "640 0 -16"
@@ -11914,7 +11891,7 @@
 "power" "100"
 "flicker" "35"
 }
-// entity 69
+// entity 67
 {
 "classname" "light_day"
 "origin" "0 -376 -288"
@@ -11923,7 +11900,7 @@
 "power" "100"
 "flicker" "35"
 }
-// entity 70
+// entity 68
 {
 "classname" "light_day"
 "origin" "-112 208 -272"
@@ -11932,7 +11909,7 @@
 "power" "100"
 "flicker" "35"
 }
-// entity 71
+// entity 69
 {
 "classname" "light_day"
 "origin" "-16 0 24"
@@ -11941,7 +11918,7 @@
 "power" "100"
 "flicker" "35"
 }
-// entity 72
+// entity 70
 {
 "classname" "light_day"
 "origin" "8 0 24"
@@ -11950,10 +11927,26 @@
 "power" "100"
 "flicker" "35"
 }
+// entity 71
+{
+"classname" "monster_spawner_caster"
+"origin" "-888 -1000 -224"
+"wait" "12"
+"count" "0"
+"maxalive" "2"
+}
+// entity 72
+{
+"classname" "monster_spawner_caster"
+"origin" "-952 1024 -224"
+"wait" "12"
+"count" "0"
+"maxalive" "2"
+}
 // entity 73
 {
 "classname" "monster_spawner_caster"
-"origin" "-1088 -1088 -224"
+"origin" "1280 -1248 -224"
 "wait" "12"
 "count" "0"
 "maxalive" "2"
@@ -11961,28 +11954,12 @@
 // entity 74
 {
 "classname" "monster_spawner_caster"
-"origin" "-1088 1152 -224"
+"origin" "1064 1072 -224"
 "wait" "12"
 "count" "0"
 "maxalive" "2"
 }
 // entity 75
-{
-"classname" "monster_spawner_caster"
-"origin" "1152 -1088 -224"
-"wait" "12"
-"count" "0"
-"maxalive" "2"
-}
-// entity 76
-{
-"classname" "monster_spawner_caster"
-"origin" "1152 1152 -224"
-"wait" "12"
-"count" "0"
-"maxalive" "2"
-}
-// entity 77
 {
 "classname" "light_day"
 "origin" "320 40 -272"
@@ -11991,7 +11968,7 @@
 "power" "100"
 "flicker" "35"
 }
-// entity 78
+// entity 76
 {
 "classname" "light_day"
 "origin" "104 208 -272"
@@ -12000,7 +11977,7 @@
 "power" "100"
 "flicker" "35"
 }
-// entity 79
+// entity 77
 {
 "classname" "light_day"
 "origin" "96 400 -272"
@@ -12009,7 +11986,7 @@
 "power" "100"
 "flicker" "35"
 }
-// entity 80
+// entity 78
 {
 "classname" "light_day"
 "origin" "0 344 -272"
@@ -12017,4 +11994,183 @@
 "_color" "255 236 170"
 "power" "100"
 "flicker" "35"
+}
+// entity 79
+{
+"classname" "light_day"
+"origin" "184 0 -24"
+"light" "400"
+"_color" "255 236 170"
+"power" "100"
+"flicker" "35"
+}
+// entity 80
+{
+"classname" "monster_spawner_caster"
+"origin" "-240 -1152 -256"
+"wait" "12"
+"count" "0"
+"maxalive" "2"
+}
+// entity 81
+{
+"classname" "monster_spawner_caster"
+"origin" "1504 -144 -320"
+"wait" "12"
+"count" "0"
+"maxalive" "2"
+}
+// entity 82
+{
+"classname" "info_ward_air"
+"origin" "1464 -1032 -592"
+}
+// entity 83
+{
+"classname" "info_ward_air"
+"origin" "1512 1064 -592"
+}
+// entity 84
+{
+"classname" "info_ward_air"
+"origin" "-488 1160 -592"
+}
+// entity 85
+{
+"classname" "info_ward_air"
+"origin" "-1320 152 -592"
+}
+// entity 86
+{
+"classname" "info_ward_air"
+"origin" "-488 -1400 -592"
+}
+// entity 87
+{
+"classname" "info_ward_air"
+"origin" "728 -1224 -592"
+}
+// entity 88
+{
+"classname" "info_ward_ground"
+"origin" "-760 -40 -568"
+}
+// entity 89
+{
+"classname" "info_ward_ground"
+"origin" "-424 -680 -440"
+}
+// entity 90
+{
+"classname" "item_axe"
+"origin" "-4 -372 -244"
+}
+// entity 91
+{
+"classname" "monster_spawner_water_spirit"
+"origin" "232 360 -312"
+"wait" "6"
+"count" "0"
+"maxalive" "8"
+}
+// entity 92
+{
+"classname" "monster_spawner_water_spirit"
+"origin" "440 216 -312"
+"wait" "6"
+"count" "0"
+"maxalive" "8"
+}
+// entity 93
+{
+"classname" "monster_spawner_water_spirit"
+"origin" "552 392 -440"
+"wait" "6"
+"count" "0"
+"maxalive" "8"
+}
+// entity 94
+{
+"classname" "monster_spawner_water_spirit"
+"origin" "728 504 -568"
+"wait" "6"
+"count" "0"
+"maxalive" "8"
+}
+// entity 95
+{
+"classname" "monster_spawner_water_spirit"
+"origin" "216 856 -184"
+"wait" "6"
+"count" "0"
+"maxalive" "8"
+}
+// entity 96
+{
+"classname" "monster_spawner_water_spirit"
+"origin" "8 536 -184"
+"wait" "6"
+"count" "0"
+"maxalive" "8"
+}
+// entity 97
+{
+"classname" "monster_spawner_brute"
+"origin" "16 -112 -416"
+"wait" "11"
+"count" "0"
+"maxalive" "4"
+}
+// entity 98
+{
+"classname" "monster_spawner_caster"
+"origin" "352 768 -160"
+"wait" "9"
+"count" "0"
+"maxalive" "6"
+}
+// entity 99
+{
+"classname" "monster_spawner_caster"
+"origin" "64 752 -160"
+"wait" "9"
+"count" "0"
+"maxalive" "6"
+}
+// entity 100
+{
+"classname" "monster_spawner_caster"
+"origin" "768 824 528"
+"wait" "9"
+"count" "0"
+"maxalive" "6"
+}
+// entity 101
+{
+"classname" "monster_spawner_caster"
+"origin" "712 752 544"
+"wait" "9"
+"count" "0"
+"maxalive" "6"
+}
+// entity 102
+{
+"classname" "monster_spawner_caster"
+"origin" "768 696 544"
+"wait" "9"
+"count" "0"
+"maxalive" "6"
+}
+// entity 103
+{
+"classname" "monster_spawner_caster"
+"origin" "840 752 544"
+"wait" "9"
+"count" "0"
+"maxalive" "6"
+}
+// entity 104
+{
+"classname" "item_axe"
+"origin" "780 12 -180"
 }

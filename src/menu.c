@@ -470,7 +470,16 @@ const char *menu_row_text(int row, const char **value) {
    줄이므로, 일시정지 메뉴가 필요로 하지 않는 공간을 필요로 합니다.
    scene.c가 아니라 이곳인 이유는 menu_row_bounds 자신의 이유와 같습니다. 행이 *어디에 있는지*를
    정하는 곳이 이곳이고 그리기가 그것을 읽습니다. 자기 상수로 그려지는 제목은 두 번째 배치가
-   되며, 두 배치가 가장 먼저 어긋나는 것은 머리글이 첫 행과 겹치는가입니다. */
+   되며, 두 배치가 가장 먼저 어긋나는 것은 머리글이 첫 행과 겹치는가입니다.
+   THE NUMBER TRACKS scene.c's block: it is TITLE_BEST_DY plus that line's own
+   height plus the 35 pixels of air before the first row. Change TITLE_SIZE or
+   either offset under it and this is the third number that has to move -- the
+   name's height is FONT_CH * TITLE_SIZE and everything below it is measured
+   down from the name's top edge.
+   이 값은 scene.c의 블록을 따라갑니다. TITLE_BEST_DY에 그 줄 자신의 높이와 첫 행 앞의
+   35픽셀을 더한 값입니다. TITLE_SIZE나 그 아래 두 오프셋을 바꾸면 함께 움직여야 하는 세
+   번째 숫자가 이것입니다. 이름의 높이는 FONT_CH * TITLE_SIZE이고, 그 아래의 모든 것은
+   이름의 위쪽 가장자리에서 아래로 잰 값입니다. */
 #define TITLE_GAP_FRONT 150.0f
 
 /* The slider bar, in the same block as the rows above and for the same reason:

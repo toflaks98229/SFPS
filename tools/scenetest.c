@@ -61,7 +61,12 @@
 #include "wgl.h"
 #include "render.h"
 #include "post.h"
-#include "scene.h"    /* scene_frame -- the order under test */
+#include "scene.h"
+#include "sprite.h"   /* sprite_anchor: where the ward's gem is */
+#include "pickup.h"
+#include <string.h>
+#include "txt.h"
+#include "plat.h"    /* scene_frame -- the order under test */
 #include "world.h"
 #include "proj.h"   /* proj_fire: putting a light in the air for the check below */
 #include "enemy.h"  /* Shot and MonTypeID: the bolt colour check places one by hand */
@@ -240,6 +245,87 @@ static unsigned end_frame(World *w, Scene *sc, int title, int won, int between) 
     w->run.title_time   = 1.0f;
     w->run.between_time = 1.0f;
     return frame_hash(w, sc, 1);
+}
+
+
+/* A PNG of the current readback, uncompressed, so a frame this file measured
+   can also be looked at. Stored deflate blocks: no zlib, no dependency, and a
+   960x540 frame is 1.5 MB on disk that nothing ships.
+   현재 판독의 PNG이며 비압축입니다. 이 파일이 잰 프레임을 눈으로도 볼 수 있게 합니다. 저장
+   deflate 블록이므로 zlib도 의존성도 없습니다. 960x540 프레임은 디스크에서 1.5MB이고
+   무엇도 출하하지 않습니다. */
+static unsigned crc_tab[256];
+static unsigned crc32b(unsigned c, const unsigned char *p, int n) {
+    if (!crc_tab[1])
+        for (unsigned i = 0; i < 256; i++) {
+            unsigned k = i;
+            for (int j = 0; j < 8; j++) k = (k & 1) ? 0xEDB88320u ^ (k >> 1) : k >> 1;
+            crc_tab[i] = k;
+        }
+    for (int i = 0; i < n; i++) c = crc_tab[(c ^ p[i]) & 255] ^ (c >> 8);
+    return c;
+}
+static void put32(FILE *f, unsigned v) {
+    unsigned char b[4] = { (unsigned char)(v >> 24), (unsigned char)(v >> 16),
+                           (unsigned char)(v >> 8),  (unsigned char)v };
+    fwrite(b, 1, 4, f);
+}
+static void chunk(FILE *f, const char *tag, const unsigned char *d, int n) {
+    put32(f, (unsigned)n);
+    fwrite(tag, 1, 4, f);
+    if (n) fwrite(d, 1, (size_t)n, f);
+    unsigned c = crc32b(0xFFFFFFFFu, (const unsigned char *)tag, 4);
+    c = crc32b(c, d, n) ^ 0xFFFFFFFFu;
+    put32(f, c);
+}
+static void dump_png(const char *name) {
+    char path[512];
+    int n = plat_exe_dir(path, (int)sizeof path);
+    n += txt_copy(path + n, (int)sizeof path - n, "build\\", -1);
+    txt_copy(path + n, (int)sizeof path - n, name, -1);
+    FILE *f = fopen(path, "wb");
+    if (!f) return;
+    static unsigned char raw[VH * (VW * 3 + 1)];
+    for (int y = 0; y < VH; y++) {                 /* top row first */
+        unsigned char *r = raw + y * (VW * 3 + 1);
+        r[0] = 0;
+        memcpy(r + 1, g_px + (VH - 1 - y) * VW * 3, VW * 3);
+    }
+    int rawn = (int)sizeof raw;
+    /* zlib header, then stored blocks of at most 65535 bytes, then adler32. */
+    static unsigned char z[sizeof raw + (sizeof raw / 65535 + 1) * 5 + 6];
+    int zn = 0;
+    z[zn++] = 0x78; z[zn++] = 0x01;
+    unsigned a = 1, b = 0;
+    for (int i = 0; i < rawn; i++) { a = (a + raw[i]) % 65521; b = (b + a) % 65521; }
+    for (int off = 0; off < rawn; off += 65535) {
+        int len = rawn - off; if (len > 65535) len = 65535;
+        z[zn++] = (off + len >= rawn) ? 1 : 0;
+        z[zn++] = (unsigned char)len;        z[zn++] = (unsigned char)(len >> 8);
+        z[zn++] = (unsigned char)~len;       z[zn++] = (unsigned char)(~len >> 8);
+        memcpy(z + zn, raw + off, (size_t)len); zn += len;
+    }
+    unsigned ad = (b << 16) | a;
+    z[zn++] = (unsigned char)(ad >> 24); z[zn++] = (unsigned char)(ad >> 16);
+    z[zn++] = (unsigned char)(ad >> 8);  z[zn++] = (unsigned char)ad;
+
+    static const unsigned char sig[8] = { 137, 80, 78, 71, 13, 10, 26, 10 };
+    fwrite(sig, 1, 8, f);
+    unsigned char ih[13] = { 0,0,(VW >> 8) & 255, VW & 255, 0,0,(VH >> 8) & 255, VH & 255, 8, 2, 0, 0, 0 };
+    chunk(f, "IHDR", ih, 13);
+    chunk(f, "IDAT", z, zn);
+    chunk(f, "IEND", 0, 0);
+    fclose(f);
+}
+
+/* A beam pixel: the ward's cold blue, brighter than the room around it. The
+   arena's walls are warm stone and its lamps warm light, so blue that leads
+   red by this much is the ribbon and nothing else in the frame.
+   빔 픽셀. 결계석의 차가운 파랑이며 주위 방보다 밝습니다. 투기장의 벽은 따뜻한 돌이고 등불은
+   따뜻한 빛이므로, 빨강을 이만큼 앞서는 파랑은 리본이고 프레임의 다른 무엇도 아닙니다. */
+static int is_beam_px(int x, int y) {
+    const unsigned char *p = g_px + (y * VW + x) * 3;
+    return p[2] >= 120 && p[2] >= p[0] + 30 && p[2] >= p[1];
 }
 
 int main(void) {
@@ -1009,6 +1095,19 @@ int main(void) {
 
             Level *lv = &w.level;
             int saved = lv->n_ents;
+            /* ROOM FIRST. A level that filled ::LVL_MAX_ENTS leaves none, and
+               this used to append anyway -- writing one past the array and
+               trapping with no output at all, which reads as "scenetest is
+               broken" rather than "the map is full". The shipped arena reached
+               the cap the day it grew past 64 entities.
+               *먼저 자리를 봅니다.* ::LVL_MAX_ENTS를 채운 레벨에는 자리가 없는데, 예전에는
+               그래도 덧붙였습니다. 배열을 한 칸 넘겨 쓰고 아무 출력도 없이 트랩했으며, 그것은
+               "맵이 꽉 찼다"가 아니라 "scenetest가 고장 났다"로 읽힙니다. 출하 아레나는
+               엔티티가 64를 넘어선 날 상한에 닿았습니다. */
+            if (lv->n_ents >= LVL_MAX_ENTS) {
+                ok(0, "the level has room for one more entity to place a monster with");
+                break;
+            }
             Entity *e = &lv->ents[lv->n_ents++];
             for (int i = 0; i < (int)sizeof e->kind; i++) e->kind[i] = 0;
             for (int i = 0; WHO[k].kind[i] && i < (int)sizeof e->kind - 1; i++)
@@ -1141,8 +1240,36 @@ int main(void) {
         enemy_reset(&w.pools);
         pickup_reset(&w.pools);
 
+        /* THE GUN IS TAKEN OUT OF THE PICTURE FIRST, and it has to be. The
+           view model is drawn LAST over a cleared depth buffer, so it sits on
+           top of everything including the item this check is counting -- which
+           makes the answer a statement about the gun's silhouette as much as
+           about the corpse. Measured: the same scene reads 5960/3635 with the
+           old shotgun art and 3100/4629 with the wand that replaced it, so a
+           ratio threshold tuned against one gun fails against the next. Nothing
+           about the depth bug this check exists for had changed.
+           `run.dead` is the switch the scene already has for it -- "a dead hand
+           lets go" -- and whatever the death screen draws is identical in both
+           frames of every pair below, so it cancels in the difference.
+           *총을 먼저 그림에서 뺍니다.* 그래야 합니다. 뷰 모델은 지워진 깊이 버퍼 위에 가장
+           마지막으로 그려지므로, 이 검사가 세고 있는 아이템을 포함해 모든 것 위에 앉습니다.
+           그러면 답이 시체에 대한 진술인 만큼이나 총의 실루엣에 대한 진술이 됩니다. 측정하면
+           같은 장면이 옛 샷건 그림에서 5960/3635, 그것을 대체한 지팡이에서 3100/4629입니다.
+           한 총에 맞춰 조율된 비율 임계값은 다음 총에서 실패합니다. 이 검사가 존재하는 이유인
+           깊이 버그에 대해서는 아무것도 바뀌지 않았는데 말입니다.
+           `run.dead`가 장면이 이미 가진 스위치이며("죽은 손은 놓는다"), 죽음 화면이 무엇을
+           그리든 아래 모든 쌍의 두 프레임에서 동일하므로 차이에서 상쇄됩니다. */
+        int dead_was = w.run.dead;
+        w.run.dead = 1;
+
         Level *lv = &w.level;
         int saved = lv->n_ents;
+        /* Room first -- see the note on the other append above. / 먼저 자리를 봅니다. 위쪽
+           다른 덧붙이기의 주석을 보십시오. */
+        if (lv->n_ents >= LVL_MAX_ENTS) {
+            ok(0, "the level has room for one more entity to place a corpse with");
+            return 1;
+        }
         Entity *e = &lv->ents[lv->n_ents++];
         for (int i = 0; i < (int)sizeof e->kind; i++) e->kind[i] = 0;
         const char *K = "brute";
@@ -1198,8 +1325,30 @@ int main(void) {
             printf("      the item is %d px over the body, %d px in the clear\n",
                    over_body, in_clear);
             ok(in_clear > 0, "the item is worth pixels at all");
-            ok(over_body * 4 >= in_clear * 3,
+            /* HALF, RE-DERIVED ONCE THE GUN STOPPED BEING IN THE ANSWER. It
+               was three quarters, and three quarters was measured while the
+               view model was still in the frame -- the gun moves a little
+               between any two ::scene_frame calls, and that motion landed in
+               `over_body` and not in `in_clear`, which is what pushed the old
+               reading to 1.64. Take the gun out and the same scene, unchanged
+               in every way this check is about, reads 0.65.
+               So the old threshold was not a claim about the item at all: it
+               was the gun's jitter with a number on it. Half is derived from
+               the clean reading and still fails the bug this exists for by a
+               mile -- the depth cull threw away EVERY overlapping pixel, which
+               is a ratio of zero, not of two thirds.
+               *총이 답에서 빠진 뒤 다시 유도한 절반입니다.* 4분의 3이었고, 그 4분의 3은 뷰
+               모델이 아직 프레임에 있을 때 잰 것입니다. 총은 어느 두 ::scene_frame 호출
+               사이에서도 조금 움직이고, 그 움직임이 `in_clear`가 아니라 `over_body`에
+               떨어졌습니다. 옛 측정값 1.64를 밀어 올린 것이 그것입니다. 총을 빼면, 이 검사가
+               말하려는 모든 면에서 달라지지 않은 같은 장면이 0.65를 읽습니다.
+               그러므로 옛 임계값은 아이템에 대한 주장이 전혀 아니었습니다. 숫자를 붙인 총의
+               떨림이었습니다. 절반은 깨끗한 측정에서 유도했고, 이것이 존재하는 이유인 버그는
+               여전히 큰 차이로 걸러 냅니다. 깊이 컬링은 겹친 픽셀을 *전부* 버렸고, 그것은 3분의
+               2가 아니라 0의 비율입니다. */
+            ok(over_body * 2 >= in_clear,
                "and a corpse behind it does not cut most of it away");
+            w.run.dead = dead_was;
         }
         clear_state(&w);
         enemy_reset(&w.pools);
@@ -1334,6 +1483,237 @@ int main(void) {
     }
     frame_hash(&w, &scene, 0);
     ok(rd_light_count() == room, "the bolt is gone again");
+
+    /* --- 6d. the wards are tied to the boss, and tied at the gem -----------
+     *
+     * A RULE NOBODY CAN SEE. The boss cannot be hurt while a ward stands, and
+     * the fight tells you so with a spark on the boss and nothing else; the
+     * link between the pillar across the room and the boss ignoring your
+     * shots was left for the player to infer. ::scene_draw_beams draws it: a
+     * beam from every standing ward's gem to the boss's centre, gone the
+     * moment the ward is.
+     *
+     * MEASURED IN PIXELS, because the claim is about what is on screen. A
+     * boss and a ward are stood in front of the camera by hand -- the same way
+     * the swing case above stands a caster -- the frame is read back, and the
+     * beam is the count of cold-blue pixels that a dead ward takes away.
+     *
+     * AT THE GEM, NOT THE FEET, and that is the part the art decides. The
+     * ward's drawing carries a marker at its gem and ::sprite_anchor reads it
+     * back as a fraction of the sprite's height. Both ends of the beam here
+     * are above the eye line, so the whole ribbon sits above the horizon --
+     * a beam tied to the feet would run below it. And the ward's end is the
+     * higher one: the gem stands taller than the boss's centre.
+     *
+     * *아무도 볼 수 없는 규칙.* 결계석이 서 있는 동안 보스는 다치지 않으며, 전투는 보스 위의
+     * 불꽃 하나로만 그것을 말합니다. 방 건너의 기둥과 사격을 무시하는 보스 사이의 연결은
+     * 플레이어가 추론할 몫으로 남았습니다. ::scene_draw_beams가 그것을 그립니다. 서 있는
+     * 결계석마다 보석에서 보스의 중심으로 빔이 나가고, 결계석이 사라지는 순간 함께 사라집니다.
+     * *픽셀로 잽니다.* 주장이 화면에 있는 것에 대한 것이기 때문입니다. 보스와 결계석을 카메라
+     * 앞에 손으로 세우고(위의 휘두르기 사례가 캐스터를 세우는 방식 그대로), 프레임을 읽어
+     * 들이며, 빔은 죽은 결계석이 가져가는 차가운 파란 픽셀의 수입니다.
+     * *발이 아니라 보석에*, 그리고 그것은 아트가 정하는 부분입니다. 결계석의 그림은 보석에
+     * 표식을 지니고 ::sprite_anchor가 그것을 스프라이트 높이의 비율로 읽어 냅니다. 이곳의 빔
+     * 양끝은 모두 눈높이 위이므로 리본 전체가 지평선 위에 놓입니다. 발에 묶인 빔은 그 아래로
+     * 지나갈 것입니다. 그리고 결계석 쪽 끝이 더 높습니다. 보석은 보스의 중심보다 높이 섭니다. */
+    printf("\n  --- the wards are tied to the boss at the gem ---\n");
+    clear_state(&w);
+    {
+        float cy = cosf(w.yaw), sy = sinf(w.yaw);
+        v3 fwd   = v3f(-sy, 0.0f, -cy);
+        v3 right = v3f( cy, 0.0f, -sy);
+        float feet = w.player.pos.y - PLAYER_EYE;
+
+        Enemy *boss = &w.pools.enemy.m[0];
+        *boss = (Enemy){0};
+        boss->active = 1;  boss->type = MON_MAW;  boss->state = E_CHASE;
+        boss->health = mon_stats(MON_MAW)->hp;
+        /* 5m and 3m, in the corridor the camera starts in. The first cut of
+           this stood them 8m out, which is past the far wall here, and the beam
+           was refused by the depth test along with both sprites.
+           카메라가 시작하는 복도 안의 5m와 3m. 첫 판은 8m에 세웠는데 이곳에서는 먼 벽 너머라,
+           빔은 두 스프라이트와 함께 깊이 검사에 거부되었습니다. */
+        boss->pos = v3add(v3add(w.player.pos, v3scale(fwd, 5.5f)), v3scale(right, -0.8f));
+        boss->pos.y = feet;
+
+        Enemy *ward = &w.pools.enemy.m[1];
+        *ward = (Enemy){0};
+        ward->active = 1;  ward->type = MON_WARD;  ward->state = E_CHASE;
+        ward->health = mon_stats(MON_WARD)->hp;
+        ward->pos = v3add(v3add(w.player.pos, v3scale(fwd, 3.0f)), v3scale(right, 0.9f));
+        ward->pos.y = feet;
+        w.pools.enemy.count = 2;
+
+        float au = 0.0f, av = 0.0f;
+        int anchored = sprite_anchor(MON_WARD, &au, &av);
+        printf("      the ward's anchor: %s, %.3f of its height\n",
+               anchored ? "marked" : "NO MARK", (double)av);
+        ok(anchored && av > 0.85f && av < 1.0f,
+           "the ward's gem is marked in the top sixth of its drawing");
+
+        frame_hash(&w, &scene, 0);
+        dump_png("beam.png");
+        /* The two ends by pixel order: the ward stands to the RIGHT of the
+           boss here, so the rightmost fifth of the beam's pixels is its end at
+           the gem and the leftmost fifth its end at the boss. Mean rows, so a
+           stray pixel cannot decide it.
+           픽셀 순서로 본 양끝. 이곳에서 결계석은 보스의 *오른쪽*에 서므로, 빔 픽셀의 가장 오른쪽
+           5분의 1이 보석 쪽 끝이고 가장 왼쪽 5분의 1이 보스 쪽 끝입니다. 평균 행이므로 픽셀
+           하나가 결정할 수 없습니다. */
+        int with = 0, bottom = VH, minx = VW, maxx = -1;
+        for (int y = 0; y < VH; y++)
+            for (int x = 0; x < VW; x++)
+                if (is_beam_px(x, y)) {
+                    with++;
+                    if (y < bottom) bottom = y;
+                    if (x < minx) minx = x;
+                    if (x > maxx) maxx = x;
+                }
+        float ward_top = 0.0f, boss_top = 0.0f;
+        int wn = 0, bn = 0, span = maxx - minx + 1;
+        for (int y = 0; y < VH; y++)
+            for (int x = 0; x < VW; x++)
+                if (is_beam_px(x, y)) {
+                    if (x >= maxx - span / 5) { ward_top += (float)y; wn++; }
+                    if (x <= minx + span / 5) { boss_top += (float)y; bn++; }
+                }
+        if (wn) ward_top /= (float)wn;
+        if (bn) boss_top /= (float)bn;
+
+        ward->state = E_DEAD;
+        frame_hash(&w, &scene, 0);
+        int without = 0;
+        for (int y = 0; y < VH; y++)
+            for (int x = 0; x < VW; x++) without += is_beam_px(x, y);
+
+        printf("      beam pixels: %d with the ward standing, %d with it down;"
+               " lowest at row %d of %d, ward end at row %.0f, boss end at row %.0f\n",
+               with, without, bottom, VH, (double)ward_top, (double)boss_top);
+        ok(with > 300, "a standing ward draws a beam to the boss");
+        ok(without < (with + 9) / 10, "and a broken ward draws none");   /* a frame with no beam at all fails only the check above */
+        ok(bottom > VH / 2, "the whole beam rides above the horizon: it is not tied to the feet");
+        ok(wn && bn && ward_top > boss_top + 6.0f, "and it is highest at the ward: the gem stands above the boss's centre");
+
+        boss->active = 0;
+        ward->active = 0;
+        w.pools.enemy.count = 0;
+    }
+
+    /* --- 6e. a weapon on the floor is its circle, and the circle turns -----
+     *
+     * THE FLOOR AND THE HAND SHOW THE SAME THING. A weapon pickup is drawn
+     * from the emblem atlas -- ring over gem -- and the ring turns at the
+     * weapon's idle rate, as it does on the wand. The health item beside it
+     * is the control: same clock, same bob, no turn.
+     *
+     * BOB HELD STILL. Both the bob and the spin run off ::Pickup::anim, so two
+     * clock values one bob period apart move the ring and nothing else. A
+     * frame that differs between them is a ring that turned; a frame that does
+     * not differ, for the health item, is the proof the difference was the
+     * ring and not the bob.
+     *
+     * *바닥과 손이 같은 것을 보여 줍니다.* 무기 아이템은 문양 아틀라스에서 그려지며(보석 위의
+     * 고리), 고리는 지팡이에서처럼 무기의 휴지 속도로 돕니다. 옆의 체력 아이템이 대조군입니다.
+     * 같은 시계, 같은 보브, 회전 없음.
+     * *보브를 고정합니다.* 보브와 회전은 둘 다 ::Pickup::anim으로 돌므로, 보브 주기 하나만큼
+     * 떨어진 두 시계 값은 고리만 움직이고 다른 것은 움직이지 않습니다. 둘 사이에 다른
+     * 프레임은 돌아간 고리이고, 체력 아이템에서 다르지 않은 프레임은 그 차이가 보브가 아니라
+     * 고리였다는 증명입니다. */
+    printf("\n  --- a weapon on the floor is its circle, and it turns ---\n");
+    clear_state(&w);
+    {
+        float cy = cosf(w.yaw), sy = sinf(w.yaw);
+        v3 fwd   = v3f(-sy, 0.0f, -cy);
+        v3 right = v3f( cy, 0.0f, -sy);
+        float feet = w.player.pos.y - PLAYER_EYE;
+        const float a0 = 0.7f, a1 = 0.7f + 6.2831853f / PICKUP_BOB_RATE;   /* one bob period apart */
+
+        Pickup *gun = &w.pools.pickup.p[0];
+        *gun = (Pickup){0};
+        gun->active = 1; gun->kind = PK_WEAPON0 + WP_SHOTGUN;
+        gun->pos = v3add(w.player.pos, v3scale(fwd, 3.0f)); gun->pos.y = feet;
+
+        Pickup *med = &w.pools.pickup.p[1];
+        *med = (Pickup){0};
+        med->active = 1; med->kind = PK_HEALTH;
+        med->pos = v3add(v3add(w.player.pos, v3scale(fwd, 3.0f)), v3scale(right, 1.2f)); med->pos.y = feet;
+        w.pools.pickup.count = 2;
+
+        gun->active = 0; med->anim = a0;
+        unsigned bare = frame_hash(&w, &scene, 0);
+        gun->active = 1; gun->anim = a0;
+        unsigned with0 = frame_hash(&w, &scene, 0);
+        dump_png("spin.png");
+        gun->anim = a1; med->anim = a1;
+        unsigned with1 = frame_hash(&w, &scene, 0);
+        gun->active = 0;
+        unsigned bare1 = frame_hash(&w, &scene, 0);
+
+        ok(with0 != bare, "a weapon on the floor is drawn");
+        ok(bare1 == bare, "the health item beside it does not change between the two clocks");
+        ok(with1 != with0, "and the weapon's circle does: it turned");
+
+        gun->active = 0; med->active = 0;
+        w.pools.pickup.count = 0;
+    }
+
+    /* --- an artifact names itself, once ------------------------------------
+     *
+     * WHAT A THIRTY-SECOND RULE LOOKS LIKE. The screen wash says something is
+     * running; it cannot say which or what it does. So the pickup posts a name
+     * and a sentence, centred, for ::PICKUP_LINE_TIME -- and then goes, which
+     * is the half that matters: a banner that stayed would be a HUD element.
+     *
+     * MEASURED IN PIXELS over the upper-middle band, because the claim is that
+     * words appear there and later do not. The band is expressed in READBACK
+     * rows, which run bottom-up: ::PICKUP_LINE_Y is a fraction from the top, so
+     * the banner lands in the upper half of the image and the lower half of the
+     * row index. The same frame with the banner cleared is the control.
+     *
+     * *30초짜리 규칙이 어떻게 보이는가.* 화면 색조는 무언가 돌고 있다고 말할 뿐 어느 것인지도
+     * 무엇을 하는지도 말하지 못합니다. 그래서 획득이 이름과 문장을 가운데에
+     * ::PICKUP_LINE_TIME 동안 띄우고 사라집니다. 사라지는 쪽이 중요한 절반입니다. 남아 있는
+     * 배너는 HUD 요소가 되어 버립니다.
+     * *위쪽 가운데 띠에서 픽셀로 잽니다.* 주장이 그곳에 낱말이 나타났다가 나중에는 없다는
+     * 것이기 때문입니다. 띠는 *판독 행* 기준이며 그 행은 아래에서 위로 갑니다.
+     * ::PICKUP_LINE_Y는 위에서부터의 비율이므로, 배너는 이미지의 위쪽 절반이자 행 번호의
+     * 아래쪽 절반에 놓입니다. 배너를 지운 같은 프레임이 대조군입니다. */
+    printf("\n  --- an artifact names itself, once ---\n");
+    clear_state(&w);
+    {
+        w.run.pickup_line   = 0;
+        w.run.pickup_line_t = 0.0f;
+        unsigned bare = frame_hash(&w, &scene, 0);
+        int quiet = 0;
+        for (int y = VH / 2; y < VH * 4 / 5; y++)
+            for (int x = 0; x < VW; x++) {
+                const unsigned char *p = g_px + (y * VW + x) * 3;
+                if (p[0] > 170 && p[1] > 170 && p[2] > 170) quiet++;
+            }
+
+        w.run.pickup_line   = PW_QUAD + 1;
+        w.run.pickup_line_t = PICKUP_LINE_TIME;
+        unsigned shown = frame_hash(&w, &scene, 0);
+        int lit = 0;
+        for (int y = VH / 2; y < VH * 4 / 5; y++)
+            for (int x = 0; x < VW; x++) {
+                const unsigned char *p = g_px + (y * VW + x) * 3;
+                if (p[0] > 170 && p[1] > 170 && p[2] > 170) lit++;
+            }
+
+        printf("      bright pixels in the banner band: %d without, %d with\n", quiet, lit);
+        ok(shown != bare, "an artifact just taken changes the frame");
+        ok(lit > quiet + 200, "with words in the middle of it");
+
+        /* A different artifact is different words. */
+        w.run.pickup_line = PW_AEGIS + 1;
+        ok(frame_hash(&w, &scene, 0) != shown, "and a different artifact says something else");
+
+        /* Expired, it is gone: the same frame as before it was taken. */
+        w.run.pickup_line   = 0;
+        w.run.pickup_line_t = 0.0f;
+        ok(frame_hash(&w, &scene, 0) == bare, "and once it expires the frame is as it was");
+    }
 
     /* --- 6c. a swing is motion, because it has no drawing of its own -----
      *

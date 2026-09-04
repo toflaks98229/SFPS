@@ -373,7 +373,22 @@ foreach ($s in $sets) {
     $path = Join-Path $root $s.File
     if (-not (Test-Path $path)) { throw "Missing asset file: $path" }
 
-    $raw  = Get-Content $path -Raw
+    # -Encoding UTF8 for the reason spelled out beside the licence check below,
+    # and this is the read where it actually costs something: Windows
+    # PowerShell defaults Get-Content to the ANSI codepage, and story.txt is
+    # Korean now. Without it every syllable arrives as whatever CP949 or
+    # CP1252 made of three UTF-8 bytes, and the game plays a cutscene of
+    # mojibake -- in the SHIPPED build only, because game_dev.exe reads the
+    # file itself and never comes through here. Two builds that read the same
+    # file differently is the exact failure story.txt's own header warns about.
+    # 아래 라이선스 검사 옆에 적힌 것과 같은 이유의 -Encoding UTF8이며, 실제로 대가를 치르는
+    # 읽기가 이곳입니다. Windows PowerShell의 Get-Content는 ANSI 코드페이지를 기본값으로
+    # 삼는데 story.txt는 이제 한국어입니다. 이것이 없으면 모든 음절이 CP949나 CP1252가 UTF-8
+    # 3바이트를 가지고 만들어 낸 무언가로 도착하고, 게임은 깨진 글자로 된 컷신을 재생합니다.
+    # 그것도 *출하 빌드에서만* 그렇습니다. game_dev.exe는 파일을 직접 읽으며 이곳을 거치지
+    # 않기 때문입니다. 같은 파일을 두 빌드가 다르게 읽는 것은 story.txt 자신의 머리말이
+    # 경고하는 바로 그 실패입니다.
+    $raw  = Get-Content $path -Raw -Encoding UTF8
     $mini = ConvertTo-Minified $raw
 
     # THE GAME SHIPS ONE MAP, AND levels.txt DESCRIBES THREE OTHER LEVELS.
@@ -428,7 +443,17 @@ foreach ($s in $sets) {
     # that is not there.
     # 샘플을 붙이기 전 레시피 자체의 크기입니다. 샘플은 자기 행에서 보고되며, 두 번 세면
     # 실제로는 없는 84KB가 합계에 들어갑니다.
-    $recipeLen = $mini.Length
+    # BYTES, not characters. .NET strings are UTF-16 and .Length counts code
+    # units, which was the same number as the byte count for as long as every
+    # asset was ASCII. story.txt in Korean is 350 characters and 684 bytes, and
+    # the row below is a size report in a project whose whole discipline is
+    # that the size numbers are true.
+    # 문자가 아니라 *바이트*입니다. .NET 문자열은 UTF-16이고 .Length는 코드 단위를 세는데,
+    # 모든 에셋이 ASCII이던 동안에는 그 값이 바이트 수와 같았습니다. 한국어로 된 story.txt는
+    # 350자이자 684바이트이며, 아래의 행은 크기 수치가 참이라는 것을 규율의 전부로 삼는
+    # 프로젝트의 크기 리포트입니다.
+    $recipeLen = [Text.Encoding]::UTF8.GetByteCount($mini)
+    $sourceLen = [Text.Encoding]::UTF8.GetByteCount($raw)
     if ($s.Name -eq 'ASSET_SOUNDS' -and $sampleText) {
         $mini = $mini + ' ' + (ConvertTo-Minified $sampleText)
     }
@@ -450,9 +475,9 @@ foreach ($s in $sets) {
 
     $report += [pscustomobject]@{
         Asset = Split-Path $s.File -Leaf
-        Source = $raw.Length
+        Source = $sourceLen
         Baked  = $recipeLen
-        Saved  = "$([math]::Round((1 - $recipeLen / $raw.Length) * 100))%"
+        Saved  = "$([math]::Round((1 - $recipeLen / $sourceLen) * 100))%"
     }
 }
 
@@ -1361,7 +1386,24 @@ function Compress-AssetArrays([string]$text) {
             }
         }
         $payload = $unesc.ToString()
-        $bytes = [Text.Encoding]::ASCII.GetBytes($payload)
+
+        # UTF8, NOT ASCII, and the note above about ASSET_SPRITES says why this
+        # line is the dangerous one: ASCII.GetBytes turns every character over
+        # 127 into '?' and returns a byte array of exactly the right length, so
+        # nothing downstream can tell. story.txt in Korean came through here and
+        # became three question marks per syllable -- the length was right, the
+        # deflate succeeded, the build passed, and the shipped game played a
+        # cutscene of '?'.
+        # ASCII is a subset of UTF-8, so every asset that was already English
+        # bakes to the same bytes it baked to before.
+        # ASCII가 아니라 UTF8이며, 위의 ASSET_SPRITES 주석이 이 줄이 왜 위험한지를 말해
+        # 줍니다. ASCII.GetBytes는 127을 넘는 모든 문자를 '?'로 바꾸고 정확히 맞는 길이의
+        # 바이트 배열을 돌려주므로, 그 뒤의 무엇도 알아챌 수 없습니다. 한국어로 된 story.txt가
+        # 이곳을 지나며 음절마다 물음표 셋이 되었습니다. 길이는 맞았고, deflate는 성공했고,
+        # 빌드는 통과했고, 출하된 게임은 '?'로 된 컷신을 재생했습니다.
+        # ASCII는 UTF-8의 부분집합이므로, 이미 영문이던 에셋은 전과 똑같은 바이트로
+        # 구워집니다.
+        $bytes = [Text.Encoding]::UTF8.GetBytes($payload)
 
         $ms = New-Object IO.MemoryStream
         $ds = New-Object IO.Compression.DeflateStream($ms, [IO.Compression.CompressionLevel]::Optimal)

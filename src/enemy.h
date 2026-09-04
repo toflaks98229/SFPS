@@ -944,26 +944,30 @@ enum {
      * @note 점멸은 면제되지 않습니다. 아무것도 보여 주지 않는 타격은 플레이어가 빗나감과
      *       구별할 수 없는 타격이며, 그것은 "휘청이지 않는다"와는 다른 불만입니다.
      */
-    MON_UNFLINCHING = 1 << 5
+    MON_UNFLINCHING = 1 << 5,
+
+    /**
+     * @brief Dies the old way: explosions, a shake, and it sinks into the floor.
+     *
+     * On death the body stays where it is for ::COLLAPSE_HOLD seconds, bursting
+     * every ::COLLAPSE_BOOM_GAP, then sinks until it is ::COLLAPSE_SINK of its
+     * own height below where it stood and is removed. A collapsing ::MON_GUARD
+     * stops guarding the moment the sequence starts (::enemy_guards_alive
+     * counts only the living).
+     *
+     * @brief 옛 방식으로 죽습니다. 폭발, 흔들림, 그리고 바닥 아래로 가라앉습니다.
+     * 죽으면 몸은 ::COLLAPSE_HOLD초 동안 제자리에서 ::COLLAPSE_BOOM_GAP마다 터지다가,
+     * 서 있던 자리보다 자기 높이의 ::COLLAPSE_SINK배 아래까지 가라앉은 뒤 제거됩니다.
+     * 붕괴 중인 ::MON_GUARD는 순서가 시작되는 순간 수호를 멈춥니다(::enemy_guards_alive는
+     * 산 것만 셉니다).
+     */
+    MON_COLLAPSES = 1 << 6
 };
 
 /** @brief Every bit above, for ::types_check to object to anything else. / 위의 모든 비트. ::types_check가 그 외의 것에 이의를 제기하기 위한 것입니다. */
-#define MON_FLAGS_ALL (MON_FLIES | MON_ANCHORED | MON_BOSS | MON_GUARD | MON_FLOATS | MON_UNFLINCHING)
+#define MON_FLAGS_ALL (MON_FLIES | MON_ANCHORED | MON_BOSS | MON_GUARD | MON_FLOATS | MON_UNFLINCHING | MON_COLLAPSES)
 
-/**
- * @brief How many attacks one kind may carry.
- *
- * ENGLISH: Three, because the bands are three -- melee, near, mid -- and a kind
- * with an answer to each of them has an answer everywhere. A fourth would be
- * two answers in one band, which ::MonAttack::weight already expresses without
- * a slot. Slots past a kind's last are ::ATK_NONE and cost their bytes in
- * `.rodata`, which is the price of the table being readable as a table.
- *
- * 한국어: 셋입니다. 대역이 셋(근접·근거리·중거리)이고, 각각에 답을 가진 종류는 어디에서나 답을
- * 가집니다. 넷째는 한 대역 안의 두 답이며, 그것은 ::MonAttack::weight이 슬롯 없이 이미
- * 표현합니다. 종류의 마지막 다음 슬롯은 ::ATK_NONE이고 `.rodata`에서 자기 바이트를 씁니다.
- * 그것이 표가 표로 읽히는 값입니다.
- */
+/** @brief Attack slots one kind may carry. / 한 종류가 지닐 수 있는 공격 슬롯 수. */
 #define MON_MAX_ATTACKS 3
 
 /**
@@ -1059,297 +1063,45 @@ typedef struct {
      */
     short kind;
 
-    /**
-     * @brief The range band this attack answers, metres.
-     *
-     * ENGLISH: Bands may overlap -- two slots offered at one distance is a
-     * choice, which is what ::weight is for. They may not leave a hole between
-     * them, because a hole is a distance at which the monster stands and does
-     * nothing; ::types_check refuses one.
-     *
-     * 한국어: 이 공격이 답하는 사거리 대역(미터)입니다. 대역은 겹쳐도 됩니다. 한 거리에서 두
-     * 슬롯이 함께 제안되는 것은 선택이며 ::weight이 그것을 위해 있습니다. 사이에 구멍을 남겨서는
-     * 안 됩니다. 구멍은 몬스터가 서서 아무것도 하지 않는 거리이고, ::types_check가 그것을
-     * 거절합니다.
-     */
+    /** @brief Range band this attack answers, metres: offered while min <= dist <= max.
+     *  / 이 공격이 담당하는 거리 대역(미터). min <= 거리 <= max일 때 제안됩니다. */
     float min, max;
 
-    /**
-     * @brief How far this attack CONNECTS, metres, as against where it starts.
-     *
-     * ENGLISH
-     * -------
-     * ONE NUMBER DID BOTH JOBS AND THEY ARE NOT THE SAME JOB. ::max is where a
-     * monster decides to use this attack; `reach` is where the attack lands.
-     * For everything that stands and swings they are the same figure, which is
-     * why one number sufficed -- you use the attack because you are already in
-     * reach of it.
-     *
-     * A CHARGE SPLITS THEM. Quake's knight has a running attack it begins from
-     * outside its own sword: the band is where the decision is made and the
-     * sword still only cuts as far as a sword. Held as one number, a charge
-     * that began at four metres would also CONNECT at four metres, so a player
-     * who outran it would be hit anyway -- and outrunning it is the entire
-     * counterplay to a telegraphed commitment.
-     *
-     * 한국어
-     * ------
-     * @brief 이 공격이 *닿는* 거리(미터). 시작하는 곳과 구별됩니다.
-     *
-     * *하나의 수가 두 일을 했고 그 둘은 같은 일이 아닙니다.* ::max는 몬스터가 이 공격을 쓰기로
-     * 정하는 곳이고 `reach`는 그 공격이 닿는 곳입니다. 서서 휘두르는 모든 것에 대해 둘은 같은
-     * 값이며, 그래서 수 하나로 충분했습니다. 이미 사거리 안에 있기 때문에 그 공격을 쓰는
-     * 것입니다.
-     * *돌진이 둘을 가릅니다.* Quake의 기사는 자기 검 바깥에서 시작하는 달리기 공격을 가집니다.
-     * 대역은 결정을 내리는 곳이고 검은 여전히 검만큼만 벱니다. 하나의 수로 붙들면 4미터에서
-     * 시작한 돌진이 4미터에서 *닿기도* 하며, 달아나 벗어난 플레이어도 맞습니다. 그리고 달아나
-     * 벗어나는 것이 예고된 결단에 대한 대응의 전부입니다.
-     */
+    /** @brief How far the attack CONNECTS, metres. Measured at release, not at the start.
+     *  / 공격이 실제로 *닿는* 거리(미터). 시작이 아니라 발동 시점에 측정합니다. */
     float reach;
 
-    /**
-     * @brief What fraction of its walking speed the monster keeps through the
-     *        wind-up of this attack.
-     *
-     * ENGLISH
-     * -------
-     * A STEP AND A CHARGE ARE ONE MECHANISM AT TWO MAGNITUDES, which is why
-     * this is a column and was a constant for exactly one revision.
-     * `MON_SWING_CLOSE` said 15% for every swing -- Quake's knight closing a
-     * third of a metre through `knight_atk` -- and the running attack it was
-     * modelled on closes the whole distance. One number cannot be both.
-     *
-     * ALONG THE FACING, NOT TOWARD THE PLAYER, and that is what makes a charge
-     * dodgeable. ::change_yaw turns a monster at ::MonType::yaw_speed and no
-     * faster, so a brute committed to a line covers 130 degrees a second of
-     * correction and no more. Driving it at the player's live position instead
-     * would make the commitment perfect and the telegraph pointless -- the
-     * same argument ::ai_run_slide already makes about strafing perpendicular
-     * to where a monster is LOOKING rather than to where the player is.
-     *
-     * ZERO FOR A BOLT. It leaves from where the monster stands, and closing
-     * while firing would undo the band ::chase_caster spent the approach
-     * establishing.
-     *
-     * 한국어
-     * ------
-     * @brief 이 공격의 준비동작 동안 몬스터가 유지하는 걷기 속도의 비율.
-     *
-     * *걸음과 돌진은 같은 기구의 두 크기이며*, 그래서 이것이 열이고 딱 한 판 동안 상수였습니다.
-     * `MON_SWING_CLOSE`는 모든 휘두르기에 대해 15%라고 말했습니다. `knight_atk`을 지나며 3분의
-     * 1미터를 붙는 Quake의 기사입니다. 그리고 그것이 본떠진 달리기 공격은 거리 전체를 붙습니다.
-     * 하나의 수가 둘 다일 수는 없습니다.
-     * *플레이어 쪽이 아니라 바라보는 방향으로*이며, 그것이 돌진을 피할 수 있게 만듭니다.
-     * ::change_yaw는 몬스터를 ::MonType::yaw_speed로 돌리고 그보다 빠르지 않으므로, 한 선에
-     * 자기를 건 브루트는 초당 130도의 수정만 할 수 있습니다. 플레이어의 실시간 위치로 몰면 그
-     * 결단은 완벽해지고 예고는 무의미해집니다. ::ai_run_slide가 플레이어가 있는 쪽이 아니라
-     * 몬스터가 *바라보는* 쪽의 직각으로 횡이동한다고 이미 펴는 것과 같은 논증입니다.
-     * *볼트에는 0입니다.* 볼트는 몬스터가 선 자리에서 떠나며, 쏘면서 붙는 것은 ::chase_caster가
-     * 접근 내내 세운 대역을 스스로 무너뜨리는 일입니다.
-     */
+    /** @brief Fraction of walking speed kept through the windup. 0 stops dead, 1 runs in.
+     *  / 예비 동작 동안 유지하는 이동 속도의 비율. 0은 정지, 1은 전속력 진입. */
     float close;
 
     int   damage;       /**< Damage ONE BOLT or one swing deals -- see ::burst. / 볼트 *하나* 또는 휘두르기 한 번의 피해량. ::burst를 참조하십시오. */
 
     float windup;       /**< Seconds of telegraph before the attack lands. / 공격이 닿기 전의 예비 동작 시간(초). */
 
-    /**
-     * @brief Seconds after the LAST bolt before the next attack may start.
-     *
-     * ENGLISH
-     * -------
-     * AFTER THE LAST, NOT AFTER THE FIRST, and the difference is the whole of
-     * what a volley costs. ::enemy_update starts this clock at
-     * `windup + (n - 1) * shot_gap`, so a monster is planted for the wind-up,
-     * then the firing, then this -- and a stream that began resting while still
-     * shooting would let its next volley overlap the one in the air.
-     *
-     * @note WHICH MEANS IT IS NOT THE SAME NUMBER IT WAS. A row that fired
-     *       everything in one frame spent nothing on the firing, so its rest
-     *       WAS its exposure. Giving that row a ::shot_gap without lowering
-     *       this leaves the monster standing still for the rest plus the whole
-     *       volley -- and a monster that became easier to shoot because its
-     *       attack got longer is a balance change nobody asked for. The water
-     *       spirit's came down from 0.85 to 0.50 when it stopped firing a
-     *       shotgun, which is roughly what the firing time added.
-     *
-     * 한국어
-     * ------
-     * @brief *마지막* 볼트 뒤부터 다음 공격이 시작될 수 있을 때까지의 초.
-     *
-     * *첫 발이 아니라 마지막 발 뒤이며*, 그 차이가 일제 사격이 치르는 값의 전부입니다.
-     * ::enemy_update는 이 시계를 `windup + (n - 1) * shot_gap`에서 시작하므로, 몬스터는 준비
-     * 동작 동안, 그다음 사격 동안, 그다음 이것 동안 붙박여 있습니다. 아직 쏘는 중에 휴식을
-     * 시작하는 줄기는 다음 일제 사격이 공중의 것과 겹치게 만듭니다.
-     *
-     * @note *따라서 이것은 예전과 같은 수가 아닙니다.* 한 프레임에 전부 쏘던 행은 사격에
-     *       아무것도 쓰지 않았으므로 그 행의 휴식이 곧 노출 시간이었습니다. 그런 행에
-     *       ::shot_gap을 주면서 이것을 낮추지 않으면, 몬스터는 휴식 *더하기* 일제 사격 전체
-     *       동안 서 있게 됩니다. 그리고 공격이 길어졌다는 이유로 쏘아 맞히기 쉬워진 몬스터는
-     *       아무도 요청하지 않은 밸런스 변경입니다. 물의 정령의 값은 산탄을 그만두면서 0.85에서
-     *       0.50으로 내려갔고, 그것은 사격 시간이 더한 양과 대략 같습니다.
-     */
+    /** @brief Seconds after the LAST bolt before the next attack may start.
+     *  / *마지막* 볼트 이후 다음 공격이 시작될 수 있기까지의 시간(초). */
     float cooldown;
 
     float shot_speed;   /**< Projectile speed, m/s. Read only by ::AI_CASTER. / 발사체 속도(m/s). ::AI_CASTER만 읽습니다. */
 
-    /**
-     * @brief The MOST bolts one attack releases. 1 is a single aimed shot.
-     *
-     * ENGLISH
-     * -------
-     * A volley is not a faster single shot. One accurate bolt is answered by
-     * stepping aside; a stream of them is answered by getting out of where it
-     * is pointing, which is a different move at a different distance.
-     *
-     * RELEASED OVER TIME, ONE EVERY ::shot_gap, AND THAT IS A CHANGE. They used
-     * to leave together in a cone -- a shotgun, arriving as one event that
-     * either hit or did not. A stream is the opposite bargain: every bolt is a
-     * separate chance to be somewhere else by the time it arrives, which is
-     * what makes ::ENEMY_MAX_SHOTS worth spending and what pays for the smaller
-     * ::SHOT_RADIUS. The counter that made it possible is ::Enemy::swung, which
-     * was already there as a flag and is now a count.
-     *
-     * WITH ::burst_min, THIS IS A RANGE rather than a number -- see there for
-     * why a volley whose length you cannot predict is the point of one.
-     *
-     * 한국어
-     * ------
-     * @brief 한 번의 공격이 내보내는 볼트의 *최대* 수. 1이면 조준된 단발입니다.
-     *
-     * 일제 사격은 더 빠른 단발이 아닙니다. 정확한 볼트 하나에는 옆으로 비켜서면 되고, 줄기로
-     * 쏟아지는 쪽에는 그것이 겨누는 자리에서 벗어나야 합니다. 다른 동작이고 다른 거리입니다.
-     *
-     * *::shot_gap마다 하나씩, 시간에 걸쳐 나가며, 그것이 바뀐 점입니다.* 예전에는 원뿔로 함께
-     * 떠났습니다. 산탄이었고, 맞거나 맞지 않거나인 하나의 사건으로 도착했습니다. 줄기는 반대의
-     * 거래입니다. 볼트마다 도착할 즈음 다른 곳에 있을 기회가 따로 생기며, 그것이
-     * ::ENEMY_MAX_SHOTS를 쓸 값어치를 만들고 작아진 ::SHOT_RADIUS의 값을 치릅니다. 이것을
-     * 가능하게 한 계수기는 ::Enemy::swung이며, 이미 플래그로 있던 것이 이제 개수입니다.
-     *
-     * ::burst_min과 함께 이것은 수가 아니라 *범위*입니다. 길이를 예측할 수 없는 일제 사격이
-     * 왜 요점인지는 그곳을 참조하십시오.
-     */
+    /** @brief The MOST bolts one attack releases. 1 is a single aimed shot.
+     *  / 한 번의 공격이 내보내는 볼트의 *최대* 수. 1이면 조준된 단발. */
     short burst;
 
-    /**
-     * @brief The FEWEST bolts one attack releases. Equal to ::burst means fixed.
-     *
-     * ENGLISH
-     * -------
-     * WHAT A RANGE BUYS IS THAT THE VOLLEY CANNOT BE COUNTED. A stream of
-     * exactly eight is a rhythm, and a rhythm is learned once and then free:
-     * the player leans out on the ninth beat forever. Rolled fresh per volley,
-     * the only safe answer is to watch the monster rather than the metronome.
-     *
-     * NOT THE SAME KNOB AS ::spread. Spread says how wide the stream is, this
-     * says how long it lasts, and they are answered by different moves --
-     * sideways against patience.
-     *
-     * @note Must not exceed ::burst; ::types_check enforces it. A row with the
-     *       two the wrong way round would roll an empty volley, which is a
-     *       monster that winds up and does nothing.
-     *
-     * 한국어
-     * ------
-     * @brief 한 번의 공격이 내보내는 볼트의 *최소* 수. ::burst와 같으면 고정입니다.
-     *
-     * *범위가 사 주는 것은 일제 사격을 셀 수 없다는 것입니다.* 정확히 여덟 발의 줄기는
-     * 박자이고, 박자는 한 번 익히면 그 뒤로는 공짜입니다. 플레이어는 아홉 번째 박에 몸을
-     * 내밀면 되고 언제까지나 그렇습니다. 일제 사격마다 새로 굴리면, 안전한 답은 메트로놈이
-     * 아니라 몬스터를 보는 것뿐입니다.
-     *
-     * *::spread와 같은 손잡이가 아닙니다.* 산포는 줄기가 얼마나 *넓은가*를 말하고 이것은
-     * 얼마나 *오래*인가를 말하며, 답하는 동작이 다릅니다. 옆으로 비키는 것과 기다리는 것입니다.
-     *
-     * @note ::burst를 넘을 수 없으며 ::types_check가 강제합니다. 둘이 뒤바뀐 행은 빈 일제
-     *       사격을 굴리게 되고, 그것은 준비 동작만 하고 아무것도 하지 않는 몬스터입니다.
-     */
+    /** @brief The FEWEST bolts one attack releases. Equal to ::burst means a fixed count.
+     *  / 한 번의 공격이 내보내는 볼트의 *최소* 수. ::burst와 같으면 고정입니다. */
     short burst_min;
 
-    /**
-     * @brief How wide the volley scatters, as a fraction of the distance.
-     *
-     * ENGLISH: A fraction and not an angle, because what the player judges is
-     * how far to move: a cone of fixed ANGLE doubles in width at twice the
-     * range, so the sidestep would grow with distance. Ignored when ::burst is
-     * 1 -- a single shot that scattered is a monster that misses, not one that
-     * sprays.
-     *
-     * 한국어: 각도가 아니라 비율인 이유는 플레이어가 판단하는 것이 *얼마나 움직일까*이기
-     * 때문입니다. 고정된 각도의 원뿔은 두 배 거리에서 두 배로 넓어져 옆걸음이 거리에 따라
-     * 커집니다. ::burst가 1이면 무시됩니다. 흩어지는 단발은 난사가 아니라 빗맞히는
-     * 몬스터입니다.
-     */
+    /** @brief How wide a volley scatters, as a fraction of the distance to the target.
+     *  / 일제 사격이 흩어지는 폭. 목표까지 거리에 대한 비율입니다. */
     float spread;
 
-    /**
-     * @brief Seconds between one bolt of a volley and the next.
-     *
-     * ENGLISH
-     * -------
-     * THE CADENCE, AND IT IS WHAT MAKES A STREAM READABLE. Fast enough and the
-     * volley is a wall arriving at once, which is the shotgun this replaced;
-     * slow enough and it is a sequence of single shots with pauses to walk
-     * through. The number worth having is the one where the player can see the
-     * next bolt coming and still has to keep moving to be out of its way.
-     *
-     * @note Ignored when ::burst is 1 -- there is no second bolt to be apart
-     *       from. Rows that fire once leave it 0 rather than a plausible-
-     *       looking number nobody reads.
-     * @note MULTIPLIED BY THE VOLLEY LENGTH, this is most of how long the
-     *       monster is committed: ::MonAttack::windup opens the attack, then
-     *       `(n - 1) * shot_gap` of firing, then ::MonAttack::cooldown. A long
-     *       volley is a long time not turning, which is the counterplay --
-     *       see ::Enemy::volley_at.
-     *
-     * 한국어
-     * ------
-     * @brief 일제 사격의 한 볼트와 다음 볼트 사이의 간격(초).
-     *
-     * *박자이며, 줄기를 읽을 수 있게 만드는 것이 이것입니다.* 충분히 빠르면 일제 사격은 한꺼번에
-     * 도착하는 벽이 되는데 그것이 이 변경이 대체한 산탄입니다. 충분히 느리면 걸어서 지나갈 수
-     * 있는 단발의 나열이 됩니다. 가질 값어치가 있는 수는, 플레이어가 다음 볼트가 오는 것을 볼 수
-     * 있으면서도 비켜 있으려면 계속 움직여야 하는 그 값입니다.
-     *
-     * @note ::burst가 1이면 무시됩니다. 사이가 벌어질 두 번째 볼트가 없기 때문입니다. 단발인
-     *       행은 아무도 읽지 않는 그럴듯한 수 대신 0을 둡니다.
-     * @note *일제 사격의 길이와 곱해져*, 몬스터가 묶여 있는 시간의 대부분이 됩니다.
-     *       ::MonAttack::windup이 공격을 열고, `(n - 1) * shot_gap` 동안 쏘고, 그다음
-     *       ::MonAttack::cooldown입니다. 긴 일제 사격은 오래 돌지 못한다는 뜻이며 그것이
-     *       대응 수단입니다. ::Enemy::volley_at을 참조하십시오.
-     */
+    /** @brief Seconds between one bolt of a volley and the next. 0 fires them all at once.
+     *  / 연속 발사에서 볼트 사이의 간격(초). 0이면 한꺼번에 나갑니다. */
     float shot_gap;
-    /**
-     * @brief How much this slot is preferred where more than one is offered.
-     *
-     * ENGLISH
-     * -------
-     * TWO ROLLS, AND THEY ASK DIFFERENT THINGS. ::MON_ODDS_MELEE and its
-     * neighbours decide WHETHER the monster attacks at all from where it is
-     * standing -- Quake's CheckAttack, willingness by band. This decides WHICH
-     * of the slots that band offers. Folding them into one number would make a
-     * monster with two attacks twice as aggressive as the same monster with
-     * one, which is a difficulty change nobody asked for, arrived at by adding
-     * an option.
-     *
-     * RELATIVE, NOT A PROBABILITY. The weights of the offered slots are summed
-     * and one is drawn against the sum, so a slot's number means nothing on its
-     * own and a row can be tuned without touching its neighbours' figures.
-     *
-     * 한국어
-     * ------
-     * @brief 둘 이상이 제안될 때 이 슬롯이 얼마나 선호되는가.
-     *
-     * *굴림이 둘이고 서로 다른 것을 묻습니다.* ::MON_ODDS_MELEE와 그 이웃들은 몬스터가 지금 선
-     * 자리에서 *공격을 하기는 하는지*를 정합니다. Quake의 CheckAttack이며 대역별 의향입니다.
-     * 이것은 그 대역이 제안하는 슬롯 중 *무엇을* 정합니다. 둘을 한 수로 접으면 공격이 둘인
-     * 몬스터가 하나인 같은 몬스터보다 두 배로 공격적이 되며, 그것은 선택지를 더한 것으로
-     * 아무도 요청하지 않은 난이도 변경을 하는 일입니다.
-     *
-     * *확률이 아니라 상대값입니다.* 제안된 슬롯들의 가중치를 합하고 그 합에 대해 하나를
-     * 뽑으므로, 슬롯의 수는 혼자서는 아무 뜻이 없고 한 행을 이웃의 수치를 건드리지 않고 조정할
-     * 수 있습니다.
-     */
+    /** @brief Relative pick chance where more than one slot is offered at this distance.
+     *  / 같은 거리에서 둘 이상이 제안될 때의 선택 가중치. */
     float weight;
 } MonAttack;
 
@@ -1385,158 +1137,35 @@ typedef struct {
     int   hp;           /**< Starting health. / 시작 체력. */
     float speed;        /**< Walking speed, m/s. / 이동 속도(m/s). */
 
-    /**
-     * @brief How far off a straight line this kind closes, in radians.
-     *
-     * ENGLISH
-     * -------
-     * A MONSTER THAT WALKS STRAIGHT AT YOU IS A MONSTER YOU STRAFE PAST.
-     * `chase_brawler` moved along the vector to the player and nothing else,
-     * so the approach was a line: predictable at any speed, and the faster it
-     * got the easier it was to sidestep, because a fast straight line arrives
-     * sooner without arriving anywhere new.
-     *
-     * The approach vector is rotated by this much, to the side ::Enemy::lefty
-     * is committed to, and that commitment flips on ::MON_SLIDE_HOLD -- the
-     * same clock the close-range strafe uses, and deliberately the same: one
-     * monster holds ONE direction at a time, so a weave and a strafe are the
-     * same decision seen at two ranges rather than two systems that can
-     * disagree.
-     *
-     * IT COSTS CLOSING SPEED, by `cos` of itself: at 0.62 rad a monster closes
-     * at 81% of ::speed. That is paid for in the speed column rather than
-     * hidden, because the two are read together and a weave tuned against a
-     * speed it does not know is a weave that reads as slowness.
-     *
-     * Zero is a straight line, which is what ::AI_INERT and the anchored boss
-     * want: neither goes anywhere, and a weave on something that does not walk
-     * would be a column with a value and no meaning.
-     *
-     * 한국어
-     * ------
-     * @brief 이 종류가 직선에서 얼마나 벗어나 접근하는지, 라디안.
-     *
-     * *곧장 걸어오는 몬스터는 옆으로 지나쳐 버리면 그만인 몬스터입니다.* `chase_brawler`는
-     * 플레이어를 향한 벡터로만 움직였으므로 접근이 직선이었습니다. 어떤 속도에서든
-     * 예측 가능하며, 빨라질수록 오히려 피하기 쉬워집니다. 빠른 직선은 더 일찍 도착할 뿐
-     * 새로운 곳에 도착하지 않기 때문입니다.
-     *
-     * 접근 벡터를 이만큼, ::Enemy::lefty가 정해 둔 쪽으로 회전시키며, 그 결정은
-     * ::MON_SLIDE_HOLD마다 뒤집힙니다. 근접 횡이동이 쓰는 것과 같은 시계이고 일부러
-     * 같습니다. 한 몬스터는 한 번에 *한* 방향을 지니므로, 갈지자와 횡이동은 서로 어긋날 수
-     * 있는 두 시스템이 아니라 두 거리에서 본 같은 결정입니다.
-     *
-     * *접근 속도를 자기 `cos`만큼 치릅니다.* 0.62라디안이면 ::speed의 81%로 다가옵니다.
-     * 숨기지 않고 속도 열에서 지불하는 이유는 둘이 함께 읽히기 때문이며, 자기가 모르는
-     * 속도에 맞춰 조율된 갈지자는 느림으로 읽히는 갈지자입니다.
-     *
-     * 0은 직선이며 ::AI_INERT와 고정된 보스가 원하는 것입니다. 둘 다 아무 데도 가지 않고,
-     * 걷지 않는 것에 붙은 갈지자는 값은 있고 뜻은 없는 열입니다.
-     */
+    /** @brief How far off a straight line this kind closes, radians. 0 walks straight in.
+     *  / 직선에서 얼마나 벗어나 접근하는가(라디안). 0이면 일직선. */
     float weave;
 
     /* --- HOW BIG IT IS -----------------------------------------------------
      *
-     * ENGLISH
-     * -------
-     * These three plus ::aspect are the whole of a monster's size. There is no
-     * per-instance scale, so a kind is exactly as big as its row says.
+     * radius, height, eye and aspect are a monster's whole size; there is no
+     * per-instance scale. The billboard is `height` tall and `height * aspect`
+     * wide, so `height` alone resizes a kind proportionally.
      *
-     * THE DRAWN BILLBOARD IS `height` TALL AND `height * aspect` WIDE, which
-     * makes ::height the one number that resizes a monster proportionally.
+     * Scale BY HAND in the same edit: `radius` (the hit cylinder), `eye`
+     * (where it looks and shoots from), and a melee attack's reach. None of
+     * them follow height.
      *
-     * WHAT FOLLOWS height ON ITS OWN: the top of the hitscan cylinder, the step
-     * it can climb (::mon_step, height/3 but never under ::PLAYER_STEP -- a
-     * kind shrunk below that keeps the player's stride and stops shrinking in
-     * this one respect, because the stairs belong to the level), the ceiling
-     * clearance a spawn needs, where the grapple attaches, and where blood
-     * sprays.
+     * Leave `aspect` alone: it is the drawing's shape, not a size, and the
+     * sprite is already stretched to it.
      *
-     * WHAT DOES NOT, and has to be scaled by hand in the same edit:
-     *   ::radius  -- the cylinder is `radius` wide and `height` tall, so a
-     *                taller monster left at the old radius is a bigger target
-     *                that is no easier to hit.
-     *   ::eye     -- bolts leave from here and sight is measured from here, so
-     *                a monster that grew without it shoots from its navel.
-     *   ::attack  -- reach is measured from the centre, and a longer body with
-     *                the old reach swings and connects with nothing.
+     * types_check looks at none of this.
      *
-     * ::aspect is per kind and NOT the art's own 64x96 cell, so the sprite is
-     * already stretched to it. Leave it alone for a proportional resize.
-     *
-     * @note ::types_check does not look at any of this. `eye` above `height`
-     *       is played rather than caught.
-     *
-     * 한국어
-     * ------
-     * 이 셋과 ::aspect가 몬스터 크기의 전부입니다. 개체별 배율은 없으므로, 한 종류는 정확히
-     * 자기 행이 말하는 크기입니다.
-     *
-     * *그려지는 빌보드는 `height` 높이에 `height * aspect` 너비*이며, 그래서 ::height 하나가
-     * 몬스터를 비례해서 키우고 줄이는 유일한 숫자입니다.
-     *
-     * height를 저절로 따라가는 것: 히트스캔 원기둥의 윗면, 오를 수 있는 턱
-     * 높이(::mon_step이며, height/3이되 결코 ::PLAYER_STEP 아래로는 내려가지 않습니다. 그보다
-     * 작아진 종류는 플레이어의 보폭을 그대로 가지며 이 한 가지에 대해서만 작아지기를 멈춥니다.
-     * 계단은 레벨의 것이기 때문입니다), 스폰에 필요한 천장 높이, 갈고리가 붙는 자리, 피가 튀는
-     * 자리.
-     *
-     * 따라가지 *않아* 같은 수정에서 손으로 함께 조정해야 하는 것:
-     *   ::radius  -- 원기둥은 `radius` 굵기에 `height` 높이입니다. 반경을 그대로 둔 채 키운
-     *                몬스터는 커졌는데 맞히기는 쉬워지지 않은 표적입니다.
-     *   ::eye     -- 볼트가 나가는 자리이자 시야를 재는 기준입니다. 이것 없이 커진 몬스터는
-     *                배꼽에서 쏩니다.
-     *   ::attack  -- 사거리는 중심에서 잽니다. 몸만 길어지고 사거리가 그대로면 헛손질입니다.
-     *
-     * ::aspect는 종류별 값이며 아트의 64x96 셀 비율이 *아닙니다.* 스프라이트는 이미 이 값으로
-     * 늘어나 있으므로, 비례 확대만 원한다면 건드리지 마십시오.
-     *
-     * @note ::types_check는 이 중 무엇도 보지 않습니다. `eye`가 `height`보다 높아도 잡히지
-     *       않고 그대로 플레이됩니다. */
+     * radius, height, eye, aspect가 몬스터 크기의 전부이며 개체별 배율은 없습니다.
+     * 빌보드는 `height` 높이에 `height * aspect` 너비이므로, `height` 하나가 비례 확대를
+     * 합니다.
+     * 같은 수정에서 *손으로* 조정할 것: `radius`(피격 원기둥), `eye`(보고 쏘는 자리),
+     * 근접 공격의 사거리. 어느 것도 height를 따라가지 않습니다.
+     * `aspect`는 건드리지 마십시오. 크기가 아니라 그림의 모양이며, 스프라이트가 이미 그
+     * 값으로 늘어나 있습니다.
+     * types_check는 이 중 무엇도 보지 않습니다. */
 
-    /**
-     * @brief Collision and hitscan radius, metres.
-     *
-     * ENGLISH
-     * -------
-     * BOTH HALVES OF THAT ARE NOW TRUE. For a long time only the hitscan half
-     * was: ::enemy_hitscan was the single reader, while the movement path asked
-     * about the monster's centre column alone. So this number said how wide a
-     * monster was to SHOOT AT and nothing about how wide it was to the world,
-     * and a monster could stand with its middle on a wall face and the rest of
-     * itself inside the geometry. ::foot_ok and ::air_ok sample it now, the
-     * same five points ::can_stand takes around ::PLAYER_RADIUS.
-     *
-     * IT IS ALSO WHAT KEEPS THE SPRITE OUT OF THE WALL, which is the surprising
-     * part and the reason a drawing bug is fixed by a number in this column. A
-     * monster is drawn as a billboard `height * aspect` wide that turns to face
-     * the camera, so the most of itself it can bury in whatever it stands
-     * against is `height * aspect / 2 - radius`. Raise this and that shrinks;
-     * at `height * aspect / 2` it is zero.
-     *
-     * @note Keep it UNDER the drawn half-width. Past that the monster is wider
-     *       to shoot at than it is to look at, and shots that visibly pass
-     *       beside it register as hits.
-     *
-     * 한국어
-     * ------
-     * @brief 충돌 및 히트스캔 반경(미터).
-     *
-     * *이제 그 두 절반이 모두 참입니다.* 오랫동안 히트스캔 쪽 절반만 참이었습니다.
-     * ::enemy_hitscan이 유일한 독자였고, 이동 경로는 몬스터의 중심 기둥 하나만 물었습니다.
-     * 그래서 이 숫자는 몬스터가 *쏘아 맞히기에* 얼마나 넓은지를 말했을 뿐 세계에 대해 얼마나
-     * 넓은지는 말하지 않았고, 몬스터는 한가운데를 벽면에 둔 채 나머지를 지오메트리 안에 넣고
-     * 서 있을 수 있었습니다. 이제 ::foot_ok와 ::air_ok가 이것을 표본하며, ::can_stand가
-     * ::PLAYER_RADIUS 둘레에서 취하는 것과 같은 다섯 점입니다.
-     *
-     * *그리고 이것이 스프라이트를 벽 밖에 붙들어 둡니다.* 놀라운 부분이자, 그리기 버그가 이
-     * 열의 숫자로 고쳐지는 이유입니다. 몬스터는 `height * aspect` 너비의 빌보드로 그려지고
-     * 카메라를 향해 돌므로, 기대 선 것에 묻을 수 있는 최대치는 `height * aspect / 2 - radius`
-     * 입니다. 이 값을 올리면 그만큼 줄고, `height * aspect / 2`에서 0이 됩니다.
-     *
-     * @note 그려지는 반너비보다 *작게* 유지하십시오. 그것을 넘으면 몬스터는 보이는 것보다 쏘아
-     *       맞히기에 더 넓어지고, 눈에 띄게 옆으로 지나가는 사격이 명중으로 처리됩니다.
-     */
+    /** @brief Collision and hitscan radius, metres. / 충돌 및 히트스캔 반경(미터). */
     float radius;
     float height;       /**< Standing height, metres. Also the drawn height. / 신장(미터). 그려지는 높이이기도 합니다. */
     float eye;          /**< Eye height above the feet, metres. Where it looks and shoots from. / 발 위의 시선 높이(미터). 보고 쏘는 자리입니다. */
@@ -1549,84 +1178,19 @@ typedef struct {
 
 
 
-    /**
-     * @brief How fast this monster can turn, in degrees per second.
-     *
-     * ENGLISH: Quake's `yaw_speed`. A monster that snaps to face the player
-     * every frame cannot be got behind, which makes strafing pointless -- there
-     * is no angle left to win. Per monster because it is character: the brute
-     * is a wall that cannot track you, the water spirit is quick enough to.
-     *
-     * 한국어: Quake의 `yaw_speed`입니다. 매 프레임 플레이어 쪽으로 즉시 도는 몬스터는 뒤를
-     * 잡을 수 없고, 그러면 이길 각도가 없어 횡이동이 무의미해집니다. 몬스터별인 이유는 그것이
-     * 성격이기 때문입니다. 브루트는 추적하지 못하는 벽이고 물의 정령은 추적할 만큼 빠릅니다.
-     */
+    /** @brief Turning speed, degrees per second. / 회전 속도(초당 도). */
     float yaw_speed;
 
-    /**
-     * @brief Seconds of immunity to the flinch after being hurt.
-     *
-     * ENGLISH: Quake's `pain_finished`. Without it every hit restarts the
-     * flinch, so any weapon firing faster than the flinch lasts (the rapid gun
-     * fires every 0.085s against a 0.16s flinch) holds a monster still until it
-     * dies. Per monster because it is a character lever: Quake's ogre gets 5
-     * seconds, and that is what makes an ogre frightening.
-     *
-     * 한국어: Quake의 `pain_finished`입니다. 이것이 없으면 매 피격이 경직을 다시 시작하므로,
-     * 경직보다 빠르게 발사되는 무기는(속사 무기는 0.16초 경직에 0.085초마다 발사됩니다)
-     * 몬스터를 죽을 때까지 붙잡아 둡니다. 몬스터별인 이유는 성격을 정하는 조절 수단이기
-     * 때문입니다. Quake의 오우거는 5초를 받고, 그것이 오우거를 무섭게 만듭니다.
-     */
+    /** @brief Seconds of immunity to the flinch after being hurt. ::MON_UNFLINCHING never flinches.
+     *  / 피격 뒤 경직에 면역이 되는 시간(초). ::MON_UNFLINCHING은 경직하지 않습니다. */
     float pain_lock;
 
-    /**
-     * @brief ::MON_FLIES and whatever joins it. Zero is the ordinary monster.
-     *
-     * ENGLISH: Zero means every assumption the code makes applies, which is what
-     * every kind shipped so far wants -- so a row written before this column
-     * existed means exactly what it meant.
-     *
-     * 한국어: ::MON_FLIES와 이후에 합류할 것들입니다. 0은 평범한 몬스터입니다. 0은 코드가 하는
-     * 모든 가정이 적용된다는 뜻이며, 지금까지 배포된 모든 종류가 원하는 바입니다. 따라서 이 열이
-     * 생기기 전에 작성된 행은 그것이 뜻하던 바를 정확히 그대로 뜻합니다.
-     */
-    /**
-     * @brief How many of this kind may be alive at once. 0 is no limit.
-     *
-     * ENGLISH
-     * -------
-     * PER KIND, WHERE ::Spawner::max_alive IS PER ROOM. That one asks how
-     * many monsters are alive at all and holds the spawner back above its
-     * number; this asks how many of THIS kind are, and the difference is
-     * what a mixed wave feels like. A room capped at eight can be eight
-     * brutes, which is not a harder version of the fight the author wrote,
-     * it is a different fight -- and it happens by accident, because which
-     * spawner wins the tick is a race nobody is steering.
-     *
-     * A REFUSAL HERE IS "NOT NOW", not "never", and it keeps the spawner's
-     * budget for the same reason ::Spawner::max_alive does: the group still
-     * arrives, once there is room for its kind. A spawner that spent its
-     * budget on a full room would quietly shrink every wave after the
-     * first.
-     *
-     * 한국어
-     * ------
-     * @brief 이 종류가 동시에 몇 마리까지 살아 있을 수 있는지. 0이면 제한 없음.
-     *
-     * *::Spawner::max_alive가 방 단위인 곳에서 이것은 종류 단위입니다.* 그쪽은 몬스터가
-     * 통틀어 몇 마리 살아 있는지를 묻고 자기 수를 넘으면 스포너를 붙잡습니다. 이것은
-     * *이 종류*가 몇 마리인지를 묻고, 그 차이가 곧 섞인 웨이브의 감각입니다. 여덟으로
-     * 제한된 방은 브루트 여덟일 수 있고, 그것은 제작자가 쓴 전투의 더 어려운 판이 아니라
-     * *다른 전투*입니다. 게다가 우연히 그렇게 됩니다. 어느 스포너가 틱을 이기는지는
-     * 아무도 조종하지 않는 경주이기 때문입니다.
-     *
-     * *이곳의 거절은 "절대"가 아니라 "지금은 아니다"이며*, ::Spawner::max_alive와 같은
-     * 이유로 스포너의 예산을 지킵니다. 그 종류의 자리가 나면 무리는 여전히 도착합니다.
-     * 가득 찬 방에 예산을 써 버리는 스포너는 첫 웨이브 이후 모든 웨이브를 조용히
-     * 줄어들게 만듭니다.
-     */
+    /** @brief How many of this kind may be alive at once. 0 is no limit.
+     *  / 이 종류가 동시에 몇 마리까지 살아 있을 수 있는가. 0이면 제한 없음. */
     int   cap;
 
+    /** @brief ::MON_FLIES and whatever joins it. 0 is the ordinary monster.
+     *  / ::MON_FLIES 등의 비트 묶음. 0이면 평범한 몬스터입니다. */
     int flags;
 } MonType;
 
@@ -1954,6 +1518,31 @@ typedef struct {
      * 종류에서는 의미가 없습니다.
      */
     short  ward_table;
+
+    /**
+     * @brief Which ::Spawner made this monster, or -1.
+     *
+     * WHAT MAKES ::Spawner::max_alive A PER-SPAWNER NUMBER. Without it the only
+     * question the pool could answer was "how many are alive anywhere", so
+     * every spawner's ceiling was really the level's -- and the one with the
+     * highest number filled the room while the rest sat locked out. An index
+     * rather than a pointer, because a ::Spawner lives in an array that a
+     * ::Pools copy relocates.
+     *
+     * Set by ::spawners_update on the monster it just placed. A monster from
+     * any other source -- the level's own layout, a ward's summon, the maw --
+     * keeps -1 and is counted by no spawner.
+     *
+     * @brief 이 몬스터를 만든 ::Spawner. 없으면 -1입니다.
+     * *::Spawner::max_alive를 스포너별 수로 만드는 것입니다.* 이것이 없으면 풀이 답할 수 있는
+     * 질문은 "어디든 몇 마리가 살아 있는가"뿐이었으므로, 모든 스포너의 상한이 실은 레벨의
+     * 상한이었습니다. 가장 큰 수를 가진 하나가 방을 채우고 나머지는 잠긴 채로 있었습니다.
+     * 포인터가 아니라 색인인 이유는, ::Spawner가 ::Pools 복사로 자리를 옮기는 배열 안에 살기
+     * 때문입니다.
+     * ::spawners_update가 방금 놓은 몬스터에 설정합니다. 다른 출처에서 온 몬스터, 곧 레벨
+     * 자신의 배치나 결계핵의 소환이나 아귀는 -1로 남으며 어느 스포너도 세지 않습니다.
+     */
+    short  from_spawner;
 } Enemy;
 
 /**
@@ -2049,21 +1638,7 @@ typedef struct {
     short owner;
 } Shot;
 
-/**
- * @brief How many spawners one level may run.
- *
- * Each is a marker the level laid out, so this is a count of authored things
- * rather than of things in flight. Eight because a level that wants more than
- * eight places monsters keep arriving from is a level that wants a different
- * mechanism -- and because every one of them is a monster every few seconds
- * into a pool of ::ENEMY_MAX.
- *
- * @brief 한 레벨이 돌릴 수 있는 스포너의 수입니다.
- * @note 각각은 레벨이 배치한 표식이므로, 이것은 비행 중인 것이 아니라 *제작된* 것의
- *       개수입니다. 8인 이유는, 몬스터가 계속 도착하는 자리가 여덟 곳보다 많기를 바라는
- *       레벨은 다른 장치를 바라는 레벨이기 때문이며, 그 하나하나가 몇 초마다 몬스터 하나를
- *       ::ENEMY_MAX 크기의 풀에 넣기 때문입니다.
- */
+/** @brief Spawner markers one level may run. / 한 레벨이 돌릴 수 있는 스포너 표식 수. */
 #define ENEMY_MAX_SPAWNERS 8
 
 /**
@@ -2103,7 +1678,31 @@ typedef struct {
     v3    pos;        /**< Where the monsters appear, feet on the floor. / 몬스터가 나타나는 자리. 발이 바닥에 닿습니다. */
     short type;       /**< Which MON_* it makes. / 어떤 MON_*를 만드는지. */
     short left;       /**< How many more it will make; -1 is unlimited. / 앞으로 만들 개수. -1이면 무제한. */
-    short max_alive;  /**< Ceiling on monsters in the level; 0 is none. / 레벨 내 몬스터 상한. 0이면 없음. */
+    /**
+     * @brief Ceiling on monsters THIS spawner has alive; 0 is none.
+     *
+     * PER SPAWNER, and it used to be per level. The check asked
+     * ::enemy_alive, which counts the whole room, so a level with a spawner at
+     * eight and five at two had five spawners that only ever fired when the
+     * room was nearly empty -- the biggest number won every tick and the rest
+     * were decoration. Measured on the shipped arena: one spawner at 8 filled
+     * it while five at 2 stayed locked.
+     *
+     * @note THE NUMBERS MEAN SOMETHING ELSE NOW. Eight spawners at eight is
+     *       sixty-four monsters rather than eight, so authored values that
+     *       were tuned against the old reading are all ceilings that no longer
+     *       bind. ::ENEMY_MAX is the backstop.
+     *
+     * @brief *이* 스포너가 살려 두는 몬스터의 상한. 0이면 없음.
+     * *스포너별이며 예전에는 레벨별이었습니다.* 검사가 방 전체를 세는 ::enemy_alive에 물었으므로,
+     * 상한 8짜리 하나와 2짜리 다섯을 둔 레벨에서는 그 다섯이 방이 거의 빌 때만 발사했습니다.
+     * 매 틱마다 가장 큰 수가 이기고 나머지는 장식이었습니다. 출하 아레나에서 측정했습니다.
+     * 8짜리 하나가 방을 채우는 동안 2짜리 다섯이 잠겨 있었습니다.
+     * @note *이제 숫자의 뜻이 다릅니다.* 8짜리 스포너 여덟은 몬스터 여덟이 아니라 예순넷이므로,
+     *       예전 해석에 맞춰 조율된 값들은 모두 더 이상 걸리지 않는 상한입니다. ::ENEMY_MAX가
+     *       마지막 방벽입니다.
+     */
+    short max_alive;
 
     /**
      * @brief The ceiling the LEVEL authored, before the wave grew it.
@@ -2188,138 +1787,100 @@ typedef struct {
     int   active;     /**< Non-zero while this slot is a spawner. / 이 슬롯이 스포너이면 0이 아닙니다. */
 } Spawner;
 
-/**
- * @brief Seconds between a spawn's telegraph and the monsters arriving.
- *
- * ENGLISH: Long enough to turn toward and short enough not to be a lull. It is
- * the same number for every spawner on purpose -- a player learns one delay,
- * and a per-kind delay would be a tell that means something different at each
- * mouth.
- *
- * 한국어: 돌아볼 수 있을 만큼 길고 소강 상태가 되지 않을 만큼 짧습니다. 모든 스포너가 같은
- * 값인 것은 의도입니다. 플레이어는 하나의 지연을 익히며, 종류별 지연은 입마다 다른 것을
- * 뜻하는 신호가 됩니다.
- */
+/** @brief Seconds between a spawn's telegraph and the monsters arriving.
+ *  / 스폰 예고와 몬스터 도착 사이의 시간(초). */
 #define SPAWN_WARN_TIME 0.55f
 
 /**
  * @brief How close the player must be for a spawner to hold its fire, metres.
- *
- * ENGLISH
- * -------
- * A monster that materialises on top of the player is not difficulty, it is the
- * game reaching past what they could have done about it: there is no reaction
- * that helps, and the hit lands before the telegraph is even read. The spawner
- * simply waits instead -- it does not consume its budget, does not reset its
- * interval, and fires the moment the player gives it room.
- *
- * @note Measured on the HORIZONTAL PLANE, ignoring height. A vertical arena has
- *       spawners above and below the player that are metres away in y and
- *       directly overhead in x/z, and dropping a monster onto someone's head is
- *       exactly the case this exists to stop. Comparing full 3D distance would
- *       call that far away and let it through.
- *
- * 한국어
- * ------
- * @brief 스포너가 발동을 멈출 만큼 플레이어가 가까운 거리(미터).
- *
- * 플레이어 머리 위에 나타나는 몬스터는 난이도가 아니라, 게임이 플레이어가 할 수 있었던 것
- * 너머로 손을 뻗는 일입니다. 도움이 되는 반응이 없고, 예고를 읽기도 전에 타격이 들어옵니다.
- * 스포너는 대신 그저 기다립니다. 예산을 소모하지도, 간격을 초기화하지도 않으며, 플레이어가
- * 자리를 내주는 즉시 발동합니다.
- *
- * @note 높이를 무시하고 *수평면*에서 잽니다. 수직 아레나에는 플레이어의 위아래로 y 기준
- *       몇 미터 떨어져 있으면서 x/z로는 바로 머리 위인 스포너가 있으며, 누군가의 머리 위로
- *       몬스터를 떨어뜨리는 것이 바로 이것이 막으려는 경우입니다. 3차원 거리를 비교하면
- *       그것을 멀다고 판정하고 통과시킵니다.
- */
+ *        / 스포너가 발동을 멈추는 플레이어까지의 거리(미터).
+ * @note Measured on the horizontal plane; height is ignored. A held spawner keeps its
+ *       budget and its timer, and fires the frame the player steps away.
+ *       / 높이를 무시하고 수평면에서 잽니다. 멈춘 스포너는 예산과 타이머를 그대로 둔 채
+ *       플레이어가 비켜주는 프레임에 발동합니다. */
 #define SPAWN_MIN_DIST 6.0f
 
-/* --- what a wave multiplies, per spawner / 웨이브가 스포너마다 곱하는 것 ---------
+/* --- the difficulty curve, per spawner, read only by ::enemy_wave_arm ---------
+ * --- 난이도 곡선. 스포너마다 적용되며 ::enemy_wave_arm만 읽습니다 ---------
  *
- * ENGLISH
- * -------
- * ::enemy_wave_arm reads these and nothing else does. They are the difficulty
- * curve, written as five numbers in one place rather than as arithmetic spread
- * through that function, because tuning an arena is changing these and looking
- * -- and a curve you have to read code to find is a curve nobody tunes.
+ *   step     = wave - 1
+ *   max_alive = min(base_alive + step * WAVE_ALIVE_STEP, ENEMY_MAX)
+ *   burst     = min(1 + step / WAVE_BURST_EVERY, WAVE_BURST_MAX)
+ *   interval  = max(base_interval * WAVE_INTERVAL_DECAY ^ step, WAVE_INTERVAL_MIN)
+ *   lull      = WAVE_LULL seconds of held spawners at every rollover after the first
+ *   hp_mul    = min(1 + step * WAVE_HP_STEP, WAVE_HP_MAX)   -- not on a boss or a ward
  *
- * EVERY ONE IS CLAMPED. The budget and the group stop growing and the interval
- * stops shrinking, so the curve flattens into a hard but finite steady state
- * instead of running to a wave that no reflex can survive. Where it flattens is
- * the real difficulty of the game; how fast it gets there is the ramp.
- *
- * 한국어
- * ------
- * ::enemy_wave_arm만이 이 값들을 읽습니다. 이것이 난이도 곡선이며, 그 함수 전반에 흩어진
- * 산술이 아니라 한곳의 숫자 다섯 개로 적었습니다. 아레나를 조율하는 일은 이 값을 바꾸고
- * 보는 것이고, 찾으려면 코드를 읽어야 하는 곡선은 아무도 조율하지 않는 곡선이기 때문입니다.
- *
- * 전부 상한이 있습니다. 예산과 무리는 커지기를 멈추고 간격은 줄어들기를 멈추므로, 곡선은 어떤
- * 반사신경으로도 살아남을 수 없는 웨이브로 달려가는 대신 험하지만 유한한 정상 상태로
- * 평평해집니다. 어디서 평평해지는가가 이 게임의 실제 난이도이고, 거기까지 얼마나 빨리
- * 가는가가 경사입니다. */
+ * max_alive is a LEVEL-WIDE count, not a per-spawner one.
+ * max_alive는 스포너별이 아니라 *레벨 전체* 수입니다. */
 
-/**
- * @brief How much higher the level's monster ceiling goes with each wave.
- *
- * ENGLISH
- * -------
- * THE WAVE BUDGET USED TO BE HERE and it is gone, because the thing it counted
- * no longer exists. A wave was a QUOTA: every spawner was handed
- * `4 + 2*(wave-1)` monsters and the wave ended when all of them had been
- * spent. That is a fine model for a room you clear, and the wrong one for the
- * game this became -- spawners run continuously now and the wave advances on a
- * clock (::WORLD_WAVE_TIME), so nothing is ever "spent" and there is no quota
- * to size.
- *
- * WHAT RAMPS INSTEAD IS THE CEILING, and it has to, because ::Spawner::max_alive
- * is a LEVEL-WIDE count and not a per-spawner one. The arena authors 8, 6, 4, 2,
- * 2, 2, 2 -- so the room fills to the highest of them, EIGHT, and every spawner
- * under that threshold is a top-up that only fires when the room is nearly
- * empty. Shrinking the interval alone would therefore have changed nothing
- * after the first few seconds of any wave: the rate was never the binding
- * constraint, the ceiling was.
- *
- * TWO, because it has to be felt over a run and cannot run away. Against the
- * arena's authored 8 it reaches 28 by wave 11 and 46 by wave 20, and
- * ::ENEMY_MAX clamps it at 64 -- which is now a cap that binds rather than a
- * number nothing could reach.
- *
- * 한국어
- * ------
- * @brief 웨이브마다 레벨의 몬스터 천장이 얼마나 더 올라가는지.
- *
- * *웨이브 예산이 이곳에 있었고 사라졌습니다.* 그것이 세던 것이 더는 존재하지 않기 때문입니다.
- * 웨이브는 *할당량*이었습니다. 스포너마다 `4 + 2*(웨이브-1)`마리를 받고 그것이 모두 소진되면
- * 웨이브가 끝났습니다. 정리하는 방에는 좋은 모델이고, 이 게임이 된 것에는 틀린 모델입니다.
- * 이제 스포너는 계속 돌고 웨이브는 시계로 넘어가므로(::WORLD_WAVE_TIME) 소진되는 것이 없고
- * 크기를 정할 할당량도 없습니다.
- *
- * *대신 오르는 것은 천장이며*, 그래야 합니다. ::Spawner::max_alive가 스포너별이 아니라
- * *레벨 전체* 수이기 때문입니다. 아레나는 8, 6, 4, 2, 2, 2, 2를 제작했으므로 방은 그중 가장
- * 높은 *여덟*까지 차고, 그 아래 임계값을 가진 스포너는 방이 거의 비었을 때만 발동하는
- * 채움용입니다. 그러므로 간격만 줄이는 것은 어느 웨이브든 처음 몇 초 뒤로는 아무것도 바꾸지
- * 못했을 것입니다. 묶는 제약은 속도가 아니라 천장이었습니다.
- *
- * *2인 이유는* 한 판 동안 체감되어야 하고 동시에 폭주하지 않아야 하기 때문입니다. 아레나가
- * 제작한 8에 대해 웨이브 11에서 28, 웨이브 20에서 46에 닿고, ::ENEMY_MAX가 64에서 자릅니다.
- * 그것은 이제 아무것도 닿을 수 없던 수가 아니라 실제로 무는 상한입니다.
- */
+/** @brief Monsters added to the level ceiling each wave. / 웨이브마다 레벨 천장에 더해지는 몬스터 수. */
 #define WAVE_ALIVE_STEP 2
 /** @brief Waves between each increase of the group size. / 무리 크기가 한 번 커지는 데 걸리는 웨이브 수. */
 #define WAVE_BURST_EVERY 3
 /** @brief Largest group one spawner delivers at once. / 스포너 하나가 한 번에 배달하는 최대 무리. */
 #define WAVE_BURST_MAX   5
-/** @brief Seconds taken off the interval each wave. / 웨이브마다 간격에서 깎이는 초. */
-#define WAVE_INTERVAL_STEP 0.35f
+/** @brief What the interval is multiplied by each wave. 0.875 is Devil Daggers' 12.5% per loop.
+ *  / 웨이브마다 간격에 곱해지는 값. 0.875는 Devil Daggers의 루프당 12.5%입니다. */
+#define WAVE_INTERVAL_DECAY 0.875f
 /** @brief Shortest the interval ever gets, seconds. / 간격이 도달할 수 있는 최솟값 (초). */
 #define WAVE_INTERVAL_MIN  1.2f
+/** @brief Seconds every spawner holds its timer after a wave rolls over. 0 for none.
+ *  / 웨이브가 넘어간 뒤 모든 스포너가 타이머를 멈추는 초. 0이면 없음. */
+#define WAVE_LULL 6.0f
+
+/**
+ * @brief Fraction of its table health a monster gains per wave, before ::WAVE_HP_MAX clamps it.
+ *  / 몬스터가 웨이브마다 표의 체력에서 얻는 비율. ::WAVE_HP_MAX가 자르기 전까지입니다. */
+#define WAVE_HP_STEP 0.05f
+
+/**
+ * @brief THE CEILING ON THE HEALTH LADDER, and the reason there is one.
+ *
+ * ENGLISH
+ * -------
+ * A compounding health curve has no ceiling by construction, and this game cannot carry
+ * one: nothing the player holds gets stronger. CoD Zombies multiplies health by 1.1 a
+ * round and pairs that with Pack-a-Punch and four players sharing the load; here the
+ * shotgun is 66.7 DPS on wave 1 and 66.7 DPS on wave 40.
+ *
+ * MEASURED AGAINST THE ROOM, not against a feeling. At the type caps the arena holds
+ * 12 water spirits, 7 casters and 5 brutes -- 1,920 health standing. One 45 s wave of
+ * sustained shotgun fire is 3,000 damage, so a multiplier past 1.56 is a room the
+ * player cannot clear inside the wave that sent it, whatever they do. 1.5 sits just
+ * under that line and is where the ladder stops.
+ *
+ * WHAT CARRIES THE CURVE AFTER THIS is the spawn rate and the alive ceiling, which are
+ * the two dimensions a fixed arsenal can actually answer: more of them, arriving faster,
+ * rather than the same ones taking more shells than the belt holds.
+ *
+ * 한국어
+ * ------
+ * @brief 체력 사다리의 상한, 그리고 상한이 있는 이유.
+ *
+ * 복리로 오르는 체력 곡선은 구조상 천장이 없으며, 이 게임은 그것을 감당할 수 없습니다.
+ * 플레이어가 든 것 중 강해지는 것이 없기 때문입니다. CoD 좀비는 라운드마다 체력에 1.1을
+ * 곱하지만 팩어펀치와 4인이 나눠 지는 화력이 함께 있습니다. 이곳의 샷건은 웨이브 1에서도
+ * 66.7 DPS, 웨이브 40에서도 66.7 DPS입니다.
+ *
+ * *느낌이 아니라 방에 대고 재었습니다.* 종류 상한에서 아레나는 물의 정령 12, 캐스터 7,
+ * 브루트 5를 담으며 서 있는 체력이 1,920입니다. 45초 웨이브 하나를 샷건으로 계속 쏘면
+ * 3,000이므로, 1.56을 넘는 배수는 무엇을 하든 그것을 보낸 웨이브 안에 정리할 수 없는
+ * 방입니다. 1.5는 그 선 바로 아래이고, 사다리는 그곳에서 멈춥니다.
+ *
+ * *그 뒤로 곡선을 이어 가는 것은* 스폰 속도와 생존 천장입니다. 고정된 무기고가 실제로
+ * 답할 수 있는 두 축이며, 같은 것이 탄띠보다 많은 탄약을 먹는 대신 더 많이 더 빨리
+ * 오는 쪽입니다.
+ */
+#define WAVE_HP_MAX 1.5f
 
 _Static_assert(WAVE_BURST_MAX <= ENEMY_MAX,
                "one group must fit the pool it spawns into");
 _Static_assert(WAVE_INTERVAL_MIN > 0.0f,
                "a zero interval is a spawner that fires every frame");
+_Static_assert(WAVE_INTERVAL_DECAY > 0.0f && WAVE_INTERVAL_DECAY <= 1.0f,
+               "the decay must shrink the interval, or leave it alone");
+_Static_assert(WAVE_HP_MAX >= 1.0f,
+               "the ladder may not take health away from a monster");
 
 /**
  * @struct EnemyPool
@@ -2392,90 +1953,46 @@ _Static_assert(WAVE_INTERVAL_MIN > 0.0f,
 #define BOSS_WARDS 4
 
 /** @brief Candidate positions a level may mark. Two lists share it. / 레벨이 표시할 수 있는 후보 자리의 수. 두 목록이 나누어 씁니다. */
-#define BOSS_MAX_CAND 16
+/* 32, up from 16. The shipped arena places exactly sixteen, so a slot added in
+   the editor was the seventeenth and was dropped with nothing but a debug
+   counter to say so. Room to add is the point of the markers.
+   16에서 32로. 출하 아레나가 정확히 열여섯을 놓으므로, 편집기에서 추가한 자리는 열일곱 번째가
+   되어 디버그 카운터 말고는 아무 말 없이 버려졌습니다. 추가할 여지가 표식의 요점입니다. */
+#define BOSS_MAX_CAND 32
 
-/**
- * @brief Seconds a groggy window may last before it is taken away.
+/* --- the shape of the fight ---------------------------------------------
  *
- * ENGLISH
- * -------
- * THE DEFENCE AGAINST A FIGHT THAT CANNOT END. A groggy window has no timer by
- * design -- it ends when the health crosses the next boundary, which is what
- * makes three cycles exact -- and that is a promise the player can decline. A
- * player who stops shooting, runs out of ammunition, or simply cannot find the
- * maw from where they are standing would otherwise hold an open boss forever
- * with the wards gone and nothing arriving.
+ * The maw arrives OPEN: it fights back, and every ::WARD_SUMMON_DMG it takes
+ * summons like a ward does. Each time its health crosses a third it raises a
+ * shield -- ::BOSS_WARDS wards, each firing one of the maw's own patterns --
+ * and takes nothing until every ward is down. Two boundaries, two ward rounds;
+ * the third boundary is death. There is no timer on an open phase: the maw's
+ * own fire and summons are the pressure.
  *
- * So the window expires, the wards come back, and the health returns to the
- * ceiling of the segment it started at -- the cycle does NOT advance. The bar
- * visibly refills, which is the only honest way to say "that window is gone":
- * a bar that stayed where it was would report progress the player no longer
- * has. The guarantee weakens from "exactly three cycles" to "at least three",
- * and a wasted window is what adds one.
- *
- * A MINUTE, and not less, because the window is meant to be spent under
- * pressure from whatever the wards summoned. Anything short enough to expire
- * during a real fight is a second failure state nobody asked for.
- *
- * 한국어
- * ------
- * @brief 그로기 창이 회수되기까지 허용되는 시간(초).
- *
- * *끝날 수 없는 전투에 대한 방어입니다.* 그로기 창은 설계상 타이머가 없습니다. 체력이 다음
- * 경계를 넘을 때 끝나고, 그것이 3사이클을 정확하게 만듭니다. 그런데 그것은 플레이어가 거절할
- * 수 있는 약속입니다. 쏘기를 멈추거나, 탄약이 떨어지거나, 서 있는 자리에서 아귀를 찾지 못하는
- * 플레이어는 그러지 않으면 결계가 사라지고 아무것도 오지 않는 채로 열린 보스를 영원히 붙들게
- * 됩니다.
- *
- * 그래서 창은 만료되고, 결계핵이 돌아오며, 체력은 시작했던 구간의 천장으로 되돌아갑니다.
- * 사이클은 *오르지 않습니다.* 바가 눈에 띄게 되차오르는데, 그것이 "그 창은 날아갔다"를 말하는
- * 유일하게 정직한 방법입니다. 그대로 머무는 바는 플레이어가 더 이상 갖고 있지 않은 진척을
- * 보고하게 됩니다. 보장은 "정확히 3사이클"에서 "최소 3사이클"로 약해지고, 낭비된 창이 하나를
- * 더합니다.
- *
- * *1분이며 그보다 짧지 않은 이유는*, 이 창이 결계핵이 부른 것들의 압박 아래에서 쓰이도록
- * 되어 있기 때문입니다. 실제 전투 중에 만료될 만큼 짧은 값은 아무도 요청하지 않은 두 번째
- * 실패 상태입니다.
- */
-#define BOSS_GROGGY_MAX 60.0f
+ * *전투의 형태.* 아귀는 *열린 채로* 도착합니다. 반격하고, ::WARD_SUMMON_DMG를 받을 때마다
+ * 결계핵처럼 소환합니다. 체력이 3분의 1 경계를 넘을 때마다 보호막을 올립니다. ::BOSS_WARDS개의
+ * 결계핵이며 각각 아귀 자신의 탄막 하나를 쏩니다. 결계핵이 모두 쓰러질 때까지 아무것도 받지
+ * 않습니다. 경계 둘에 결계핵 두 번, 세 번째 경계가 죽음입니다. 열린 단계에 타이머는 없습니다.
+ * 아귀 자신의 사격과 소환이 압박입니다. */
 
-/**
- * @brief Damage a ward must ACCRUE before it summons once.
- *
- * ENGLISH: A threshold rather than a per-hit event, and enemy.c's note in
- * ::enemy_hurt has the whole argument: one point-blank shotgun blast is six
- * calls into that function, so "summon when damaged" read literally fills
- * ::ENEMY_MAX in seconds and then says nothing about it in a release build.
- * ::MON_WARD's health is a whole multiple of this, so a ward pays a fixed
- * number of times on its way down however it is killed.
- *
- * 한국어: 타격마다의 사건이 아니라 문턱이며, ::enemy_hurt의 enemy.c 주석에 논거 전부가
- * 있습니다. 근접 샷건 한 발은 그 함수 호출 여섯 번이므로, "피해를 입으면 소환"을 문자 그대로
- * 받으면 몇 초 만에 ::ENEMY_MAX가 차고 릴리스 빌드는 그에 대해 아무 말도 하지 않습니다.
- * ::MON_WARD의 체력은 이 값의 정수배이므로, 결계핵은 어떻게 죽든 쓰러지는 동안 정해진 횟수만큼
- * 지급합니다.
- */
+/** @brief Seconds a collapsing body holds its ground, bursting, before it sinks. / 붕괴하는 몸이 터지며 자리를 지키는 시간(초). */
+#define COLLAPSE_HOLD     0.9f
+/** @brief Seconds between bursts while collapsing. / 붕괴 중 폭발 간격(초). */
+#define COLLAPSE_BOOM_GAP 0.22f
+/** @brief How far it sinks, in body heights, before it is removed. / 제거되기까지 가라앉는 깊이(신장 배수). */
+#define COLLAPSE_SINK     1.2f
+/** @brief Seconds the sink takes. / 가라앉는 데 걸리는 시간(초). */
+#define COLLAPSE_SINK_TIME 2.0f
+
+/** @brief Damage a ward takes per summon payment. Its hp is a whole multiple of this.
+ *  / 결계핵이 한 번 소환하기까지 받는 피해량. 결계핵의 hp는 이 값의 정수배입니다. */
 #define WARD_SUMMON_DMG 30
 
 /** @brief Monsters one payment is worth. / 한 번의 지급이 내놓는 마리 수. */
 #define WARD_SUMMON_COUNT 2
 
-/**
- * @brief Live monsters past which a ward's summon is skipped.
- *
- * ENGLISH: ::Spawner::max_alive's argument, applied to the other thing in this
- * file that makes monsters. Deliberately well under ::ENEMY_MAX rather than at
- * it: the pool is shared with corpses and the eviction path has a defect at
- * saturation -- every recycled slot receives the same ::Enemy::sight_age, so a
- * whole regenerated ward set would refresh its sight on one frame, which is the
- * stagger that field exists to prevent.
- *
- * 한국어: ::Spawner::max_alive의 논거를, 이 파일에서 몬스터를 만드는 다른 것에 적용한 것입니다.
- * ::ENEMY_MAX가 아니라 그보다 한참 아래인 것은 의도적입니다. 풀은 시체와 공유되고, 포화 상태의
- * 축출 경로에는 결함이 있습니다. 재활용된 슬롯이 전부 같은 ::Enemy::sight_age를 받으므로, 재생된
- * 결계핵 무리 전체가 한 프레임에 시야를 갱신하게 됩니다. 그 필드가 존재하는 이유인 분산이 바로
- * 그것입니다.
- */
+/** @brief Live monsters past which a ward's summon is skipped. Kept well under ::ENEMY_MAX.
+ *  / 이 수를 넘으면 결계핵의 소환을 건너뜁니다. ::ENEMY_MAX보다 한참 아래로 둡니다. */
 #define WARD_SUMMON_CAP 40
 
 /** @brief Metres a summoned monster appears from the ward that owed it. / 소환된 몬스터가 빚진 결계핵에서 떨어져 나타나는 거리(미터). */
@@ -2544,6 +2061,8 @@ typedef struct {
      * 스토리 모드에는 뒤에 숨을 웨이브 관문이 없기 때문입니다.
      */
     char  have_started;
+    short ward_rounds; /**< Times wards have been raised this fight. / 이번 전투에서 결계핵을 세운 횟수. */
+    short guards_seen; /**< Standing wards last frame, so a fall can be noticed. / 지난 프레임의 결계핵 수. 쓰러짐을 알아채기 위해. */
 } BossFight;
 
 typedef struct {
@@ -2667,6 +2186,20 @@ typedef struct {
      *       나누기이며, 스폰을 원하지 않는 호출자에게는 ::Spawner::active가 있습니다.
      */
     float    spawn_rate;
+
+    /** @brief Seconds left in which spawner timers do not run. ::enemy_wave_arm sets it to
+     *         ::WAVE_LULL on every rollover after the first; ::spawners_update counts it down.
+     *  / 스포너 타이머가 돌지 않는 남은 초. ::enemy_wave_arm이 첫 웨이브 이후의 모든 롤오버에
+     *  ::WAVE_LULL로 세우고 ::spawners_update가 감소시킵니다. */
+    float    lull;
+
+    /** @brief What a spawned monster multiplies its table health by. ::enemy_wave_arm sets it
+     *         from the wave; ::make_monster applies it to everything that is not a boss or a
+     *         ward, because those two have their health read off the TABLE by the fight.
+     *  / 스폰된 몬스터가 표의 체력에 곱하는 값. ::enemy_wave_arm이 웨이브에서 정하고
+     *  ::make_monster가 보스와 결계핵을 뺀 모두에게 적용합니다. 그 둘은 전투가 체력을
+     *  *표에서* 읽기 때문입니다. */
+    float    hp_mul;
 
     Spawner spawner[ENEMY_MAX_SPAWNERS]; /**< Markers that keep making monsters. / 몬스터를 계속 만들어 내는 표식. */
     int     n_spawners;                  /**< How many are in use. / 사용 중인 개수. */
@@ -3050,6 +2583,25 @@ int enemy_alive(const Pools *pl);
  * 충족됩니다.
  */
 int enemy_alive_of(const Pools *pl, int type);
+
+/**
+ * @brief How many live monsters a given spawner has out.
+ *
+ * Counts ::Enemy::from_spawner, so it answers only for monsters this spawner
+ * placed -- the level's own layout and a ward's summons are invisible to it.
+ * Corpses do not count: a slot in ::E_DEAD is a body, not a monster.
+ *
+ * @param[in] pl Pools to count in.
+ * @param[in] si Spawner index, below ::enemy_spawner_count.
+ * @return The count, or 0 for an index nothing was made from.
+ *
+ * @brief 주어진 스포너가 내보낸 살아 있는 몬스터의 수.
+ * ::Enemy::from_spawner를 세므로 이 스포너가 놓은 몬스터에 대해서만 답합니다. 레벨 자신의
+ * 배치와 결계핵의 소환은 여기에 보이지 않습니다. 시체는 세지 않습니다. ::E_DEAD 칸은 몬스터가
+ * 아니라 몸입니다.
+ * @return 그 수. 아무것도 만들지 않은 색인이면 0입니다.
+ */
+int enemy_alive_from(const Pools *pl, int si);
 
 /**
  * @brief One monster by index.
@@ -3464,9 +3016,8 @@ int enemy_boss_summon(Pools *pl, const Level *l);
  * @param[in,out] pl The pool.
  * @param[in]     to The health to restore to.
  *
- * WHAT AN EXPIRED GROGGY WINDOW COSTS. ::BOSS_GROGGY_MAX has the argument; in
- * short, a window with no timer is a promise the player can decline, and taking
- * the segment back is how declining it costs something.
+ * RAISED AT A BOUNDARY, never on arrival and never on a timer: the maw
+ * arrives open, and each third of its health it loses raises one round.
  *
  * @note NEVER DOWNWARD, which is why this is not a plain assignment. Called
  *       with a ceiling computed from a cycle count, and a cycle count that is
@@ -3483,9 +3034,8 @@ int enemy_boss_summon(Pools *pl, const Level *l);
  * @param[in,out] pl 풀.
  * @param[in]     to 되돌릴 체력.
  *
- * 만료된 그로기 창이 치르는 값입니다. 논거는 ::BOSS_GROGGY_MAX에 있습니다. 요약하면, 타이머가
- * 없는 창은 플레이어가 거절할 수 있는 약속이고, 구간을 회수하는 것이 그 거절에 값을 매기는
- * 방법입니다.
+ * 경계에서 세우며, 도착 시에도 타이머로도 세우지 않습니다. 아귀는 열린 채로 도착하고,
+ * 체력의 3분의 1을 잃을 때마다 한 회차를 세웁니다.
  *
  * @note *결코 내리지 않으며*, 그것이 이것이 단순 대입이 아닌 이유입니다. 사이클 수에서 계산한
  *       천장을 받는데, 사이클 수가 한 번이라도 1만큼 틀리면 그러지 않을 경우 플레이어가 정당하게

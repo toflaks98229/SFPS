@@ -72,11 +72,29 @@
  * number: unfiltering needs the whole filtered stream at once, which is
  * (w * 4 + 1) * h -- one extra byte per row for the filter type.
  *
- * 256 rather than the 192x104 the largest authored cell actually measures,
- * because ::TEX_SIZE is 256 and a wall drawn at the size the material buffer
- * holds is the obvious next thing somebody tries. The cost of the headroom is
- * .bss, which is zeroed at load and occupies nothing on the floppy -- the same
- * bargain ::FX_MAX_PARTICLES and LVL_MAX_RANGES already strike.
+ * IT WAS 256, chosen because ::TEX_SIZE is 256 and a wall drawn at the size the
+ * material buffer holds is the obvious next thing somebody tries. 704 is the
+ * ward's doing: its drawing is a standing pillar, 160x688, and an authored
+ * drawing taller than this is simply refused -- ::png_decode raises DIAG_PNG
+ * and the sprite never reaches an atlas, which is what a 688-tall file did
+ * before this number moved. 704 is 688 rounded up to a multiple of 64.
+ *
+ * The cost of the headroom is .bss, which is zeroed at load and occupies
+ * nothing on the floppy -- the same bargain ::FX_MAX_PARTICLES and
+ * LVL_MAX_RANGES already strike. It is not free in RAM: the two scratch
+ * buffers this sizes go from 0.50 MB together to 3.78 MB. That is the price of
+ * letting art be authored at the size it was drawn rather than at the size the
+ * decoder happened to allow.
+ *
+ * 256이었고, ::TEX_SIZE가 256이며 재질 버퍼가 담는 크기로 그린 벽이 누구나 다음으로 시도할
+ * 것이기 때문이었습니다. 704는 결계핵 때문입니다. 그 그림은 160x688의 선돌이고, 이보다 큰
+ * 그림은 그냥 거절됩니다. ::png_decode가 DIAG_PNG를 올리고 스프라이트는 아틀라스에 닿지
+ * 못하며, 이 수가 움직이기 전 688 높이의 파일이 실제로 그랬습니다. 704는 688을 64의 배수로
+ * 올린 것입니다.
+ * 여유의 값은 .bss이며 로드 시 0으로 채워지고 플로피에는 자리를 차지하지 않습니다.
+ * ::FX_MAX_PARTICLES와 LVL_MAX_RANGES가 이미 맺은 것과 같은 거래입니다. RAM에서는 공짜가
+ * 아닙니다. 이것이 크기를 정하는 두 임시 버퍼가 합쳐 0.50 MB에서 3.78 MB가 됩니다. 그것이
+ * 그림을 디코더가 허용한 크기가 아니라 그려진 크기로 저작하게 하는 값입니다.
  *
  * 한국어
  * ------
@@ -91,7 +109,7 @@
  * 로드 시 0으로 채워지고 플로피 용량을 차지하지 않습니다. ::FX_MAX_PARTICLES와
  * LVL_MAX_RANGES가 이미 맺고 있는 것과 같은 거래입니다.
  */
-#define PNG_MAX_SIDE 256
+#define PNG_MAX_SIDE 704
 
 /**
  * @brief The largest compressed stream a file may carry, bytes.

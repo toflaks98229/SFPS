@@ -65,6 +65,11 @@ static void oki(int cond, const char *what, int got, int want) {
     printf("  %-56s %6d / %6d  %s\n", what, got, want, cond ? "ok" : "FAIL");
     if (!cond) fails++;
 }
+static void okf(int cond, const char *what, float got, float want) {
+    printf("  %-58s %s", what, cond ? "ok" : "FAIL");
+    if (!cond) { printf("   (got %.3f, want %.3f)", (double)got, (double)want); fails++; }
+    printf("\n");
+}
 
 /* Writes an entity kind into the fixture. ::Entity::kind is a fixed buffer and
    the test needs several different ones, so this is the one place that spells a
@@ -279,13 +284,19 @@ static int whp(void) {
    보스를 한 사이클 통째로 진행시킵니다. 결계핵을 정리한 뒤, 경계가 피해를 멈출 때까지
    때립니다. 그 뒤의 사이클 수를 반환합니다. */
 static int wcycle(void) {
-    wsmash();
-    wstep(2);                                  /* step_boss notices, opens it */
-    for (int i = 0; i < 200 && enemy_boss_index(&W.pools) >= 0; i++) {
+    /* One cycle, the new way: hit the OPEN maw down to its boundary, which
+       raises the wards; smash them; wait out their collapse. Returns the
+       cycle count afterwards.
+       새 방식의 한 사이클. *열린* 아귀를 경계까지 때려 결계핵을 세우고, 부수고, 붕괴가 끝나기를
+       기다립니다. 그 뒤의 사이클 수를 돌려줍니다. */
+    for (int i = 0; i < 400 && enemy_boss_index(&W.pools) >= 0; i++) {
         whit(20);
         wstep(1);
-        if (enemy_guards_alive(&W.pools) > 0) break;   /* it re-warded */
+        if (enemy_guards_alive(&W.pools) > 0) break;   /* the boundary raised them */
     }
+    if (enemy_boss_index(&W.pools) < 0) return W.pools.enemy.boss.cycle;
+    wsmash();
+    wstep((int)((COLLAPSE_HOLD + COLLAPSE_SINK_TIME) / DT) + 10);
     return W.pools.enemy.boss.cycle;
 }
 
@@ -324,8 +335,10 @@ static void world_cases(void) {
     wstep(2);
     ok(enemy_boss_index(&W.pools) >= 0,
        "and step_boss raises one as soon as the wave allows it");
-    oki(enemy_guards_alive(&W.pools) == BOSS_WARDS, "with a full set of wards",
-        enemy_guards_alive(&W.pools), BOSS_WARDS);
+    oki(enemy_guards_alive(&W.pools) == 0, "with NO wards yet: it arrives open",
+        enemy_guards_alive(&W.pools), 0);
+    oki(W.pools.enemy.boss.ward_rounds == 0, "and no ward round spent",
+        W.pools.enemy.boss.ward_rounds, 0);
     ok(W.pools.enemy.spawn_slow > 0.0f, "and the arena's spawners are suppressed");
     oki(W.run.boss_line == BOSS_LINE_WAKE, "and it announced itself",
         W.run.boss_line, BOSS_LINE_WAKE);
@@ -341,19 +354,98 @@ static void world_cases(void) {
         ok(W.run.wave >= w0, "the wave counter is not frozen by a live boss");
     }
 
-    /* --- warded, then open ----------------------------------------------- */
+    /* --- open on arrival: a hit lands, and it summons ----------------------
+       The first phase has no shield. Damage goes through, and every
+       ::WARD_SUMMON_DMG of it books a summon the way a ward's does.
+       첫 단계에는 보호막이 없습니다. 피해가 들어가고, 그 ::WARD_SUMMON_DMG마다 결계핵이
+       하듯 소환을 예약합니다. */
+    printf("\n  --- open on arrival ---\n");
     wfix(0, 8, 8);
     wfight();
     {
         int before = whp();
-        whit(500);
-        oki(whp() == before, "world-level: a warded maw takes nothing",
-            whp(), before);
+        whit(WARD_SUMMON_DMG);
+        oki(whp() == before - WARD_SUMMON_DMG, "a hit on the arriving maw lands",
+            whp(), before - WARD_SUMMON_DMG);
+        int bi = enemy_boss_index(&W.pools);
+        ok(bi >= 0 && enemy_at(&W.pools, bi)->summon_left >= WARD_SUMMON_COUNT,
+           "and it owes a summon for the damage");
+        int minions = enemy_alive_minions(&W.pools);
+        wstep((int)(SPAWN_WARN_TIME / DT) + 4);
+        oki(enemy_alive_minions(&W.pools) > minions, "which arrives after the telegraph",
+            enemy_alive_minions(&W.pools), minions + 1);
     }
-    wsmash();
-    wstep(2);
-    oki(W.run.boss_line == BOSS_LINE_OPEN, "clearing the wards opens it, and says so",
-        W.run.boss_line, BOSS_LINE_OPEN);
+
+    /* --- the first boundary raises the shield --------------------------------
+       Down to the first third: the wards appear, a hit takes nothing, and
+       the round is counted.
+       첫 3분의 1까지 내려가면 결계핵이 나타나고, 타격은 아무것도 빼앗지 못하며, 회차가 세어집니다. */
+    printf("\n  --- the first boundary ---\n");
+    wfix(0, 8, 8);
+    wfight();
+    {
+        for (int i = 0; i < 400 && enemy_guards_alive(&W.pools) == 0; i++) { whit(20); wstep(1); }
+        oki(enemy_guards_alive(&W.pools) == BOSS_WARDS, "crossing the first third raises a full set of wards",
+            enemy_guards_alive(&W.pools), BOSS_WARDS);
+        oki(W.pools.enemy.boss.cycle == 1, "and counts one cycle", W.pools.enemy.boss.cycle, 1);
+        oki(W.pools.enemy.boss.ward_rounds == 1, "and one ward round", W.pools.enemy.boss.ward_rounds, 1);
+        int before = whp();
+        whit(500);
+        oki(whp() == before, "a warded maw takes nothing", whp(), before);
+        oki(W.run.boss_line == BOSS_LINE_WARD, "and it announces the shield",
+            W.run.boss_line, BOSS_LINE_WARD);
+
+        /* The wards fight: one of the maw's patterns, and only one.
+           결계핵은 싸웁니다. 아귀의 탄막 하나이며 하나뿐입니다. */
+        oki(mon_attack_count(MON_WARD) == 1, "a ward carries exactly one attack",
+            mon_attack_count(MON_WARD), 1);
+        const MonAttack *wa = mon_attack(MON_WARD, 0), *ma = mon_attack(MON_MAW, 0);
+        ok(wa && ma && wa->kind == ma->kind && wa->burst == ma->burst && wa->spread == ma->spread &&
+           wa->shot_gap == ma->shot_gap && wa->shot_speed == ma->shot_speed && wa->damage == ma->damage,
+           "and it is one of the maw's own, copied field for field");
+        int shots_before = enemy_shot_count(&W.pools), fired = 0;
+        for (int i = 0; i < 60 * 8 && !fired; i++) {
+            wstep(1);
+            for (int k = 0; k < enemy_count(&W.pools); k++) {
+                const Enemy *m = enemy_at(&W.pools, k);
+                if (m->active && m->type == MON_WARD && m->state == E_ATTACK) fired = 1;
+            }
+        }
+        ok(fired, "a standing ward attacks the player");
+        (void)shots_before;
+
+        /* Breaking them: protection ends the instant the collapse starts,
+           while the bodies are still there sinking; then they are gone, a
+           height and a fifth down.
+           부수기. 보호는 붕괴가 시작되는 순간 끝나며, 그때 몸은 아직 가라앉는 중입니다. 그 뒤
+           신장의 1.2배 아래에서 사라집니다. */
+        wsmash();
+        int standing = 0, top = -1;
+        for (int k = 0; k < enemy_count(&W.pools); k++) {
+            const Enemy *m = enemy_at(&W.pools, k);
+            if (m->active && m->type == MON_WARD) { standing++; top = k; }
+        }
+        oki(enemy_guards_alive(&W.pools) == 0, "the moment they break, they guard nothing",
+            enemy_guards_alive(&W.pools), 0);
+        oki(standing == BOSS_WARDS, "while every body is still there, collapsing",
+            standing, BOSS_WARDS);
+        before = whp();
+        whit(20);
+        oki(whp() == before - 20, "and a hit on the maw lands at once", whp(), before - 20);
+        float stood = enemy_at(&W.pools, top)->pos.y, lowest = stood;
+        int gone = 0;
+        for (int i = 0; i < (int)((COLLAPSE_HOLD + COLLAPSE_SINK_TIME) / DT) + 30; i++) {
+            wstep(1);
+            const Enemy *m = enemy_at(&W.pools, top);
+            if (!m->active) { gone = 1; break; }
+            if (m->pos.y < lowest) lowest = m->pos.y;
+        }
+        float want = stood - mon_stats(MON_WARD)->height * 1.2f;   /* THE RULE, not the constant: its height and a fifth. 상수가 아니라 규칙: 자기 높이와 그 5분의 1. */
+        printf("      the ward sank to %.2f (floor at %.2f)\n", (double)lowest, (double)want);
+        ok(gone, "a broken ward sinks and is removed");
+        okf(lowest > want - 0.10f && lowest < want + 0.30f,
+            "a height and a fifth below where it stood", lowest, want);
+    }
 
     /* --- three cycles, and not two or four ------------------------------- */
     wfix(0, 8, 8);
@@ -362,8 +454,8 @@ static void world_cases(void) {
         int c1 = wcycle();
         oki(c1 == 1, "one cleared boundary is one cycle", c1, 1);
         ok(enemy_boss_index(&W.pools) >= 0, "and the maw is still standing");
-        oki(enemy_guards_alive(&W.pools) == BOSS_WARDS, "with a fresh set of wards",
-            enemy_guards_alive(&W.pools), BOSS_WARDS);
+        oki(enemy_guards_alive(&W.pools) == 0, "open again once its wards are down",
+            enemy_guards_alive(&W.pools), 0);
 
         int c2 = wcycle();
         oki(c2 == 2, "two boundaries is two cycles", c2, 2);
@@ -371,6 +463,26 @@ static void world_cases(void) {
 
         wcycle();
         ok(enemy_boss_index(&W.pools) < 0, "the third boundary kills it");
+        oki(W.pools.enemy.boss.ward_rounds == 2, "wards were raised exactly twice in the whole fight",
+            W.pools.enemy.boss.ward_rounds, 2);
+        {   /* and the maw goes the way its wards did */
+            int body = -1;
+            for (int k = 0; k < enemy_count(&W.pools); k++)
+                if (enemy_at(&W.pools, k)->active && enemy_at(&W.pools, k)->type == MON_MAW) body = k;
+            ok(body >= 0, "its body is still there, collapsing");
+            float stood = body >= 0 ? enemy_at(&W.pools, body)->pos.y : 0.0f, lowest = stood;
+            int gone = 0;
+            for (int i = 0; body >= 0 && i < (int)((COLLAPSE_HOLD + COLLAPSE_SINK_TIME) / DT) + 30; i++) {
+                wstep(1);
+                const Enemy *m = enemy_at(&W.pools, body);
+                if (!m->active) { gone = 1; break; }
+                if (m->pos.y < lowest) lowest = m->pos.y;
+            }
+            float want = stood - mon_stats(MON_MAW)->height * 1.2f;   /* THE RULE, not the constant: its height and a fifth. 상수가 아니라 규칙: 자기 높이와 그 5분의 1. */
+            ok(gone, "and it sinks away like a ward");
+            okf(lowest > want - 0.10f && lowest < want + 0.30f,
+                "a height and a fifth below where it stood", lowest, want);
+        }
         oki(W.run.boss_line == BOSS_LINE_DIE, "and the death line is posted",
             W.run.boss_line, BOSS_LINE_DIE);
         ok(!W.run.won, "the win waits -- the line has not been read yet");
@@ -417,35 +529,26 @@ static void world_cases(void) {
         ok(W.run.won,  "and then the run is won");
     }
 
-    /* --- the groggy timeout ---------------------------------------------
-       The defence against a fight that cannot end. Wards come back, the health
-       returns to the ceiling it started at, and the cycle does NOT advance.
-       끝날 수 없는 전투에 대한 방어입니다. 결계핵이 돌아오고, 체력은 시작했던 천장으로
-       되돌아가며, 사이클은 오르지 *않습니다.* */
+    /* --- the maw's fire varies ----------------------------------------------
+       Three patterns on its row, chosen by weight: over a stretch of fighting
+       it must start attacks from more than one slot.
+       그 행의 탄막 셋을 가중치로 고릅니다. 한동안 싸우면 둘 이상의 슬롯에서 공격을 시작해야
+       합니다. */
+    printf("\n  --- the maw's patterns ---\n");
     wfix(0, 8, 8);
     wfight();
-    wsmash();
-    wstep(2);
     {
-        int c0 = W.pools.enemy.boss.cycle;
-        whit(60);                                  /* some progress, not a boundary */
-        int hurt_to = whp();
-        ok(hurt_to < mon_stats(MON_MAW)->hp, "the player hurts it during the window");
-
-        /* Wait the window out without firing again. */
-        wstep((int)(BOSS_GROGGY_MAX / DT) + 10);
-
-        oki(W.pools.enemy.boss.cycle == c0,
-            "an expired window does NOT advance the cycle",
-            W.pools.enemy.boss.cycle, c0);
-        oki(whp() == mon_stats(MON_MAW)->hp,
-            "the health returns to the ceiling it started at",
-            whp(), mon_stats(MON_MAW)->hp);
-        oki(enemy_guards_alive(&W.pools) == BOSS_WARDS,
-            "and the wards are back up",
-            enemy_guards_alive(&W.pools), BOSS_WARDS);
-        oki(W.run.boss_line == BOSS_LINE_WARD, "and it says it pulled them back",
-            W.run.boss_line, BOSS_LINE_WARD);
+        oki(mon_attack_count(MON_MAW) >= 2, "the maw carries more than one pattern",
+            mon_attack_count(MON_MAW), 3);
+        unsigned used = 0;
+        int bi = enemy_boss_index(&W.pools);
+        for (int i = 0; i < 60 * 40 && bi >= 0; i++) {
+            wstep(1);
+            const Enemy *m = enemy_at(&W.pools, bi);
+            if (m->state == E_ATTACK && m->atk >= 0) used |= 1u << m->atk;
+        }
+        int distinct = 0; for (unsigned b = used; b; b >>= 1) distinct += (int)(b & 1u);
+        oki(distinct >= 2, "and uses at least two of them in forty seconds", distinct, 2);
     }
 
     /* --- endless mode: waits for its wave, then says nothing -------------
@@ -533,6 +636,12 @@ static void world_cases(void) {
                 air, BOSS_WARDS);
             oki(ground >= BOSS_WARDS, "and enough ground ones",
                 ground, BOSS_WARDS);
+            /* AND ROOM TO ADD. The cap used to equal what the arena placed,
+               so the first slot a mapper added was silently dropped.
+               *그리고 추가할 여지.* 상한이 아레나가 놓은 수와 같았던 탓에, 매퍼가 처음 추가한
+               자리는 조용히 버려졌습니다. */
+            ok(p.enemy.boss.n_cand < BOSS_MAX_CAND,
+               "with room under the cap for a mapper to add slots");
 
             ok(enemy_spawner_count(&p) > 0,
                "and a spawner, so the wave clock has something to count");

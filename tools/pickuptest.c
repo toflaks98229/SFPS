@@ -89,7 +89,7 @@ int main(void) {
     /* --- standing away from anything collects nothing --- */
     {
         int hp = 50, keys = KEY_NONE; Weapon w = armed(5);
-        pickup_update(&g_pools, &L, eye_at(50.0f, 50.0f), &hp, PLAYER_MAX_HP, &w, &keys, 0, DT);
+        pickup_update(&g_pools, &L, eye_at(50.0f, 50.0f), &hp, PLAYER_MAX_HP, &w, &keys, 0, DT, 0);
         ok(hp == 50 && w.ammo[WP_SHOTGUN] == 5, "far from every pickup, nothing is taken");
         ok(pickup_count(&g_pools) == 2, "and none are consumed");
     }
@@ -97,14 +97,14 @@ int main(void) {
     /* --- walking onto the ammo box adds shells and consumes it --- */
     {
         int hp = 50, keys = KEY_NONE; Weapon w = armed(5);
-        pickup_update(&g_pools, &L, eye_at(0.0f, 0.0f), &hp, PLAYER_MAX_HP, &w, &keys, 0, DT);
+        pickup_update(&g_pools, &L, eye_at(0.0f, 0.0f), &hp, PLAYER_MAX_HP, &w, &keys, 0, DT, 0);
         okf(w.ammo[WP_SHOTGUN] == 5 + wp_stats(WP_SHOTGUN)->pickup_ammo,
             "ammo box gives shells", (float)w.ammo[WP_SHOTGUN],
             (float)(5 + wp_stats(WP_SHOTGUN)->pickup_ammo));
         ok(hp == 50, "and does not touch health");
         /* Standing on the now-empty spot gives nothing more. */
         int a2 = w.ammo[WP_SHOTGUN];
-        pickup_update(&g_pools, &L, eye_at(0.0f, 0.0f), &hp, PLAYER_MAX_HP, &w, &keys, 0, DT);
+        pickup_update(&g_pools, &L, eye_at(0.0f, 0.0f), &hp, PLAYER_MAX_HP, &w, &keys, 0, DT, 0);
         ok(w.ammo[WP_SHOTGUN] == a2, "the collected box gives nothing the second time");
     }
 
@@ -114,7 +114,7 @@ int main(void) {
         int hp = PLAYER_MAX_HP, keys = KEY_NONE; Weapon w = armed(5);
 
         /* At full health, the medkit must be ignored and remain. */
-        pickup_update(&g_pools, &L, eye_at(5.0f, 0.0f), &hp, PLAYER_MAX_HP, &w, &keys, 0, DT);
+        pickup_update(&g_pools, &L, eye_at(5.0f, 0.0f), &hp, PLAYER_MAX_HP, &w, &keys, 0, DT, 0);
         ok(hp == PLAYER_MAX_HP, "a medkit at full health heals nothing");
         int live = 0; for (int i = 0; i < pickup_count(&g_pools); i++)
             if (pickup_at(&g_pools, i)->active) live++;
@@ -122,7 +122,7 @@ int main(void) {
 
         /* Hurt, then walk over it: it heals, capped at max. */
         hp = PLAYER_MAX_HP - 10;
-        pickup_update(&g_pools, &L, eye_at(5.0f, 0.0f), &hp, PLAYER_MAX_HP, &w, &keys, 0, DT);
+        pickup_update(&g_pools, &L, eye_at(5.0f, 0.0f), &hp, PLAYER_MAX_HP, &w, &keys, 0, DT, 0);
         ok(hp == PLAYER_MAX_HP, "hurt, the medkit heals but does not overfill");
     }
 
@@ -130,7 +130,7 @@ int main(void) {
     {
         pickup_spawn_level(&g_pools, &L);
         int hp = 50, keys = KEY_NONE; Weapon w = armed(wp_stats(WP_SHOTGUN)->max_ammo);
-        pickup_update(&g_pools, &L, eye_at(0.0f, 0.0f), &hp, PLAYER_MAX_HP, &w, &keys, 0, DT);
+        pickup_update(&g_pools, &L, eye_at(0.0f, 0.0f), &hp, PLAYER_MAX_HP, &w, &keys, 0, DT, 0);
         ok(w.ammo[WP_SHOTGUN] == wp_stats(WP_SHOTGUN)->max_ammo,
            "a full belt ignores the ammo box");
         int live = 0; for (int i = 0; i < pickup_count(&g_pools); i++)
@@ -184,6 +184,20 @@ int main(void) {
 
         ok(pickup_kind_for_n("nosuchitem", 10) < 0,
            "and an unknown name resolves to nothing");
+        /* `mana` is the current name for what the maps still call `ammo`:
+           one kind, two spellings, for every weapon and for the bare box.
+           `mana`는 맵이 아직 `ammo`라 부르는 것의 현재 이름입니다. 모든 무기와 맨 상자에
+           대해 한 종류, 두 표기입니다. */
+        int mana_ok = pickup_kind_for_n("mana", 4) == PK_AMMO;
+        for (int w = 0; w < WP_TYPES; w++) {
+            char a[32], b[32];
+            int n = 0; while (wp_stats(w)->name[n]) { a[n] = b[n] = wp_stats(w)->name[n]; n++; }
+            a[n] = 'm'; a[n+1] = 'a'; a[n+2] = 'n'; a[n+3] = 'a';
+            b[n] = 'a'; b[n+1] = 'm'; b[n+2] = 'm'; b[n+3] = 'o';
+            if (pickup_kind_for_n(a, n + 4) != PK_AMMO_FOR(w) ||
+                pickup_kind_for_n(b, n + 4) != PK_AMMO_FOR(w)) mana_ok = 0;
+        }
+        ok(mana_ok, "'mana' and '<weapon>mana' reach the same kinds as the 'ammo' spellings");
 
         /* The length is honoured, not the terminator: the decoder hands this a
            slice of one big text blob, so a resolver that ran to the NUL would
@@ -240,7 +254,7 @@ int main(void) {
             char label[80];
 
             pickup_update(&g_pools, &L, eye_at(0.0f, 0.0f), &hp, PLAYER_MAX_HP,
-                          &w, &keys, power, DT);
+                          &w, &keys, power, DT, 0);
             snprintf(label, sizeof label,
                      "the %s starts its own clock and no other", ART[a].name);
             okf(power[ART[a].which] == PLAYER_POWER_TIME, label,
@@ -256,7 +270,7 @@ int main(void) {
             /* Half spent, then the twin is walked over. */
             power[ART[a].which] = PLAYER_POWER_TIME * 0.5f;
             pickup_update(&g_pools, &L, eye_at(4.0f, 0.0f), &hp, PLAYER_MAX_HP,
-                          &w, &keys, power, DT);
+                          &w, &keys, power, DT, 0);
             snprintf(label, sizeof label,
                      "and a second %s restarts rather than adds", ART[a].name);
             okf(power[ART[a].which] == PLAYER_POWER_TIME, label,

@@ -89,6 +89,12 @@ void pickup_spawn_level(Pools *pl, const Level *l) {
            바깥면으로 답합니다. */
         if (!level_ground(l, x, z, e->y * 0.01f, 1e9f, &f, &c)) continue;
 
+        /* A box for a weapon that takes no ammo (max_ammo 0) is not placed: nothing could ever
+           pick it up, so it would sit on the floor for the whole level.
+           탄약을 쓰지 않는 무기(max_ammo 0)의 상자는 놓지 않습니다. 아무도 주울 수 없으니 레벨
+           내내 바닥에 남게 됩니다. */
+        if (PK_AMMO_WEAPON(kind) >= 0 && wp_stats(PK_AMMO_WEAPON(kind))->max_ammo <= 0) continue;
+
         if (pl->pickup.count >= PICKUP_MAX) { DIAG(DIAG_PICKUP_CAP); continue; }
 
         Pickup *p = &pl->pickup.p[pl->pickup.count++];
@@ -271,7 +277,7 @@ static int fly(Pools *pl, Pickup *p, const Level *l, float dt) {
 
 void pickup_update(Pools *pl, const Level *l, v3 player_eye,
                    int *health, int health_max,
-                   Weapon *w, int *keys, float *power, float dt) {
+                   Weapon *w, int *keys, float *power, float dt, int *took) {
     /* The player's feet, so a pickup at floor level is compared like with
        like rather than against the eye 1.7 m up. */
     float feet_y = player_eye.y - PLAYER_EYE;
@@ -345,6 +351,11 @@ void pickup_update(Pools *pl, const Level *l, v3 player_eye,
                도는 것을 거절하는 검사는 플레이어를 보이지만 주울 수 없는 아티팩트
                곁에 붙들어 둡니다. */
             power[p->kind - PK_POWER0] = PLAYER_POWER_TIME;
+            /* Told to the caller so the HUD can name it. `+ 1` because 0 is
+               "nothing was picked up" and ::PW_QUAD is 0.
+               호출자에게 알려 HUD가 이름을 부를 수 있게 합니다. 0이 "주운 것 없음"이고
+               ::PW_QUAD가 0이므로 `+ 1`입니다. */
+            if (took) *took = p->kind - PK_POWER0 + 1;
             audio_play("part", 88);
         } else if (p->kind == PK_HEALTH) {
             if (*health >= health_max) continue;
@@ -393,7 +404,7 @@ void pickup_update(Pools *pl, const Level *l, v3 player_eye,
             w->owned[gw] = 1;
             w->ammo[gw] += S->start_ammo;
             if (w->ammo[gw] > S->max_ammo) w->ammo[gw] = S->max_ammo;
-            if (!had) w->cur = gw;
+            if (!had) wp_swap_to(w, gw);
             audio_play("pammo", 90);
         } else {
             /* An ammo box, for whichever belt its kind names. */
@@ -478,10 +489,11 @@ static int name_eq_n(const char *a, int n, const char *b) {
  * Three families, checked in the order a name could be ambiguous in:
  *
  *   health              the medkit
- *   ammo                the shotgun's box, under the name every level already
- *                       uses -- renaming it would empty the authored maps
- *   <weapon>ammo        that weapon's box, e.g. "rapidammo"
- *   <weapon>            the weapon itself, e.g. "axe"
+ *   mana                the shotgun's mana; `ammo` is the same kind under the
+ *                       name the authored maps carry
+ *   <weapon>mana        that weapon's mana, e.g. "rapidmana"; `<weapon>ammo`
+ *                       is accepted as the older spelling
+ *   <weapon>            the weapon's magic circle, e.g. "axe"
  *
  * The weapon families are derived from ::WEAPONS by walking it, so a weapon
  * added to that table can be placed in a level immediately -- there is no
@@ -507,17 +519,21 @@ static int name_eq_n(const char *a, int n, const char *b) {
 int pickup_kind_for_n(const char *k, int len) {
     if (name_eq_n(k, len, "health")) return PK_HEALTH;
     if (name_eq_n(k, len, "ammo"))   return PK_AMMO;
+    if (name_eq_n(k, len, "mana"))   return PK_AMMO;
     if (name_eq_n(k, len, "quad"))   return PK_POWER0 + PW_QUAD;
     if (name_eq_n(k, len, "shadow")) return PK_POWER0 + PW_SHADOW;
     if (name_eq_n(k, len, "aegis"))  return PK_POWER0 + PW_AEGIS;
 
     for (int w = 0; w < WP_TYPES; w++) {
         const char *n = wp_stats(w)->name;
-
-        /* "<name>ammo", compared without building a string. */
+        /* "<name>mana" and "<name>ammo", compared without building a string.
+           `mana` is the current name; `ammo` is what the authored maps carry.
+           "<이름>mana"와 "<이름>ammo"를 문자열을 만들지 않고 비교합니다. `mana`가 현재
+           이름이고 `ammo`는 저작된 맵이 담고 있는 이름입니다. */
         int i = 0;
         while (i < len && n[i] && k[i] == n[i]) i++;
-        if (!n[i] && name_eq_n(k + i, len - i, "ammo")) return PK_AMMO_FOR(w);
+        if (!n[i] && (name_eq_n(k + i, len - i, "mana") ||
+                      name_eq_n(k + i, len - i, "ammo"))) return PK_AMMO_FOR(w);
     }
     for (int w = 0; w < WP_TYPES; w++)
         if (name_eq_n(k, len, wp_stats(w)->name)) return PK_WEAPON_FOR(w);

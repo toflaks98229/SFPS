@@ -45,6 +45,7 @@
 #include "proj.h"   /* the player's grenades and bolts */
 #include "enemy.h"
 #include "pickup.h"
+#include "weapon.h"   /* wp_stats, WPN_SPIN_RATE: a floor circle turns at its wand rate */
 #include "sprite.h"
 #include "font.h"
 #include "post.h"     /* post_begin/post_end/post_size -- this file drives the pass */
@@ -1231,7 +1232,6 @@ static void scene_lights(const World *w, v3 eye) {
 #define PICKUP_NUDGE    0.03f
 
 #define PICKUP_BOB      0.06f   /* bob amplitude, metres */
-#define PICKUP_BOB_RATE 2.2f
 
 /** @brief Where an item's billboard sits: lifted clear of the floor, and bobbing. / 아이템 빌보드가 놓이는 자리. 바닥에서 들리고 위아래로 움직입니다. */
 static v3 pickup_centre(const Pickup *p) {
@@ -1362,6 +1362,21 @@ static v3 pickup_centre(const Pickup *p) {
    워시가 곧 그 어둡게 하기입니다. ::scene_draw_title을 참조하십시오.
    세 오프셋은 ::menu_title_y에서 *아래로* 잰 값입니다. 그곳이 menu.c가 현재 화면의 머리글을 두는
    자리이며, 타이틀 화면은 정확히 이 블록을 위해 그 간격을 넓힙니다. */
+/* THE WIDTH THAT CONSTRAINS THESE IS THE WINDOW'S, not the pixelise pass's.
+   The UI runs after post_end, so vw here is the client area -- 1280 -- and not
+   the 426 that GFX_PIXEL_CHUNKY renders the world into. Worth writing down
+   because the 426 is the number that looks relevant and is not: the world is
+   pixelised, the text over it is not.
+   The name is seven syllables and a space. A syllable advances FONT_KW where a
+   letter advances FONT_CW, so the line is 62 glyph pixels -- 558 at this size,
+   44% of the window, with the English subtitle beneath it at 216.
+   이 값들을 제약하는 너비는 픽셀화 패스의 것이 아니라 *창*의 것입니다. UI는 post_end 뒤에
+   실행되므로 이곳의 vw는 클라이언트 영역인 1280이며, GFX_PIXEL_CHUNKY가 월드를 렌더링하는
+   426이 아닙니다. 적어 두는 이유는 426이 관련 있어 *보이지만* 아니기 때문입니다. 픽셀화되는
+   것은 월드이고 그 위의 텍스트는 아닙니다.
+   이름은 일곱 음절과 공백 하나입니다. 음절은 FONT_CW가 아니라 FONT_KW만큼 전진하므로 줄의
+   너비는 글리프 픽셀로 62, 이 크기에서 558이며 창의 44%입니다. 그 아래 영문 부제는
+   216입니다. */
 #define TITLE_DIM       0.70f
 #define TITLE_SIZE      9.0f
 #define TITLE_SUB_SIZE  1.8f
@@ -1473,6 +1488,8 @@ void scene_init(Scene *s, Weapon *w) {
        버퍼는 할당 대신 지오메트리를 잃습니다. 보고되기는 하지만 여전히 월드에 뚫린
        구멍입니다. */
     mb_init(&s->enemy_buf,  ENEMY_MAX * 6);
+    mb_init(&s->beam_buf,   ENEMY_MAX * 3 * 6);   /* three ribbons a ward */
+    mb_init(&s->emb_buf,    PICKUP_MAX * 2 * 6);  /* ring and gem a weapon */
     mb_init(&s->pickup_buf, PICKUP_MAX * 6);
     mb_init(&s->shot_buf,   ENEMY_MAX_SHOTS * SHOT_QUADS * 6);
     /* 1024 vertices = 170 glyphs, because text_run draws a whole line through
@@ -1489,6 +1506,8 @@ void scene_init(Scene *s, Weapon *w) {
     mb_init(&s->level_buf,  LEVEL_BUF_VERTS);
 
     s->enemy_mesh  = (Mesh){0};
+    s->beam_mesh   = (Mesh){0};
+    s->emb_mesh    = (Mesh){0};
     s->pickup_mesh = (Mesh){0};
     s->shot_mesh   = (Mesh){0};
     s->hud_mesh    = (Mesh){0};
@@ -1510,6 +1529,8 @@ void scene_init(Scene *s, Weapon *w) {
 void scene_free(Scene *s) {
     /* mb_free is safe on an already-freed buffer, so this is safe twice. */
     mb_free(&s->enemy_buf);
+    mb_free(&s->beam_buf);
+    mb_free(&s->emb_buf);
     mb_free(&s->pickup_buf);
     mb_free(&s->shot_buf);
     mb_free(&s->hud_buf);
@@ -1682,7 +1703,7 @@ void scene_draw_enemies(Scene *s, const Pools *pl, mat4 vp, v3 eye, v3 cam_right
 
         /* Frame from state, walk cycle from the animation clock. */
         int fr = SPR_WALK0;
-        if (m->state == E_DEAD)        fr = SPR_DEAD;
+        if (m->state == E_DEAD)        fr = (S->flags & MON_COLLAPSES) ? SPR_WALK0 : SPR_DEAD;
         /* ::E_HURT NO LONGER PICKS A FRAME. It used to select ::SPR_HURT, and
            no creature has a drawing for it -- so the one moment a monster is
            most worth looking at was the one moment it turned back into the
@@ -1853,6 +1874,15 @@ void scene_draw_enemies(Scene *s, const Pools *pl, mat4 vp, v3 eye, v3 cam_right
                     * (HURT_SHAKE_PIXELS / (float)SPR_CW) * w;
             centre = v3add(centre, v3scale(cam_right, k));
         }
+        /* THE COLLAPSE SHUDDERS, twice the flinch and for the whole sequence:
+           the body is coming apart, not being hit.
+           붕괴는 흔들립니다. 경직의 두 배로, 순서 내내입니다. 몸이 부서지는 중이지 맞는 중이
+           아닙니다. */
+        if (m->state == E_DEAD && (S->flags & MON_COLLAPSES)) {
+            float k = sinf(m->anim * HURT_SHAKE_RATE)
+                    * (2.0f * HURT_SHAKE_PIXELS / (float)SPR_CW) * w;
+            centre = v3add(centre, v3scale(cam_right, k));
+        }
         mb_billboard_uv(&s->enemy_buf, centre, cam_right, v3f(0,1,0),
                         w, h, u0, v0, u1, v1);
     }
@@ -1880,7 +1910,9 @@ void scene_draw_enemies(Scene *s, const Pools *pl, mat4 vp, v3 eye, v3 cam_right
         if (!m->active) continue;
         float flash = m->flash > 0.0f ? m->flash : 0.0f;
         float shade = 1.0f;
-        if (m->state == E_DEAD) shade = 0.35f + 0.65f * (m->timer / CORPSE_FADE);
+        if (m->state == E_DEAD)
+            shade = (mon_stats(m->type)->flags & MON_COLLAPSES)
+                  ? 1.0f : 0.35f + 0.65f * (m->timer / CORPSE_FADE);
         rd_color(shade, shade, shade, flash);
         glDrawArrays(GL_TRIANGLES, q * 6, 6);
         q++;
@@ -1888,6 +1920,67 @@ void scene_draw_enemies(Scene *s, const Pools *pl, mat4 vp, v3 eye, v3 cam_right
     glEnable(GL_CULL_FACE);
 }
 
+
+void scene_draw_beams(Scene *s, const Pools *pl, mat4 vp, v3 eye) {
+    int bi = enemy_boss_index(pl);
+    if (bi < 0) return;
+    const Enemy   *boss = enemy_at(pl, bi);
+    const MonType *BS   = mon_stats(boss->type);
+    v3 to = v3f(boss->pos.x, boss->pos.y + BS->height * 0.5f, boss->pos.z);
+
+    static const float W[3] = { BEAM_GLOW_W, BEAM_HALO_W, BEAM_CORE_W };
+    int n = enemy_count(pl), live = 0;
+    mb_reset(&s->beam_buf);
+    for (int i = 0; i < n; i++) {
+        const Enemy *m = enemy_at(pl, i);
+        if (!m->active || m->state == E_DEAD) continue;
+        const MonType *S = mon_stats(m->type);
+        if (!(S->flags & MON_GUARD)) continue;
+
+        /* The gem, as the drawing places it; the top for art with no mark.
+           그림이 놓은 보석. 표식 없는 아트는 꼭대기. */
+        float au = 0.5f, av = 1.0f;
+        (void)sprite_anchor(m->type, &au, &av);
+        v3 from = v3f(m->pos.x, m->pos.y + S->height * av, m->pos.z);
+
+        for (int t = 0; t < 3; t++) mb_ribbon(&s->beam_buf, from, to, eye, W[t], 1.0f);
+        live++;
+    }
+    if (!live) return;
+
+    mesh_upload(&s->beam_mesh, &s->beam_buf, 1);
+    rd_mode(RD_FLAT);
+    rd_mvp(vp);
+    glDisable(GL_CULL_FACE);
+    glDepthMask(GL_FALSE);          /* glows do not occlude */
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+    glBindVertexArray(s->beam_mesh.vao);
+
+    /* The ward's "warded" spark, cold and cooling, but a shade deeper than
+       that effect at the core: additive over stone, a near-white core came out
+       of the post pass as a white line, and white is the boss's hit-flash. Blue
+       that stays blue after the pass is what says "the ward's" and not "hit".
+       Pulse from the boss's clock so every beam breathes together.
+       결계석의 "warded" 불꽃처럼 차갑고 식어 가는 색이되, 심은 그 효과보다 한 단계 깊습니다.
+       돌 위에 가산하면 거의 흰 심은 후처리를 지나 흰 선으로 나왔고, 흰색은 보스의 피격
+       섬광입니다. 후처리 뒤에도 파랑으로 남는 파랑이 "피격"이 아니라 "결계석의 것"이라고
+       말합니다. 보스의 시계로 맥동하므로 모든 빔이 함께 숨 쉽니다. */
+    float pulse = 0.75f + 0.25f * sinf(boss->anim * BEAM_PULSE_RATE);
+    const float col[3][4] = {
+        {  40/255.0f, 100/255.0f, 220/255.0f, 0.16f * pulse },
+        {  60/255.0f, 140/255.0f, 255/255.0f, 0.35f * pulse },
+        { 120/255.0f, 190/255.0f, 255/255.0f, 0.70f },
+    };
+    for (int k = 0; k < live; k++)
+        for (int t = 0; t < 3; t++) {
+            rd_color(col[t][0], col[t][1], col[t][2], col[t][3]);
+            glDrawArrays(GL_TRIANGLES, (k * 3 + t) * 6, 6);
+        }
+    glDisable(GL_BLEND);
+    glDepthMask(GL_TRUE);
+    glEnable(GL_CULL_FACE);
+}
 
 void scene_draw_pickups(Scene *s, const Pools *pl, mat4 vp, v3 eye, v3 cam_right) {
     DIAG_WANT_WORLD_PASS();
@@ -1898,6 +1991,9 @@ void scene_draw_pickups(Scene *s, const Pools *pl, mat4 vp, v3 eye, v3 cam_right
     for (int i = 0; i < pn; i++) {
         const Pickup *p = pickup_at(pl, i);
         if (!p->active) continue;
+        /* A weapon is its magic circle, drawn by ::scene_draw_weapon_pickups.
+           무기는 그 마법진이며 ::scene_draw_weapon_pickups가 그립니다. */
+        if (p->kind >= PK_WEAPON0 && p->kind <= PK_WEAPON_LAST) continue;
         float u0, v0, u1, v1;
         pickup_uv(p->kind, &u0, &v0, &u1, &v1);
         /* NUDGED TOWARD THE EYE, and the reason is a corpse. A monster's drop
@@ -1954,6 +2050,55 @@ void scene_draw_pickups(Scene *s, const Pools *pl, mat4 vp, v3 eye, v3 cam_right
     glBindTexture(GL_TEXTURE_2D, s->pickup_tex);
     glDisable(GL_CULL_FACE);
     mesh_draw(&s->pickup_mesh);
+    glEnable(GL_CULL_FACE);
+}
+
+void scene_draw_weapon_pickups(Scene *s, const Pools *pl, mat4 vp, v3 eye, v3 cam_right) {
+    int pn = pickup_count(pl), n = 0;
+    mb_reset(&s->emb_buf);
+    for (int i = 0; i < pn; i++) {
+        const Pickup *p = pickup_at(pl, i);
+        if (!p->active) continue;
+        if (p->kind < PK_WEAPON0 || p->kind > PK_WEAPON_LAST) continue;
+        int w = p->kind - PK_WEAPON0;
+
+        v3 pc = pickup_centre(p);
+        {
+            v3 toward = v3sub(eye, pc);
+            float d = v3len(toward);
+            if (d > 1e-4f) pc = v3add(pc, v3scale(toward, PICKUP_NUDGE / d));
+        }
+
+        /* The ring's angle: the wand's idle rate for this weapon, on the
+           pickup's own clock. 고리의 각도. 이 무기의 지팡이 휴지 속도를 아이템 자신의
+           시계에 곱한 값입니다. */
+        float cd = wp_stats(w)->cooldown;
+        if (cd < 0.001f) cd = 0.001f;
+        float a = p->anim * (WPN_SPIN_RATE / cd);
+        float c = cosf(a), sn = sinf(a);
+        v3 up = v3f(0, 1, 0);
+        v3 r_rot = v3add(v3scale(cam_right, c), v3scale(up, sn));
+        v3 u_rot = v3add(v3scale(cam_right, -sn), v3scale(up, c));
+
+        float u0, v0, u1, v1;
+        emblem_uv(0, w, &u0, &v0, &u1, &v1);      /* the ring turns */
+        mb_billboard_uv(&s->emb_buf, pc, r_rot, u_rot,
+                        PICKUP_EMBLEM_SIZE, PICKUP_EMBLEM_SIZE, u0, v0, u1, v1);
+        emblem_uv(1, w, &u0, &v0, &u1, &v1);      /* the gem does not */
+        mb_billboard_uv(&s->emb_buf, pc, cam_right, up,
+                        PICKUP_EMBLEM_SIZE, PICKUP_EMBLEM_SIZE, u0, v0, u1, v1);
+        n++;
+    }
+    if (!n) return;
+    mesh_upload(&s->emb_mesh, &s->emb_buf, 1);
+    rd_mode(RD_SPRITE);
+    rd_mvp(vp);
+    rd_eye(eye);
+    rd_color(1.0f, 1.0f, 1.0f, 0.0f);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, emblem_atlas());
+    glDisable(GL_CULL_FACE);
+    mesh_draw(&s->emb_mesh);
     glEnable(GL_CULL_FACE);
 }
 
@@ -2215,6 +2360,39 @@ static void ui_end(void) {
     glEnable(GL_CULL_FACE);
 }
 
+/* --- what the player calls their weapons --------------------------------
+ *
+ * SEPARATE FROM ::WeaponType::name, which is an identifier: levels place
+ * `item_shotgun`, loot.txt names `shotgun`, and pickup.c matches on it. This
+ * is the word on screen, and the two must be free to differ -- the axe is a
+ * circular saw to look at and `axe` everywhere a name is typed.
+ *
+ * Falls back to the identifier for a row nobody has named here, so a weapon
+ * added to the table shows up rather than vanishing from the roster.
+ *
+ * *::WeaponType::name과 별개입니다.* 그쪽은 식별자입니다. 레벨은 `item_shotgun`을 놓고
+ * loot.txt는 `shotgun`이라 적으며 pickup.c가 그것으로 대조합니다. 이것은 화면에 나오는
+ * 낱말이고, 둘은 달라질 수 있어야 합니다. 도끼는 보기에 원형톱이지만 이름을 적는 곳에서는
+ * 어디서나 `axe`입니다.
+ * 이곳에서 아무도 이름 붙이지 않은 행은 식별자로 대체되므로, 표에 추가된 무기는 목록에서
+ * 사라지지 않고 나타납니다. */
+static const char *weapon_label(int type) {
+    static const char *const KO[WP_TYPES] = {
+        "산탄",     /* WP_SHOTGUN */
+        "유탄",     /* WP_GRENADE */
+        "연사",     /* WP_RAPID   */
+        "원형톱",   /* WP_AXE     */
+    };
+    if (type < 0 || type >= WP_TYPES) return "";
+    return KO[type] ? KO[type] : wp_stats(type)->name;
+}
+
+/* Defined with the roster helpers below; the HUD calls it first. Without this the tool build,
+   which compiles with -Wall -Wextra, rejects the implicit declaration.
+   아래 로스터 헬퍼들과 함께 정의되며 HUD가 먼저 호출합니다. 이것이 없으면 -Wall -Wextra로
+   컴파일하는 툴 빌드가 암묵 선언을 거부합니다. */
+static const char *weapon_label(int type);
+
 void scene_draw_hud(Scene *s, int vw, int vh, const Level *l,
                     const Player *p, const Weapon *w) {
     DIAG_WANT_UI_PASS();
@@ -2310,67 +2488,32 @@ void scene_draw_hud(Scene *s, int vw, int vh, const Level *l,
     text_run(s, HUD_MARGIN, vh - HUD_BASELINE, HUD_TEXT_SIZE, hp,
              1.0f - lo * 0.6f, 0.25f + lo * 0.7f, 0.25f, 1.0f);
 
-    /* --- which artifact is running ----------------------------------------
+    /* --- the artifacts are not a row here any more ------------------------
      *
-     * ENGLISH
-     * -------
-     * THE NAME, IN ITS OWN COLOUR, which is what the keycards and the weapon
-     * roster a few rows up already do. A powerup joining that column reads as
-     * one more thing the player is carrying rather than as a new kind of
-     * readout, and it costs no atlas cell and no icon art.
+     * They were three names in a column of names, next to the keys and the
+     * roster. What they are is a rule that runs for thirty seconds, and a name
+     * in a corner says which one is running without ever saying what it does.
+     * ::scene_draw_pickup_line names it AND describes it, once, at the moment
+     * it is taken; the screen wash goes on saying how long is left, by ending.
      *
-     * NO CLOCK. There was one -- three digits counting down, and they were
-     * placed a row and a bit above the health, which at ::HUD_TEXT_SIZE is on
-     * top of it: the keys sit at 7.4 and the weapons at 9.0, and 1.15 was not
-     * a row at all. But the number was the wrong instrument as well as in the
-     * wrong place. Quake does not count powerups down; it shows the item and
-     * TINTS THE SCREEN, so the information arrives peripherally and the player
-     * never looks away from the fight to read it. A digit demands a glance,
-     * and a glance is the thing a thirty-second window cannot afford.
-     *
-     * The wash below is what actually says how long is left, by ending.
-     *
-     * 한국어
-     * ------
-     * *자기 색의 이름*이며, 몇 줄 위의 열쇠와 무기 목록이 이미 하는 일입니다. 파워업이 그 열에
-     * 합류하면 새로운 종류의 계기판이 아니라 플레이어가 지니고 있는 것 하나 더로 읽히고,
-     * 아틀라스 칸도 아이콘 그림도 들지 않습니다.
-     *
-     * *시계는 없습니다.* 있었습니다. 세어 내려가는 숫자였고, 체력보다 한 줄 남짓 위에
-     * 놓였는데 ::HUD_TEXT_SIZE 단위에서 그것은 체력 *위*입니다. 열쇠가 7.4, 무기가 9.0이며
-     * 1.15는 애초에 한 줄이 아니었습니다. 다만 그 숫자는 자리만 틀린 것이 아니라 도구 자체가
-     * 틀렸습니다. 퀘이크는 파워업을 세어 내리지 않습니다. 항목을 보여 주고 *화면을 물들입니다*.
-     * 그래서 정보가 주변시로 도착하고 플레이어는 그것을 읽으려고 전투에서 눈을 떼지 않습니다.
-     * 숫자는 시선을 요구하며, 30초짜리 창이 감당할 수 없는 것이 바로 그 한 번의 시선입니다.
-     *
-     * 아래의 물듦이 남은 시간을 실제로 말해 줍니다. 끝남으로써.
-     */
-    {
-        static const char *const PW_NAME[PW_KINDS] = { "quad", "shadow", "aegis" };
-        static const float PW_COL[PW_KINDS][3] = {
-            { 0.45f, 0.65f, 1.00f },   /* PW_QUAD   */
-            { 0.65f, 0.45f, 0.95f },   /* PW_SHADOW */
-            { 1.00f, 0.80f, 0.35f },   /* PW_AEGIS  */
-        };
-        float x = HUD_MARGIN;
-        float y = vh - HUD_BASELINE - HUD_TEXT_SIZE * 5.8f;
-        for (int i = 0; i < PW_KINDS; i++) {
-            if (p->power[i] <= 0.0f) continue;
-            text_run(s, x, y, 1.0f, PW_NAME[i],
-                     PW_COL[i][0], PW_COL[i][1], PW_COL[i][2], 1.0f);
-            x += font_width(1.0f, PW_NAME[i]) + 10.0f;
-        }
+     * *아티팩트는 더 이상 이곳의 한 줄이 아닙니다.* 열쇠와 무기 목록 옆, 이름들의 열에 놓인
+     * 이름 셋이었습니다. 그것들의 정체는 30초 동안 도는 규칙이며, 구석의 이름은 어느 것이
+     * 도는지 말할 뿐 무엇을 하는지는 결코 말하지 않습니다. ::scene_draw_pickup_line이 주운
+     * 순간에 이름과 설명을 한 번에 말하고, 화면 색조가 끝남으로써 남은 시간을 계속 말합니다. */
+    /* Ammo, bottom-right, and red when the gun is empty. Nothing at all for a weapon with no
+       belt (max_ammo 0): a permanent 0 would read as empty.
+       탄띠가 없는 무기(max_ammo 0)는 아무것도 그리지 않습니다. 영원한 0은 비었다고 읽힙니다. */
+    if (wp_stats(w->cur)->max_ammo > 0) {
+        char am[16];
+        am[txt_append_int(am, sizeof(am), 0, w->ammo[w->cur])] = 0;
+        float aw = font_width(HUD_TEXT_SIZE, am);
+        if (w->ammo[w->cur] == 0)
+            text_run(s, vw - HUD_MARGIN - aw, vh - HUD_BASELINE, HUD_TEXT_SIZE, am,
+                     0.9f, 0.2f, 0.2f, 1.0f);
+        else
+            text_run(s, vw - HUD_MARGIN - aw, vh - HUD_BASELINE, HUD_TEXT_SIZE, am,
+                     0.9f, 0.85f, 0.4f, 1.0f);
     }
-    /* Ammo, bottom-right, and red when the gun is empty. */
-    char am[16];
-    am[txt_append_int(am, sizeof(am), 0, w->ammo[w->cur])] = 0;
-    float aw = font_width(HUD_TEXT_SIZE, am);
-    if (w->ammo[w->cur] == 0)
-        text_run(s, vw - HUD_MARGIN - aw, vh - HUD_BASELINE, HUD_TEXT_SIZE, am,
-                 0.9f, 0.2f, 0.2f, 1.0f);
-    else
-        text_run(s, vw - HUD_MARGIN - aw, vh - HUD_BASELINE, HUD_TEXT_SIZE, am,
-                 0.9f, 0.85f, 0.4f, 1.0f);
 
     /* --- the roster, above the ammo -------------------------------------
      *
@@ -2399,7 +2542,7 @@ void scene_draw_hud(Scene *s, int vw, int vh, const Level *l,
         float x = HUD_MARGIN;
         float y = vh - HUD_BASELINE - HUD_TEXT_SIZE * 9.0f;
         for (int i = 0; i < WP_TYPES; i++) {
-            const char *nm = wp_stats(i)->name;
+            const char *nm = weapon_label(i);
             float wd = font_width(1.0f, nm);
             if (!w->owned[i])
                 text_run(s, x, y, 1.0f, nm, 0.30f, 0.32f, 0.36f, 1.0f);
@@ -2551,8 +2694,10 @@ void scene_draw_win(Scene *s, int vw, int vh, const Player *p, const Weapon *w,
     char line[64];
     int  n = txt_append_str(line, sizeof(line), 0, "health ");
     n = txt_append_int(line, sizeof(line), n, p->health);
-    n = txt_append_str(line, sizeof(line), n, "   ammo ");
-    n = txt_append_int(line, sizeof(line), n, w->ammo[w->cur]);
+    if (wp_stats(w->cur)->max_ammo > 0) {
+        n = txt_append_str(line, sizeof(line), n, "   ammo ");
+        n = txt_append_int(line, sizeof(line), n, w->ammo[w->cur]);
+    }
     line[n] = 0;
     float lw = font_width(WIN_STAT_SIZE, line);
     text_run(s, (vw - lw) * 0.5f, vh * 0.5f + 4.0f, WIN_STAT_SIZE, line,
@@ -2745,12 +2890,12 @@ void scene_draw_title(Scene *s, int vw, int vh, float t, int best) {
     float top = menu_title_y(vw, vh);
     float cx  = vw * 0.5f;
 
-    const char *title = "SFPS";
+    const char *title = "마법소녀 대소동";
     float tw = font_width(TITLE_SIZE, title);
     text_run(s, cx - tw * 0.5f, top, TITLE_SIZE, title,
              1.0f, 0.82f, 0.28f, k);
 
-    const char *sub = "a shooter that fits on a floppy disk";
+    const char *sub = "MAGICIAN GIRL MAYHEM";
     float sw = font_width(TITLE_SUB_SIZE, sub);
     text_run(s, cx - sw * 0.5f, top + TITLE_SUB_DY, TITLE_SUB_SIZE, sub,
              0.66f, 0.64f, 0.60f, k);
@@ -2820,6 +2965,23 @@ static void draw_menu_notices(Scene *s, int vw, int vh, float cx, int rows) {
 '으로 나누는 래퍼는 줄바꿈 위치를 정하는 두 번째 장소가 됩니다. */
     if (menu_screen() == MENU_CREDITS) {
         static const char *NOTICE[] = {
+            /* THE GAME ITSELF, FIRST. Everything below this is somebody
+               else's licence being honoured; this screen is titled CREDITS
+               and had nobody in it. Three lines rather than six, because
+               ::NOTICE_ROWS is 25 and the table was 97 long: a fourth column
+               holds 100, and the hundred-and-first would open a fifth that
+               the shrink-to-fit below would pay for in type size -- on a
+               screen whose whole obligation is that it stays legible.
+               *게임 자신이 먼저입니다.* 이 아래는 전부 다른 사람의 라이선스를 지키는
+               것이며, CREDITS라는 제목의 이 화면에 정작 사람이 없었습니다. 여섯 줄이
+               아니라 세 줄인 이유는 ::NOTICE_ROWS가 25이고 표가 97줄이었기 때문입니다.
+               넷째 단이 100까지 담고, 101번째 줄은 다섯째 단을 열며, 아래의 축소 맞춤이
+               그 값을 글자 크기로 치릅니다. 읽을 수 있어야 한다는 것이 의무의 전부인
+               화면에서 말입니다. */
+            "SFPS by toflaks98229 and 4분의1 (QU4RTER)",
+            "github.com/toflaks98229   q4t4q1@gmail.com",
+            "",
+
             "Artwork from the Freedoom project.",
             "Copyright (c) 2001-2024 Contributors to",
             "the Freedoom project. All rights reserved.",
@@ -2952,14 +3114,18 @@ static void draw_menu_notices(Scene *s, int vw, int vh, float cx, int rows) {
            스스로 움직입니다. */
         static const int NOTICE_ROWS = 25;
 
-        /* Where each work's attribution begins. Two numbers rather than a
-           rule that inspects the text, because "the three lines that name a
-           project" is not something a line can be asked about -- the same
-           argument ::NOTICE_ROWS is not derived from the words either.
+        /* Where each attribution begins. Numbers rather than a rule that
+           inspects the text, because "the three lines that name a project" is
+           not something a line can be asked about -- the same argument
+           ::NOTICE_ROWS is not derived from the words either.
+           THREE NOW, AND THE LAST TWO MOVED: the game's own credit took the
+           first three lines, so Freedoom went 0 -> 3 and LibreQuake 48 -> 51.
+           Anything inserted above a lead shifts it, which is the cost of
+           indices and is why they sit ten lines from the table they index.
            각 저작물의 귀속 표시가 시작되는 곳입니다. 텍스트를 들여다보는 규칙이 아니라 숫자
            둘인 이유는, "프로젝트를 지목하는 세 줄"이 한 줄에게 물어볼 수 있는 것이 아니기
            때문입니다. ::NOTICE_ROWS도 단어에서 유도하지 않는 것과 같은 논거입니다. */
-        static const int NOTICE_LEAD[] = { 0, 48 };
+        static const int NOTICE_LEAD[] = { 0, 3, 51 };
 
         const int n = (int)(sizeof(NOTICE) / sizeof(NOTICE[0]));
 
@@ -3199,11 +3365,16 @@ void scene_draw_story(Scene *s, int vw, int vh, const StoryPage *page,
  * for its reason: font_text draws a line at a time, so lines live as lines
  * rather than as one string with newlines in it.
  *
- * ENGLISH ONLY, and that is a constraint rather than a choice. font.c's atlas
- * is `FIRST 32` through `COUNT 96` -- printable ASCII and nothing else -- so
- * there is no Hangul glyph to draw with. Every string this game puts on screen
- * is in the same position. Korean story text needs a font change, which is a
- * larger piece of work than the fight these lines belong to.
+ * KOREAN, AND IN C RATHER THAN IN story.txt. The font change these lines used
+ * to be waiting on happened -- font.c composes Hangul now -- so the constraint
+ * is gone and what is left is the placement. These stay here because they are
+ * beats in the fight, raised by step_boss on a state change, not pages a
+ * player reads and dismisses; story.txt is for the second kind.
+ *
+ * Being in C is also what makes them work at all right now. A string here goes
+ * into .rdata as the UTF-8 the compiler read; a string in story.txt goes
+ * through bake.ps1, which had to be taught to carry bytes over 127 before the
+ * shipped build could say any of this.
  *
  * Kept short for a second reason: each is centred at ::HUD_NOTICE_SIZE, and a
  * line long enough to reach the viewport edges at 2.2 would have to shrink,
@@ -3214,21 +3385,88 @@ void scene_draw_story(Scene *s, int vw, int vh, const StoryPage *page,
  * *그리기 곁의 표*이며, ::draw_menu_notices 자신의 배치이자 그 이유를 따릅니다. font_text는 한
  * 번에 한 줄을 그리므로, 줄은 개행이 든 문자열 하나가 아니라 줄로 존재합니다.
  *
- * *영어 전용이며, 선택이 아니라 제약입니다.* font.c의 아틀라스는 `FIRST 32`부터 `COUNT 96`까지,
- * 출력 가능한 ASCII뿐입니다. 그릴 한글 글리프가 없습니다. 이 게임이 화면에 올리는 모든 문자열이
- * 같은 처지입니다. 한글 스토리 텍스트는 폰트 작업을 필요로 하며, 그것은 이 대사들이 속한
- * 전투보다 큰 작업입니다.
+ * *한국어이며, story.txt가 아니라 C 안에 있습니다.* 이 대사들이 기다리던 폰트 작업이
+ * 이루어졌습니다. font.c가 이제 한글을 조합하므로 제약은 사라졌고, 남은 것은 어디에 두는가입니다.
+ * 이곳에 남는 이유는 이것들이 step_boss가 상태 변화에서 올리는 *전투의 박자*이지, 플레이어가
+ * 읽고 넘기는 페이지가 아니기 때문입니다. 후자를 위한 곳이 story.txt입니다.
+ *
+ * C 안에 있다는 것이 지금 당장 이것들이 동작하는 이유이기도 합니다. 이곳의 문자열은 컴파일러가
+ * 읽은 UTF-8 그대로 .rdata에 들어갑니다. story.txt의 문자열은 bake.ps1을 거치며, 출하 빌드가
+ * 이 말들을 할 수 있으려면 그쪽이 127을 넘는 바이트를 실어 나르도록 먼저 배워야 했습니다.
  *
  * 짧게 유지하는 두 번째 이유는, 각각이 ::HUD_NOTICE_SIZE로 가운데 정렬되기 때문입니다. 2.2에서
  * 뷰포트 가장자리에 닿을 만큼 긴 줄은 줄여야 하고, 그러면 전투에서 가장 큰 목소리의 문장이 가장
  * 작은 문장이 됩니다. */
+
+/* --- an artifact, named and explained --------------------------------------
+ *
+ * TWO LINES, CENTRED, for ::PICKUP_LINE_TIME: the name at notice size and a
+ * sentence under it at the size the HUD uses for everything else. The name
+ * carries the artifact's own colour -- the same one the screen wash uses --
+ * so the banner and the tint are visibly the same event.
+ *
+ * Placed above the boss banner's row rather than on it. Both can be up at
+ * once (an artifact taken during the fight), and two centred lines in one
+ * place would overwrite each other.
+ *
+ * *두 줄을 가운데에* ::PICKUP_LINE_TIME 동안 띄웁니다. 이름은 공지 크기로, 그 아래 문장은
+ * HUD가 다른 모든 것에 쓰는 크기로 놓습니다. 이름은 아티팩트 자신의 색을 지니며, 화면 색조가
+ * 쓰는 바로 그 색이므로 배너와 색조가 눈에 보이게 같은 사건이 됩니다.
+ * 보스 배너의 줄 위에 두고 같은 줄에 두지 않습니다. 둘이 동시에 떠 있을 수 있으며(전투 중에
+ * 주운 아티팩트), 한 자리의 가운데 정렬 두 줄은 서로를 덮어씁니다. */
+#define PICKUP_LINE_Y     0.24f   /**< Fraction of viewport height for the name. / 이름 줄의 뷰포트 높이 비율. */
+#define PICKUP_LINE_GAP   8.0f    /**< Pixels between the name and its description. / 이름과 설명 사이 픽셀. */
+#define PICKUP_LINE_FADE  0.7f    /**< Seconds of fade at the tail. / 꼬리에서 흐려지는 시간(초). */
+
+static void scene_draw_pickup_line(Scene *s, int vw, int vh, int kind, float left) {
+    static const char *const NAME[PW_KINDS] = { "4배 피해", "그림자 반지", "수호의 방패" };
+    static const char *const DESC[PW_KINDS] = {
+        "주는 피해가 네 배가 된다",
+        "몬스터가 당신을 보지 못한다",
+        "받는 피해가 30%로 줄어든다",
+    };
+    static const float COL[PW_KINDS][3] = {
+        { 0.45f, 0.65f, 1.00f },   /* PW_QUAD   */
+        { 0.65f, 0.45f, 0.95f },   /* PW_SHADOW */
+        { 1.00f, 0.80f, 0.35f },   /* PW_AEGIS  */
+    };
+    int k = kind - 1;
+    if (k < 0 || k >= PW_KINDS) return;
+
+    ui_begin(vw, vh);
+
+    /* Fades over the tail only: the moment it appears is the moment it is
+       most worth reading. 꼬리에서만 흐려집니다. 나타나는 순간이 가장 읽을 가치가 있는
+       순간입니다. */
+    float a = left / PICKUP_LINE_FADE;
+    if (a > 1.0f) a = 1.0f;
+
+    /* The NAME is the big line and the description the small one. Note which
+       constant is which: ::HUD_TEXT_SIZE is 3.5 and ::HUD_NOTICE_SIZE is 2.2,
+       so the "notice" size is the SMALLER of the two -- taking them at their
+       names put the artifact's name in fine print under a large sentence.
+       *이름이 큰 줄이고 설명이 작은 줄입니다.* 어느 상수가 어느 쪽인지 유의하십시오.
+       ::HUD_TEXT_SIZE가 3.5이고 ::HUD_NOTICE_SIZE가 2.2이므로 "공지" 크기가 둘 중 *작은*
+       쪽입니다. 이름만 보고 가져다 쓰면 아티팩트의 이름이 큰 문장 아래의 잔글씨가 됩니다. */
+    float y  = (float)vh * PICKUP_LINE_Y;
+    float nw = font_width(HUD_TEXT_SIZE, NAME[k]);
+    text_run(s, ((float)vw - nw) * 0.5f, y, HUD_TEXT_SIZE, NAME[k],
+             COL[k][0], COL[k][1], COL[k][2], a);
+
+    float dw = font_width(HUD_NOTICE_SIZE, DESC[k]);
+    text_run(s, ((float)vw - dw) * 0.5f,
+             y + (float)FONT_CH * HUD_TEXT_SIZE + PICKUP_LINE_GAP,
+             HUD_NOTICE_SIZE, DESC[k], 0.85f, 0.85f, 0.88f, a * 0.9f);
+    ui_end();
+}
+
 static const char *boss_line_text(int line) {
     switch (line) {
-    case BOSS_LINE_WAKE: return "THE SPIRE OPENS ITS MOUTH";
-    case BOSS_LINE_OPEN: return "THE WARDS ARE DOWN -- HURT IT";
-    case BOSS_LINE_HIT:  return "IT FEELS THAT";
-    case BOSS_LINE_WARD: return "IT PULLS THE WARDS BACK UP";
-    case BOSS_LINE_DIE:  return "THE MAW IS QUIET";
+    case BOSS_LINE_WAKE: return "첨탑이 아가리를 연다";
+    case BOSS_LINE_OPEN: return "수호석이 내려갔다 -- 때려라";
+    case BOSS_LINE_HIT:  return "그것이 느꼈다";
+    case BOSS_LINE_WARD: return "보호막 -- 수호석이 솟는다";
+    case BOSS_LINE_DIE:  return "아가리가 조용하다";
     default:             return 0;
     }
 }
@@ -3782,8 +4020,10 @@ void scene_frame(const World *w, Scene *sc, int vw, int vh, int frozen) {
        pixelised and dithered along with everything else -- see scene.h. */
     scene_draw_enemies(sc, &w->pools, vp, eye_pos, cam.right);
     scene_draw_pickups(sc, &w->pools, vp, eye_pos, cam.right);
+    scene_draw_weapon_pickups(sc, &w->pools, vp, eye_pos, cam.right);
     scene_draw_shots  (sc, &w->pools, vp, cam.right, cam.up);
     scene_draw_proj   (sc, &w->pools, vp, cam.right, cam.up);
+    scene_draw_beams  (sc, &w->pools, vp, eye_pos);
     fx_draw(&w->pools, vp, cam.right, cam.up);
 
     /* --- what shots left behind, and the rope, still in world space ---
@@ -3918,6 +4158,11 @@ void scene_frame(const World *w, Scene *sc, int vw, int vh, int frozen) {
                             wards, BOSS_WARDS, wards == 0, line, la);
         }
     }
+
+    /* The artifact banner, on its own row above the boss's. Both may be up.
+       아티팩트 배너입니다. 보스 배너 위 자기 줄에 있으며 둘이 동시에 뜰 수 있습니다. */
+    if (!w->run.dead && !w->run.won && w->run.pickup_line)
+        scene_draw_pickup_line(sc, vw, vh, w->run.pickup_line, w->run.pickup_line_t);
 
     /* The three end/start screens are mutually exclusive by construction:
        `title` is cleared before a run can begin, and a run that has been won

@@ -385,8 +385,70 @@ int main(void) {
         enemy_spawn_level(&w.pools, &w.level);
         enemy_wave_arm(&w.pools, 7);
         int before = enemy_alive(&w.pools);
-        step_n(&w, 200);
+        /* Past the lull first: every rollover after the first holds the spawners for
+           WAVE_LULL, and this arm is a rollover.
+           먼저 휴지기를 지납니다. 첫 웨이브 이후의 모든 롤오버는 스포너를 WAVE_LULL 동안
+           멈추며, 이 장전도 롤오버입니다. */
+        step_n(&w, (int)(WAVE_LULL * 60.0f) + 200);
         ok(enemy_alive(&w.pools) - before > 1, "a later wave sends groups");
+    }
+
+    /* --- the lull ------------------------------------------------------ */
+    printf("\nthe valley between waves\n");
+    {
+        fixture(&w);
+        add_spawner(&w.level, "spawner_water_spirit", 2000, 0, 10, 0, 0);
+        enemy_spawn_level(&w.pools, &w.level);
+        step_n(&w, 1);          /* arms wave 1, so the step below is not the first arm */
+
+        /* A rollover holds every spawner: nothing arrives for WAVE_LULL, then the
+           interval runs and the group lands.
+           롤오버는 모든 스포너를 멈춥니다. WAVE_LULL 동안 아무것도 오지 않다가 간격이
+           돌고 무리가 내립니다. */
+        enemy_wave_arm(&w.pools, 2);
+        step_n(&w, (int)(WAVE_LULL * 60.0f) - 3);
+        oki(enemy_alive(&w.pools) == 0, "a rollover holds the spawners for WAVE_LULL",
+            enemy_alive(&w.pools), 0);
+        step_n(&w, 3 + 61 + (int)(SPAWN_WARN_TIME * 60.0f) + 8);
+        ok(enemy_alive(&w.pools) > 0, "and they arrive once it has passed");
+
+        /* The first wave is not a rollover and has no lull.
+           첫 웨이브는 롤오버가 아니며 휴지기가 없습니다. */
+        enemy_reset(&w.pools);
+        enemy_spawn_level(&w.pools, &w.level);
+        enemy_wave_arm(&w.pools, 1);
+        step_n(&w, 61 + (int)(SPAWN_WARN_TIME * 60.0f) + 3);
+        ok(enemy_alive(&w.pools) > 0, "and the first wave starts without one");
+    }
+
+    /* --- the health ladder --------------------------------------------- */
+    printf("\nthe health ladder climbs and then stops\n");
+    {
+        const int BASE = mon_stats(MON_WATER_SPIRIT)->hp;
+
+        fixture(&w);
+        add_spawner(&w.level, "spawner_water_spirit", 2000, 0, 10, 0, 0);
+        enemy_spawn_level(&w.pools, &w.level);
+        step_n(&w, 1);          /* arms wave 1, so the arm below is not the first */
+        step_n(&w, 61 + (int)(SPAWN_WARN_TIME * 60.0f) + 8);
+        int first = enemy_alive(&w.pools) ? enemy_at(&w.pools, 0)->health : -1;
+        oki(first == BASE, "wave 1 delivers a monster at the table's health", first, BASE);
+
+        /* A wave far past the clamp: the ladder must be AT the ceiling, not above it.
+           고정점보다 한참 깊은 웨이브입니다. 사다리는 천장을 넘지 않고 천장에 있어야 합니다. */
+        enemy_spawn_level(&w.pools, &w.level);
+        enemy_wave_arm(&w.pools, 40);
+        step_n(&w, (int)(WAVE_LULL * 60.0f) + 61 + (int)(SPAWN_WARN_TIME * 60.0f) + 8);
+        int deep   = enemy_alive(&w.pools) ? enemy_at(&w.pools, 0)->health : -1;
+        int capped = (int)((float)BASE * WAVE_HP_MAX + 0.5f);
+        oki(deep == capped, "and wave 40 is capped at WAVE_HP_MAX, not compounded",
+            deep, capped);
+
+        /* The boss and its wards are read off the table by the fight, so they never scale.
+           보스와 결계핵은 전투가 표에서 읽으므로 결코 배율을 받지 않습니다. */
+        ok((mon_stats(MON_MAW)->flags & MON_BOSS) &&
+           (mon_stats(MON_WARD)->flags & MON_GUARD),
+           "and the two kinds the ladder skips are still flagged as such");
     }
 
     /* --- the spawner under your feet -------------------------------------
@@ -977,6 +1039,69 @@ int main(void) {
         }
 
         ok(arenas > 0, "the campaign still contains an arena to ask about");
+    }
+
+
+    /* --- a ceiling is a spawner's own, not the level's ----------------------
+     *
+     * WHAT ONE SPAWNER HAS OUT, and it used to be what the ROOM had out. The
+     * check asked ::enemy_alive, so the highest number in the level won every
+     * tick and every smaller one was decoration: a level with one spawner at
+     * eight and five at two ran one spawner. Measured on the shipped arena
+     * before this: 8 alive from the first, 0 from all five others, for as long
+     * as anyone cared to watch.
+     *
+     * TWO SPAWNERS WITH DIFFERENT CEILINGS, far enough apart that neither
+     * postpones the other through ::SPAWN_MIN_DIST, and each is asked what IT
+     * has out. The small one must reach its own number rather than being
+     * locked out by the big one, and neither may exceed its own.
+     *
+     * DIFFERENT KINDS on purpose. ::MonType::cap is a per-kind level-wide
+     * ceiling and would confound the reading if both spawners made the same
+     * creature -- the point here is the per-spawner rule, not that one.
+     *
+     * *한 스포너가 내보낸 수이며, 예전에는 방 전체가 내보낸 수였습니다.* 검사가 ::enemy_alive에
+     * 물었으므로 레벨에서 가장 큰 수가 매 틱마다 이겼고 더 작은 것은 전부 장식이었습니다.
+     * 8짜리 하나와 2짜리 다섯을 둔 레벨은 스포너 하나만 돌렸습니다. 이 수정 전에 출하 아레나에서
+     * 측정했습니다. 첫 번째에서 8마리, 나머지 다섯에서 0마리이며, 아무리 오래 지켜봐도
+     * 그대로였습니다.
+     * *상한이 다른 스포너 둘*을 ::SPAWN_MIN_DIST로 서로를 미루지 않을 만큼 떨어뜨려 놓고,
+     * 각자에게 *자기가* 내보낸 수를 묻습니다. 작은 쪽은 큰 쪽에 잠기지 않고 자기 수에 도달해야
+     * 하며, 어느 쪽도 자기 수를 넘어서는 안 됩니다.
+     * *종류를 다르게 한 것은 의도입니다.* ::MonType::cap은 종류별 레벨 전체 상한이므로 두
+     * 스포너가 같은 생물을 만들면 판독을 흐립니다. 이곳의 요점은 그것이 아니라 스포너별 규칙입니다. */
+    printf("\n  --- a ceiling is a spawner's own ---\n");
+    {
+        World w;
+        fixture(&w);
+        add_spawner(&w.level, "spawner_water_spirit", -2000, -2000, 5, 0, 6);
+        add_spawner(&w.level, "spawner_brute",         2000,  2000, 5, 0, 2);
+        enemy_spawn_level(&w.pools, &w.level);
+        oki(enemy_spawner_count(&w.pools) == 2, "two spawners in the fixture",
+            enemy_spawner_count(&w.pools), 2);
+
+        step_n(&w, 60 * 120);
+
+        int big   = enemy_alive_from(&w.pools, 0);
+        int small = enemy_alive_from(&w.pools, 1);
+        printf("      after two minutes: %d from the ceiling of 6, %d from the ceiling of 2\n",
+               big, small);
+        oki(small == 2, "the smaller ceiling is reached, not locked out by the larger",
+            small, 2);
+        oki(big == 6, "and the larger reaches its own", big, 6);
+        ok(enemy_alive(&w.pools) >= big + small,
+           "and the room holds at least both: the two ceilings add rather than compete");
+
+        /* And what a spawner made is its own: nothing counts twice.
+           그리고 한 스포너가 만든 것은 그것의 것입니다. 무엇도 두 번 세이지 않습니다. */
+        int owned = 0;
+        for (int i = 0; i < w.pools.enemy.count; i++) {
+            const Enemy *m = &w.pools.enemy.m[i];
+            if (!m->active || m->state == E_DEAD) continue;
+            if (m->from_spawner >= 0) owned++;
+        }
+        oki(owned == big + small, "every claimed monster is claimed by exactly one spawner",
+            owned, big + small);
     }
 
     check_type_cap();

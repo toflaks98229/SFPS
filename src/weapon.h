@@ -370,6 +370,138 @@ extern GunPose g_gun_pose;
  * air, which is what makes shotgun-jumping and mid-swing redirects off the
  * grapple work. Raise RECOIL_MOVE_AIR for punchier jumps; raise _GROUND if
  * ground combat should feel more physical at the cost of some stability. */
+/**
+ * @brief Radians a second the ring turns, per second of the weapon's cooldown.
+ *
+ * ENGLISH
+ * -------
+ * THE RATE IS THE FIRE RATE, and that is the whole idea: a weapon's cooldown
+ * already says how fast it shoots, so dividing by it makes the ring's speed the
+ * thing the player is holding rather than a number somebody tuned per weapon.
+ * At the shipped cooldowns that is 0.60 rad/s on the shotgun (1.05s), 1.05 on
+ * the grenade launcher (0.60s), 1.26 on the axe (0.50s) and 6.30 on the rapid
+ * (0.10s) -- ten and a half times the shotgun, which is exactly the ratio of
+ * their fire rates. Nothing has to be kept in step because there is only one
+ * number and it is already in ::WeaponType.
+ *
+ * 0.63 IS ONE TURN EVERY TEN SECONDS PER SECOND OF COOLDOWN, picked so the
+ * slowest weapon in the roster reads as turning at all without the fastest
+ * becoming a blur: 2*pi/10.
+ *
+ * 한국어
+ * ------
+ * @brief 무기 대기 시간 1초당 고리가 도는 초당 라디안.
+ *
+ * *속도가 곧 연사 속도이며*, 그것이 발상의 전부입니다. 무기의 대기 시간이 이미 얼마나 빨리
+ * 쏘는지를 말하므로, 그것으로 나누면 고리의 속도가 누군가 무기마다 조율한 수가 아니라
+ * *플레이어가 쥐고 있는 것*이 됩니다. 출하된 대기 시간에서 샷건(1.05초) 0.60 rad/s, 유탄
+ * 발사기(0.60초) 1.05, 도끼(0.50초) 1.26, 래피드(0.10초) 6.30입니다. 샷건의 10.5배이며 그것은
+ * 정확히 두 무기 연사 속도의 비입니다. 맞춰 둘 것이 없습니다. 수가 하나뿐이고 그것은 이미
+ * ::WeaponType 안에 있습니다.
+ * *0.63은 대기 시간 1초당 10초에 한 바퀴*이며, 구성에서 가장 느린 무기도 돈다고 읽히되 가장
+ * 빠른 것이 뭉개지지 않도록 골랐습니다. 2*pi/10입니다.
+ */
+#define WPN_SPIN_RATE 0.63f
+
+/**
+ * @brief Radians a second added to the ring the instant a shot goes off.
+ *
+ * ENGLISH: What makes firing visible on the ring rather than only inferable
+ * from its steady rate. Four is between six and seven times the shotgun's
+ * resting rate, so a single blast is a clear lurch; on the rapid it is
+ * two thirds of a rate that is already fast, which reads as the ring being
+ * driven rather than kicked -- the same input feeling different in the hand
+ * of a different weapon, for free.
+ *
+ * 한국어: @brief 발사가 일어나는 순간 고리에 더해지는 초당 라디안.
+ * @note 발사를 고리에서 *보이게* 만드는 것입니다. 꾸준한 속도에서 추론만 되지 않도록 합니다.
+ *       4는 샷건의 정지 속도의 예닐곱 배이므로 한 발이 뚜렷한 요동입니다. 래피드에서는 이미
+ *       빠른 속도의 3분의 2라서 걷어차이는 것이 아니라 *구동되는* 것으로 읽힙니다. 같은
+ *       입력이 다른 무기의 손에서 다르게 느껴지며, 그 값은 공짜입니다.
+ */
+#define WPN_SPIN_KICK 4.0f
+
+/**
+ * @brief Extra rad/s the saw's ring keeps while it is cutting.
+ *
+ * ENGLISH: THE ONE WEAPON WHOSE RING IS A BLADE. Every other weapon shoves the
+ * ring once per shot and lets ::WPN_SPIN_DECAY spend it, which reads as recoil.
+ * A circular saw does not recoil, it RUNS: the ring should be up to speed for
+ * as long as the cut lasts and wind down after, which is a level held rather
+ * than an impulse decayed. So this is added to the rate for ::WPN_SAW_SPIN_TIME
+ * after a swing instead of being handed to `spin_kick`.
+ *
+ * Twenty-five is high on purpose. At the axe's 0.50s cooldown its resting rate
+ * is 1.26 rad/s, so the blade turns twenty times faster while cutting: past the
+ * point where an eye can follow a spoke, which is exactly how a saw reads.
+ *
+ * 한국어: *고리가 곧 날인 유일한 무기입니다.* 다른 모든 무기는 발사마다 고리를 한 번 떠밀고
+ * ::WPN_SPIN_DECAY가 그것을 쓰며, 그것은 반동으로 읽힙니다. 원형톱은 반동하지 않고
+ * *돕니다.* 절삭이 이어지는 동안 고리는 최고 속도여야 하고 그 뒤에 잦아들어야 하며, 그것은
+ * 감쇠하는 충격이 아니라 유지되는 수준입니다. 그래서 이 값은 `spin_kick`에 넘겨지는 대신
+ * 휘두른 뒤 ::WPN_SAW_SPIN_TIME 동안 회전 속도에 더해집니다.
+ * 25가 높은 것은 의도입니다. 도끼의 대기 시간 0.50초에서 휴지 속도는 1.26 rad/s이므로,
+ * 절삭 중에는 날이 스무 배 빨리 돕니다. 눈이 살을 따라갈 수 있는 지점을 넘어서며, 그것이
+ * 바로 톱이 읽히는 방식입니다.
+ */
+#define WPN_SAW_SPIN 25.0f
+
+/**
+ * @brief Seconds the saw's ring stays at speed after a swing.
+ *
+ * ENGLISH: Longer than the axe's own 0.50s cooldown, so holding the trigger
+ * keeps the blade at a steady scream rather than pulsing it once per swing --
+ * each swing renews the timer before the last one runs out. Released, it stops
+ * within a beat, which is what says the cut is over.
+ *
+ * 한국어: 도끼 자신의 대기 시간 0.50초보다 길므로, 방아쇠를 누르고 있으면 날이 휘두를 때마다
+ * 맥동하지 않고 한결같은 비명을 유지합니다. 각 휘두르기가 이전 것이 끝나기 전에 타이머를
+ * 갱신하기 때문입니다. 놓으면 한 박자 안에 멎으며, 그것이 절삭이 끝났다고 말합니다.
+ */
+#define WPN_SAW_SPIN_TIME 0.65f
+
+/**
+ * @brief How fast the shot's kick bleeds out of the ring, per second.
+ *
+ * ENGLISH: Exponential, like ::MOMENTUM_DRAG_AIR and for its reason -- halving
+ * dt and stepping twice must land where one full step does, or the lurch
+ * changes shape with the frame rate. Six is a lurch that is over in about half
+ * a second, which is inside the shotgun's own cooldown: the ring settles just
+ * as the gun becomes ready, so the picture finishes saying "fired" exactly when
+ * the weapon stops being busy.
+ *
+ * 한국어: @brief 발사의 충격이 고리에서 빠져나가는 초당 비율.
+ * @note ::MOMENTUM_DRAG_AIR처럼 지수 감쇠이며 이유도 같습니다. dt를 절반으로 줄여 두 번
+ *       실행해도 한 번에 실행한 곳에 도착해야 하며, 아니면 요동의 모양이 프레임률에 따라
+ *       달라집니다. 6은 약 0.5초에 끝나는 요동이고 그것은 샷건 자신의 대기 시간 안입니다.
+ *       총이 준비되는 바로 그때 고리가 가라앉으므로, 그림은 무기가 바빠지기를 그만두는
+ *       순간에 "쐈다"는 말을 마칩니다.
+ */
+#define WPN_SPIN_DECAY 6.0f
+
+/** @brief Turn the ring's angle back at, radians. / 고리의 각도를 되감는 지점 (라디안). */
+/**
+ * @brief Seconds the switch flourish lasts.
+ *
+ * ENGLISH: SHORT BECAUSE IT IS A SMEAR, not a draw animation. Doom's raise and
+ * lower are about a fifth of a second each and they are a COST -- the gun is
+ * gone while they play. This one costs nothing, so the only thing setting its
+ * length is how long a smear frame can be held before it stops reading as
+ * motion and starts reading as a different picture. Hand-drawn animation gives
+ * a smear one or two frames of a three-frame move; 0.18s is eleven frames at
+ * 60Hz, split either side of white, so each half is about five.
+ *
+ * 한국어: *꺼내는 동작이 아니라 스미어이므로 짧습니다.* Doom의 올리기와 내리기는 각각
+ * 5분의 1초쯤이고 그것들은 *비용*입니다. 재생되는 동안 총이 없습니다. 이것은 비용이 없으므로
+ * 길이를 정하는 유일한 것은, 스미어 프레임이 움직임으로 읽히기를 그만두고 다른 그림으로
+ * 읽히기 시작하기까지 얼마나 붙잡아 둘 수 있는가입니다. 손그림 애니메이션은 세 프레임 동작에
+ * 스미어를 한둘 줍니다. 0.18초는 60Hz에서 열한 프레임이고 흰색을 사이에 두고 갈리므로
+ * 한쪽이 다섯쯤입니다.
+ */
+#define WPN_SWAP_TIME 0.18f
+
+#define WPN_SPIN_WRAP 6.283185307f
+
 #define RECOIL_MOVE_GROUND   1.4f   ///< @brief Kick speed added when firing while grounded, m/s. / 지상에서 사격 시 추가되는 반동 속도 (m/s).
 #define RECOIL_MOVE_AIR      5.5f   ///< @brief Kick speed added when firing airborne -- shotgun jumping. / 공중에서 사격 시 추가되는 반동 속도. 샷건 점프의 핵심입니다.
 
@@ -511,6 +643,89 @@ typedef struct {
         bob_phase와 분리한 이유는 그것이 플레이어가 멈추면 함께 멈추기 때문이며,
         전기톱은 걷고 있든 아니든 떨립니다. */
     float anim_clock;
+    /**
+     * @brief Radians the wand's magic ring has turned, free-running.
+     *
+     * ENGLISH
+     * -------
+     * THE RING TURNS AND THE STONE IN IT DOES NOT, which is why the emblem is
+     * two drawings -- see ::EMB_SMEAR and the layers in ::wpview_draw_view. The
+     * angle is the whole of what this field is; how fast it grows is
+     * ::wp_spin_rate, and it is asked rather than stored so a weapon swap takes
+     * effect on the next frame with nothing to keep in step.
+     *
+     * WRAPPED, for ::anim_clock's reason: a float that has been accumulating
+     * for an hour has lost the precision a smooth turn needs.
+     *
+     * ONE ANGLE FOR EVERY WEAPON, not one per weapon. Switching mid-turn should
+     * carry the ring's position across rather than snapping it back to zero --
+     * the wand is one object and the emblem in it changed, so the thing that
+     * was already spinning keeps spinning.
+     *
+     * 한국어
+     * ------
+     * @brief 지팡이의 마법 고리가 돈 각도(라디안). 자유 진행합니다.
+     *
+     * *고리는 돌고 그 안의 돌은 돌지 않으며*, 그것이 문양이 두 그림인 이유입니다.
+     * ::EMB_SMEAR와 ::wpview_draw_view의 레이어를 보십시오. 이 필드의 전부는 각도이고, 얼마나
+     * 빨리 자라는지는 ::wp_spin_rate입니다. 저장하지 않고 물어보므로, 무기를 바꾸면 맞춰 둘
+     * 것 없이 다음 프레임에 적용됩니다.
+     * *감아 돌립니다.* ::anim_clock의 이유와 같습니다. 한 시간 동안 누적된 실수는 매끄러운
+     * 회전에 필요한 정밀도를 잃습니다.
+     * *무기마다가 아니라 하나의 각도입니다.* 회전 도중에 바꾸면 고리의 위치가 0으로 튕기지
+     * 않고 이어져야 합니다. 지팡이는 하나의 물건이고 그 안의 문양이 바뀐 것이므로, 이미 돌고
+     * 있던 것은 계속 돕니다.
+     */
+    float spin;
+
+    /**
+     * @brief Extra radians a second the ring still owes from the last shot.
+     *
+     * ENGLISH: The kick. A ring that turned at a constant rate would say what
+     * weapon is held and nothing about firing it; this is added to the rate and
+     * decays, so every shot is a lurch that settles. ::WPN_SPIN_KICK sets it
+     * and ::WPN_SPIN_DECAY spends it.
+     *
+     * 한국어: @brief 지난 발사에서 고리가 아직 빚진 초당 추가 라디안.
+     * @note 발차기입니다. 일정한 속도로 도는 고리는 어느 무기를 쥐었는지만 말하고 발사에
+     *       대해서는 아무 말도 하지 않습니다. 이것은 속도에 더해진 뒤 감쇠하므로, 모든 발사가
+     *       가라앉는 요동이 됩니다. ::WPN_SPIN_KICK이 설정하고 ::WPN_SPIN_DECAY가 씁니다.
+     */
+    float spin_kick;
+
+    /**
+     * @brief Seconds the saw's blade is still up to speed. 0 when it is not.
+     *
+     * Set by a swing of a ::WeaponType with a `melee_range`, spent by
+     * ::wp_update, and read by ::wp_spin_rate. Held rather than decayed -- see
+     * ::WPN_SAW_SPIN.
+     *
+     * @brief 톱날이 아직 최고 속도인 시간(초). 아니면 0입니다.
+     * `melee_range`를 가진 ::WeaponType의 휘두르기가 설정하고, ::wp_update가 소비하며,
+     * ::wp_spin_rate가 읽습니다. 감쇠가 아니라 유지입니다. ::WPN_SAW_SPIN을 보십시오.
+     */
+    float saw_spin;
+
+    /**
+     * @brief Seconds left of the switch flourish, 0 when there is none.
+     *
+     * ENGLISH: COSMETIC, AND IT HAS TO BE. The field beside this one says
+     * switching is instant and costs no time, and that is a design decision
+     * this must not quietly reverse -- picking the right tool has to stay cheap
+     * enough to do mid-fight. Nothing reads this except the draw: the new
+     * weapon is in hand, loaded and firable on the frame the key is pressed,
+     * and what this times is the ring's flash, not the player's wait.
+     *
+     * 한국어: *장식이며 그래야만 합니다.* 바로 옆의 필드는 전환이 즉시이고 시간이 들지
+     * 않는다고 말하며, 그것은 이것이 조용히 뒤집어서는 안 되는 설계 결정입니다. 올바른
+     * 도구를 고르는 일은 교전 중에도 할 만큼 저렴해야 합니다. 그리기 외에는 아무도 이것을
+     * 읽지 않습니다. 새 무기는 키를 누른 프레임에 손에 있고 장전되어 있으며 발사할 수
+     * 있습니다. 이것이 재는 것은 고리의 섬광이지 플레이어의 대기가 아닙니다.
+     */
+    float swap;
+    /** @brief Which weapon the flourish is coming from, a WP_* index. / 연출이 떠나오는 무기의 WP_* 인덱스. */
+    int   swap_from;
+
     float sway_x, sway_y;/**< View model lag behind mouse movement. / 마우스 움직임에 뒤따르는 뷰 모델의 지연. */
     float spread;        /**< Aim bloom in radians, grows per shot. / 조준 산포도 (라디안). 사격할 때마다 증가합니다. */
     float pump_timer;    /**< Counts down to the pump sound after a shot. / 사격 후 펌프 소리까지의 카운트다운. */
@@ -794,6 +1009,46 @@ int wp_axe_leap(Weapon *w, float yaw, float pitch, v3 *player_vel);
 int wp_axe_land(Weapon *w, Pools *pl, v3 feet, int grounded, float dt);
 
 /** @brief Non-zero while an axe leap is in the air. / 도끼 도약이 공중에 있는 동안 0이 아닙니다. */
+/**
+ * @brief Radians a second the wand's magic ring is turning right now.
+ *
+ * ENGLISH: ::WPN_SPIN_RATE over the held weapon's cooldown, plus whatever the
+ * last shot's kick has not yet decayed. Derived rather than stored -- see the
+ * definition for why a field would be a copy to keep in step.
+ * 한국어: @brief 지팡이의 마법 고리가 지금 돌고 있는 초당 라디안.
+ * @note 쥔 무기의 대기 시간으로 나눈 ::WPN_SPIN_RATE에, 지난 발사의 충격 중 아직 감쇠하지
+ *       않은 만큼을 더한 값입니다. 저장하지 않고 유도합니다. 필드가 왜 맞춰 두어야 할
+ *       사본이 되는지는 정의부를 보십시오.
+ */
+float wp_spin_rate(const Weapon *w);
+
+/**
+ * @brief Put a weapon in hand and start the switch flourish.
+ *
+ * The one way ::Weapon::cur changes during play. Assigning it directly still
+ * works and is still wrong: the flourish is how the switch is ANNOUNCED, and a
+ * change the player cannot see is a change they will make twice.
+ *
+ * @param[in,out] w    The belt.
+ * @param[in]     type A WP_* index; ignored if out of range or already in hand.
+ *
+ * @brief 무기를 손에 쥐여 주고 전환 연출을 시작합니다.
+ * @note 플레이 중 ::Weapon::cur가 바뀌는 유일한 경로입니다. 직접 대입해도 여전히 동작하고
+ *       여전히 틀립니다. 연출이 곧 전환을 *알리는* 방식이며, 플레이어가 볼 수 없는 변화는
+ *       그들이 두 번 하게 되는 변화입니다.
+ */
+void wp_swap_to(Weapon *w, int type);
+
+/**
+ * @brief How far through the switch flourish, 0 at the press and 1 at rest.
+ *
+ * 1 when there is no flourish, so a caller may use it without asking first.
+ *
+ * @brief 전환 연출의 진행도. 누른 순간 0, 끝나면 1입니다.
+ * @note 연출이 없으면 1이므로, 호출자는 먼저 묻지 않고 써도 됩니다.
+ */
+float wp_swap_t(const Weapon *w);
+
 int wp_axe_leaping(const Weapon *w);
 
 /* --- Public function prototypes: lifecycle / 공개 함수 프로토타입: 수명 주기 --- */

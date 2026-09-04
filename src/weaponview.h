@@ -210,6 +210,69 @@ void wpview_draw_world(WeaponView *v, const Weapon *w, mat4 view_proj,
  */
 void wpview_draw_view(WeaponView *v, const Weapon *w, float aspect);
 
+#ifdef HOT_RELOAD
+/**
+ * @brief The emblem quad's four corners, in the 1x1 ortho box the view draws in.
+ *
+ * Tests only, and it is the SAME arithmetic the frame uses rather than a copy:
+ * a rigidity check against a second implementation would pass while the drawn
+ * ring sheared. Corners run anticlockwise from the bottom left; `spin` is the
+ * ring's angle in radians and 0 is the stone's.
+ *
+ * @brief 뷰가 그리는 1x1 직교 상자 안 문양 사각형의 네 모서리.
+ * @note 검사 전용이며, 사본이 아니라 프레임이 쓰는 *그* 산술입니다. 두 번째 구현에 대한 강체
+ *       검사는 그려지는 고리가 전단되는 동안에도 통과합니다. 모서리는 왼쪽 아래에서 반시계로
+ *       돕니다. `spin`은 고리의 각도(라디안)이고 0은 돌의 것입니다.
+ */
+/**
+ * @brief Which emblem column the ring and the stone are showing this frame.
+ *
+ * The weapon's own during play, and ::EMB_SMEAR for as long as a switch
+ * flourish is running -- see ::wpview_emblem_tint for what that column is for.
+ *
+ * @brief 이번 프레임에 고리와 돌이 보여 주는 문양 열.
+ * @note 평소에는 무기 자신의 것이고, 전환 연출이 도는 동안에는 ::EMB_SMEAR입니다. 그 열이
+ *       무엇을 위한 것인지는 ::wpview_emblem_tint를 보십시오.
+ */
+int wpview_emblem_cell(const Weapon *w);
+
+/**
+ * @brief The rgb multiplier the emblem layers are drawn with this frame.
+ *
+ * WHITE IS THE MIDPOINT, and that is the whole design. ::EMB_SMEAR's drawing is
+ * colourless, so it takes whatever colour it is multiplied by: the flourish
+ * walks the old weapon's hue up to white and then down into the new weapon's,
+ * which reads as the ring flaring out and coming back as something else. A
+ * straight fade from one hue to the other passes through the muddy colours
+ * between them instead, and muddy is what a smear must not look like.
+ *
+ * (1,1,1) when nothing is happening, so the ring draws in its own colours.
+ *
+ * @brief 이번 프레임에 문양 레이어들이 그려질 rgb 곱셈 계수.
+ * @note *흰색이 중간점이며* 그것이 설계의 전부입니다. ::EMB_SMEAR의 그림은 색이 없으므로
+ *       곱해지는 색을 그대로 받습니다. 연출은 옛 무기의 색상을 흰색까지 올린 다음 새 무기의
+ *       것으로 내려가며, 이는 고리가 확 타올랐다가 다른 것이 되어 돌아오는 것으로 읽힙니다.
+ *       한 색상에서 다른 색상으로 곧장 페이드하면 그 사이의 탁한 색들을 지나가는데, 탁함은
+ *       스미어가 결코 보여서는 안 되는 것입니다.
+ * @note 아무 일도 없으면 (1,1,1)이므로 고리는 자기 색으로 그려집니다.
+ */
+void wpview_emblem_tint(const Weapon *w, float rgb[3]);
+
+/**
+ * @brief The rectangle the held art is drawn into: x0, y0, x1, y1.
+ *
+ * Tests only, and at the rest position. Pairs with ::wpview_emblem_quad so a
+ * check can ask whether the emblem is still ON the wand.
+ *
+ * @brief 쥔 아트가 그려지는 사각형: x0, y0, x1, y1.
+ * @note 검사 전용이며 휴지 위치입니다. 문양이 여전히 지팡이 *위에* 있는지 검사가 물을 수
+ *       있도록 ::wpview_emblem_quad와 짝을 이룹니다.
+ */
+void wpview_art_rect(float aspect, float out[4]);
+
+void wpview_emblem_quad(float aspect, float spin, float out[4][2]);
+#endif
+
 /**
  * @brief Draws the crosshair and the hook-ready ring.
  *

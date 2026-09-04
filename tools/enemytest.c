@@ -870,15 +870,25 @@ static void check_close_quarters(void) {
  * *프레임 수가 아니라 두 사건 사이에서 잽니다.* 몬스터가 ::E_ATTACK에 들어간 프레임부터
  * ::Enemy::swung이 피해가 떠났다고 말하는 프레임까지입니다. 프레임을 세면 걸음만큼이나
  * 준비동작의 길이를 재게 되고, 준비동작은 누군가 조정할 수 있는 열입니다. */
-static float swing_step(const char *kind, int type, int slot) {
+static float swing_step(const char *kind, int type, int slot, short z_cm) {
     build();
     put_kind(&L.ents[0], kind);
-    L.ents[0].x = 0; L.ents[0].y = 0; L.ents[0].z = -300;
+    L.ents[0].x = 0; L.ents[0].y = 0; L.ents[0].z = z_cm;
 
     enemy_reset(&g_pools);
     g_pools.enemy.rng = 1u;
     enemy_spawn_level(&g_pools, &L);
     if (enemy_count(&g_pools) != 1) return -1.0f;
+
+    /* FACING THE PLAYER, who stands at +z of the marker: forward is (-sin yaw, -cos yaw), so
+       yaw = pi points down +z. A wind-up step is only taken while facing the target, and
+       ::make_monster hands out a yaw, not a target -- a brute that begins its swing from
+       inside its band never turns first, so left alone it would stand its wind-up out.
+       *플레이어를 바라봅니다.* 플레이어는 표식의 +z에 서 있고 전방은 (-sin yaw, -cos yaw)이므로
+       yaw = pi가 +z를 향합니다. 준비동작의 걸음은 목표를 바라볼 때만 내딛는데, ::make_monster는
+       목표가 아니라 yaw를 줍니다. 대역 안에서 휘두르기를 시작하는 브루트는 먼저 돌지 않으므로,
+       그대로 두면 준비동작을 제자리에서 흘려보냅니다. */
+    g_pools.enemy.m[0].yaw = 3.14159265f;
 
     v3 player = v3f(0.0f, PLAYER_EYE, 0.0f);
     v3 start = v3f(0,0,0);
@@ -901,7 +911,14 @@ static void check_swing_step(void) {
     const MonAttack *BA = mon_attack(MON_BRUTE, 0);
     float want = BR->speed * BA->close * BA->windup;
 
-    float got = swing_step("brute", MON_BRUTE, 0);
+    /* Inside slot 0's band (2.3 m) and clear of touching (1.16 m), so the standing swing
+       is what is chosen and its step has room to be measured. Any further out and the
+       brute charges first (slot 1), which now stops AT the player -- leaving slot 0
+       nothing to close.
+       슬롯 0의 대역(2.3m) 안이면서 접촉 거리(1.16m) 밖이므로, 선택되는 것은 서서 하는
+       휘두르기이고 그 걸음을 잴 여지가 있습니다. 더 멀면 브루트는 먼저 돌진(슬롯 1)하는데,
+       이제 돌진은 플레이어 *앞에서* 멈추므로 슬롯 0이 좁힐 간격이 남지 않습니다. */
+    float got = swing_step("brute", MON_BRUTE, 0, -200);
     printf("      brute closed %.3fm through its wind-up; ai_charge says %.3f\n",
            (double)got, (double)want);
     ok(got >= 0.0f, "the brute reached a swing");
@@ -914,7 +931,7 @@ static void check_swing_step(void) {
        *그리고 볼트는 그러지 않으며*, 그것이 위의 줄을 ::E_ATTACK이 걷기를 배웠다는 이야기가
        아니라 휘두르기에 대한 이야기로 만듭니다. 캐스터의 슬롯 0은 볼트이고, 선 자리에서
        쏩니다. */
-    float bolt = swing_step("caster", MON_CASTER, 0);
+    float bolt = swing_step("caster", MON_CASTER, 0, -300);
     printf("      caster moved %.3fm through its bolt's wind-up\n", (double)bolt);
     ok(bolt >= 0.0f, "the caster reached a bolt");
     ok(bolt >= 0.0f && bolt < 0.02f, "and a bolt leaves from where it stands");
@@ -2075,16 +2092,31 @@ int main(void) {
            거절하기 때문입니다. 그 플래그에 대한 분기를 참조하십시오. 이곳에서 검사하는 것은
            플래그이지 보스전이 그것을 내주는 방식이 아닙니다. 그쪽은 tools/bosstest.c가
            맡습니다. */
-        g_pools.enemy.m[0].type  = MON_WARD;
-        g_pools.enemy.m[0].pos.y = 6.0f;
-        g_pools.enemy.m[0].vel_y = 0.0f;
-
-        for (int i = 0; i < 240; i++)
+        /* A WARD DOES NOT FALL EITHER, and it no longer hangs: an anchored,
+           collapsing kind sinks on its own clock -- ::COLLAPSE_SINK of its
+           height below where it stood -- and is then removed. What is pinned
+           is the depth and the removal, not the seconds.
+           결계핵도 떨어지지 않으며, 이제 매달려 있지도 않습니다. 고정된 붕괴 종류는 자기
+           시계로 가라앉습니다. 서 있던 자리보다 자기 높이의 ::COLLAPSE_SINK배 아래까지이며,
+           그 뒤 제거됩니다. 고정하는 것은 깊이와 제거이지 초가 아닙니다. */
+        g_pools.enemy.m[0].type      = MON_WARD;
+        g_pools.enemy.m[0].pos.y     = 6.0f;
+        g_pools.enemy.m[0].vel_y     = 0.0f;
+        g_pools.enemy.m[0].timer     = 0.0f;                 /* as enemy_hurt leaves a collapsing kind */
+        g_pools.enemy.m[0].volley_at = g_pools.enemy.m[0].pos;
+        float lowest = 6.0f;
+        int   gone_at = -1;
+        for (int i = 0; i < 480; i++) {
             enemy_update(&g_pools, &r, v3f(0.0f, PLAYER_EYE, 300.0f), DT);
-
-        okf(fabsf(g_pools.enemy.m[0].pos.y - 6.0f) < 0.01f,
-            "but an anchored corpse holds its height",
-            g_pools.enemy.m[0].pos.y, 6.0f);
+            if (!g_pools.enemy.m[0].active) { gone_at = i; break; }
+            if (g_pools.enemy.m[0].pos.y < lowest) lowest = g_pools.enemy.m[0].pos.y;
+        }
+        float want = 6.0f - mon_stats(MON_WARD)->height * 1.2f;   /* THE RULE, not the constant: its height and a fifth. 상수가 아니라 규칙: 자기 높이와 그 5분의 1. */
+        printf("      a dead ward sank to %.2f (floor at %.2f) and was gone after %d frames\n",
+               (double)lowest, (double)want, gone_at);
+        ok(gone_at > 0, "an anchored corpse does not hang: it collapses and is removed");
+        okf(lowest > want - 0.10f && lowest < want + 0.30f,
+            "having sunk its height and a fifth below where it stood", lowest, want);
     }
 
     /* --- and an ordinary monster still falls -------------------------------

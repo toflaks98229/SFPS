@@ -105,7 +105,7 @@
  * 스윙에는 옳고 이 메커니즘에는 그른 모델입니다. 미트 훅은 플레이어를 끌어당겨야
  * 하며, 이때 생기는 궤적은 로프가 아니라 마지막의 도약에서 나옵니다.
  */
-#define HOOK_RANGE          40.0f  ///< @brief Metres the claw can reach before giving up. / 클로가 포기하기 전까지 도달할 수 있는 거리 (미터).
+#define HOOK_RANGE          20.0f  ///< @brief Metres the claw can reach before giving up. / 클로가 포기하기 전까지 도달할 수 있는 거리 (미터).
 #define HOOK_ARRIVE_DIST     1.6f  ///< @brief Distance at which the pull counts as arrival. / 견인이 도달로 인정되는 거리.
 
 /* --- arriving when the anchor cannot physically be reached ---
@@ -249,10 +249,23 @@
  * yanked, and a fast entry still feels different from a standing one -- while
  * guaranteeing the line is straight by the time it matters.
  *
- * At 8.0 the component is down to ~2% of its entry value after half a second,
- * which is shorter than every pull that is not nearly at HOOK_RANGE. Lower it
- * for wider, more preserved arcs; raise it for a pull that snaps to the line
+ * At 12.0 the component is down to ~2% of its entry value after a third of a
+ * second, which is shorter than every pull that is not nearly at HOOK_RANGE. Lower
+ * it for wider, more preserved arcs; raise it for a pull that snaps to the line
  * almost at once. Zero restores the old behaviour exactly.
+ *
+ * IT WAS 8.0, TUNED WHEN HOOK_RANGE WAS 40m AND THE FIXTURE PULLED 20m. On a 15m
+ * pull -- an ordinary shot now that the range is 20m -- 8.0 did not finish, and
+ * hooktest measured a 30 m/s entry (what a chained hook reaches, HOOK_LAUNCH_MAX
+ * being 30) arriving 16m from its anchor: the player crossed the anchor plane while
+ * still far off to the side, and the pull ended there.
+ *
+ * 12 RATHER THAN 16, because the two properties pull against each other. 16.0 fixed
+ * arrival and then failed the other half of the rule -- sideways travel has to
+ * SURVIVE into the launch, which is what chains hooks together -- by straightening
+ * so hard there was nothing left to carry. Measured at 12.0: every entry speed from
+ * 0 to 30 m/s arrives within 1.5m, and a 12 m/s crossing still launches with 0.34
+ * m/s of it. Both halves hold, which neither 8 nor 16 manages.
  *
  * 한국어
  * ------
@@ -278,7 +291,7 @@
  * 8.0에서는 0.5초 후 성분이 진입값의 약 2%까지 떨어지며, 이는 HOOK_RANGE에 가까운 경우를
  * 제외한 모든 견인보다 짧습니다. 값을 낮추면 더 넓고 운동량이 보존되는 궤적이 되고, 높이면
  * 거의 즉시 직선에 붙는 견인이 됩니다. 0이면 이전 동작과 정확히 같아집니다. */
-#define HOOK_PULL_STRAIGHTEN 8.0f  ///< @brief Per-second decay of velocity across the hook. 0 keeps the old curving pull. / 훅을 가로지르는 속도의 초당 감쇠율. 0이면 이전의 휘어지는 견인이 유지됩니다.
+#define HOOK_PULL_STRAIGHTEN 12.0f ///< @brief Per-second decay of velocity across the hook. 0 keeps the old curving pull. / 훅을 가로지르는 속도의 초당 감쇠율. 0이면 이전의 휘어지는 견인이 유지됩니다.
 
 /* --- 3. the impact ---
  * Hooking a monster is an attack. The damage is deliberately modest -- this

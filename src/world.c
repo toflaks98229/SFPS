@@ -363,7 +363,7 @@ static void step_look_move(World *w, const Input *in, float aspect, float dt) {
     }
 
     player_move(&w->player, &w->level, solid, n_solid,
-                wish, speed, in->jump && !hooked, dt);
+                wish, speed, in->jump && !hooked, in->forward, dt);
 
     /* Landing. The floor test is ::WORLD_SHAKE_LAND_MIN's, so stepping off a
        stair is not an impact.
@@ -1296,7 +1296,7 @@ static void step_weapon_pick(World *w, int want) {
     if (!w->weapon.owned[want])        return;
     if (w->weapon.cur == want)         return;
 
-    w->weapon.cur = want;
+    wp_swap_to(&w->weapon, want);
 
     /* A switch cancels a swing in progress rather than carrying its timer
        across: the axe's dash must not be inherited by the shotgun.
@@ -1981,6 +1981,7 @@ static void step_boss(World *w, float dt) {
         w->pools.enemy.spawn_slow = 0.0f;
 
         boss_reward(w);
+        world_shake(w, WORLD_SHAKE_MAX);
         boss_say(w, BOSS_LINE_DIE);
 
         /* STORY MODE DOES NOT WIN HERE, and the reason is the line just
@@ -2085,12 +2086,22 @@ static void step_boss(World *w, float dt) {
         b->groggy     = 0.0f;
         b->was_groggy = 0;
         w->pools.enemy.spawn_slow = WORLD_BOSS_SPAWN_SLOW;
-        enemy_ward_place(&w->pools, &w->level);
+        /* OPEN ON ARRIVAL. The wards come with the first boundary, not the
+           first frame -- see the fight-shape note in enemy.h.
+           *도착하면 열려 있습니다.* 결계핵은 첫 프레임이 아니라 첫 경계와 함께 옵니다.
+           enemy.h의 전투 형태 설명을 보십시오. */
+        b->ward_rounds = 0;
+        b->guards_seen = 0;
         world_shake(w, WORLD_SHAKE_HURT);
         boss_say(w, BOSS_LINE_WAKE);
         return;
     }
 
+    {
+        int guards = enemy_guards_alive(&w->pools);
+        if (guards < b->guards_seen) world_shake(w, WORLD_SHAKE_HURT);   /* a ward is coming down */
+        b->guards_seen = (short)guards;
+    }
     if (enemy_guards_alive(&w->pools) > 0) {
         /* Warded. The clock is not running and must be put back, or a window
            interrupted by a re-ward would resume already half spent.
@@ -2107,17 +2118,23 @@ static void step_boss(World *w, float dt) {
 
     if (!b->was_groggy) {
         b->was_groggy = 1;
-        world_shake(w, WORLD_SHAKE_HURT);
-        /* AT THE BOSS, not at the player, so the sound points. The player is by
-           construction looking away from the maw when the last ward falls --
-           that is the fight's design -- and a non-positional cue would tell
-           them something happened without telling them where.
-           플레이어가 아니라 *보스 위치*에서 재생하므로 소리가 방향을 가리킵니다. 마지막
-           결계핵이 쓰러질 때 플레이어는 구조적으로 아귀를 등지고 있으며(그것이 이 전투의
-           설계입니다), 위치 없는 신호는 무언가 일어났다고만 말하고 어디인지는 말하지
-           않습니다. */
-        audio_play_at("bossopen", 100, enemy_at(&w->pools, idx)->pos);
-        boss_say(w, BOSS_LINE_OPEN);
+        /* "OPEN" IS THE SHIELD COMING DOWN, not the maw arriving. It arrives
+           open; the first round of wards is what makes an opening an event.
+           "열림"은 보호막이 내려오는 것이지 아귀의 도착이 아닙니다. 아귀는 열린 채로 도착하며,
+           첫 결계핵 회차가 있어야 열림이 사건이 됩니다. */
+        if (b->ward_rounds > 0) {
+            world_shake(w, WORLD_SHAKE_HURT);
+            /* AT THE BOSS, not at the player, so the sound points. The player is by
+               construction looking away from the maw when the last ward falls --
+               that is the fight's design -- and a non-positional cue would tell
+               them something happened without telling them where.
+               플레이어가 아니라 *보스 위치*에서 재생하므로 소리가 방향을 가리킵니다. 마지막
+               결계핵이 쓰러질 때 플레이어는 구조적으로 아귀를 등지고 있으며(그것이 이 전투의
+               설계입니다), 위치 없는 신호는 무언가 일어났다고만 말하고 어디인지는 말하지
+               않습니다. */
+            audio_play_at("bossopen", 100, enemy_at(&w->pools, idx)->pos);
+            boss_say(w, BOSS_LINE_OPEN);
+        }
     }
 
     b->groggy += dt;
@@ -2134,37 +2151,12 @@ static void step_boss(World *w, float dt) {
         w->run.boss_line != BOSS_LINE_HIT)
         boss_say(w, BOSS_LINE_HIT);
 
-    int ceiling = S->hp * (BOSS_CYCLES - b->cycle)     / BOSS_CYCLES;
     int floor_hp = S->hp * (BOSS_CYCLES - b->cycle - 1) / BOSS_CYCLES;
 
-    /* --- the window expires ---------------------------------------------
-       THE DEFENCE AGAINST A FIGHT THAT CANNOT END. The window has no timer by
-       design -- it ends when the health crosses the boundary, which is what
-       makes the cycle count exact -- and that is a promise a player can decline
-       by running out of ammunition, by losing the maw behind them, or simply by
-       stopping. So it is taken back: the wards return and the health goes up to
-       the ceiling of the segment it started at. The cycle does NOT advance.
-       The bar visibly refilling is the only honest way to say the window is
-       gone; a bar that stayed put would report progress the player no longer
-       has. See ::BOSS_GROGGY_MAX.
-       끝날 수 없는 전투에 대한 방어입니다. 이 창은 설계상 타이머가 없습니다. 체력이 경계를
-       넘을 때 끝나고, 그것이 사이클 수를 정확하게 만듭니다. 그런데 그것은 플레이어가 탄약이
-       떨어져서, 아귀를 등 뒤로 놓쳐서, 또는 그냥 멈춤으로써 거절할 수 있는 약속입니다. 그래서
-       회수합니다. 결계핵이 돌아오고 체력은 시작했던 구간의 천장까지 올라갑니다. 사이클은
-       오르지 *않습니다.*
-       바가 눈에 띄게 되차오르는 것이 창이 날아갔다고 말하는 유일하게 정직한 방법입니다.
-       그대로 머무는 바는 플레이어가 더 이상 갖고 있지 않은 진척을 보고합니다.
-       ::BOSS_GROGGY_MAX를 참조하십시오. */
-    if (b->groggy >= BOSS_GROGGY_MAX) {
-        enemy_boss_heal(&w->pools, ceiling);
-        b->groggy     = 0.0f;
-        b->was_groggy = 0;
-        enemy_ward_place(&w->pools, &w->level);
-        world_shake(w, WORLD_SHAKE_HURT);
-        audio_play_at("bossward", 100, e->pos);
-        boss_say(w, BOSS_LINE_WARD);
-        return;
-    }
+    /* NO TIMEOUT ON AN OPEN PHASE. The maw fights back and summons while
+       open, so a player who stops shooting is under fire, not waiting.
+       *열린 단계에 시간제한은 없습니다.* 아귀는 열린 동안 반격하고 소환하므로, 쏘기를 멈춘
+       플레이어는 기다리는 것이 아니라 사격을 받고 있습니다. */
 
     /* --- the boundary was crossed ---------------------------------------
        The last boundary is zero (::types_check enforces the divisibility), so
@@ -2177,6 +2169,8 @@ static void step_boss(World *w, float dt) {
         b->groggy     = 0.0f;
         b->was_groggy = 0;
         enemy_ward_place(&w->pools, &w->level);
+        b->guards_seen = (short)enemy_guards_alive(&w->pools);
+        world_shake(w, WORLD_SHAKE_HURT);
         audio_play_at("bossward", 100, e->pos);
         boss_say(w, BOSS_LINE_WARD);
     }
@@ -3020,10 +3014,19 @@ int world_step(World *w, const Input *in, float aspect, float dt) {
     /* Pickups top up health, ammo and the roster when walked over. The weapon
        is passed whole rather than one ammo pointer, because a box says which
        belt it fills and a weapon pickup fills none of them. */
+    int took = 0;
     if (!frozen)
         pickup_update(&w->pools, &w->level, w->player.pos,
                       &w->player.health, PLAYER_MAX_HP,
-                      &w->weapon, &w->player.keys, w->player.power, dt);
+                      &w->weapon, &w->player.keys, w->player.power, dt, &took);
+    /* Raised where the pickup happened, not a frame later: the artifact's tint
+       lands on the same frame and the two are one event.
+       한 프레임 뒤가 아니라 획득이 일어난 곳에서 올립니다. 아티팩트의 색조가 같은 프레임에
+       도착하며 둘은 하나의 사건입니다. */
+    if (took) {
+        w->run.pickup_line   = took;
+        w->run.pickup_line_t = PICKUP_LINE_TIME;
+    }
 
     /* Before the exit, because a pad and an exit on the same tile is a level
        bug either way and this order makes it an obvious one: the player is
@@ -3075,6 +3078,16 @@ int world_step(World *w, const Input *in, float aspect, float dt) {
        프레임에 올라가는데, 스토리 모드에서 그 프레임은 `won`이 서서 모든 것을 정지시키는
        프레임입니다. `!frozen`으로 막힌 대사는 게시된 뒤 프로세스가 끝날 때까지 화면에 남습니다.
        ::door_notice_left가 그러하듯 만료되며, 그리기가 꼬리에서 흐리게 만듭니다. */
+    /* The artifact banner's own clock, beside the boss's and for its reasons.
+       아티팩트 배너의 시계입니다. 보스의 것 옆에 같은 이유로 둡니다. */
+    if (w->run.pickup_line_t > 0.0f) {
+        w->run.pickup_line_t -= dt;
+        if (w->run.pickup_line_t <= 0.0f) {
+            w->run.pickup_line_t = 0.0f;
+            w->run.pickup_line   = 0;
+        }
+    }
+
     if (w->run.boss_line_t > 0.0f) {
         w->run.boss_line_t -= dt;
         if (w->run.boss_line_t <= 0.0f) {

@@ -201,7 +201,7 @@ static const WeaponType WEAPONS[WP_TYPES] = {
        유탄은 방어구 없는 체력 100에 대해 60입니다. Quake도 같은 값을 물리지만 그 80%를 흡수할
        방어구 200을 함께 줍니다. 이 게임은 아무것도 주지 않으므로 도화선이 대응 수단이고,
        ::PROJ_FUSE 1.6초가 그것을 반사가 아니라 판단으로 만듭니다. */
-    { "grenade", "shotgun", "launch", 0   ,    0   ,        6,  20,   3, 120, 0.60f, 0.010f,  0, 18.75f, 26.0f, 0.0f, 0.075f, 0.130f, 1 },
+    { "grenade", "shotgun", "launch", 0   ,    0   ,        6,  40,   3, 120, 0.60f, 0.010f,  0, 18.75f, 26.0f, 0.0f, 0.075f, 0.130f, 1 },
 
     /* No hitscan: the bolts travel, so a moving target has to be led. That is
        the cost of the highest sustained damage in the roster.
@@ -235,7 +235,11 @@ static const WeaponType WEAPONS[WP_TYPES] = {
        샷건의 66.7에 대한 40 DPS가 그것을 제자리로 돌립니다.
        *내려찍기는 Quake의 것이 아니며* 5.5m의 70을 유지합니다. Quake의 도끼에는 빌려올 두
        번째 공격이 없습니다. 그것은 이 프로젝트 자신의 것으로 남습니다. */
-    { "axe",     "shotgun", "saw",    "sawup", 0   ,        3,   6,   2,  20, 0.50f, 0.0f,    0, 0.0f,  0.0f, 2.2f, 0.090f, 0.150f, 0 },
+    /* TAKES NO AMMO: max 0 is the flag, and start and pick follow. The swing and the leap are
+       both free; the leap is paced by landing (::wp_axe_land) rather than by a belt.
+       *탄약을 쓰지 않습니다.* max 0이 그 표시이며 start와 pick이 따릅니다. 휘두르기와 도약 모두
+       무료이고, 도약의 박자는 탄띠가 아니라 착지(::wp_axe_land)가 정합니다. */
+    { "axe",     "shotgun", "saw",    "sawup", 0   ,        0,   0,   0,  20, 0.50f, 0.0f,    0, 0.0f,  0.0f, 2.2f, 0.090f, 0.150f, 0 },
 };
 
 const WeaponType *wp_stats(int type) {
@@ -757,6 +761,16 @@ static void attack_feedback(Weapon *w, const WeaponType *S) {
 
     w->flash_scale = 1.1f + frand(w) * 0.7f;
     w->flash_roll  = frand(w) * M_TAU;
+
+    /* AND THE RING IS SHOVED. Set rather than added, so holding the trigger on
+       the rapid weapon does not stack ten kicks into a spin nobody can read --
+       every shot is the same shove and the decay between them is what makes a
+       fast weapon look driven and a slow one look struck.
+       *그리고 고리가 떠밀립니다.* 더하지 않고 *설정*하므로, 래피드에서 방아쇠를 누르고 있어도
+       열 번의 충격이 쌓여 아무도 읽을 수 없는 회전이 되지 않습니다. 모든 발사가 같은 밀침이고,
+       그 사이의 감쇠가 빠른 무기를 구동되는 것으로, 느린 무기를 얻어맞는 것으로 보이게
+       합니다. */
+    w->spin_kick = WPN_SPIN_KICK;
 }
 
 /**
@@ -928,7 +942,15 @@ static void attack(Weapon *w, Pools *pl, const Level *l,
 
     if (S->pellets > 0)          fire_hitscan(w, pl, l, S, eye, yaw, pitch, player_vel, player_grounded);
     else if (S->proj_speed > 0)  fire_projectile(w, pl, S, eye, yaw, pitch);
-    else if (S->melee_range > 0) fire_melee(w, pl, S, eye, yaw, pitch, player_vel);
+    else if (S->melee_range > 0) {
+        fire_melee(w, pl, S, eye, yaw, pitch, player_vel);
+        /* AND THE BLADE SPINS UP. Set rather than added, the way `spin_kick`
+           is: holding the trigger renews the same window instead of banking
+           a longer and longer one.
+           *그리고 날이 회전을 올립니다.* `spin_kick`이 그러하듯 더하지 않고 설정합니다.
+           방아쇠를 누르고 있으면 점점 긴 창을 쌓는 대신 같은 창을 갱신합니다. */
+        w->saw_spin = WPN_SAW_SPIN_TIME;
+    }
 
     attack_feedback(w, S);
 }
@@ -948,6 +970,31 @@ void wp_update(Weapon *w, Pools *pl, const Level *l,
     w->anim_clock += dt;
     if (w->anim_clock > IDLE_CYCLE_TIME) w->anim_clock -= IDLE_CYCLE_TIME;
 
+    /* THE RING TURNS, AND THE SHOT'S KICK BLEEDS OUT OF IT. Advanced here
+       rather than in the view for ::anim_clock's reason -- the picture is
+       drawn from state and does not own any -- and wrapped for its other one.
+       The decay is exponential so halving dt and stepping twice lands where
+       one full step does; see ::WPN_SPIN_DECAY.
+       *고리가 돌고, 발사의 충격이 거기서 빠져나갑니다.* 뷰가 아니라 이곳에서 진행시키는 것은
+       ::anim_clock의 이유와 같습니다. 그림은 상태로부터 그려질 뿐 상태를 소유하지 않습니다.
+       감아 돌리는 것은 그것의 다른 이유입니다. 감쇠는 지수이므로 dt를 절반으로 줄여 두 번
+       실행해도 한 번에 실행한 곳에 도착합니다. ::WPN_SPIN_DECAY를 보십시오. */
+    w->spin += wp_spin_rate(w) * dt;
+    if (w->spin > WPN_SPIN_WRAP) w->spin -= WPN_SPIN_WRAP;
+    if (w->spin_kick > 0.0f) {
+        w->spin_kick -= w->spin_kick * (1.0f - expf(-WPN_SPIN_DECAY * dt));
+        if (w->spin_kick < 0.001f) w->spin_kick = 0.0f;
+    }
+    /* The saw's window runs down flat rather than decaying: the blade is at
+       speed or it is not, and a saw that eased off would read as one losing
+       power. 톱의 창은 감쇠가 아니라 일정하게 줄어듭니다. 날은 최고 속도이거나 아니거나이며,
+       서서히 힘을 빼는 톱은 동력을 잃는 톱으로 읽힙니다. */
+    if (w->saw_spin > 0.0f) {
+        w->saw_spin -= dt;
+        if (w->saw_spin < 0.0f) w->saw_spin = 0.0f;
+    }
+
+    if (w->swap          > 0.0f) w->swap          -= dt;
     if (w->cooldown      > 0.0f) w->cooldown      -= dt;
     if (w->hook_cooldown > 0.0f) w->hook_cooldown -= dt;
     if (w->flash         > 0.0f) w->flash         -= dt;
@@ -962,8 +1009,11 @@ void wp_update(Weapon *w, Pools *pl, const Level *l,
     if (w->dry_timer > 0.0f) w->dry_timer -= dt;
 
     if (firing && w->cooldown <= 0.0f) {
-        if (w->ammo[w->cur] > 0) {
-            w->ammo[w->cur]--;
+        /* A weapon whose belt holds nothing (max_ammo 0) fires for free and never runs dry.
+           탄띠가 없는 무기(max_ammo 0)는 무료로 발사하며 결코 마르지 않습니다. */
+        int free = wp_stats(w->cur)->max_ammo <= 0;
+        if (free || w->ammo[w->cur] > 0) {
+            if (!free) w->ammo[w->cur]--;
             attack(w, pl, l, eye, yaw, pitch + w->recoil, player_vel, player_grounded);
         } else if (w->dry_timer <= 0.0f) {
             /* Empty: a click, and a short lockout so holding the trigger does
@@ -1209,6 +1259,64 @@ int wp_sprite_frame(const Weapon *w) {
 
 /* ------------------------------------------------------------- the axe leap */
 
+/* --- how fast the ring turns ---------------------------------------------
+ *
+ * ASKED, NOT STORED. The answer is a division of two numbers the weapon table
+ * already holds, so a field would be a third copy to keep in step with a swap
+ * -- and the failure when it drifts is a ring whose speed disagrees with the
+ * gun it is on, which is the exact thing the speed exists to say.
+ *
+ * A COOLDOWN OF ZERO WOULD DIVIDE BY IT. No shipped row is zero and
+ * ::weapontest asserts the table's shape, but the guard is here rather than
+ * there because this returns a rate that something multiplies dt by: an
+ * infinity reaching ::Weapon::spin is a NaN in a transform, and a black screen
+ * is a poor way to learn a table row was blank.
+ *
+ * *저장하지 않고 물어봅니다.* 답은 무기 표가 이미 가진 두 수의 나눗셈이므로, 필드는 무기
+ * 교체와 맞춰 두어야 할 세 번째 사본이 됩니다. 어긋났을 때의 고장은 자기가 올라탄 총과 속도가
+ * 어긋나는 고리이며, 그것이 바로 이 속도가 말하려던 것입니다.
+ * *대기 시간이 0이면 그것으로 나눕니다.* 출하된 행 중 0은 없고 ::weapontest가 표의 모양을
+ * 단언하지만, 방어는 그곳이 아니라 이곳에 있습니다. 이것은 무언가가 dt를 곱할 *비율*을
+ * 돌려주기 때문입니다. ::Weapon::spin에 닿는 무한대는 변환 안의 NaN이고, 검은 화면은 표의
+ * 행이 비어 있었다는 것을 배우는 좋은 방법이 아닙니다. */
+void wp_swap_to(Weapon *w, int type) {
+    if (!w) return;
+    if (type < 0 || type >= WP_TYPES) return;
+    if (w->cur == type) return;
+
+    w->swap_from = w->cur;
+    w->cur       = type;
+    w->swap      = WPN_SWAP_TIME;
+
+    /* THE RING WHIPS ROUND TOO, and it is the same kick a shot gives it rather
+       than a second mechanism: a swap is a thing that happened to the weapon,
+       and the ring answering everything that happens to the weapon is what
+       makes it read as part of the weapon.
+       *고리도 함께 휩니다.* 두 번째 장치가 아니라 발사가 주는 그 충격입니다. 전환은 무기에게
+       일어난 일이고, 무기에게 일어나는 모든 일에 고리가 답하는 것이 고리를 무기의 일부로
+       읽히게 만듭니다. */
+    w->spin_kick = WPN_SPIN_KICK;
+}
+
+float wp_swap_t(const Weapon *w) {
+    if (!w || w->swap <= 0.0f) return 1.0f;
+    float t = 1.0f - w->swap / WPN_SWAP_TIME;
+    if (t < 0.0f) return 0.0f;
+    if (t > 1.0f) return 1.0f;
+    return t;
+}
+
+float wp_spin_rate(const Weapon *w) {
+    if (!w) return 0.0f;
+    float cd = wp_stats(w->cur)->cooldown;
+    if (cd < 0.001f) cd = 0.001f;
+    float r = WPN_SPIN_RATE / cd + w->spin_kick;
+    /* The saw runs while it cuts: a level added on top, not an impulse.
+       톱은 자르는 동안 돕니다. 충격이 아니라 위에 더해지는 수준입니다. */
+    if (w->saw_spin > 0.0f) r += WPN_SAW_SPIN;
+    return r;
+}
+
 int wp_axe_leaping(const Weapon *w) { return w->leaping; }
 
 
@@ -1216,12 +1324,6 @@ int wp_axe_leap(Weapon *w, float yaw, float pitch, v3 *player_vel) {
     if (w->cur != WP_AXE) return 0;
     if (w->leaping) return 0;
 
-    const WeaponType *S = wp_stats(WP_AXE);
-    if (w->ammo[WP_AXE] <= 0) {
-        if (w->dry_timer <= 0.0f) { audio_play("dry", 55); w->dry_timer = 0.35f; }
-        return 0;
-    }
-    (void)S;
 
     float cy = cosf(yaw), sy = sinf(yaw);
     float cp = cosf(pitch), sp = sinf(pitch);
@@ -1239,7 +1341,6 @@ int wp_axe_leap(Weapon *w, float yaw, float pitch, v3 *player_vel) {
     player_vel->y = AXE_LEAP_UP;
     *player_vel = v3add(*player_vel, v3scale(flat, AXE_LEAP_FWD));
 
-    w->ammo[WP_AXE]--;
     w->leaping    = 1;
     w->leap_timer = 0.0f;
     w->punch     += wp_stats(WP_AXE)->punch;

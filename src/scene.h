@@ -138,6 +138,10 @@
 typedef struct {
     MeshBuf enemy_buf,  pickup_buf,  shot_buf,  hud_buf;   /**< CPU-side builders. / CPU 측 빌더. */
     Mesh    enemy_mesh, pickup_mesh, shot_mesh, hud_mesh;  /**< Their GPU counterparts. / 대응하는 GPU 측 메시. */
+    MeshBuf beam_buf;                                       /**< The ward beams, see ::scene_draw_beams. / 결계 빔. ::scene_draw_beams 참조. */
+    Mesh    beam_mesh;
+    MeshBuf emb_buf;                                        /**< Weapon pickups, drawn from the emblem atlas. / 문양 아틀라스에서 그리는 무기 아이템. */
+    Mesh    emb_mesh;
 
 
     GLuint  sprite_tex;   /**< Monster atlas. / 몬스터 아틀라스. */
@@ -456,6 +460,70 @@ void scene_draw_level(const Scene *s, mat4 vp, v3 eye);
  *       비활성화하고, 반환 전에 복원합니다.
  */
 void scene_draw_enemies(Scene *s, const Pools *pl, mat4 vp, v3 eye, v3 cam_right);
+
+/* --- the ward beams --------------------------------------------------------
+ *
+ * WHAT TIES THE WARDS TO THE BOSS, on screen. The rule is already in enemy.c
+ * -- the boss cannot be hurt while a ward stands -- but a rule nobody can see
+ * is a boss that seems to ignore damage for no reason. So each standing ward
+ * runs a beam from its gem to the boss's centre, the way the End's crystals
+ * feed its dragon: break the ward and the beam is gone with it, and the boss
+ * visibly loses a line.
+ *
+ * ATTACHED AT THE GEM BY THE DRAWING, not by a number here. The ward's art
+ * carries a marker pixel at the gem and ::sprite_anchor turns it into a
+ * fraction of the sprite's height, so the beam stays on the gem through a
+ * resize of the ward or a redraw of the pillar. A kind with no marker gets
+ * the top of its sprite.
+ *
+ * THREE ADDITIVE RIBBONS, the same core / halo / glow the bolts are built
+ * from, in the ward's cold blue so it reads as the ward feeding the boss and
+ * not the boss firing at the ward. Pulsed off the boss's own clock: one heart
+ * for every line.
+ *
+ * *결계석을 보스에 묶는 것*을 화면에 보입니다. 규칙은 이미 enemy.c에 있습니다. 결계석이
+ * 서 있는 동안 보스는 다치지 않습니다. 그러나 아무도 볼 수 없는 규칙은 이유 없이 피해를
+ * 무시하는 것처럼 보이는 보스입니다. 그래서 서 있는 결계석마다 자기 보석에서 보스의
+ * 중심으로 빔을 냅니다. 엔드의 수정이 드래곤을 먹이는 방식입니다. 결계석을 부수면 빔도
+ * 함께 사라지고, 보스는 눈에 보이게 선 하나를 잃습니다.
+ * *보석에 붙는 것은 그림이 정합니다*, 이곳의 숫자가 아니라. 결계석의 아트는 보석에 표식
+ * 픽셀을 지니고 ::sprite_anchor가 그것을 스프라이트 높이의 비율로 바꾸므로, 결계석의
+ * 크기 변경이나 기둥의 다시 그리기를 지나도 빔은 보석 위에 남습니다. 표식이 없는 종류는
+ * 스프라이트의 꼭대기를 받습니다.
+ * *가산 리본 셋*이며, 볼트가 만들어지는 것과 같은 심/후광/발광입니다. 결계석의 차가운
+ * 파랑이므로 보스가 결계석을 쏘는 것이 아니라 결계석이 보스를 먹이는 것으로 읽힙니다.
+ * 보스 자신의 시계로 맥동합니다. 모든 선에 하나의 심장입니다. */
+#define BEAM_GLOW_W   0.40f   ///< @brief Outer ribbon width, metres. / 바깥 리본 너비(미터).
+#define BEAM_HALO_W   0.20f   ///< @brief Middle ribbon width, metres. / 가운데 리본 너비(미터).
+#define BEAM_CORE_W   0.06f   ///< @brief Core ribbon width, metres. / 심 리본 너비(미터).
+#define BEAM_PULSE_RATE 5.0f  ///< @brief Radians per second of ::Enemy::anim. / ::Enemy::anim 초당 라디안.
+void scene_draw_beams(Scene *s, const Pools *pl, mat4 vp, v3 eye);
+
+/* --- weapon pickups: the magic circle on the floor -------------------------
+ *
+ * A weapon lying on the floor is its magic circle, drawn from the SAME atlas
+ * the wand draws it from: row 0 the ring, row 1 the gem, two billboards over
+ * one point. The ring turns at the weapon's own idle rate -- ::WPN_SPIN_RATE
+ * over its cooldown, the rate the wand shows when it is not firing -- and the
+ * gem holds still, so the floor and the hand agree about what this thing is.
+ *
+ * Rotated by turning the billboard's basis, not its corners: the quad is
+ * square and `right`/`up` are orthonormal, so there is no shear to fall into.
+ *
+ * ::scene_draw_pickups skips these kinds; their cells in the pickup atlas are
+ * not drawn by anything.
+ *
+ * 바닥에 놓인 무기는 그 마법진이며, 지팡이가 그리는 *같은* 아틀라스에서 그립니다. 0번 줄이
+ * 고리, 1번 줄이 보석이고, 한 점 위에 빌보드 둘입니다. 고리는 무기 자신의 휴지 속도로
+ * 돕니다. ::WPN_SPIN_RATE를 쿨다운으로 나눈 값이며, 지팡이가 쏘지 않을 때 보이는 속도입니다.
+ * 보석은 가만히 있으므로 바닥과 손이 이것이 무엇인지에 대해 일치합니다.
+ * 모서리가 아니라 빌보드의 기저를 돌려 회전합니다. 사각형이 정사각형이고 `right`/`up`이
+ * 정규직교이므로 빠질 전단이 없습니다.
+ * ::scene_draw_pickups는 이 종류들을 건너뛰며, 아이템 아틀라스의 그 칸은 무엇도 그리지
+ * 않습니다. */
+#define PICKUP_BOB_RATE 2.2f      ///< @brief Radians per second of ::Pickup::anim for the bob; public so a test can hold the bob still. / 보브에 대한 ::Pickup::anim의 초당 라디안. 검사가 보브를 고정할 수 있도록 공개.
+#define PICKUP_EMBLEM_SIZE 1.6f   ///< @brief Billboard edge for a floor circle, metres. / 바닥 마법진 빌보드의 변(미터).
+void scene_draw_weapon_pickups(Scene *s, const Pools *pl, mat4 vp, v3 eye, v3 cam_right);
 
 /**
  * @brief Draws the pickups as bobbing billboards on the same sprite path.

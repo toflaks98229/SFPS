@@ -438,6 +438,9 @@ int loot_held_kind(const Weapon *w, int *gun) {
     for (int k = 0; k < WP_TYPES; k++) {
         int t = (start + k) % WP_TYPES;
         if (!w->owned[t]) continue;
+        /* A weapon with no belt (max_ammo 0) is owed nothing, however owned it is.
+           탄띠가 없는 무기(max_ammo 0)는 아무리 보유해도 빚진 것이 없습니다. */
+        if (wp_stats(t)->max_ammo <= 0) continue;
         if (gun) *gun = t + 1;
         return PK_AMMO_FOR(t);
     }

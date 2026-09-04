@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <math.h>
 #include "weapon.h"
+#include "weaponview.h"
 #include "pools.h"
 #include "sprite.h"   /* WPN_* -- the poses the viewmodel cycles through */
 #include "proj.h"
@@ -127,7 +128,10 @@ int main(void) {
             const WeaponType *S = wp_stats(i);
             if (S->start_ammo > S->max_ammo)  bad++;
             if (S->pickup_ammo > S->max_ammo) bad++;
-            if (S->max_ammo <= 0)             bad++;
+            if (S->max_ammo < 0)              bad++;
+            /* No belt at all is allowed, and then nothing may fill it.
+               탄띠가 아예 없는 것은 허용되며, 그러면 아무것도 채워서는 안 됩니다. */
+            if (S->max_ammo == 0 && (S->start_ammo || S->pickup_ammo)) bad++;
             if (S->cooldown <= 0.0f)          bad++;
             if (S->damage <= 0)               bad++;
         }
@@ -141,6 +145,8 @@ int main(void) {
         okd(hooks == WP_TYPES - 1, "every weapon but one throws the grapple",
             hooks, WP_TYPES - 1);
         ok(!wp_stats(WP_AXE)->hook, "and the one that does not is the axe");
+        okd(wp_stats(WP_AXE)->max_ammo == 0, "which is also the one weapon that takes no ammo",
+            wp_stats(WP_AXE)->max_ammo, 0);
     }
 
     /* --- 2. a bolt flies flat -------------------------------------------
@@ -640,6 +646,446 @@ int main(void) {
         v3 d = WP_MUZZLE_DEFAULT;
         ok(w.muzzle.x == d.x && w.muzzle.y == d.y && w.muzzle.z == d.z,
            "and starts at the default muzzle, not at the camera origin");
+    }
+
+    /* --- the ring's spin is the fire rate ---------------------------------
+     *
+     * WHAT THIS PINS IS A RATIO, not a rate. The whole point of driving the
+     * wand's ring from ::WeaponType::cooldown is that the picture cannot
+     * disagree with the gun: retune a cooldown and the ring follows, and this
+     * stays green. Assert 6.30 rad/s on the rapid and the check would be
+     * ::WPN_SPIN_RATE written twice, red the first time anybody tunes a weapon
+     * for reasons that have nothing to do with the ring.
+     *
+     * THE FASTER WEAPON MUST TURN FASTER, and by the ratio of the two fire
+     * rates -- which is what makes the ring readable as "what am I holding"
+     * rather than as decoration that happens to move.
+     *
+     * AND A SHOT MUST BE VISIBLE IN IT. A ring that only ever turned at its
+     * resting rate would say which weapon is held and nothing about firing it,
+     * so the kick is checked as: faster immediately after a shot, and settled
+     * back afterwards. The settling is what stops a held trigger stacking into
+     * a blur -- ::wp_fire SETS the kick rather than adding to it.
+     *
+     * *못 박는 것은 비율이지 속도가 아닙니다.* 지팡이의 고리를 ::WeaponType::cooldown에서
+     * 구동하는 요점 전체는 그림이 총과 어긋날 수 없다는 것입니다. 대기 시간을 조율하면 고리가
+     * 따라오고 이 검사는 초록으로 남습니다. 래피드에 6.30 rad/s를 단언하면 그 검사는
+     * ::WPN_SPIN_RATE를 두 번 쓴 것이 되고, 고리와 아무 상관 없는 이유로 누가 무기를 조율하는
+     * 첫 순간에 빨개집니다.
+     * *더 빠른 무기가 더 빨리 돌아야 하며*, 두 연사 속도의 비만큼 그래야 합니다. 그것이 고리를
+     * 장식이 아니라 "내가 무엇을 쥐고 있는가"로 읽히게 만듭니다.
+     * *그리고 발사가 그 안에 보여야 합니다.* 정지 속도로만 도는 고리는 어느 무기를 쥐었는지만
+     * 말하고 발사에 대해서는 아무 말도 하지 않으므로, 충격은 이렇게 검사합니다. 발사 직후 더
+     * 빠르고, 그 뒤 가라앉을 것. 가라앉음이 방아쇠를 누르고 있을 때 뭉개짐으로 쌓이지 않게
+     * 막는 것입니다. ::wp_fire는 충격을 더하지 않고 *설정*합니다. */
+    printf("\nthe ring turns at the fire rate\n");
+    {
+        Weapon w = (Weapon){0};
+        float rate[WP_TYPES];
+        for (int i = 0; i < WP_TYPES; i++) {
+            w.cur = i;
+            w.spin_kick = 0.0f;
+            rate[i] = wp_spin_rate(&w);
+            printf("      %-8s cooldown %.3fs -> %.2f rad/s\n",
+                   wp_stats(i)->name, (double)wp_stats(i)->cooldown, (double)rate[i]);
+            ok(rate[i] > 0.0f, wp_stats(i)->name);
+        }
+
+        /* Every pair, so this cannot pass by one weapon happening to be right. */
+        int wrong = 0;
+        for (int a = 0; a < WP_TYPES; a++)
+            for (int b = 0; b < WP_TYPES; b++) {
+                if (a == b) continue;
+                float want = wp_stats(b)->cooldown / wp_stats(a)->cooldown;
+                float got  = rate[a] / rate[b];
+                if (got < want * 0.99f || got > want * 1.01f) wrong++;
+            }
+        okd(wrong == 0, "and every pair is in the ratio of their fire rates",
+            wrong, 0);
+
+        /* THE KICK IS FIRED, NOT ASSIGNED. Setting ::Weapon::spin_kick here and
+           reading the rate back would check the arithmetic and nothing else --
+           it passed with ::wp_fire's kick deleted and with the decay deleted,
+           because neither line was on the path the test walked. So the shot
+           goes through ::wp_update with `firing` set, exactly as a trigger
+           pull does, and the settling is real frames of it.
+           *충격은 대입하는 것이 아니라 발사하는 것입니다.* 이곳에서 ::Weapon::spin_kick을
+           설정하고 속도를 되읽는 것은 산술만 검사할 뿐입니다. ::wp_fire의 충격을 지워도,
+           감쇠를 지워도 통과했습니다. 두 줄 다 검사가 걷는 경로에 없었기 때문입니다. 그래서
+           발사는 방아쇠를 당길 때와 똑같이 `firing`을 세운 ::wp_update를 지나가고, 가라앉음도
+           실제 프레임입니다. */
+        const float SDT = 1.0f / 60.0f;
+        v3 seye = v3f(0, 0, 0), svel = v3f(0, 0, 0);
+        Weapon f = (Weapon){0};
+        wp_init(&f);
+        f.cur = WP_SHOTGUN;
+        f.ammo[WP_SHOTGUN] = 10;
+
+        wp_update(&f, &g_pools, 0, SDT, 0, seye, 0, 0, 0, 0, 0, 1.4f, 1.6f, &svel, 1);
+        float rest = wp_spin_rate(&f);
+
+        wp_update(&f, &g_pools, 0, SDT, 1, seye, 0, 0, 0, 0, 0, 1.4f, 1.6f, &svel, 1);
+        float shot = wp_spin_rate(&f);
+        ok(shot > rest * 1.5f, "a shot shoves the ring well past its resting rate");
+
+        for (int i = 0; i < 60; i++)
+            wp_update(&f, &g_pools, 0, SDT, 0, seye, 0, 0, 0, 0, 0, 1.4f, 1.6f, &svel, 1);
+        float after = wp_spin_rate(&f);
+        printf("      shotgun rest %.2f, shot %.2f, one second later %.2f\n",
+               (double)rest, (double)shot, (double)after);
+        ok(after < rest * 1.05f, "and it settles back within a second");
+
+        /* And the angle actually moved, so the rate is not a number nobody
+           multiplies dt by. */
+        ok(f.spin > 0.0f, "and the ring's angle advanced while it turned");
+    }
+
+    /* --- the ring turns without leaning ------------------------------------
+     *
+     * THE QUAD LIVES IN A 1x1 BOX OVER A VIEWPORT THAT IS NOT SQUARE, so one
+     * unit of x and one of y are different numbers of pixels. That is fine for
+     * a still drawing and fatal for a turning one: scale the corner offsets
+     * before rotating and the two scales meet inside the rotation, which is a
+     * shear. It shipped that way and the ring visibly leaned.
+     *
+     * MEASURED IN PIXELS, because ortho units are exactly the thing that lies
+     * here -- a quad that is square in ortho units is not square on screen. The
+     * corners come from ::wpview_emblem_quad, which is the arithmetic the frame
+     * draws with rather than a copy of it: a check against its own second
+     * implementation would stay green while the drawn ring sheared.
+     *
+     * TWO PROPERTIES, THROUGH A FULL TURN. Adjacent sides keep their length
+     * ratio, and the corners stay square. Both are what "rigid" means and
+     * neither can be satisfied by a shear. Against the broken order these read
+     * 3.15 and 31 degrees; the tolerances below are far tighter than that and
+     * far looser than the 1.003 and 0.18 the fix actually achieves, so this
+     * fails on the bug and not on the last digit of a float.
+     *
+     * *사각형은 정사각형이 아닌 뷰포트 위 1x1 상자 안에 있으므로*, x 한 단위와 y 한 단위는
+     * 서로 다른 픽셀 수입니다. 가만히 있는 그림에는 괜찮고 도는 그림에는 치명적입니다. 회전
+     * 전에 모서리 오프셋에 배율을 주면 두 배율이 회전 안에서 만나며, 그것이 전단입니다. 그렇게
+     * 출하되었고 고리가 눈에 띄게 기울었습니다.
+     * *픽셀로 잽니다.* 이곳에서 거짓말하는 것이 바로 직교 단위이기 때문입니다. 직교 단위로
+     * 정사각형인 사각형은 화면에서 정사각형이 아닙니다. 모서리는 ::wpview_emblem_quad에서
+     * 오며, 그것은 사본이 아니라 프레임이 그리는 산술입니다. 자기 자신의 두 번째 구현에 대한
+     * 검사는 그려지는 고리가 전단되는 동안에도 초록으로 남습니다.
+     * *한 바퀴 동안 두 성질입니다.* 이웃한 변이 길이 비를 지키고, 모서리가 직각으로 남습니다.
+     * 둘 다 "강체"의 뜻이며 전단으로는 어느 쪽도 만족되지 않습니다. 깨진 순서에서는 3.15와
+     * 31도가 나옵니다. 아래 허용치는 그보다 훨씬 빡빡하고, 수정이 실제로 내는 1.003과
+     * 0.18보다는 훨씬 헐거우므로, 이 검사는 결함에서 실패하고 실수의 마지막 자리에서는
+     * 실패하지 않습니다. */
+    printf("\nthe ring turns without leaning\n");
+    {
+        /* A 16:9 view, which is the shape the box is stretched over. */
+        const float VW = 1600.0f, VH = 900.0f, ASPECT = VW / VH;
+        float worst_ratio = 1.0f, worst_skew = 0.0f;
+
+        for (int deg = 0; deg < 360; deg += 5) {
+            float q[4][2];
+            wpview_emblem_quad(ASPECT, (float)deg * 3.14159265f / 180.0f, q);
+
+            /* Ortho units to pixels: x spans VW, y spans VH. */
+            float px[4], py[4];
+            for (int k = 0; k < 4; k++) { px[k] = q[k][0] * VW; py[k] = q[k][1] * VH; }
+
+            float ax = px[1] - px[0], ay = py[1] - py[0];   /* one side */
+            float bx = px[2] - px[1], by = py[2] - py[1];   /* the next */
+            float la = sqrtf(ax * ax + ay * ay);
+            float lb = sqrtf(bx * bx + by * by);
+            if (la < 1e-6f || lb < 1e-6f) { ok(0, "the quad has area"); break; }
+
+            float r = la > lb ? la / lb : lb / la;
+            if (r > worst_ratio) worst_ratio = r;
+
+            /* The corner between them, in degrees away from square. */
+            float cosang = (ax * bx + ay * by) / (la * lb);
+            if (cosang >  1.0f) cosang =  1.0f;
+            if (cosang < -1.0f) cosang = -1.0f;
+            float skew = fabsf(acosf(cosang) * 180.0f / 3.14159265f - 90.0f);
+            if (skew > worst_skew) worst_skew = skew;
+        }
+
+        printf("      over a full turn: sides up to %.3f:1, corners off square by %.2f deg\n",
+               (double)worst_ratio, (double)worst_skew);
+        ok(worst_ratio < 1.05f, "adjacent sides keep their length through the turn");
+        ok(worst_skew  < 2.0f,  "and the corners stay square");
+    }
+
+    /* --- and it stays set into the staff -----------------------------------
+     *
+     * THE EMBLEM IS PART OF THE WAND, not a badge floating beside it. That is a
+     * composition, and a composition is exactly what a resize breaks: the wand
+     * was shrunk to WPN_ART_SCALE of Doom's cell, and had the emblem kept the
+     * old extent it would now be a magic circle wider than the staff it is set
+     * into.
+     *
+     * A RATIO, NOT A RECTANGLE. The check does not know 40%, and must not --
+     * that number is a taste decision the author is free to change. What it
+     * knows is that the emblem's share of the wand is EMB_CW/WPN_CW across,
+     * which is the atlas geometry the art was drawn against, and that the point
+     * it turns about is on the wand. Both survive any scale; a scale applied to
+     * one layer and not the other fails them.
+     *
+     * THE CENTRE AND NOT THE BOX, because the box is not inside the cell and
+     * should not be. The emblem canvas keeps two transparent rows under its
+     * ink, the ring reaches the cell's last row, and so the canvas hangs two
+     * rows below the wand -- an earlier draft of this check asked whether the
+     * canvas fitted and went red against art that was placed correctly. See
+     * ::EMB_ON_WAND_Y.
+     *
+     * *문양은 지팡이의 일부이지*, 그 옆에 떠 있는 배지가 아닙니다. 그것은 구성이며, 크기 변경이
+     * 정확히 깨뜨리는 것이 구성입니다. 지팡이는 Doom의 셀 대비 WPN_ART_SCALE로 줄었고,
+     * 문양이 예전 크기를 유지했다면 지금쯤 자기가 박힌 지팡이보다 넓은 마법진이 되었을 것입니다.
+     * *사각형이 아니라 비율입니다.* 이 검사는 40%를 모르며 알아서도 안 됩니다. 그 수는 저자가
+     * 자유로이 바꿀 수 있는 취향의 결정입니다. 검사가 아는 것은, 문양이 지팡이에서 차지하는
+     * 너비의 몫이 EMB_CW/WPN_CW라는 것, 그것이 아트가 저작된 기준인 아틀라스 기하라는 것,
+     * 그리고 그것이 도는 중심점이 지팡이 위에 있다는 것입니다. 둘 다 어떤 배율에서도
+     * 살아남습니다. 한 레이어에만 적용된 배율은 둘을 실패시킵니다.
+     * *상자가 아니라 가운데입니다.* 상자는 셀 안에 있지 않으며 있어서도 안 되기 때문입니다.
+     * 문양 캔버스는 잉크 아래에 투명한 두 행을 두고, 고리는 셀의 마지막 행에 닿으므로,
+     * 캔버스는 지팡이보다 두 행 아래로 내려갑니다. 이 검사의 이전 초안은 캔버스가 들어맞는지
+     * 물었고 올바르게 배치된 아트에 대해 빨간불이 되었습니다. ::EMB_ON_WAND_Y를 보십시오. */
+    printf("\nthe emblem is set into the staff\n");
+    {
+        const float ASPECT = 1600.0f / 900.0f;
+        float rect[4], q[4][2];
+        wpview_art_rect(ASPECT, rect);
+        wpview_emblem_quad(ASPECT, 0.0f, q);   /* unturned: the authored pose */
+
+        float ex0 = q[0][0], ex1 = q[1][0];
+        float ey0 = q[0][1], ey1 = q[2][1];
+        float share = (ex1 - ex0) / (rect[2] - rect[0]);
+        float want  = (float)EMB_CW / (float)WPN_CW;
+
+        printf("      the emblem spans %.3f of the wand, the atlas says %.3f\n",
+               (double)share, (double)want);
+        ok(fabsf(share - want) < 0.01f,
+           "the emblem keeps the atlas's share of the wand's width");
+        float mx = (ex0 + ex1) * 0.5f, my = (ey0 + ey1) * 0.5f;
+        ok(mx > rect[0] && mx < rect[2] && my > rect[1] && my < rect[3],
+           "and turns about a point on the wand rather than beside it");
+    }
+
+    /* --- a swap flares white and comes back another colour -----------------
+     *
+     * THE FLOURISH IS THE ONLY THING THAT SAYS THE SWITCH TOOK. Nothing else
+     * about a swap is visible: the belt is instant by design, the art in hand
+     * is the same wand for every weapon, and the only part that differs is the
+     * ring turning on it. A change the player cannot see is a change they will
+     * make twice.
+     *
+     * WALKED THROUGH ::wp_update, not assigned. The spin check below learned
+     * this the hard way -- a fixture that sets the field and reads it back
+     * passes with the feature deleted, because the deleted line was never on
+     * the path. So the swap is asked for the way a keypress asks for it and the
+     * flourish is real frames of the real update.
+     *
+     * WHAT IS PINNED IS THE SHAPE, not the colours. The four hues come off the
+     * art (::emblem_hue) and the artist may repaint them tomorrow. What must
+     * not change is that the walk starts on the old weapon's colour, passes
+     * through white, and ends leaning the way the new weapon's does -- white in
+     * the middle is the whole reason the smear frame is colourless, and a
+     * straight fade between two hues passes through the mud between them
+     * instead of flaring.
+     *
+     * *연출만이 전환이 먹혔다고 말합니다.* 전환의 다른 무엇도 보이지 않습니다. 벨트는 설계상
+     * 즉시이고, 손에 든 그림은 모든 무기에 대해 같은 지팡이이며, 다른 것은 그 위에서 도는
+     * 고리뿐입니다. 플레이어가 볼 수 없는 변화는 그들이 두 번 하게 되는 변화입니다.
+     * *대입이 아니라 ::wp_update를 통해 걷습니다.* 아래의 회전 검사가 이것을 힘들게
+     * 배웠습니다. 필드를 설정하고 되읽는 픽스처는 기능을 지워도 통과합니다. 지워진 줄이 애초에
+     * 경로에 없었기 때문입니다. 그래서 전환은 키 입력이 요청하는 방식으로 요청되고, 연출은
+     * 실제 갱신의 실제 프레임입니다.
+     * *고정하는 것은 색이 아니라 모양입니다.* 네 색상은 아트에서 옵니다(::emblem_hue). 작가는
+     * 내일 다시 칠할 수 있습니다. 바뀌어서는 안 되는 것은, 걸음이 옛 무기의 색에서 시작해
+     * 흰색을 지나 새 무기의 색이 기우는 쪽으로 끝난다는 것입니다. 가운데의 흰색이 스미어
+     * 프레임이 무색인 이유의 전부이며, 두 색상 사이의 곧은 페이드는 그 사이의 진창을
+     * 지나갑니다. */
+    printf("\na weapon swap flares white and comes back another colour\n");
+    {
+        const float SDT = 1.0f / 60.0f;
+        v3 seye = v3f(0, 0, 0), svel = v3f(0, 0, 0);
+        Weapon f = (Weapon){0};
+        wp_init(&f);
+        f.owned[WP_RAPID]  = 1;
+        f.ammo[WP_RAPID]   = 50;
+        f.ammo[WP_SHOTGUN] = 10;
+
+        float rest[3];
+        wpview_emblem_tint(&f, rest);
+        ok(rest[0] == 1.0f && rest[1] == 1.0f && rest[2] == 1.0f,
+           "a weapon at rest draws its ring in the colours it was painted");
+        ok(wpview_emblem_cell(&f) == WP_SHOTGUN,
+           "and shows its own emblem");
+
+        /* THE SMEAR'S OWN DRAWING HAS TO BE COLOURLESS. Everything below rests
+           on it: a tinted canvas cannot be tinted to something else.
+           *스미어 자신의 그림은 무색이어야 합니다.* 아래의 모든 것이 그것에 기댑니다. 이미
+           물든 캔버스는 다른 것으로 물들일 수 없습니다. */
+        float canvas[3];
+        emblem_hue(EMB_SMEAR, canvas);
+        printf("      the smear frame's own colour is %.2f %.2f %.2f\n",
+               (double)canvas[0], (double)canvas[1], (double)canvas[2]);
+        ok(fabsf(canvas[0] - canvas[1]) < 0.03f &&
+           fabsf(canvas[1] - canvas[2]) < 0.03f,
+           "the smear frame is drawn colourless, so a tint can give it a colour");
+
+        wp_swap_to(&f, WP_RAPID);
+        ok(f.cur == WP_RAPID, "a swap puts the new weapon in hand at once");
+        ok(f.cooldown <= 0.0f, "and leaves it able to fire on the same frame");
+
+        float first[3] = { 0, 0, 0 }, last[3] = { 1, 1, 1 };
+        float ends = 0.0f, middle_lit = 0.0f;
+        int frames = 0, smeared = 0;
+
+        while (f.swap > 0.0f && frames < 240) {
+            float c[3];
+            wpview_emblem_tint(&f, c);
+            if (frames == 0) for (int k = 0; k < 3; k++) first[k] = c[k];
+            for (int k = 0; k < 3; k++) last[k] = c[k];
+
+            float lo = c[0], hi = c[0];
+            for (int k = 1; k < 3; k++) {
+                if (c[k] < lo) lo = c[k];
+                if (c[k] > hi) hi = c[k];
+            }
+            float spread = hi - lo, t = wp_swap_t(&f);
+            if (t < 0.15f || t > 0.85f) { if (spread > ends) ends = spread; }
+            /* THE DIMMEST CHANNEL, not the spread between them. A spread near
+               zero only says "grey", and grey is where a straight fade between
+               two roughly opposite hues passes anyway -- this fixture's own
+               pair does, at 0.03, so the first cut of this check passed with
+               the white midpoint deleted. What only a walk THROUGH WHITE
+               produces is all three channels up at once, so that is what is
+               asked for.
+               *가장 어두운 채널이지 채널 사이의 폭이 아닙니다.* 폭이 0에 가깝다는 것은
+               "회색"이라는 뜻일 뿐이고, 대략 반대인 두 색상 사이의 곧은 페이드는 어차피
+               회색을 지나갑니다. 이 픽스처의 짝도 0.03으로 그러하며, 그래서 이 검사의 첫
+               판은 흰색 중간점을 지워도 통과했습니다. 흰색을 *지나는* 걸음만이 내는 것은 세
+               채널이 동시에 올라가는 것이며, 그래서 그것을 묻습니다. */
+            if (t > 0.40f && t < 0.60f) { if (lo > middle_lit) middle_lit = lo; }
+            if (wpview_emblem_cell(&f) == EMB_SMEAR) smeared++;
+
+            wp_update(&f, &g_pools, 0, SDT, 0, seye, 0, 0, 0, 0, 0,
+                      1.4f, 1.6f, &svel, 1);
+            frames++;
+        }
+
+        float from[3], to[3];
+        emblem_hue(WP_SHOTGUN, from);
+        emblem_hue(WP_RAPID,   to);
+        int lead_last = 0, lead_to = 0;
+        for (int k = 1; k < 3; k++) {
+            if (last[k] > last[lead_last]) lead_last = k;
+            if (to[k]   > to[lead_to])     lead_to   = k;
+        }
+
+        printf("      %d frame(s), %d of them smeared; spread %.2f at the ends, "
+               "dimmest channel %.2f in the middle\n", frames, smeared,
+               (double)ends, (double)middle_lit);
+        printf("      it ends leaning on channel %d and the new weapon's is %d\n",
+               lead_last, lead_to);
+
+        ok(frames > 0 && frames <= (int)(WPN_SWAP_TIME * 60.0f) + 2,
+           "the flourish runs itself out in about WPN_SWAP_TIME");
+        ok(smeared == frames,
+           "and the ring is the smear frame for every frame of it");
+        ok(fabsf(first[0] - from[0]) < 0.01f &&
+           fabsf(first[1] - from[1]) < 0.01f &&
+           fabsf(first[2] - from[2]) < 0.01f,
+           "it starts on the colour the weapon being put away was painted");
+        ok(middle_lit > 0.90f, "flares all the way to white halfway through");
+        ok(ends > 0.15f,   "and is a colour and not a wash at both ends");
+        ok(lead_last == lead_to,
+           "it ends leaning the way the weapon being drawn does");
+        ok(wpview_emblem_cell(&f) == WP_RAPID,
+           "then the new weapon's own emblem takes the ring back");
+    }
+
+    /* --- the saw runs while it cuts ---------------------------------------
+     *
+     * EVERY OTHER WEAPON SHOVES THE RING AND LETS IT DECAY, which reads as
+     * recoil. The saw is the one whose ring is a blade, so it holds a rate for
+     * ::WPN_SAW_SPIN_TIME instead: at speed while cutting, stopped after.
+     *
+     * A RATIO AND A SHAPE, not the constants. What is pinned is that a swing
+     * makes the ring turn several times faster than at rest, that it is still
+     * at that speed a swing-length later (so holding the trigger is a steady
+     * scream and not a pulse), and that it is back to rest once the window
+     * ends. Any of those broken is a saw that reads wrong; none of them cares
+     * what the numbers are.
+     *
+     * DRIVEN THROUGH ::wp_update AND ::wp_fire, never by writing the field:
+     * a check that sets `saw_spin` by hand passes with the feature deleted.
+     *
+     * *다른 모든 무기는 고리를 떠밀고 감쇠시키며*, 그것은 반동으로 읽힙니다. 톱은 고리가 곧
+     * 날인 유일한 무기이므로 대신 ::WPN_SAW_SPIN_TIME 동안 속도를 유지합니다. 자르는 동안은
+     * 최고 속도이고 그 뒤에는 멎습니다.
+     * *상수가 아니라 비율과 형태입니다.* 고정하는 것은, 휘두르면 고리가 휴지 상태보다 몇 배
+     * 빨리 돈다는 것, 휘두르기 하나만큼 지난 뒤에도 여전히 그 속도라는 것(그래서 방아쇠를 누르고
+     * 있으면 맥동이 아니라 한결같은 비명), 그리고 창이 끝나면 휴지 속도로 돌아온다는 것입니다.
+     * 셋 중 무엇이 깨져도 잘못 읽히는 톱이며, 어느 것도 숫자가 얼마인지는 상관하지 않습니다.
+     * *필드를 쓰지 않고 ::wp_update와 ::wp_fire를 통해 구동합니다.* `saw_spin`을 손으로
+     * 설정하는 검사는 기능이 삭제되어도 통과합니다. */
+    printf("\nthe saw runs while it cuts\n");
+    {
+        const float SDT = 1.0f / 60.0f;
+        v3 seye = v3f(0, 0, 0), svel = v3f(0, 0, 0);
+        Weapon f = (Weapon){0};
+        wp_init(&f);
+        f.owned[WP_AXE] = 1;
+        f.cur = WP_AXE;
+
+        wp_update(&f, &g_pools, 0, SDT, 0, seye, 0, 0, 0, 0, 0, 1.4f, 1.6f, &svel, 1);
+        float rest = wp_spin_rate(&f);
+
+        /* One swing, through the same path a held trigger takes. */
+        wp_update(&f, &g_pools, 0, SDT, 1, seye, 0, 0, 0, 0, 0, 1.4f, 1.6f, &svel, 1);
+        float cutting = wp_spin_rate(&f);
+
+        /* A swing-length later with the trigger released: still at speed,
+           because the window outlasts the cooldown. */
+        for (int i = 0; i < (int)(wp_stats(WP_AXE)->cooldown / SDT); i++)
+            wp_update(&f, &g_pools, 0, SDT, 0, seye, 0, 0, 0, 0, 0, 1.4f, 1.6f, &svel, 1);
+        float still = wp_spin_rate(&f);
+
+        /* Past the window: back to rest. */
+        for (int i = 0; i < (int)(WPN_SAW_SPIN_TIME / SDT) + 8; i++)
+            wp_update(&f, &g_pools, 0, SDT, 0, seye, 0, 0, 0, 0, 0, 1.4f, 1.6f, &svel, 1);
+        float after = wp_spin_rate(&f);
+
+        printf("      saw rest %.2f rad/s, cutting %.2f, one swing later %.2f, after %.2f\n",
+               (double)rest, (double)cutting, (double)still, (double)after);
+        ok(cutting > rest * 5.0f, "a swing spins the blade several times faster than rest");
+        ok(still   > rest * 5.0f, "and it is still at speed a swing later: a steady cut, not a pulse");
+        ok(after   < rest * 1.5f, "and it stops once the cut is over");
+
+        /* No other weapon holds a rate: the shotgun's shove decays away over
+           the same span. 다른 무기는 속도를 유지하지 않습니다. 샷건의 충격은 같은 시간 동안
+           감쇠해 사라집니다. */
+        Weapon g = (Weapon){0};
+        wp_init(&g);
+        g.cur = WP_SHOTGUN;
+        g.ammo[WP_SHOTGUN] = 10;
+        wp_update(&g, &g_pools, 0, SDT, 0, seye, 0, 0, 0, 0, 0, 1.4f, 1.6f, &svel, 1);
+        float grest = wp_spin_rate(&g);
+        wp_update(&g, &g_pools, 0, SDT, 1, seye, 0, 0, 0, 0, 0, 1.4f, 1.6f, &svel, 1);
+        float gshot = wp_spin_rate(&g);
+        for (int i = 0; i < (int)(WPN_SAW_SPIN_TIME / SDT) + 8; i++)
+            wp_update(&g, &g_pools, 0, SDT, 0, seye, 0, 0, 0, 0, 0, 1.4f, 1.6f, &svel, 1);
+        float gafter = wp_spin_rate(&g);
+        printf("      shotgun rest %.2f, shot %.2f, after %.2f\n",
+               (double)grest, (double)gshot, (double)gafter);
+        /* MEASURED AT THE SHOT, not only after it. Checking the end state alone
+           passes for a shotgun that briefly span like a blade and then stopped
+           -- verified: giving every weapon `saw_spin` broke nothing here until
+           this line was added.
+           *끝 상태만이 아니라 발사 시점에 잽니다.* 끝 상태만 보는 검사는 잠깐 날처럼 돌았다가
+           멎은 샷건에 대해서도 통과합니다. 확인했습니다. 모든 무기에 `saw_spin`을 줘도 이 줄이
+           추가되기 전까지는 이곳에서 아무것도 깨지지 않았습니다. */
+        ok(gshot < cutting * 0.5f,
+           "a shot is a shove and not a blade: nowhere near the saw's cutting rate");
+        ok(gafter < grest * 1.5f,
+           "and the shove has decayed away over the same span");
     }
 
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall weapon checks passed\n", fails);

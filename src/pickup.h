@@ -437,7 +437,7 @@ const Pickup *pickup_at(const Pools *pl, int i);
  */
 void pickup_update(Pools *pl, const Level *l, v3 player_eye,
                    int *health, int health_max,
-                   Weapon *w, int *keys, float *power, float dt);
+                   Weapon *w, int *keys, float *power, float dt, int *took);
 
 /**
  * @brief Throws an item into the air from a point, to land and be collected.

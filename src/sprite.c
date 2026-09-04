@@ -304,88 +304,31 @@ static int caster_pixel(int fr, float nx, float ny, unsigned char *rgb) {
     return shade(win, best, ny, glow, PAL_CASTER, rgb);
 }
 
-/* ------------------------------------------------------------------- maw
+/* ------------------------------------------------------------- the boss
  *
- * NOT A CREATURE SHAPE, and that is the point of it. Every other body here is
- * a silhouette with a head on top and something under it; this one fills its
- * cell corner to corner, because it is a piece of the wall that opened. The
- * read a player needs from across a room is "that is not a monster, that is the
- * room", and a silhouette with air around it cannot say that.
+ * NOT HERE ANY MORE, and that is the point. Every other creature in this file
+ * is generated art that a drawing may replace one frame at a time; the boss is
+ * a single drawing that replaces it outright, so there is nothing left to fall
+ * back to and nothing to keep in step with the art. `maw.png` ends in a letter,
+ * which ::name_frame reads as "every frame", so one file is the walk, the
+ * attack, the flinch and the corpse.
  *
- * IT HAS NO WALK. Frames 0 and 1 breathe instead -- the lips of the slit part
- * and close by a few hundredths -- which is the only motion an anchored thing
- * can have and is enough to keep it from reading as scenery.
+ * WHAT WAS HERE was a furnace-lit gash in a wall that breathed between frames
+ * 0 and 1 and glowed on the attack. It is in the history if the drawing ever
+ * needs a reference. ::creature_pixel answers for MON_MAW with nothing rather
+ * than falling through to the water spirit's generator, because a boss briefly
+ * shaped like the weakest thing in the room is a worse failure than an empty
+ * cell that says the art is missing.
  *
- * 생물의 형태가 아니며, 그것이 요점입니다. 이곳의 다른 모든 몸통은 위에 머리가 있고 그 아래에
- * 무언가가 있는 실루엣이지만, 이것은 자기 칸을 모서리까지 채웁니다. 열린 벽의 일부이기
- * 때문입니다. 플레이어가 방 건너에서 얻어야 할 읽힘은 "저것은 몬스터가 아니라 방이다"이고,
- * 주위에 공기가 있는 실루엣은 그렇게 말할 수 없습니다.
- *
- * 걷기가 없습니다. 프레임 0과 1은 대신 호흡합니다. 갈라진 틈의 입술이 수백분의 일만큼
- * 벌어졌다 닫히며, 그것이 고정된 것이 가질 수 있는 유일한 움직임이자 배경으로 읽히지 않게
- * 하기에 충분한 양입니다. */
-
-static const unsigned char PAL_MAW[C_COUNT][3] = {
-    {  74,  30,  34 }, { 104,  46,  46 }, {  46,  18,  22 },
-    { 208, 190, 172 }, { 255, 170,  70 }, {  10,   4,   6 },
-    { 255, 120,  40 },   /* C_GLOW: furnace light */
-};
-
-static int maw_pixel(int fr, float nx, float ny, unsigned char *rgb) {
-    float gape = 0.0f, glowamt = 0.35f, clench = 0.0f;
-    switch (fr) {
-    case SPR_WALK0:  gape =  0.015f; break;              /* breathing, not walking */
-    case SPR_WALK1:  gape = -0.015f; break;
-    case SPR_ATTACK: gape =  0.11f; glowamt = 1.0f; break;
-    case SPR_HURT:   clench = 0.06f; glowamt = 0.7f; break;
-    case SPR_DEAD:   gape = -0.10f; glowamt = 0.0f; break;
-    default: break;
-    }
-
-    float best = -1e9f; int win = C_BODY;
-
-    /* The mass. Two overlapping slabs rather than one, so the edge is not a
-       clean ellipse -- a clean edge reads as an object sitting in front of the
-       wall, and this is meant to read as the wall itself having a hole in it.
-       덩어리입니다. 하나가 아니라 겹친 두 판이므로 가장자리가 깔끔한 타원이 아닙니다. 깔끔한
-       가장자리는 벽 앞에 놓인 물체로 읽히는데, 이것은 벽 자체에 구멍이 난 것으로 읽혀야
-       합니다. */
-    part(ell(nx, ny, 0.0f, 0.50f, 0.50f, 0.52f), C_BODY,  &best, &win);
-    part(ell(nx, ny, -0.16f, 0.62f, 0.34f, 0.36f), C_BELLY, &best, &win);
-    part(ell(nx, ny,  0.18f, 0.38f, 0.32f, 0.34f), C_BELLY, &best, &win);
-
-    if (best <= 0.0f) return 0;
-
-    /* The rim: a ring of flesh a little darker than the face, so the slit does
-       not float. */
-    if (ell(nx, ny, 0.0f, 0.50f, 0.40f, 0.42f) > 0.0f) win = C_LIMB;
-
-    /* THE SLIT, which is the whole silhouette's job. Two lips meeting on a
-       horizontal axis; `gape` moves them apart and `clench` pulls them past
-       each other so a hurt frame is unmistakably shut.
-       틈이며, 실루엣 전체의 임무가 그것입니다. 수평축에서 만나는 두 입술입니다. `gape`가 둘을
-       벌리고 `clench`는 서로를 지나치도록 당겨서, 피격 프레임이 명백하게 닫히게 합니다. */
-    float half = 0.13f + gape - clench;
-    if (half > 0.0f && ell(nx, ny, 0.0f, 0.50f, 0.30f, half) > 0.0f) win = C_MAW;
-
-    /* Teeth along both lips, as pairs rather than a comb: three each, so the
-       count reads at 64 pixels wide instead of turning into a grey band. */
-    for (int i = -1; i <= 1; i++) {
-        float tx = (float)i * 0.15f;
-        if (ell(nx, ny, tx, 0.50f + half - 0.03f, 0.045f, 0.055f) > 0.0f ||
-            ell(nx, ny, tx + 0.075f, 0.50f - half + 0.03f, 0.045f, 0.055f) > 0.0f)
-            win = C_HORN;
-    }
-
-    /* The furnace behind the teeth. Only when actually open, so a shut maw is
-       not a lamp.
-       이빨 뒤의 화로입니다. 실제로 열려 있을 때만이므로, 닫힌 아귀는 등불이 아닙니다. */
-    if (half > 0.08f && ell(nx, ny, 0.0f, 0.50f, 0.16f, half * 0.55f) > 0.0f)
-        win = C_EYE;
-
-    float glow = (win == C_EYE) ? glowamt : 0.0f;
-    return shade(win, best, ny, glow, PAL_MAW, rgb);
-}
+ * *더 이상 이곳에 없으며*, 그것이 요점입니다. 이 파일의 다른 모든 생물은 그림이 한 프레임씩
+ * 대체할 수 있는 생성 아트입니다. 보스는 그것을 통째로 대체하는 단 하나의 그림이므로,
+ * 물러설 곳도 아트와 맞춰 둘 것도 남지 않았습니다. `maw.png`는 글자로 끝나고 ::name_frame이
+ * 그것을 "모든 프레임"으로 읽으므로, 한 파일이 걷기이자 공격이자 경직이자 시체입니다.
+ * *이곳에 있던 것은* 0번과 1번 프레임 사이에서 숨 쉬고 공격에서 타오르는, 용광로 빛을 받은
+ * 벽의 갈라진 틈이었습니다. 그림에 참고가 필요해지면 이력에 있습니다. ::creature_pixel은
+ * MON_MAW에 대해 물의 정령의 생성기로 흘러가지 않고 아무것도 아닌 것으로 답합니다. 잠시나마
+ * 방에서 가장 약한 것의 모습을 한 보스가, 아트가 없다고 말하는 빈 칸보다 나쁜 실패이기
+ * 때문입니다. */
 
 /* ------------------------------------------------------------------ ward
  *
@@ -471,7 +414,7 @@ static int creature_pixel(int type, int fr, float nx, float ny, unsigned char *r
     switch (type) {
     case MON_BRUTE:  return brute_pixel(fr, nx, ny, rgb);
     case MON_CASTER: return caster_pixel(fr, nx, ny, rgb);
-    case MON_MAW:    return maw_pixel(fr, nx, ny, rgb);
+    case MON_MAW:    (void)fr; return 0;   /* the drawing is the whole boss */
     case MON_WARD:   return ward_pixel(fr, nx, ny, rgb);
     default:         return spirit_pixel(fr, nx, ny, rgb);
     }
@@ -770,7 +713,7 @@ static GLuint g_pickup_atlas;
    branches on.
    그림이 어느 아틀라스로 향하는지입니다. 디코더는 공유되며 셀 크기와 이름-행 규칙만
    다르므로, 이것이 디코더가 분기하는 유일한 값입니다. */
-enum { SPR_DEST_MONSTER, SPR_DEST_WEAPON, SPR_DEST_PICKUP, SPR_DEST_WALL };
+enum { SPR_DEST_MONSTER, SPR_DEST_WEAPON, SPR_DEST_PICKUP, SPR_DEST_WALL, SPR_DEST_EMBLEM };
 
 /* Defined below, next to the decoder it wraps; declared here because the
    pickup atlas is built above it and the alternative is moving a 200-line
@@ -926,6 +869,13 @@ static GLuint g_atlas;
    -1로 설정합니다. 그런 목록은 프레임 수를 기록하는 두 번째 장소이며, 그림이 하나
    추가되거나 빠지는 순간 열거형과 조용히 어긋납니다. */
 static int g_weapon_muz[WP_TYPES][WPN_FRAMES][2];
+
+/* A monster's anchor: the same magenta marker, one per kind, read from the
+   first frame that carries it. The ward's is the gem the boss's beam attaches
+   to. See ::sprite_anchor.
+   몬스터의 앵커. 같은 자홍색 표식이며 종류마다 하나이고, 그것을 지닌 첫 프레임에서 읽습니다.
+   결계석의 것은 보스의 빔이 붙는 보석입니다. ::sprite_anchor를 보십시오. */
+static int g_mon_anchor[MON_TYPES][2];
 
 /* The viewmodel's name prefix. "gun0" is frame 0 of the weapon, the same way
    "brute0" is frame 0 of the brute -- the name carries the placement, so adding
@@ -1126,7 +1076,8 @@ static int name_frame(const char *nm, int nm_len, int *body_len) {
 /** @brief How many frames a destination's atlas holds per subject. / 대상의 아틀라스가 주제마다 담는 프레임 수. */
 static int frames_in(int dest) {
     return (dest == SPR_DEST_WEAPON) ? WPN_FRAMES
-         : (dest == SPR_DEST_MONSTER) ? SPR_FRAMES : 1;
+         : (dest == SPR_DEST_MONSTER) ? SPR_FRAMES
+         : (dest == SPR_DEST_EMBLEM)  ? EMB_ROWS : 1;
 }
 
 /**
@@ -1209,6 +1160,52 @@ static int sprite_slot_for(int dest, const char *nm, int nm_len,
            만든다면 셋만 쓰는 레벨을 위해 게임의 모든 텍스처를 싣게 됩니다. */
         type  = (want && txt_is(nm, nm_len, want)) ? 0 : -1;
         *frame = 0;
+    } else if (dest == SPR_DEST_EMBLEM) {
+        /* TWO ROWS, ONE PER LAYER, AND THE ROW RIDES IN THE FRAME SLOT.
+           `<weapon>_magic` is the ring that turns and `<weapon>_gem` the stone
+           that does not, so the view can draw them as two quads with two
+           motions; `change_magic` / `change_gem` are the SMEAR frame (see
+           ::EMB_SMEAR), in the column past the last weapon. The
+           emblem atlas has no animation, so `*frame` is free to mean "which
+           row", which keeps ::decode_sprites' placement loop unchanged.
+           *두 줄이며 레이어마다 하나이고, 줄 번호는 프레임 자리에 실립니다.*
+           `<무기>_magic`은 도는 고리이고 `<무기>_gem`은 돌지 않는 돌이므로, 뷰는 둘을
+           두 움직임을 가진 두 사각형으로 그릴 수 있습니다. `change_magic` / `change_gem`은
+           *스미어 프레임*이며(::EMB_SMEAR 참조) 마지막 무기 다음 열에 있습니다. 문양
+           아틀라스에는 애니메이션이 없으므로 `*frame`이 "몇 번째 줄"을 뜻해도 되고, 그것이
+           ::decode_sprites의 배치 루프를 그대로 두게 합니다. */
+        static const char SUF[2][7] = { "_magic", "_gem" };
+        int row = -1, blen = 0;
+        for (int r = 0; r < 2 && row < 0; r++) {
+            int sl = r == 0 ? 6 : 4;
+            if (nm_len <= sl) continue;
+            int ok = 1;
+            for (int i = 0; i < sl; i++)
+                if (nm[nm_len - sl + i] != SUF[r][i]) { ok = 0; break; }
+            if (ok) { row = r; blen = nm_len - sl; }
+        }
+        if (row < 0) { type = -1; *frame = 0; }
+        else {
+            type = txt_is(nm, blen, "change") ? WP_TYPES
+                                              : weapon_type_for_prefix(nm, blen);
+            *frame = row;
+        }
+    } else if (dest == SPR_DEST_WEAPON && txt_is(nm, nm_len, "wand")) {
+        /* THE ONE DRAWING THAT IS EVERY CELL. The wand is the view model for
+           every weapon and every frame of it -- what changes per weapon is the
+           emblem, drawn over it from its own atlas -- so one file fills the
+           whole sheet rather than twelve copies of the same picture riding the
+           floppy. WP_TYPES is the sentinel ::decode_sprites reads as "all
+           rows"; a per-frame drawing named the ordinary way still overrides
+           its cell, because the overlay clears a cell before painting it.
+           *모든 칸인 단 하나의 그림.* 지팡이는 모든 무기와 그 모든 프레임의 뷰 모델이고,
+           무기마다 달라지는 것은 그 위에 자기 아틀라스에서 그려지는 문양입니다. 그러므로
+           한 파일이 시트 전체를 채우며, 같은 그림의 사본 열두 장이 플로피에 실리지
+           않습니다. WP_TYPES는 ::decode_sprites가 "모든 줄"로 읽는 표식이고, 보통 이름의
+           프레임별 그림은 여전히 자기 칸을 덮어씁니다. 오버레이가 칠하기 전에 칸을 지우기
+           때문입니다. */
+        type = WP_TYPES;
+        *frame = -1;
     } else {
         /* The split decides both halves: which subject the name belongs to and
            which of its frames it fills. A name that ends in a letter leaves
@@ -1218,7 +1215,26 @@ static int sprite_slot_for(int dest, const char *nm, int nm_len,
            ::decode_sprites가 그것을 "전부"로 읽습니다. */
         int blen;
         int f = name_state(nm, nm_len, &blen);
-        if (f < 0) f = name_frame(nm, nm_len, &blen);
+        /* == -1 AND NOT < 0, because ::name_state has two different negatives
+           to say and only one of them means "no state suffix here". A matched
+           `_idle` answers ::SPR_WALK_BOTH, which is -2, and `f < 0` threw that
+           match away: ::name_frame then took the whole name, so `maw_idle`
+           looked up a monster called "maw_idle", found none, and the drawing
+           was dropped without a word. Two sprites were invisible in the shipped
+           atlas because of this line -- the boss walked as generated art with
+           its drawing showing only on the attack and the corpse, and the ward
+           the same. sprite.h's own note on ::SPR_WALK_BOTH already said it was
+           "distinct from the -1"; the reader was what did not distinguish them.
+           *< 0이 아니라 == -1입니다.* ::name_state가 할 말은 서로 다른 음수 두 개이고 그중
+           하나만이 "여기에는 상태 접미사가 없다"는 뜻이기 때문입니다. 일치한 `_idle`은
+           ::SPR_WALK_BOTH인 -2로 답하는데, `f < 0`은 그 일치를 버렸습니다. 그러면
+           ::name_frame이 이름 전체를 가져가므로 `maw_idle`은 "maw_idle"이라는 몬스터를
+           찾다가 없어서, 그림이 한마디 말도 없이 버려졌습니다. 이 한 줄 때문에 출하되는
+           아틀라스에서 스프라이트 둘이 보이지 않았습니다. 보스는 생성된 그림으로 걸었고
+           자기 그림은 공격과 시체에서만 보였으며, 결계석도 마찬가지였습니다. sprite.h의
+           ::SPR_WALK_BOTH 설명은 이미 그것이 "-1과 다르다"고 말하고 있었습니다. 구분하지
+           못한 쪽은 읽는 이였습니다. */
+        if (f == -1) f = name_frame(nm, nm_len, &blen);
         type  = (dest == SPR_DEST_WEAPON) ? weapon_type_for_prefix(nm, blen)
                                           : mon_type_for_prefix(nm, blen);
         /* A digit past the end of the atlas is frame 0 rather than a refusal:
@@ -1412,10 +1428,12 @@ static int decode_sprites(const char *p, unsigned char *buf, int W, int H,
        디코더 사본은 다른 버그를 가진 같은 코드가 될 뿐입니다. */
     const int cell_w = (dest == SPR_DEST_WEAPON) ? WPN_CW
                      : (dest == SPR_DEST_PICKUP) ? PK_CW
-                     : (dest == SPR_DEST_WALL)   ? SPR_WALL : SPR_CW;
+                     : (dest == SPR_DEST_WALL)   ? SPR_WALL
+                     : (dest == SPR_DEST_EMBLEM) ? EMB_CW : SPR_CW;
     const int cell_h = (dest == SPR_DEST_WEAPON) ? WPN_CH
                      : (dest == SPR_DEST_PICKUP) ? PK_CH
-                     : (dest == SPR_DEST_WALL)   ? SPR_WALL : SPR_CH;
+                     : (dest == SPR_DEST_WALL)   ? SPR_WALL
+                     : (dest == SPR_DEST_EMBLEM) ? EMB_CH : SPR_CH;
 
     /* "No marker" is -1, and this is the one place that can say so for every
        frame without a second copy of how many frames there are.
@@ -1425,6 +1443,9 @@ static int decode_sprites(const char *p, unsigned char *buf, int W, int H,
         for (int i = 0; i < WPN_FRAMES; i++)
             for (int t = 0; t < WP_TYPES; t++)
                 g_weapon_muz[t][i][0] = g_weapon_muz[t][i][1] = -1;
+    } else if (dest == SPR_DEST_MONSTER) {
+        for (int t = 0; t < MON_TYPES; t++)
+            g_mon_anchor[t][0] = g_mon_anchor[t][1] = -1;
     }
 
     for (;;) {
@@ -1500,11 +1521,22 @@ static int decode_sprites(const char *p, unsigned char *buf, int W, int H,
         if (frame == SPR_WALK_BOTH) { f0 = SPR_WALK0; f1 = SPR_WALK1 + 1; }
         placed++;
 
+        /* One row, or every row for the wand's sentinel -- see the WEAPON
+           branch of ::sprite_slot_for. The body below reads `t`, never `type`,
+           so the sentinel is the only line that knows there was a loop.
+           한 줄이거나, 지팡이의 표식이면 모든 줄입니다. ::sprite_slot_for의 WEAPON 분기를
+           보십시오. 아래 본문은 `type`이 아니라 `t`를 읽으므로, 루프가 있었다는 것을 아는
+           줄은 표식 하나뿐입니다. */
+        int t0 = type, t1 = type + 1;
+        if (dest == SPR_DEST_WEAPON && type == WP_TYPES) { t0 = 0; t1 = WP_TYPES; }
+        for (int t = t0; t < t1; t++)
         for (int f = f0; f < f1; f++) {
         int ox = (dest == SPR_DEST_WALL)   ? 0
-               : (dest == SPR_DEST_PICKUP) ? type * cell_w : f * cell_w;
+               : (dest == SPR_DEST_PICKUP) ? t * cell_w
+               : (dest == SPR_DEST_EMBLEM) ? t * cell_w : f * cell_w;
         int oy = (dest == SPR_DEST_WALL)   ? 0
-               : (dest == SPR_DEST_PICKUP) ? 0             : type  * cell_h;
+               : (dest == SPR_DEST_PICKUP) ? 0
+               : (dest == SPR_DEST_EMBLEM) ? f * cell_h : t * cell_h;
 
         /* A DRAWN FRAME OWNS ITS CELL: clear the generated creature out of it
            before painting. The two are not layers of one picture, and leaving
@@ -1594,9 +1626,18 @@ static int decode_sprites(const char *p, unsigned char *buf, int W, int H,
            이제 총구와 픽셀은 구조적으로 일치합니다. 둘 다 같은 디코딩에서 나와 같은 두
            숫자로 배치됩니다. 총열과 다른 배치로 계산된 화염은 바로 이 표식이 막으려는
            실패입니다. */
-        if (dest == SPR_DEST_WEAPON && muz_x >= 0 && f < WPN_FRAMES) {
-            g_weapon_muz[type][f][0] = place_x + muz_x;
-            g_weapon_muz[type][f][1] = place_y + muz_y;
+        if (dest == SPR_DEST_WEAPON && muz_x >= 0 && f < WPN_FRAMES && t < WP_TYPES) {
+            g_weapon_muz[t][f][0] = place_x + muz_x;
+            g_weapon_muz[t][f][1] = place_y + muz_y;
+        }
+        /* First frame with a marker wins: an `_idle` fills both walk frames
+           from one drawing, and a corpse should not move the anchor.
+           표식을 지닌 첫 프레임이 이깁니다. `_idle`은 한 그림으로 걷기 두 프레임을 채우고,
+           시체가 앵커를 옮겨서는 안 됩니다. */
+        if (dest == SPR_DEST_MONSTER && muz_x >= 0 && t < MON_TYPES &&
+            g_mon_anchor[t][0] < 0) {
+            g_mon_anchor[t][0] = place_x + muz_x;
+            g_mon_anchor[t][1] = place_y + muz_y;
         }
         }
     }
@@ -1852,6 +1893,142 @@ int weapon_has_art(void) {
     return g_weapon_any;
 }
 
+/* --- the emblem atlas: what changes on the wand when the weapon does -------
+ *
+ * TWO ROWS BY WP_TYPES+1 COLUMNS of ::EMB_CW x ::EMB_CH. Row 0 is the magic
+ * ring, row 1 the stone in its centre; the column past the last weapon is the
+ * SMEAR frame (`change_*`, see ::EMB_SMEAR). Kept out of the weapon
+ * atlas on purpose: that sheet is indexed by (weapon, frame) and drawn as ONE
+ * quad, and a ring that has to turn while the wand under it holds still is by
+ * definition a second quad with a second motion -- it needs its own texture
+ * coordinates, not a cell in somebody else's grid.
+ * Built like ::pickup_atlas: calloc so unfilled cells are transparent, the
+ * overlay does all the placing, NEAREST because it is pixel art.
+ *
+ * *두 줄, WP_TYPES+1 열이며* 각각 ::EMB_CW x ::EMB_CH입니다. 0번 줄은 마법 고리, 1번 줄은 그
+ * 가운데의 돌이고, 마지막 무기 다음 열은 *스미어 프레임*(`change_*`, ::EMB_SMEAR)입니다.
+ * 일부러 무기 아틀라스 밖에 둡니다. 그 시트는 (무기, 프레임)으로 색인되고 사각형
+ * *하나*로 그려지는데, 아래의 지팡이는 가만히 있고 고리만 돌아야 한다면 그것은 정의상 두
+ * 번째 움직임을 가진 두 번째 사각형이며, 남의 격자 안의 칸이 아니라 자기 텍스처 좌표가
+ * 필요합니다. ::pickup_atlas처럼 만듭니다. calloc이라 채워지지 않은 칸은 투명하고, 배치는
+ * 오버레이가 전부 하며, 픽셀 아트이므로 NEAREST입니다. */
+static GLuint g_emblem_atlas;
+static int    g_emblem_built;
+
+static void emblem_build(void) {
+    if (g_emblem_built) return;
+    g_emblem_built = 1;
+    int W = EMB_CW * EMB_CELLS, H = EMB_CH * EMB_ROWS;
+    unsigned char *buf = calloc((size_t)W * H * 4, 1);
+    if (!buf) return;
+    overlay_drawn_sprites(buf, W, H, SPR_DEST_EMBLEM);
+    glGenTextures(1, &g_emblem_atlas);
+    glBindTexture(GL_TEXTURE_2D, g_emblem_atlas);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, W, H, 0, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    free(buf);
+}
+
+GLuint emblem_atlas(void) {
+    emblem_build();
+    return g_emblem_atlas;
+}
+
+/* --- what colour each weapon's magic is ------------------------------------
+ *
+ * NO GL, and that is the point of doing it here rather than reading the texture
+ * back. ::overlay_drawn_sprites is the same CPU decode ::emblem_build feeds the
+ * uploader, so this walks the pixels the artist drew without a window -- which
+ * is what lets a headless test ask whether the swap flourish ends on the right
+ * colour.
+ *
+ * ONCE, into a static. Four averages over five 96x96 cells is nothing, but it
+ * decodes the whole sprite blob to get them, and the draw asks every frame.
+ *
+ * 헤드리스이며, 텍스처를 되읽지 않고 이곳에서 하는 이유가 그것입니다.
+ * ::overlay_drawn_sprites는 ::emblem_build가 업로더에 넘기는 그 CPU 디코드이므로, 이것은
+ * 창 없이 작가가 그린 픽셀을 걷습니다. 전환 연출이 올바른 색에서 끝나는지 헤드리스 검사가
+ * 물을 수 있는 이유입니다.
+ * *한 번만 계산해 정적 배열에 둡니다.* 96x96 다섯 칸의 평균은 아무것도 아니지만, 그것을 얻자고
+ * 스프라이트 블롭 전체를 디코드하며 그리기는 매 프레임 묻습니다. */
+static float g_emblem_hue[EMB_CELLS][3];
+static int   g_emblem_hue_ready;
+
+static void emblem_hues_build(void) {
+    if (g_emblem_hue_ready) return;
+    g_emblem_hue_ready = 1;
+
+    /* White until proven otherwise, so a cell with no art tints nothing.
+       달리 밝혀지기 전까지는 흰색입니다. 그림이 없는 칸은 아무것도 물들이지 않습니다. */
+    for (int c = 0; c < EMB_CELLS; c++)
+        g_emblem_hue[c][0] = g_emblem_hue[c][1] = g_emblem_hue[c][2] = 1.0f;
+
+    int W = EMB_CW * EMB_CELLS, H = EMB_CH * EMB_ROWS;
+    unsigned char *buf = calloc((size_t)W * H * 4, 1);
+    if (!buf) return;
+    overlay_drawn_sprites(buf, W, H, SPR_DEST_EMBLEM);
+
+    for (int c = 0; c < EMB_CELLS; c++) {
+        double sum[3] = { 0, 0, 0 };
+        long n = 0;
+        /* Row 0 of the atlas is the ring itself; the stone below it is the same
+           weapon and would only weight the average toward its own smaller area.
+           아틀라스의 0번 줄이 고리 자체입니다. 그 아래의 돌은 같은 무기이며, 평균을 자기
+           작은 면적 쪽으로 기울일 뿐입니다. */
+        for (int y = 0; y < EMB_CH; y++) {
+            const unsigned char *row =
+                buf + (((size_t)y * (size_t)W) + (size_t)c * EMB_CW) * 4;
+            for (int x = 0; x < EMB_CW; x++) {
+                if (row[x * 4 + 3] < 128) continue;   /* the cutout's own line */
+                for (int k = 0; k < 3; k++) sum[k] += row[x * 4 + k];
+                n++;
+            }
+        }
+        if (!n) continue;
+
+        /* NORMALISED BY THE BRIGHTEST CHANNEL, so what comes back is a hue and
+           not a brightness. The smear frame it multiplies is already as bright
+           as the atlas goes; scaling it by an average would dim the flourish in
+           proportion to how dark the artist happened to draw that ring.
+           *가장 밝은 채널로 정규화하므로* 돌아오는 것은 밝기가 아니라 색상입니다. 이것이
+           곱해질 스미어 프레임은 이미 아틀라스가 낼 수 있는 만큼 밝습니다. 평균으로
+           배율을 주면 작가가 그 고리를 얼마나 어둡게 그렸느냐에 비례해 연출이 어두워집니다. */
+        float v[3], m = 0.0f;
+        for (int k = 0; k < 3; k++) {
+            v[k] = (float)(sum[k] / (double)n);
+            if (v[k] > m) m = v[k];
+        }
+        if (m < 1.0f) continue;
+        for (int k = 0; k < 3; k++) g_emblem_hue[c][k] = v[k] / m;
+    }
+    free(buf);
+}
+
+void emblem_hue(int cell, float rgb[3]) {
+    if (!rgb) return;
+    emblem_hues_build();
+    if (cell < 0) cell = 0;
+    if (cell >= EMB_CELLS) cell = EMB_CELLS - 1;
+    for (int k = 0; k < 3; k++) rgb[k] = g_emblem_hue[cell][k];
+}
+
+void emblem_uv(int row, int cell, float *u0, float *v0, float *u1, float *v1) {
+    if (row < 0) row = 0;
+    if (row >= EMB_ROWS) row = EMB_ROWS - 1;
+    if (cell < 0) cell = 0;
+    if (cell >= EMB_CELLS) cell = EMB_CELLS - 1;
+    float cw = 1.0f / EMB_CELLS, ch = 1.0f / EMB_ROWS;
+    float insu = 0.5f / (EMB_CW * EMB_CELLS), insv = 0.5f / (EMB_CH * EMB_ROWS);
+    *u0 = cell * cw + insu;
+    *u1 = (cell + 1) * cw - insu;
+    /* Same flip as ::weapon_uv: row 0 of the buffer is the TOP of the drawing. */
+    *v0 = (row + 1) * ch - insv;    /* quad bottom */
+    *v1 = row * ch + insv;          /* quad top */
+}
+
 GLuint weapon_atlas(void) {
     weapon_build();
     return g_weapon_atlas;
@@ -1914,6 +2091,15 @@ void weapon_uv(int type, int frame, float *u0, float *v0, float *u1, float *v1) 
  *       방향으로 진행합니다. 뒤집기를 이곳에서 처리하면 그것을 아는 곳이 정확히 하나가
  *       됩니다.
  */
+int sprite_anchor(int type, float *u, float *v) {
+    if (type < 0 || type >= MON_TYPES) return 0;
+    int mx = g_mon_anchor[type][0], my = g_mon_anchor[type][1];
+    if (mx < 0) return 0;
+    *u = (mx + 0.5f) / (float)SPR_CW;
+    *v = 1.0f - (my + 0.5f) / (float)SPR_CH;
+    return 1;
+}
+
 int weapon_muzzle(int type, int frame, float *u, float *v) {
     weapon_build();
     if (type < 0) type = 0;
@@ -1953,6 +2139,14 @@ void sprite_decode_blob(const char *text, unsigned char *rgba, int W, int H,
    알파벳을 문자 단위로 노출하여 tools/sprtest.c가 bake.ps1이 인코딩에 쓰는 문자열과
    대조할 수 있게 합니다. 그 계약은 PowerShell 스크립트와 C 파일 사이에 있으며 어떤
    컴파일러도 볼 수 없습니다. */
+
+int sprite_mon_anchor_px(int type, int *x, int *y) {
+    if (type < 0 || type >= MON_TYPES) return 0;
+    if (g_mon_anchor[type][0] < 0) return 0;
+    *x = g_mon_anchor[type][0];
+    *y = g_mon_anchor[type][1];
+    return 1;
+}
 
 int sprite_weapon_muzzle_px(int type, int frame, int *x, int *y) {
     if (frame < 0 || frame >= WPN_FRAMES) return 0;

@@ -769,7 +769,7 @@ static void test_level_on_map(void) {
         rng = rng * 1664525u + 1013904223u;
         float a = (rng >> 8) * (6.2831853f / 16777216.0f);
         player_move(&p, &LV, 0, 0, v3f(cosf(a), 0, sinf(a)), PLAYER_WALK,
-                    (rng & 0x400000) != 0, DT);
+                    (rng & 0x400000) != 0, 1, DT);
 
         if (p.pos.y > highest) highest = p.pos.y;
         if (!level_ground(&LV, p.pos.x, p.pos.z, p.pos.y - PLAYER_EYE, 1e9f, &f, &c))
@@ -1101,10 +1101,22 @@ static void test_entities(void) {
     int peak = 0;
     for (int i = 0; i < 120 * 60; i++) {
         enemy_update(&PL, &LV, v3f(0, 1.7f, 5.0f), DT);
-        if (enemy_alive(&PL) > peak) peak = enemy_alive(&PL);
+        if (enemy_alive_from(&PL, 0) > peak) peak = enemy_alive_from(&PL, 0);
     }
+    /* ASKED OF THE SPAWNER, not of the room. The ceiling is what THIS spawner
+       has out, so the caster the level itself drew is not counted against it --
+       the room holds five and the spawner holds four. This check used to read
+       ::enemy_alive and expect four in the whole level, which was the old rule:
+       one spawner's number was every spawner's, and the level's own monsters
+       ate into it.
+       *방이 아니라 스포너에게 묻습니다.* 상한은 *이* 스포너가 내보낸 수이므로, 레벨이 직접 그린
+       캐스터는 여기에 세이지 않습니다. 방은 다섯을, 스포너는 넷을 지닙니다. 이 검사는 예전에
+       ::enemy_alive를 읽고 레벨 전체에서 넷을 기대했는데, 그것이 옛 규칙이었습니다. 한 스포너의
+       수가 모든 스포너의 수였고 레벨 자신의 몬스터가 그것을 갉아먹었습니다. */
+    printf("      spawner 0 peaked at %d of its ceiling 4; the room holds %d\n",
+           peak, enemy_alive(&PL));
     check(peak <= 4, "never exceeding the ceiling the map set");
-    check(enemy_alive(&PL) == 4, "and it is still holding at it");
+    check(enemy_alive_from(&PL, 0) == 4, "and it is still holding at it");
     check(PL.enemy.spawner[0].left > 0, "with some still owed");
 
     /* Clear the room and it resumes, which is the other half: the ceiling is a

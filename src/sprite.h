@@ -327,6 +327,26 @@ GLuint pickup_atlas(void);
 void sprite_uv(int type, int frame, float *u0, float *v0, float *u1, float *v1);
 
 /**
+ * @brief Where a monster's marker pixel sits, as a fraction of its cell.
+ *
+ * The same magenta pixel the weapon muzzle uses, found in the drawing when
+ * the atlas is decoded and never painted. `v` runs up the cell from the feet,
+ * so `feet + height * v` is the point in the world -- it follows a resize of
+ * ::MonType::height and a redraw of the art with no number to update. The
+ * ward carries one at its gem, which is where the boss's beam attaches.
+ *
+ * @return 1 and the fractions, or 0 for a kind whose art has no marker.
+ *
+ * @brief 몬스터의 표식 픽셀 위치, 셀에 대한 비율.
+ * 무기 총구가 쓰는 것과 같은 자홍색 픽셀이며, 아틀라스를 디코딩할 때 그림에서 찾고 결코
+ * 칠하지 않습니다. `v`는 발에서 위로 오르므로 `feet + height * v`가 세계의 그 점입니다.
+ * ::MonType::height의 크기 변경과 아트의 다시 그리기를 갱신할 숫자 없이 따라갑니다.
+ * 결계석은 보석에 하나를 지니며, 그곳이 보스의 빔이 붙는 자리입니다.
+ * @return 표식이 있으면 1과 비율, 아트에 표식이 없는 종류면 0.
+ */
+int sprite_anchor(int type, float *u, float *v);
+
+/**
  * @brief Returns the atlas sub-rectangle of one pickup kind.
  *
  * ENGLISH
@@ -426,6 +446,8 @@ void sprite_decode_blob(const char *text, unsigned char *rgba, int W, int H,
  */
 
 int sprite_weapon_muzzle_px(int type, int frame, int *x, int *y);
+/** @brief Test hook: the recorded anchor in atlas pixels, or 0. / 검사 훅: 기록된 앵커(아틀라스 픽셀), 없으면 0. */
+int sprite_mon_anchor_px(int type, int *x, int *y);
 #endif
 
 /* --- The hand-drawn viewmodel / 손으로 그린 뷰 모델 --- */
@@ -488,6 +510,158 @@ GLuint weapon_atlas(void);
  * @param[out] u0,v0,u1,v1 부분 영역.
  */
 void weapon_uv(int type, int frame, float *u0, float *v0, float *u1, float *v1);
+
+/**
+ * @brief The emblem cell: the magic ring and its stone, drawn over the wand.
+ *
+ * ENGLISH: 96 square because that is what the art is, and it is not the wand
+ * cell's shape on purpose -- the ring is a separate quad with a separate
+ * motion (it turns when the weapon fires; the stone in it does not), so it has
+ * its own atlas rather than a corner of the wand's. Where it sits on the wand
+ * is ::EMB_ON_WAND_X / ::EMB_ON_WAND_Y, read off the reference drawing the
+ * artist supplied with the ring already in place.
+ * 한국어: 96 정사각형인 이유는 아트가 그렇기 때문이고, 일부러 지팡이 셀의 모양이 아닙니다.
+ * 고리는 별개의 움직임을 가진 별개의 사각형이므로(무기가 발사되면 돌고, 안의 돌은 돌지
+ * 않습니다) 지팡이 셀의 한구석이 아니라 자기 아틀라스를 갖습니다. 지팡이 위의 자리는
+ * ::EMB_ON_WAND_X / ::EMB_ON_WAND_Y이며, 작가가 고리를 미리 얹어 준 참고 그림에서 읽었습니다.
+ */
+/**
+ * @brief How much of Doom's psprite cell the held art actually fills.
+ *
+ * ENGLISH
+ * -------
+ * THE CELL SAYS WHERE, THIS SAYS HOW BIG. ::WPN_CW x ::WPN_CH is Doom's
+ * psprite screen and the coordinates every drawing was authored against, so it
+ * has to stay exactly what it is -- but nothing about it settles how much of
+ * itself a drawing should cover. Doom's guns are held at the hip with their art
+ * running to the cell's edges; a wand held up in front of the face is a smaller
+ * object at the same distance, and at full cell size it filled the lower half
+ * of the screen.
+ *
+ * 0.52, AND IT SCALES ALL THREE LAYERS. The wand, the ring turning on it and
+ * the stone in the ring are one held object -- they are three quads only
+ * because they move differently -- so one number sizes the group and the two
+ * emblem layers stay in the places on the wand the reference drawing put them.
+ *
+ * ARRIVED AT IN TWO STEPS, and the second is why this is 0.52 and not a round
+ * number. The full cell filled the lower half of the screen, 0.40 fixed that
+ * and read a little small in play, and 0.52 is 0.40 raised by three tenths --
+ * the size the wand was judged at, plus the amount it was judged short by.
+ * A held object's size is a thing you settle by looking at it, so what this
+ * records is the looking rather than a derivation.
+ *
+ * ABOUT THE BOTTOM CENTRE. Shrinking a held thing toward the middle of the
+ * screen would make it read as floating; shrinking it toward the bottom edge
+ * keeps it held. The bob, sway and punch are untouched by this, because they
+ * move the anchor rather than the size.
+ *
+ * 한국어
+ * ------
+ * @brief 손에 쥔 아트가 Doom psprite 셀을 실제로 얼마나 채우는지.
+ *
+ * *셀은 어디인지를 말하고 이것은 얼마나 큰지를 말합니다.* ::WPN_CW x ::WPN_CH는 Doom의
+ * psprite 화면이자 모든 그림이 저작된 기준 좌표이므로 지금 그대로여야 합니다. 그러나 그것의
+ * 무엇도 그림이 자기 자신을 얼마나 덮어야 하는지는 정하지 않습니다. Doom의 총은 허리에 쥐고
+ * 아트가 셀 가장자리까지 갑니다. 얼굴 앞에 든 지팡이는 같은 거리의 더 작은 물건이고, 셀을
+ * 가득 채우면 화면 아래 절반을 덮었습니다.
+ * *0.52이며 세 레이어 전부에 적용됩니다.* 지팡이와 그 위에서 도는 고리와 고리 안의 돌은 하나의
+ * 쥔 물건입니다. 셋이 사각형인 이유는 서로 다르게 움직이기 때문일 뿐이므로, 수 하나가 그
+ * 묶음의 크기를 정하고 두 문양 레이어는 참고 그림이 둔 지팡이 위의 자리를 지킵니다.
+ * *두 단계로 도달했으며*, 둘째가 이것이 어림수가 아니라 0.52인 이유입니다. 셀 전체는 화면
+ * 아래 절반을 덮었고, 0.40이 그것을 고쳤으나 플레이에서 조금 작게 읽혔으며, 0.52는 0.40을
+ * 10분의 3만큼 올린 값입니다. 지팡이를 판단한 크기에, 모자란다고 판단된 만큼을 더한 것입니다.
+ * 쥔 물건의 크기는 보고 정하는 것이므로, 이곳이 기록하는 것은 유도가 아니라 그 봄입니다.
+ * *아래 가운데 기준입니다.* 쥔 물건을 화면 가운데로 줄이면 떠 있는 것으로 읽힙니다. 아래
+ * 가장자리 쪽으로 줄이면 쥔 채로 남습니다. 보브와 스웨이와 펀치는 크기가 아니라 기준점을
+ * 움직이므로 이것에 영향받지 않습니다.
+ */
+#define WPN_ART_SCALE 0.52f
+
+#define EMB_CW 96
+#define EMB_CH 96
+#define EMB_ROWS  2                 /**< Row 0 the ring, row 1 the stone. / 0번 줄 고리, 1번 줄 돌. */
+#define EMB_CELLS (WP_TYPES + 1)    /**< One per weapon, then the smear. / 무기마다 하나, 그다음 스미어. */
+
+/**
+ * @brief The smear column: `change_magic` / `change_gem`.
+ *
+ * ENGLISH: A SMEAR FRAME, not a neutral emblem. It is the drawing shown while
+ * the ring is moving too fast to read -- the middle beat of pose, smear, pose,
+ * which is how hand-drawn animation sells a fast move without drawing every
+ * position in it. That is why it is white rays rather than a coloured sigil:
+ * a smear is the shape motion leaves behind, not a thing with an identity.
+ * It is a column of the emblem atlas rather than a fourth layer because it
+ * REPLACES the weapon's own ring for the frames it covers; both are row 0 and
+ * only the column changes, so swapping to it costs one integer.
+ *
+ * 한국어: *중립 문양이 아니라 스미어 프레임입니다.* 고리가 읽을 수 없을 만큼 빠르게 움직이는
+ * 동안 보여 주는 그림이며, 포즈-스미어-포즈의 가운데 박자입니다. 손그림 애니메이션이 빠른
+ * 동작의 모든 위치를 그리지 않고도 그것을 팔아넘기는 방식입니다. 색 있는 인장이 아니라 흰
+ * 광선인 이유가 그것입니다. 스미어는 움직임이 남긴 형상이지 정체를 가진 물건이 아닙니다.
+ * 네 번째 레이어가 아니라 문양 아틀라스의 한 *열*인 이유는, 그것이 덮는 프레임 동안 무기
+ * 자신의 고리를 *대체*하기 때문입니다. 둘 다 0번 줄이고 열만 바뀌므로, 바꾸는 값은 정수
+ * 하나입니다.
+ */
+#define EMB_SMEAR WP_TYPES
+/**
+ * @brief Where the 96x96 emblem canvas sits in the 192x104 wand cell, pixels.
+ *
+ * MEASURED, NOT EYEBALLED, and the first reading was a pixel out. Differencing
+ * the reference drawing against the wand with its ring removed gives the ring's
+ * own pixels at x 68..159, y 12..103; the axe emblem is the one whose art fills
+ * its canvas (92 of 96, the others were drawn smaller inside the same square),
+ * so its ink at 3..94 x 2..93 is what has to land there. 65 and 10 put it
+ * exactly on both. 66 was a pixel right.
+ *
+ * THE CANVAS HANGS 2 ROWS BELOW THE CELL, and that is correct rather than an
+ * overflow: the ring reaches the cell's last row, 103, and the canvas keeps two
+ * rows of transparent margin under the ink. A check that asks whether the
+ * canvas is inside the cell fails on this and is asking the wrong question --
+ * see the emblem check in weapontest, which asks about the centre.
+ *
+ * *눈대중이 아니라 측정했으며*, 첫 판독은 1픽셀 어긋나 있었습니다. 참고 그림에서 고리를 지운
+ * 지팡이를 빼면 고리 자신의 픽셀이 x 68..159, y 12..103에 나옵니다. 자기 캔버스를 채운
+ * 그림은 도끼의 문양이며(96 중 92이고 나머지는 같은 정사각형 안에 더 작게 그려졌습니다),
+ * 그 잉크 3..94 x 2..93이 그곳에 놓여야 합니다. 65와 10이 둘 다 정확히 맞춥니다. 66은
+ * 1픽셀 오른쪽이었습니다.
+ * *캔버스는 셀보다 2행 아래로 내려갑니다.* 넘침이 아니라 올바른 것입니다. 고리는 셀의 마지막
+ * 행인 103에 닿고, 캔버스는 잉크 아래에 투명한 여백 두 행을 남깁니다. 캔버스가 셀 안에
+ * 있는지 묻는 검사는 이것에서 실패하며 잘못된 질문을 하고 있습니다. 가운데를 묻는
+ * weapontest의 문양 검사를 보십시오.
+ */
+#define EMB_ON_WAND_X 65
+#define EMB_ON_WAND_Y 10
+
+/**
+ * @brief The colour a weapon's magic is drawn in, as an rgb multiplier.
+ *
+ * READ OFF THE ART, not written down beside it. The four rings were drawn in
+ * four colours and the swap flourish's whole job is to walk between them, so a
+ * table of hex values here would be a second copy of a decision the artist
+ * already made in the PNGs -- and the copy is the one that goes stale. The
+ * average of a cell's opaque pixels, normalised by its brightest channel, is
+ * what comes back: a hue at full brightness, so multiplying the white smear
+ * frame by it produces that weapon's colour rather than a darker anything.
+ *
+ * ::EMB_SMEAR's own cell is white, and answers (1,1,1). That is not incidental
+ * -- it is the fact the flourish is built on. See ::EMB_SMEAR.
+ *
+ * @param[in]  cell One of the emblem columns; clamped.
+ * @param[out] rgb  Three multipliers, each 0..1, the largest of them 1.
+ *
+ * @brief 무기의 마법이 그려진 색. rgb 곱셈 계수입니다.
+ * @note *표가 아니라 아트에서 읽습니다.* 네 고리는 네 색으로 그려졌고 전환 연출이 하는 일의
+ *       전부가 그 사이를 걷는 것이므로, 이곳의 16진수 표는 작가가 이미 PNG 안에서 내린 결정의
+ *       두 번째 사본일 것이며, 낡아 가는 쪽은 언제나 사본입니다. 돌아오는 값은 한 칸의 불투명
+ *       픽셀 평균을 가장 밝은 채널로 정규화한 것입니다. 최대 밝기의 색상이므로, 흰 스미어
+ *       프레임에 곱하면 어두운 무엇이 아니라 그 무기의 색이 나옵니다.
+ * @note ::EMB_SMEAR의 칸 자체는 희고 (1,1,1)을 답합니다. 우연이 아니라 이 연출이 딛고 선
+ *       사실입니다. ::EMB_SMEAR를 보십시오.
+ */
+void emblem_hue(int cell, float rgb[3]);
+
+GLuint emblem_atlas(void);
+void   emblem_uv(int row, int cell, float *u0, float *v0, float *u1, float *v1);
 
 /**
  * @brief Where a weapon frame's muzzle sits, as a fraction of its cell.

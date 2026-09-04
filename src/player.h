@@ -63,123 +63,63 @@
  *
  * ENGLISH
  * -------
- * WHAT THIS REPLACED, AND WHY IT HAD TO. The first version of this was a
- * pull-up that probed for a standable top within a hand's reach and rose only
- * when it found one. Its own note called that the whole design -- "you may
- * climb exactly what you can see the top of" -- and in the shipped arena that
- * sentence is the bug. Measured over `lqdm4`: of the walls standing beside a
- * spot the player can stand on, 48% have their top within 1.5m, and then
- * NOTHING until 4.5m, with the real mass at 6.5-8.5m and 13m. A player at the
- * foot of a wall is usually at the foot of one whose top is three or six
- * metres up, not one metre. The probe was answering a question the map almost
- * never asks, so it almost never fired.
+ * The climb looks at no top: it rises at this rate for as long as
+ * ::PLAYER_CLIMB_TIME has left, and the two together are the whole of how high a wall
+ * may be taken -- 13.5 x 0.30 = 4.05m of rise.
  *
- * SO THE WALL IS CLIMBED WITHOUT LOOKING AT ITS TOP, which is Overwatch's
- * rule and the reason it works on maps nobody authored for it: hold into a
- * surface while airborne and you go up, and where you end up is wherever you
- * ran out. Nothing is probed, so nothing can fail to be found.
- *
- * FOUR AND A HALF IS BRISK ON PURPOSE. Slower and the player hangs on the face
- * long enough to wonder whether they are stuck; faster and the climb is over
- * before the eye can see it, which makes a wall look like something that
- * sometimes lets you through. It is a SPEED and not an impulse because the
- * rise has to last as long as the wall does -- an impulse launches and then
- * leaves the rest of the climb to gravity.
+ * @note Faster than ::PLAYER_WALK on purpose. A climb slower than walking reads as being
+ *       stuck to the wall rather than moving up it.
  *
  * 한국어
  * ------
  * @brief 벽 등반이 상승하는 속도(m/s).
  *
- * *무엇을 대체했고 왜 그래야 했는가.* 이것의 첫 판은 손 닿는 거리 안에서 설 수 있는 꼭대기를
- * 탐사하고 그것을 찾았을 때만 상승하는 끌어올림이었습니다. 그 주석은 스스로 그것을 설계의
- * 전부라고 불렀습니다. "꼭대기가 보이는 만큼만 오른다." 그리고 출하 아레나에서 그 문장이 곧
- * 결함입니다. `lqdm4`에서 측정하면, 플레이어가 설 수 있는 자리 옆에 선 벽들 가운데 48%는
- * 꼭대기가 1.5m 안에 있고, 그다음은 4.5m까지 *아무것도 없으며*, 실제 덩어리는 6.5~8.5m와
- * 13m에 있습니다. 벽 앞에 선 플레이어는 보통 꼭대기가 1미터가 아니라 3미터나 6미터 위에 있는
- * 벽 앞에 섭니다. 탐사는 맵이 거의 묻지 않는 질문에 답하고 있었고, 그래서 거의 발동하지
- * 않았습니다.
+ * 등반은 꼭대기를 보지 않습니다. ::PLAYER_CLIMB_TIME이 남아 있는 동안 이 속도로 오르며,
+ * 둘이 함께 벽을 얼마나 높이 탈 수 있는지의 전부입니다. 13.5 x 0.30 = 4.05m 상승입니다.
  *
- * *그래서 벽은 꼭대기를 보지 않고 오릅니다.* 그것이 오버워치의 규칙이며, 그것을 위해 만들어진
- * 적 없는 맵에서도 통하는 이유입니다. 공중에서 면을 향해 누르고 있으면 올라가고, 도착지는
- * 힘이 다한 그 자리입니다. 탐사하는 것이 없으므로 찾지 못해 실패할 것도 없습니다.
- *
- * *4.5는 일부러 빠릅니다.* 더 느리면 플레이어가 벽면에 매달린 채 자기가 걸린 것인지 의심할
- * 만큼 시간이 흐르고, 더 빠르면 눈이 알아채기 전에 등반이 끝나 벽이 이따금 통과시켜 주는
- * 것처럼 보입니다. 충격량이 아니라 *속도*인 이유는 상승이 벽이 이어지는 동안 계속되어야 하기
- * 때문입니다. 충격량은 쏘아 올린 뒤 나머지 등반을 중력에 맡깁니다.
+ * @note 의도적으로 ::PLAYER_WALK보다 빠릅니다. 걷기보다 느린 등반은 벽을 오르는 것이
+ *       아니라 벽에 붙어 버린 것으로 읽힙니다.
  */
-#define PLAYER_CLIMB_SPEED 4.5f
+#define PLAYER_CLIMB_SPEED 13.5f
 
 /**
  * @brief Seconds of wall climb one trip through the air buys.
  *
  * ENGLISH
  * -------
- * THIS IS THE ONLY THING BOUNDING THE CLIMB, now that no top is looked for,
- * and it is spent rather than checked: it refills when the feet are on a floor
- * and at no other moment, so a wall cannot be taken in two bites by letting go
- * and pressing again. That is the whole of what stops a wall being a ladder.
+ * THE ONLY THING BOUNDING THE CLIMB, and it is spent rather than checked: it refills when
+ * the feet are on a floor and at no other moment, so a wall cannot be taken in two bites by
+ * letting go and pressing again. That is the whole of what stops a wall being a ladder.
  *
- * THREE TENTHS OF A SECOND, AND THE NUMBER CAME FROM TWO PLACES AGREEING.
- * At ::PLAYER_CLIMB_SPEED it is 1.35m of rise, which measures out as a jump
- * held into a wall mounting a 3.00m shelf and failing at 3.25m -- against
- * 1.75m and 2.00m before any of this existed.
+ * A DURATION AND NOT A HEIGHT, because the player is not always starting from the same
+ * place. Climb begins wherever the body met the wall, which is high after a jump and low
+ * after a fall, and a height budget would silently give the falling player the bigger climb.
+ * Seconds cost the same everywhere.
  *
- * 3.00m is the hook's arrival launch, exactly. That is the first place: the
- * grapple is a weapon slot with a cooldown, and a free movement rule that beat
- * it for height would make the expensive way up the worse one. The two ways up
- * should agree about how tall the world is, and now they do.
- *
- * The second is the map. Everything `lqdm4` offers as one storey is under
- * 2.5m, and the next thing up is 4.5m, with NOTHING in between -- so a ceiling
- * of 3.00m sits inside an empty band. It reaches every low wall completely and
- * cannot reach a single high one, which means it opens no route an author did
- * not draw. Anything from 0.28 to 0.32 lands on the same 3.00m; the middle of
- * that range is taken rather than its edge, so a small retune of the speed or
- * of gravity does not quietly move the ceiling.
- *
- * 1,312 of the walls measured have no standable top within twenty metres at
- * all -- those are the boundary -- and against them the budget simply runs out
- * and the player falls off. That is the correct answer and needs no special
- * case.
- *
- * IT IS A DURATION AND NOT A HEIGHT even though a height is what was reasoned
- * about, because the player is not always starting from the same place. Climb
- * begins wherever the body met the wall, which is high after a jump and low
- * after a fall, and a height budget would silently give the falling player the
- * bigger climb. Seconds cost the same everywhere.
+ * @note With ::PLAYER_CLIMB_SPEED this is 4.05m of rise, which MOUNTS A 9.20m SHELF and fails
+ *       at 9.25m -- movetest measures both. It was 1.35m and 3.00m, and 3.00m was the
+ *       hook's arrival launch to the centimetre, sitting inside the empty band between
+ *       `lqdm4`'s 2.5m storeys and its 4.5m ones. 9.20m clears that band outright, so the
+ *       climb now opens routes an author did not draw and beats the grapple for height.
+ *       Both were deliberate properties of the old number.
  *
  * 한국어
  * ------
  * @brief 공중에 한 번 뜨는 것이 사 주는 벽 등반의 초.
  *
- * *꼭대기를 찾지 않게 된 지금 등반을 묶는 것은 이것뿐이며*, 검사되는 것이 아니라 *소모*됩니다.
- * 발이 바닥에 있을 때 채워지고 다른 어느 순간에도 채워지지 않으므로, 손을 뗐다가 다시 눌러
- * 벽을 두 번에 나누어 먹을 수 없습니다. 벽이 사다리가 되지 않게 막는 것은 그것이 전부입니다.
+ * *등반을 묶는 것은 이것뿐이며*, 검사되는 것이 아니라 *소모*됩니다. 발이 바닥에 닿을 때만
+ * 채워지고 다른 어느 순간에도 채워지지 않으므로, 손을 놓았다 다시 눌러 벽을 두 번에 나눠
+ * 오를 수 없습니다. 벽이 사다리가 되는 것을 막는 것이 그 전부입니다.
  *
- * *0.3초이며, 그 수는 두 곳이 같은 말을 해서 나왔습니다.* ::PLAYER_CLIMB_SPEED에서 1.35m의
- * 상승이고, 실측으로는 벽을 향해 누른 점프가 3.00m 선반에 올라서고 3.25m에서 실패합니다. 이
- * 모든 것이 있기 전의 1.75m와 2.00m에 견주어서 말입니다.
+ * *높이가 아니라 지속 시간인 이유는* 플레이어가 늘 같은 자리에서 시작하지 않기 때문입니다.
+ * 등반은 몸이 벽에 닿은 곳에서 시작하며 점프 뒤에는 높고 낙하 뒤에는 낮습니다. 높이 예산은
+ * 떨어지는 플레이어에게 조용히 더 큰 등반을 줍니다. 초는 어디서나 같은 값입니다.
  *
- * 3.00m는 훅의 도달 도약과 정확히 같습니다. 그것이 첫 번째 곳입니다. 갈고리는 재사용 대기가
- * 있는 무기 슬롯이고, 높이에서 그것을 이기는 공짜 이동 규칙은 비싼 길을 더 나쁜 길로 만듭니다.
- * 올라가는 두 길은 세계가 얼마나 높은지에 대해 같은 말을 해야 하고, 이제 그렇습니다.
- *
- * 두 번째는 맵입니다. `lqdm4`가 한 층으로 내놓는 것은 모두 2.5m 아래에 있고 그다음 것은
- * 4.5m이며 그 사이에는 *아무것도 없으므로*, 3.00m의 상한은 빈 띠 안에 앉습니다. 낮은 벽은
- * 남김없이 닿고 높은 벽은 하나도 닿지 못하며, 그것은 제작자가 긋지 않은 길을 열지 않는다는
- * 뜻입니다. 0.28부터 0.32까지 어느 값이든 같은 3.00m에 닿습니다. 그 구간의 가장자리가 아니라
- * 가운데를 취한 것은, 속도나 중력의 작은 재조정이 상한을 슬그머니 옮기지 않도록 하기
- * 위함입니다.
- *
- * 측정된 벽 가운데 1,312개는 20미터 안에 설 수 있는 꼭대기가 아예 없습니다. 그것들이
- * 경계이고, 그 앞에서는 예산이 그냥 바닥나 플레이어가 떨어집니다. 그것이 옳은 답이며 특별
- * 취급이 필요 없습니다.
- *
- * *따져 본 것은 높이인데도 높이가 아니라 지속 시간인 이유는* 플레이어가 늘 같은 자리에서
- * 시작하지 않기 때문입니다. 등반은 몸이 벽에 닿은 그 자리에서 시작하며, 점프 뒤에는 높고 낙하
- * 뒤에는 낮습니다. 높이 예산은 떨어지는 플레이어에게 조용히 더 큰 등반을 줍니다. 초는 어디서나
- * 같은 값을 치릅니다.
+ * @note ::PLAYER_CLIMB_SPEED와 함께 4.05m 상승이며, 이는 *9.20m 선반을 올라서고* 9.25m에서
+ *       실패합니다. 둘 다 movetest가 측정합니다. 1.35m와 3.00m였고, 3.00m는 훅의 도달 도약과
+ *       센티미터까지 같았으며 `lqdm4`의 2.5m 층과 4.5m 층 사이의 빈 띠 안에 있었습니다.
+ *       9.20m는 그 띠를 완전히 넘어서므로, 이제 등반은 제작자가 그리지 않은 경로를 열고
+ *       높이에서 갈고리를 이깁니다. 둘 다 옛 수치의 의도된 성질이었습니다.
  */
 #define PLAYER_CLIMB_TIME 0.30f
 
@@ -638,7 +578,7 @@ typedef struct {
  */
 void player_move(Player *p, const Level *l,
                  const Blocker *solid, int n_solid,
-                 v3 wish, float speed, int jump, float dt);
+                 v3 wish, float speed, int jump, int forward, float dt);
 
 /**
  * @brief Adds directly to the player's momentum -- a recoil kick, a grapple's pull.

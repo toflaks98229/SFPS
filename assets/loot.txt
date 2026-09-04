@@ -95,7 +95,7 @@
 # 동작하며, 이제 *캐스터*에 떨어집니다. 은퇴한 이름이 그것을 대신한 것을 따라가는 이유는
 # enemy.c의 MON_LEGACY에 있습니다.
 d water_spirit
-  chance 26
+  chance 22
   item held   3
   item health 1
 
@@ -104,7 +104,7 @@ d water_spirit
 # BRUTE: 체력 120은 많은 탄약입니다. 그 대부분을 돌려주지 않으면 이것은 우회하는
 # 몬스터가 됩니다.
 d brute
-  chance 62
+  chance 52
   item held   3
   item health 2
 
@@ -118,7 +118,7 @@ d brute
 # 레이스의 확률로 지급합니다. 이제 캐스터가 날며, 레이스의 44는 그냥 걸어가서 칠 수 없는
 # 상대에게 붙던 웃돈이었기 때문입니다. 그 웃돈은 이제 캐스터의 것입니다.
 d caster
-  chance 44
+  chance 38
   item health 3
   item held   2
 

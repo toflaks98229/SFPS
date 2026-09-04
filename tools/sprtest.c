@@ -32,6 +32,8 @@
 #include <stdio.h>
 #include <string.h>
 #include "sprite.h"
+#include "txt.h"
+#include "plat.h"
 #include "enemy.h"      /* MON_TYPES -- the monster atlas has one row per type */
 #include "weapon.h"     /* WP_TYPES  -- and the weapon atlas one row per weapon */
 #include "diag.h"       /* DIAG_PNG -- a refusal has to be counted to be seen */
@@ -239,6 +241,221 @@ int main(void) {
            anywhere the drawing did not cover. */
         const unsigned char *corner = &g_atlas[((0 * SPR_CH + 0) * AW + 0) * 4];
         ok(corner[3] == 0, "while the drawn cell was cleared first");
+    }
+
+    /* --- 4. how many frames a name asks for -------------------------------
+     *
+     * THREE ANSWERS AND THE NAME IS THE ONLY THING THAT SAYS WHICH. A trailing
+     * digit is one frame; a `_idle` suffix is the two walk frames and nothing
+     * else; a name that is just the creature is every frame it has. All three
+     * are decided in ::sprite_slot_for, and none of them is visible anywhere
+     * but in the atlas afterwards.
+     *
+     * THIS EXISTS BECAUSE THE MIDDLE ONE SILENTLY DID NOTHING. ::name_state
+     * answers ::SPR_WALK_BOTH -- which is -2 -- when it matches `_idle`, and
+     * the caller tested `f < 0` for "no suffix found", so every matched `_idle`
+     * was thrown away and the whole name went to the monster lookup instead.
+     * `maw_idle` asked for a creature called "maw_idle", there is none, and the
+     * drawing was dropped without a diagnostic. It shipped: the boss walked as
+     * generated art with its own drawing appearing only on the attack and the
+     * corpse, and the ward did the same.
+     *
+     * ASKED THROUGH THE DECODER, not by calling the name parser. The parser
+     * gave the right answer the whole time -- what was broken was what the
+     * caller did with it -- so a test that asks the parser passes while the
+     * atlas stays wrong.
+     *
+     * *답은 셋이고 어느 것인지를 말하는 것은 이름뿐입니다.* 끝의 숫자는 한 프레임,
+     * `_idle` 접미사는 걷기 두 프레임과 그 외 아무것도 아님, 생물 이름만 있는 것은 그것이
+     * 가진 모든 프레임입니다. 셋 다 ::sprite_slot_for에서 결정되며, 어느 것도 이후의
+     * 아틀라스 말고는 어디에서도 보이지 않습니다.
+     * *이것이 존재하는 이유는 가운데 것이 조용히 아무 일도 하지 않았기 때문입니다.*
+     * ::name_state는 `_idle`에 일치하면 -2인 ::SPR_WALK_BOTH로 답하는데, 호출자는 "접미사
+     * 없음"을 `f < 0`으로 검사했으므로 일치한 `_idle`이 전부 버려지고 이름 전체가 몬스터
+     * 조회로 넘어갔습니다. `maw_idle`은 "maw_idle"이라는 생물을 찾았고 그런 것은 없으며,
+     * 그림은 진단 한 줄 없이 버려졌습니다. 그대로 출하되었습니다. 보스는 생성된 그림으로
+     * 걸었고 자기 그림은 공격과 시체에서만 나타났으며, 결계석도 마찬가지였습니다.
+     * *이름 해석기를 호출하지 않고 디코더를 통해 묻습니다.* 해석기는 내내 옳은 답을 냈고
+     * 망가진 것은 호출자가 그 답으로 한 일이므로, 해석기에 묻는 검사는 아틀라스가 틀린 채로
+     * 통과합니다. */
+    printf("\na name says how many frames it fills\n");
+    {
+        static const unsigned char RED[4]  = { 255,   0,   0, 255 };
+        static const unsigned char BLUE[4] = {   0,   0, 255, 255 };
+
+        /* Filled with a stand-in for the generated creature, so a cell the
+           drawing did not claim is visibly the one it did not claim.
+           생성된 생물의 대역으로 채웁니다. 그래야 그림이 차지하지 않은 칸이 차지하지 않은
+           칸으로 눈에 보입니다. */
+        for (int i = 0; i < AW * AH; i++) {
+            g_atlas[i*4+0] = 9; g_atlas[i*4+1] = 9;
+            g_atlas[i*4+2] = 9; g_atlas[i*4+3] = 255;
+        }
+        blob_reset();
+        blob_png("water_spirit_idle", 2, 1, RED,  -1, -1, 0);
+        blob_png("brute",             2, 1, BLUE, -1, -1, 0);
+        sprite_decode_blob(blob(), g_atlas, AW, AH, 0);
+
+        int idle_hit = 0, idle_kept = 0, all_hit = 0;
+        for (int fr = 0; fr < SPR_FRAMES; fr++) {
+            const unsigned char *a = at(0, fr, 2, 1, 0, 0);
+            const unsigned char *b = at(1, fr, 2, 1, 0, 0);
+            if (a[0] == 255 && a[3] == 255) idle_hit++;
+            if (a[0] == 9   && a[3] == 255) idle_kept++;
+            if (b[2] == 255 && b[3] == 255) all_hit++;
+        }
+        printf("      `_idle` filled %d of %d frames and left %d generated; "
+               "the bare name filled %d\n",
+               idle_hit, SPR_FRAMES, idle_kept, all_hit);
+
+        ok(idle_hit == 2, "a single `_idle` fills the two walk frames");
+        ok(idle_kept == SPR_FRAMES - 2,
+           "and leaves the attack, the flinch and the corpse alone");
+        ok(all_hit == SPR_FRAMES,
+           "a name with no suffix at all fills every frame it has");
+    }
+
+    /* --- 5. the boss is a drawing, and there is nothing behind it ---------
+     *
+     * EVERY OTHER CREATURE HAS A GENERATOR UNDERNEATH IT. sprite.c draws all of
+     * them and a PNG replaces the cells it covers, which is what lets the
+     * bestiary be half drawn and still show creatures. The boss is the one that
+     * gave that up: its generated art was deleted when a single drawing took
+     * over all five frames, so a `maw.png` that goes missing, gets renamed, or
+     * fails to decode is not a boss in the old style -- it is no boss at all,
+     * an empty cell walking around the arena, and nothing in the build says so.
+     *
+     * SO THIS ASKS THE SHIPPED ATLAS, not a fixture. ::sprite_dump_ppm builds
+     * the same buffer ::sprite_atlas uploads, overlay included, and it is the
+     * only headless view of it -- the tool exists so a human can eyeball the
+     * sheet, and this turns the eyeballing into an assertion. Transparent
+     * pixels come back as the dump's own checkerboard, 40 and 60 grey, so "the
+     * cell has art" is "the cell is not entirely those two values".
+     *
+     * TWO PROPERTIES: there IS art, and every frame is the SAME art. The second
+     * is what "the boss is a single sprite" means, and it is the one that
+     * catches a per-frame drawing creeping back in beside the whole-name one.
+     *
+     * *다른 모든 생물은 아래에 생성기를 두고 있습니다.* sprite.c가 그것들을 전부 그리고 PNG가
+     * 자기가 덮는 칸을 대체하며, 그래서 도감이 절반만 그려져도 생물을 보여 줄 수 있습니다.
+     * 보스는 그것을 포기한 하나입니다. 그림 하나가 다섯 프레임 전부를 가져가면서 생성된
+     * 아트를 지웠으므로, `maw.png`가 사라지거나 이름이 바뀌거나 디코딩에 실패하면 그것은 옛
+     * 모습의 보스가 아니라 보스가 아예 없는 것입니다. 투기장을 걸어 다니는 빈 칸이며, 빌드의
+     * 무엇도 그렇다고 말하지 않습니다.
+     * *그래서 픽스처가 아니라 출하되는 아틀라스에 묻습니다.* ::sprite_dump_ppm은
+     * ::sprite_atlas가 업로드하는 그 버퍼를 오버레이까지 포함해 만들며, 그것을 헤드리스로 보는
+     * 유일한 창입니다. 이 도구는 사람이 시트를 눈으로 보라고 있는 것이고, 이 검사는 그 눈으로
+     * 보기를 단언으로 바꿉니다. 투명 픽셀은 덤프 자신의 체크무늬인 40과 60 회색으로 돌아오므로,
+     * "칸에 그림이 있다"는 "칸이 그 두 값만으로 이루어져 있지 않다"입니다.
+     * *두 성질입니다.* 그림이 *있고*, 모든 프레임이 *같은* 그림입니다. 둘째가 "보스는 단일
+     * 스프라이트"의 뜻이며, 이름 전체짜리 그림 옆으로 프레임별 그림이 다시 기어드는 것을
+     * 잡아내는 쪽입니다. */
+    printf("\nthe boss is one drawing and it is all of him\n");
+    {
+        /* BESIDE THE BINARY, not beside the caller. The first cut of this
+           wrote "build/..." and passed under -Tool and failed under -Test,
+           because the suite runs the exe from build\\ and a relative path is
+           a claim about the CALLER's directory. ::plat_exe_dir is the answer
+           the rest of the tools already use, and it ends in a separator so the
+           name appends with no logic here.
+           *호출자 옆이 아니라 바이너리 옆입니다.* 이것의 첫 판은 "build/..."에 썼고 -Tool에서
+           통과했다가 -Test에서 실패했습니다. 스위트는 exe를 build\\에서 실행하며, 상대 경로는
+           *호출자*의 디렉토리에 대한 주장이기 때문입니다. ::plat_exe_dir이 나머지 도구들이 이미
+           쓰는 답이고, 구분자로 끝나므로 이곳에서 이름을 붙이는 데 별도 처리가 없습니다. */
+        char pbuf[512];
+        int pn = plat_exe_dir(pbuf, (int)sizeof pbuf);
+        txt_copy(pbuf + pn, (int)sizeof pbuf - pn, "sprtest_boss.ppm", -1);
+        const char *path = pbuf;
+        if (!sprite_dump_ppm(path)) {
+            ok(0, "the atlas could be dumped");
+        } else {
+            FILE *f = fopen(path, "rb");
+            int W = 0, H = 0, maxv = 0;
+            if (f && fscanf(f, "P6 %d %d %d", &W, &H, &maxv) == 3 &&
+                W == SPR_CW * SPR_FRAMES && H == SPR_CH * MON_TYPES) {
+                fgetc(f);                          /* the single byte after 255 */
+                static unsigned char img[SPR_CW * SPR_FRAMES *
+                                         SPR_CH * MON_TYPES * 3];
+                size_t got = fread(img, 1, (size_t)W * H * 3, f);
+                fclose(f);
+                f = 0;
+                ok(got == (size_t)W * H * 3, "the dumped atlas is a whole image");
+
+                int inked = 0, same = 0;
+                for (int fr = 0; fr < SPR_FRAMES; fr++) {
+                    int differs = 0;
+                    for (int y = 0; y < SPR_CH; y++)
+                      for (int x = 0; x < SPR_CW; x++) {
+                        const unsigned char *p =
+                            &img[(((MON_MAW * SPR_CH + y) * W) +
+                                  fr * SPR_CW + x) * 3];
+                        const unsigned char *q =
+                            &img[(((MON_MAW * SPR_CH + y) * W) + x) * 3];
+                        if (fr == 0 && !(p[0] == 40 || p[0] == 60) ) inked++;
+                        if (p[0] != q[0] || p[1] != q[1] || p[2] != q[2])
+                            differs = 1;
+                      }
+                    if (!differs) same++;
+                }
+                printf("      frame 0 has %d drawn pixel(s); %d of %d frames "
+                       "match it\n", inked, same, SPR_FRAMES);
+                ok(inked > 500,
+                   "the boss's cell holds a drawing and not the empty grid");
+                ok(same == SPR_FRAMES,
+                   "and every frame of him is that same one drawing");
+            } else {
+                if (f) fclose(f);
+                ok(0, "the dumped atlas has the header the atlas has");
+            }
+            remove(path);
+        }
+    }
+
+    /* --- 6. a monster's marker becomes its anchor -------------------------
+     *
+     * THE SAME MAGENTA PIXEL THE MUZZLE USES, on a creature. The ward carries
+     * one at its gem and the boss's beam attaches there, so the point the beam
+     * lands on is a fact about the drawing rather than a number beside it: a
+     * taller ward or a redrawn pillar moves the beam with no edit anywhere.
+     *
+     * Three things, through the decoder: the anchor is where the marker was
+     * placed, the marker itself is never painted, and a kind with no marker
+     * says so rather than pointing at a corner.
+     *
+     * *총구가 쓰는 것과 같은 자홍색 픽셀*을 생물에 씁니다. 결계석은 보석에 하나를 지니고
+     * 보스의 빔이 그곳에 붙으므로, 빔이 닿는 점은 그림 옆의 숫자가 아니라 그림에 대한
+     * 사실입니다. 더 큰 결계석이나 다시 그린 기둥은 어디도 고치지 않고 빔을 옮깁니다.
+     * 디코더를 통해 셋을 봅니다. 앵커는 표식이 놓인 자리이고, 표식 자체는 결코 칠해지지
+     * 않으며, 표식 없는 종류는 구석을 가리키는 대신 없다고 말합니다. */
+    printf("\na monster's marker becomes its anchor\n");
+    {
+        static const unsigned char RED[4]  = { 255, 0,   0, 255 };
+        static const unsigned char MARK[4] = { 255, 0, 255, 255 };
+        for (int i = 0; i < AW * AH; i++) {
+            g_atlas[i*4+0] = 9; g_atlas[i*4+1] = 9;
+            g_atlas[i*4+2] = 9; g_atlas[i*4+3] = 255;
+        }
+        blob_reset();
+        blob_png("water_spirit_idle", 3, 3, RED, 1, 0, MARK);   /* marked at (1,0) */
+        blob_png("brute",             3, 3, RED, -1, -1, 0);     /* no marker      */
+        sprite_decode_blob(blob(), g_atlas, AW, AH, 0);
+
+        /* Where the decoder seats a 3x3: centred, on the cell floor -- the
+           same arithmetic at() uses, so the expectation and the readback
+           cannot disagree about placement. */
+        int ex = (SPR_CW - 3) / 2 + 1, ey = (SPR_CH - 3) + 0;
+        int ax = -1, ay = -1;
+        int has = sprite_mon_anchor_px(0, &ax, &ay);
+        printf("      anchor at (%d,%d), expected (%d,%d)\n", ax, ay, ex, ey);
+        ok(has && ax == ex && ay == ey, "the anchor is where the marker was placed");
+
+        const unsigned char *mk = at(0, 0, 3, 3, 1, 0);
+        ok(mk[3] == 0, "and the marker pixel itself was cut out, not painted");
+
+        float u = -1.0f, v = -1.0f;
+        ok(sprite_anchor(0, &u, &v) && v > 0.0f && v < 0.05f && u > 0.4f && u < 0.6f,
+           "as a fraction: near the feet and across the middle");
+        ok(!sprite_anchor(1, &u, &v), "a kind with no marker has no anchor");
     }
 
     /* --- 3. the muzzle comes out of the pixels ----------------------------

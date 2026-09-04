@@ -1877,27 +1877,12 @@ typedef struct {
     short   sun_power, sky_power;
 
     /**
-     * @brief How much faster this level's spawners run, as a percent. 100 is
-     *        as authored, 0 means the level did not say.
-     *
-     * ENGLISH: An integer because every number a level authors here is one --
-     * the same reason ::sun_power is a short. 200 is twice as often, 50 is
-     * half. Copied onto ::EnemyPool::spawn_rate at load, which is the knob
-     * ::spawn_wait divides by.
-     *
-     * 0 IS "UNSAID", NOT "NEVER". A level that does not mention it runs at
-     * 100, because the overwhelming majority never will and a field whose
-     * silence meant "stop" would empty every map that predates it.
-     *
-     * 한국어: 정수인 이유는 이곳에서 레벨이 저작하는 모든 수가 정수이기 때문이며,
-     * ::sun_power가 short인 것과 같은 이유입니다. 200은 두 배로 자주, 50은 절반입니다.
-     * 로드 시점에 ::EnemyPool::spawn_rate로 복사되며, 그것이 ::spawn_wait가 나누는
-     * 손잡이입니다.
-     *
-     * *0은 "절대"가 아니라 "말하지 않음"입니다.* 언급하지 않는 레벨은 100으로 돕니다.
-     * 압도적 다수가 언급하지 않을 것이고, 침묵이 "멈춤"을 뜻하는 필드는 이것보다 앞선 모든
-     * 맵을 비워 버리기 때문입니다.
-     */
+     * @brief How much faster this level's spawners run, as a percent. 100 is as authored,
+     *        200 twice as often, 50 half. 0 means the level did not say, and reads as 100.
+     *        / 이 레벨의 스포너가 얼마나 빨리 도는가(백분율). 100은 제작된 대로,
+     *        200은 두 배, 50은 절반입니다. 0은 말하지 않았다는 뜻이며 100으로 읽힙니다.
+     * @note Copied onto ::EnemyPool::spawn_rate at load; ::spawn_wait divides by it.
+     *       / 로드 시점에 ::EnemyPool::spawn_rate로 복사되며 ::spawn_wait가 그것으로 나눕니다. */
     short   spawn_rate;
     DoorDef doors[LVL_MAX_DOORS];         /**< Moving sectors, as authored. / 제작된 그대로의 이동 섹터. */
     int     n_doors;                      /**< Number of doors in use. / 사용 중인 문의 수. */

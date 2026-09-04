@@ -101,18 +101,83 @@
 #define STORY_PAGES 6
 
 /**
- * @brief Characters in one line, terminator included.
+ * @brief Bytes in one line, terminator included.
  *
- * ENGLISH: Sized against the narrowest window this UI is drawn in rather than
- * against taste. At ::STORY_TEXT_SIZE a glyph advances ::FONT_CW * size pixels,
- * so 47 characters is 564 of them -- inside a 640-wide viewport with a margin,
- * and centred, so a shorter line simply sits in the middle.
+ * ENGLISH
+ * -------
+ * BYTES, and the word matters. This was 48 and doing two jobs at once: it
+ * sized the buffer and, because a byte was a character and a character was six
+ * glyph pixels, it also capped how wide a line could be drawn. Hangul broke
+ * the second job -- a syllable is three bytes and eight glyph pixels, so 47
+ * bytes bought fifteen syllables and only 240 pixels where it bought 47 Latin
+ * letters and 564. Lines that read as short in Korean were running out of
+ * buffer at half the width English was allowed.
  *
- * 한국어: 취향이 아니라 이 UI가 그려지는 가장 좁은 창을 기준으로 정한 크기입니다.
- * ::STORY_TEXT_SIZE에서 글리프는 ::FONT_CW * size 픽셀만큼 전진하므로, 47자는 564픽셀입니다.
- * 너비 640 뷰포트 안에 여백을 두고 들어가며, 가운데 정렬이므로 짧은 줄은 그냥 가운데 놓입니다.
+ * So the two jobs are two constants now. This one is the buffer and is sized
+ * to be out of the way: 112 bytes is the point at which a Hangul line can
+ * reach the width ::STORY_LINE_W allows, and the cost is nothing a budget
+ * notices -- `g_cut` is a zeroed static, which is .bss, which is not in the
+ * file. The width is ::STORY_LINE_W's job and tools/storytest.c checks it.
+ *
+ * @note Because this no longer caps width, an English line CAN now be authored
+ *       long enough to run off the screen. That is what the storytest check
+ *       exists to catch, and it catches it in a build rather than in a
+ *       cutscene.
+ *
+ * 한국어
+ * ------
+ * @brief 한 줄의 바이트 수. 종료 문자를 포함합니다.
+ *
+ * *바이트*이며, 그 단어가 중요합니다. 이 값은 48이었고 두 가지 일을 겸하고 있었습니다.
+ * 버퍼의 크기를 정했고, 또 1바이트가 1문자이고 1문자가 6글리프 픽셀이었으므로 줄이 얼마나
+ * 넓게 그려질 수 있는지도 함께 제한했습니다. 한글이 두 번째 일을 깨뜨렸습니다. 음절 하나가
+ * 3바이트이자 8글리프 픽셀이므로, 47바이트는 영문 47자와 564픽셀을 사던 자리에서 한글
+ * 15자와 240픽셀만을 삽니다. 한국어로 짧게 읽히는 줄들이 영문에 허용된 너비의 절반에서
+ * 버퍼를 다 쓰고 있었습니다.
+ *
+ * 그래서 두 가지 일이 이제 두 개의 상수입니다. 이것은 버퍼이며 걸리적거리지 않을 크기로
+ * 잡았습니다. 112바이트는 한글 줄이 ::STORY_LINE_W가 허용하는 너비에 도달할 수 있는
+ * 지점이고, 그 대가는 어떤 예산도 알아채지 못합니다. `g_cut`은 0으로 초기화되는 정적
+ * 변수이고, 그것은 .bss이며, .bss는 파일에 없습니다. 너비는 ::STORY_LINE_W의 몫이고
+ * tools/storytest.c가 그것을 검사합니다.
+ *
+ * @note 이 값이 더는 너비를 제한하지 않으므로, 이제 영문 줄을 화면 밖으로 나갈 만큼 길게
+ *       쓸 *수* 있습니다. storytest의 검사가 존재하는 이유가 그것이며, 컷신이 아니라
+ *       빌드에서 잡아냅니다.
  */
-#define STORY_LINE_MAX 48
+#define STORY_LINE_MAX 112
+
+/**
+ * @brief How wide one line may be drawn, in glyph pixels.
+ *
+ * ENGLISH
+ * -------
+ * 282 is `47 * FONT_CW` -- the width the old 48-byte cap allowed a line of
+ * Latin, kept as the budget after that cap stopped expressing it. Glyph pixels
+ * rather than screen pixels so the number does not have to know what size the
+ * caller draws at: multiply by ::STORY_TEXT_SIZE for the pixels on screen, or
+ * hand a line to `font_width(1.0f, s)` and compare directly, which is what
+ * tools/storytest.c does over the shipped file.
+ *
+ * @note A budget, not a truncation point. Nothing clips a line to this -- the
+ *       test fails and the author shortens the line, because a sentence cut by
+ *       a renderer is a sentence nobody wrote.
+ *
+ * 한국어
+ * ------
+ * @brief 한 줄이 그려질 수 있는 너비. 글리프 픽셀 단위입니다.
+ *
+ * 282는 `47 * FONT_CW`이며, 옛 48바이트 한계가 라틴 문자 한 줄에 허용하던 너비입니다. 그
+ * 한계가 더는 그것을 표현하지 않게 된 뒤에도 예산으로 남겼습니다. 화면 픽셀이 아니라 글리프
+ * 픽셀인 이유는, 이 숫자가 호출자가 어떤 크기로 그리는지 알 필요가 없도록 하기 위해서입니다.
+ * 화면상의 픽셀을 얻으려면 ::STORY_TEXT_SIZE를 곱하고, 아니면 줄을 `font_width(1.0f, s)`에
+ * 건네 직접 비교하십시오. tools/storytest.c가 출하되는 파일에 대해 하는 일이 그것입니다.
+ *
+ * @note 잘라 내는 지점이 아니라 *예산*입니다. 이 값에 맞춰 줄을 자르는 것은 없습니다.
+ *       테스트가 실패하고 제작자가 줄을 줄입니다. 렌더러가 자른 문장은 아무도 쓰지 않은
+ *       문장이기 때문입니다.
+ */
+#define STORY_LINE_W 282
 
 /* STORY_NAME_MAX WAS HERE and sized nothing. Cutscene names are not copied:
    ::story_moment_name hands back a pointer into a static table, so there is no

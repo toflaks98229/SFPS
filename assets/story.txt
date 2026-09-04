@@ -11,13 +11,21 @@
 #              Default 4500. Clamped up to 600, because a page that expires on
 #              the frame it starts reads as a rendering fault.
 #
-# TWO RULES THE FORMAT IMPOSES, and both are the font's or the bake's rather
-# than a preference:
+# THREE RULES THE FORMAT IMPOSES, and each is the font's, the screen's or the
+# bake's rather than a preference:
 #
-#   ENGLISH ONLY. font.c's atlas is printable ASCII and nothing else, so there
-#   is no Hangul glyph to draw with. Every string this game puts on screen is
-#   in the same position -- CLEARED, ENTERING, THE MAW IS QUIET -- so this is a
-#   property of the game rather than of the story.
+#   MIND THE WIDTH, NOT THE LENGTH. A line may be as wide as STORY_LINE_W --
+#   282 glyph pixels, which is 35 Hangul syllables or 47 Latin letters -- and
+#   tools/storytest.c measures every line in this file against it. Going over
+#   fails a build rather than clipping a sentence in a cutscene. The buffer
+#   (STORY_LINE_MAX) is 112 bytes and will not be what stops you: a syllable
+#   costs three of those and eight of the pixels, so the pixels run out first
+#   in either language.
+#
+#   THE LINES BELOW ARE KOREAN and the labels around them are not. CLEARED,
+#   ENTERING, THE MAW IS QUIET and the rest of the HUD are still English, so a
+#   run currently reads its story in one language and its state in another.
+#   That is a half-finished translation rather than a decision.
 #
 #   NO `#` INSIDE A LINE. Comments are stripped twice, by bake.ps1 on the way
 #   into the binary and by txt_skip on the way out of this file, so a `#` in a
@@ -31,20 +39,29 @@
 
 # ---------------------------------------------------------------- the intro --
 #
-# Held before the first frame of a story run. It has one job: say what the
-# player is walking into, so that a fixed monster on a wall reads as a thing
-# that was put there rather than as a monster that forgot to move.
+# Held before the first frame of a story run. Two jobs: say what the player is
+# walking into, so that a fixed monster on a wall reads as a thing that was put
+# there rather than as a monster that forgot to move -- and then, on the last
+# page, name the controls. That page is last because it is the one the player
+# should still have in front of them when the cutscene ends and they take over;
+# it also holds longest, since a line of prose is read once and a control is
+# read, tried, and read again.
 c intro
   p
-    t "THE SPIRE STOPPED SENDING ANYTHING DOWN"
-    t "NO ORE. NO WATER. NO WORD."
+    t "첨탑이 아무것도 내려보내지 않았다"
+    t "광석도 없다. 물도 없다. 소식도 없다."
   p
-    t "WHAT CAME UP INSTEAD WAS HUNGRY"
-    t "AND IT KNEW THE WAY"
+    t "대신 올라온 것은 굶주려 있었다"
+    t "그리고 길을 알고 있었다"
   p
-    t "SOMETHING IN THE GLASS TOWER IS EATING"
-    t "GO UP. FIND THE MOUTH."
+    t "유리탑 안에서 무언가가 먹고 있다"
+    t "올라가라. 아가리를 찾아라."
     hold 5200
+  p
+    t "WASD로 움직인다. 좌클릭으로 쏜다."
+    t "1 2 3 4 로 무기를 바꾼다."
+    t "우클릭으로 갈고리를 쏜다."
+    hold 7000
 
 # -------------------------------------------------------------- the victory --
 #
@@ -53,13 +70,13 @@ c intro
 # read, and this is the gap that opens.
 c victory
   p
-    t "THE WARDS ARE ASH AND THE MOUTH IS SHUT"
+    t "수호석은 재가 되고 아가리는 닫혔다"
   p
-    t "THE TOWER IS QUIET ENOUGH TO HEAR"
-    t "HOW FAR DOWN IT GOES"
+    t "탑은 이제 충분히 조용해서 들린다"
+    t "그것이 얼마나 아래로 뻗어 있는지"
   p
-    t "IT WAS NEVER THE ONLY ONE"
-    t "THE OTHERS DO NOT WAIT FOR A STORY"
+    t "그것은 결코 하나뿐이 아니었다"
+    t "나머지는 이야기를 기다리지 않는다"
     hold 5000
 
 # --------------------------------------------------------------- the defeat --
@@ -79,6 +96,6 @@ c victory
 # 내내 건너뛰어질 것이며, 그것은 덜 말하는 것보다 나쁜 결말입니다.
 c defeat
   p
-    t "THE WARDS HOLD"
-    t "THE SPIRE GOES BACK TO SWALLOWING"
+    t "수호석은 버텼다"
+    t "첨탑은 다시 삼키기 시작한다"
     hold 3400

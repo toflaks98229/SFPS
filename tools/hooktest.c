@@ -98,6 +98,11 @@ int main(void) {
     /* A tall room. Sector units are centimetres, so this is 40m square and
        30m tall.
 
+       Thirty metres across, so its wall is 15 m from the middle -- comfortably
+       inside ::HOOK_RANGE, which is 20 m. It used to be 40 m across and the wall
+       sat at exactly the range, which the halving of HOOK_RANGE turned into a
+       coin toss: every beat below depends on there being a wall to reach.
+
        Every fixture below keeps the player INSIDE this box. That is not
        incidental: level_trace hits instantly from a point outside the
        geometry, so a fixture placed above the ceiling attaches to itself at
@@ -105,7 +110,7 @@ int main(void) {
        resulting failures pointed at the physics when the fixture was what was
        wrong. */
     Level L = {0};
-    box(&L, -2000, -2000, 2000, 2000, 0, 3000);
+    box(&L, -1500, -1500, 1500, 1500, 0, 3000);
     L.start[0] = 0; L.start[1] = 0; L.start[2] = 0;
 
     /* Head height for a player standing in the middle of that room. */
@@ -145,9 +150,9 @@ int main(void) {
         }
         ok(w.hook_state == HOOK_PULLING, "the claw reaches the wall and latches");
         ok(w.hook_enemy < 0, "with no monster hooked -- it hit geometry");
-        okf(fabsf(w.hook_target.z - (-20.0f)) < 0.6f,
-            "landing on the wall it actually hit", w.hook_target.z, -20.0f);
-        /* 20m at 90 m/s is ~0.22s, about 13 frames. Being wildly off means
+        okf(fabsf(w.hook_target.z - (-15.0f)) < 0.6f,
+            "landing on the wall it actually hit", w.hook_target.z, -15.0f);
+        /* 15m at 90 m/s is ~0.17s, about 10 frames. Being wildly off means
            the flight speed is not what the constant says. */
         okf(frames < 30, "in roughly the time the flight speed implies",
             (float)frames, 30.0f);
@@ -231,10 +236,10 @@ int main(void) {
         v3 pos = v3f(0.0f, STAND_Y, 0.0f), vel = v3f(0,0,0);
         wp_hook_fire(&w, pos, 0.0f, 0.0f);
 
-        float start_dist = 20.0f;
+        float start_dist = 15.0f;
         run_hook(&w, &L, &pos, &vel, 60 * 8);
 
-        float end_dist = fabsf(pos.z - (-20.0f));
+        float end_dist = fabsf(pos.z - (-15.0f));
         ok(end_dist < start_dist * 0.25f,
            "the pull closes the distance -- a winch, not a rope");
         ok(w.hook_state == HOOK_IDLE, "and the cycle completes on arrival");
@@ -345,6 +350,7 @@ int main(void) {
         wp_hook_fire(&w, pos, 0.0f, 0.0f);
         run_hook(&w, &L, &pos, &vel, 60 * 8);
 
+        printf("      12 m/s across -> launch keeps vel.x %.3f\n", (double)vel.x);
         ok(vel.x > 0.2f,
            "travel across the surface is carried into the launch");
     }
@@ -360,7 +366,7 @@ int main(void) {
        what a claw fired level at 1.7m expects to find. */
     {
         Level M = {0};
-        box(&M, -2000, -2000, 2000, 2000, 0, 3000);
+        box(&M, -1500, -1500, 1500, 1500, 0, 3000);
         M.start[0] = 0; M.start[1] = 0; M.start[2] = 0;
         M.n_ents = 1;
         put_kind(&M.ents[0], "water_spirit");
@@ -425,7 +431,7 @@ int main(void) {
        rather than by position is what makes this detectable at all. */
     {
         Level M = {0};
-        box(&M, -2000, -2000, 2000, 2000, 0, 3000);
+        box(&M, -1500, -1500, 1500, 1500, 0, 3000);
         M.n_ents = 1;
         put_kind(&M.ents[0], "water_spirit");
         M.ents[0].x = 0; M.ents[0].z = -1500;
@@ -614,7 +620,7 @@ int main(void) {
     /* --- a monster lights it too, and takes priority over the wall --------- */
     {
         Level M = {0};
-        box(&M, -2000, -2000, 2000, 2000, 0, 3000);
+        box(&M, -1500, -1500, 1500, 1500, 0, 3000);
         M.n_ents = 1;
         put_kind(&M.ents[0], "water_spirit");
         M.ents[0].x = 0; M.ents[0].z = -1000;
@@ -745,7 +751,7 @@ int main(void) {
 
        The winch only ever ACCELERATED along the hook and capped that component;
        nothing touched the component across it, so entry momentum survived
-       untouched to the end. Measured on this 20m fixture before the fix: 12 m/s
+       untouched to the end. Measured on the 20m fixture this suite used then: 12 m/s
        of sideways entry missed the anchor by 3.6m, and 30 m/s -- which a
        chained hook reaches easily, HOOK_LAUNCH_MAX being 30 and airborne drag
        being almost nothing -- missed by 8.5m and took 30% longer to arrive.
@@ -797,6 +803,8 @@ int main(void) {
 
             float dx = pos.x - anchor.x, dz = pos.z - anchor.z;
             float miss = sqrtf(dx*dx + dz*dz);
+            printf("      entry %4.0f m/s -> missed the anchor by %.2fm\n",
+                   (double)SIDE[i], (double)miss);
             if (miss > worst) worst = miss;
         }
 
@@ -822,7 +830,7 @@ int main(void) {
         player_impulse(&p, v3f(6.0f, 0.0f, 0.0f));
 
         float x0 = p.pos.x;
-        player_move(&p, &L, 0, 0, v3f(0,0,0), 0.0f, 0, DT);
+        player_move(&p, &L, 0, 0, v3f(0,0,0), 0.0f, 0, 0, DT);
         float moved_first_frame = p.pos.x - x0;
         ok(moved_first_frame > 0.03f, "an impulse moves the player next frame");
         ok(!p.grounded, "and the fixture is actually airborne, not resting on it");
@@ -832,7 +840,7 @@ int main(void) {
            still genuinely airborne throughout and ground drag never gets a
            chance to sneak into this measurement the way it did before. */
         float speed0 = fabsf(p.vel.x);
-        for (int i = 0; i < 30; i++) player_move(&p, &L, 0, 0, v3f(0,0,0), 0.0f, 0, DT);
+        for (int i = 0; i < 30; i++) player_move(&p, &L, 0, 0, v3f(0,0,0), 0.0f, 0, 0, DT);
         float speed1 = fabsf(p.vel.x);
         ok(!p.grounded, "and still airborne at the end of the measurement");
         ok(speed1 < speed0, "and bleeds off rather than lasting forever");
@@ -857,8 +865,8 @@ int main(void) {
         player_impulse(&a, v3f(6.0f, 0.0f, 0.0f));
 
         for (int i = 0; i < 30; i++) {
-            player_move(&g, &L, 0, 0, v3f(0,0,0), 0.0f, 0, DT);
-            player_move(&a, &L, 0, 0, v3f(0,0,0), 0.0f, 0, DT);
+            player_move(&g, &L, 0, 0, v3f(0,0,0), 0.0f, 0, 0, DT);
+            player_move(&a, &L, 0, 0, v3f(0,0,0), 0.0f, 0, 0, DT);
         }
         ok(g.grounded, "the ground fixture really is grounded throughout");
         ok(!a.grounded, "and the air fixture really is not");

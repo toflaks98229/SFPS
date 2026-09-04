@@ -126,6 +126,50 @@
 
 /* ------------------------------------------------------------------ config */
 
+/**
+ * @brief The game's name, as Windows is told it.
+ *
+ * ENGLISH
+ * -------
+ * Seven places used to spell this out: the window caption, the two title-bar
+ * formats, and four MessageBox captions -- and one of the seven was buried
+ * mid-format-string where a grep for the quoted word does not find it. That is
+ * the shape of a name that drifts, and this project has already written the
+ * essay about it in size.ps1.
+ *
+ * @note THIS IS THE SUBTITLE, not the title. The game is 마법소녀 대소동 and
+ *       ::scene_draw_title draws that, in the game's own font, which can
+ *       compose Hangul; what Windows gets is the English line that sits under
+ *       it. That is not a compromise made here so much as the reason the
+ *       subtitle is useful -- see the note below.
+ * @note ASCII, and it has to stay ASCII. The calls below are the ANSI Win32
+ *       entry points, which read these bytes in the system codepage; UTF-8
+ *       Hangul here would be mojibake on any machine that is not already
+ *       Korean. Putting the real title in the taskbar means CreateWindowExW,
+ *       a class registered with RegisterClassW, and a UTF-8 to UTF-16
+ *       conversion -- not a different string.
+ *
+ * 한국어
+ * ------
+ * @brief 게임의 이름. Windows에 알려 주는 형태입니다.
+ *
+ * 일곱 곳이 이것을 따로 적고 있었습니다. 창 캡션, 제목 표시줄 형식 두 개, MessageBox 캡션
+ * 넷입니다. 그리고 그중 하나는 형식 문자열 한가운데 묻혀 있어 따옴표로 감싼 단어를 grep해도
+ * 찾히지 않았습니다. 이름이 어긋나기 시작하는 모양이 그것이며, 이 프로젝트는 size.ps1에서
+ * 이미 그에 대한 글을 써 두었습니다.
+ *
+ * @note 이것은 *제목이 아니라 부제목*입니다. 게임의 이름은 마법소녀 대소동이고 그것은
+ *       ::scene_draw_title이 한글을 조합할 수 있는 게임 자신의 폰트로 그립니다. Windows가
+ *       받는 것은 그 아래에 놓이는 영문 줄입니다. 이곳에서 어쩔 수 없이 택한 타협이라기보다,
+ *       부제목이 쓸모 있는 이유 자체입니다. 아래 항목을 참조하십시오.
+ * @note ASCII이며 ASCII로 남아야 합니다. 아래의 호출들은 ANSI Win32 진입점이고 이 바이트를
+ *       시스템 코드페이지로 해석합니다. 이곳에 UTF-8 한글을 두면 이미 한국어로 설정된
+ *       기계가 아닌 곳에서는 깨집니다. 진짜 제목을 작업 표시줄에 올리려면 다른 문자열이
+ *       아니라 CreateWindowExW와 RegisterClassW로 등록한 클래스, 그리고 UTF-8에서
+ *       UTF-16으로의 변환이 필요합니다.
+ */
+#define GAME_NAME "MAGICIAN GIRL MAYHEM"
+
 #define WIN_W 1280           ///< @brief Initial window width, pixels. / 초기 창 너비 (픽셀).
 #define WIN_H 720            ///< @brief Initial window height, pixels. / 초기 창 높이 (픽셀).
 
@@ -1096,9 +1140,16 @@ static void set_title(const World *w, int fps) {
 
     /* wsprintfA has no %f, so angles are printed in millidegrees and
        positions in centimetres -- integers all the way down. */
-    char title[512];
+    /* 544 rather than 512 because ::GAME_NAME is sixteen characters longer
+       than the "SFPS" that used to sit in the format below, and wsprintfA
+       bounds nothing -- the margin that was here before the rename is the
+       margin that should be here after it.
+       512가 아니라 544인 이유는 ::GAME_NAME이 아래 형식에 들어 있던 "SFPS"보다 열여섯 자
+       길고 wsprintfA는 아무것도 검사하지 않기 때문입니다. 이름을 바꾸기 전에 있던 여유가
+       바꾼 뒤에도 있어야 합니다. */
+    char title[544];
     wsprintfA(title,
-        "%s%s%sSFPS %dfps | %s | assets: %s | pos %d,%d,%d cm | "
+        "%s%s%s" GAME_NAME " %dfps | %s | assets: %s | pos %d,%d,%d cm | "
         "yaw %d pitch %d recoil %d mdeg",
         any_over ? "! DROPPED " : "", any_over ? over : "",
         any_over ? " | " : "",
@@ -1120,7 +1171,7 @@ static void set_title(const World *w, int fps) {
 #else
     (void)w;
     char title[64];
-    wsprintfA(title, "SFPS   %d fps", fps);
+    wsprintfA(title, GAME_NAME "   %d fps", fps);
 #endif
     SetWindowTextA(g_wnd, title);
 }
@@ -1159,7 +1210,7 @@ static void set_title(const World *w, int fps) {
 static int app_start(HINSTANCE inst, int show, HDC *dc, Scene *scene) {
     if (!gl_bootstrap(inst)) {
         MessageBoxA(0, "OpenGL 3.3 is not available on this machine.",
-                    "SFPS", MB_ICONERROR);
+                    GAME_NAME, MB_ICONERROR);
         return 1;
     }
 
@@ -1175,7 +1226,7 @@ static int app_start(HINSTANCE inst, int show, HDC *dc, Scene *scene) {
     DWORD style = WS_OVERLAPPEDWINDOW & ~(WS_THICKFRAME | WS_MAXIMIZEBOX);
     AdjustWindowRect(&r, style, FALSE);
 
-    g_wnd = CreateWindowExA(0, "qwnd", "SFPS", style,
+    g_wnd = CreateWindowExA(0, "qwnd", GAME_NAME, style,
                             CW_USEDEFAULT, CW_USEDEFAULT,
                             r.right - r.left, r.bottom - r.top,
                             0, 0, inst, 0);
@@ -1183,7 +1234,7 @@ static int app_start(HINSTANCE inst, int show, HDC *dc, Scene *scene) {
 
     if (!gl_make_context(*dc)) {
         MessageBoxA(0, "Failed to create a 3.3 core context.",
-                    "SFPS", MB_ICONERROR);
+                    GAME_NAME, MB_ICONERROR);
         return 1;
     }
     gl_set_vsync(1);
@@ -1293,7 +1344,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
        기록은 알린 뒤 무시하며 게임은 평소대로 시작합니다. 데모는 실행을 거부할 이유가
        아닙니다. */
     if (!demo_file_open(&g_demo, &g_world))
-        MessageBoxA(0, "That demo could not be read.", "SFPS", MB_ICONERROR);
+        MessageBoxA(0, "That demo could not be read.", GAME_NAME, MB_ICONERROR);
 
     /* WORLD_ENTER_NEW whichever this is: a fresh start begins at full health
        with the boot belt, which is what wp_init just set, and a playback enters
@@ -1769,7 +1820,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
     }
 
     if (!demo_file_close(&g_demo))
-        MessageBoxA(0, "The demo could not be written.", "SFPS", MB_ICONERROR);
+        MessageBoxA(0, "The demo could not be written.", GAME_NAME, MB_ICONERROR);
 
     /* Pairs every mb_init the program made: ::scene_init's, and the two
        modules that build their own buffer on first draw rather than at

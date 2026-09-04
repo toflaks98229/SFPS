@@ -262,6 +262,144 @@ void wpview_draw_world(WeaponView *v, const Weapon *w, mat4 view_proj,
  *       마스크이기 때문입니다. 블렌딩하면 아티스트가 선명하게 그린 모든 가장자리에 반쯤
  *       밝은 픽셀의 테두리가 남습니다.
  */
+/* --- the rectangle the held art is drawn into ------------------------------
+ *
+ * ONE COPY, because the emblem layers have to land on the wand and not merely
+ * near it. This used to be inline in the draw, and the emblem's own corners
+ * were worked out beside it from the same locals -- which is fine right up to
+ * the moment one of the two is scaled and the other is not, and the magic
+ * circle slides off the staff it is supposed to be set into.
+ *
+ * `cx` is the centre and `cy` the bottom, with the caller's bob, sway and punch
+ * already in them. Out come x0, y0, x1, y1 of the 1x1 ortho box.
+ *
+ * *사본은 하나입니다.* 문양 레이어가 지팡이 *위에* 앉아야지 그 근처에 앉아서는 안 되기
+ * 때문입니다. 이것은 그리기 안에 인라인으로 있었고 문양의 모서리는 같은 지역 변수들로 그
+ * 옆에서 계산되었습니다. 둘 중 하나에만 배율이 가고 다른 하나에는 가지 않는 순간까지는
+ * 괜찮으며, 그 순간 마법진은 박혀 있어야 할 지팡이에서 미끄러집니다.
+ * `cx`는 가운데, `cy`는 바닥이고 호출자의 보브와 스웨이와 펀치가 이미 들어 있습니다.
+ * 1x1 직교 상자의 x0, y0, x1, y1이 나옵니다. */
+static void art_rect(float aspect, float cx, float cy, float out[4]) {
+    /* The viewport IS Doom's 3D view, so the cell's share of it is the cell's
+       share of those 168 rows. Width follows from the 320x200 screen being
+       displayed at 4:3: our height covers VIEW rows, so the full screen is
+       (4/3)*FULL/VIEW of it across. Matching FULL instead of VIEW is what left
+       the shotgun a fifth too small with its bottom balanced on the edge.
+       뷰포트가 곧 Doom의 3D 뷰이므로, 셀이 차지하는 비율은 그 168행 중 셀의 비율입니다.
+       너비는 320x200 화면이 4:3으로 표시된다는 사실에서 나옵니다. 우리 높이가 VIEW행을
+       담으므로 화면 전체는 그 (4/3)*FULL/VIEW배만큼 넓습니다. VIEW가 아니라 FULL에
+       맞춘 것이 샷건을 5분의 1만큼 작게, 아래를 가장자리에 걸터앉게 만든 원인입니다. */
+    const float SH = (float)(WPN_DOOM_VIEW - WPN_DOOM_TOP) / (float)WPN_DOOM_VIEW;
+    float sw = (4.0f / 3.0f) * (float)WPN_DOOM_FULL / (float)WPN_DOOM_VIEW
+             / (aspect > 0.01f ? aspect : 1.0f);
+
+    /* --- how big the held art is drawn ----------------------------------
+       DOOM'S CELL IS THE FRAME, NOT THE SIZE. Everything above computes where
+       Doom's psprite screen is, and that is still what places the art -- the
+       cell's own coordinates are what the drawing was authored against, so the
+       geometry has to stay. What it does NOT settle is how much of that cell a
+       drawing should fill: Doom's guns are held at the hip and their art runs
+       to the edges of the psprite, and a wand held up in front of the face is
+       a smaller object seen at the same distance.
+       SCALED ABOUT THE BOTTOM CENTRE, so shrinking it keeps it a thing held at
+       the bottom of the screen rather than sliding it into the middle. `cx` is
+       already the centre and `cy` already the bottom, so this is one multiply
+       on the extent and none on the anchor -- the bob, the sway and the punch
+       still move the art exactly as far as they did, because they moved the
+       anchor and not the size.
+       *Doom의 셀은 크기가 아니라 틀입니다.* 위의 모든 것은 Doom의 psprite 화면이 어디인지를
+       계산하며, 그것이 여전히 아트를 배치합니다. 셀 자신의 좌표가 그림이 저작된 기준이므로
+       그 기하는 남아야 합니다. 그것이 정하지 *않는* 것은 그림이 그 셀을 얼마나 채워야 하는가
+       입니다. Doom의 총은 허리에 쥐고 그 아트가 psprite의 가장자리까지 갑니다. 얼굴 앞에 든
+       지팡이는 같은 거리에서 보이는 더 작은 물건입니다.
+       *아래 가운데를 기준으로 배율을 줍니다.* 그래야 줄여도 화면 아래에 쥔 물건으로 남고
+       가운데로 미끄러지지 않습니다. `cx`가 이미 가운데이고 `cy`가 이미 바닥이므로, 곱셈은
+       크기에만 있고 기준점에는 없습니다. 보브와 스웨이와 펀치는 기준점을 움직였지 크기를
+       움직인 것이 아니므로, 아트를 정확히 예전만큼 움직입니다. */
+    float aw = sw * WPN_ART_SCALE, ah = SH * WPN_ART_SCALE;
+    out[0] = cx - aw * 0.5f;
+    out[1] = cy;
+    out[2] = cx + aw * 0.5f;
+    out[3] = cy + ah;
+}
+
+int wpview_emblem_cell(const Weapon *w) {
+    if (!w) return 0;
+    if (w->swap > 0.0f) return EMB_SMEAR;
+    return (w->cur >= 0 && w->cur < WP_TYPES) ? w->cur : 0;
+}
+
+void wpview_emblem_tint(const Weapon *w, float rgb[3]) {
+    if (!rgb) return;
+    rgb[0] = rgb[1] = rgb[2] = 1.0f;
+    if (!w || w->swap <= 0.0f) return;
+
+    float t = wp_swap_t(w);
+    float a[3], b[3];
+    if (t < 0.5f) {
+        emblem_hue(w->swap_from, a);
+        emblem_hue(EMB_SMEAR,    b);
+        t = t * 2.0f;
+    } else {
+        emblem_hue(EMB_SMEAR,    a);
+        emblem_hue(w->cur,       b);
+        t = t * 2.0f - 1.0f;
+    }
+    for (int k = 0; k < 3; k++) rgb[k] = a[k] + (b[k] - a[k]) * t;
+}
+
+/* --- where the emblem's four corners land ---------------------------------
+ *
+ * LIFTED OUT OF THE DRAW so a test can walk it without a GL context. The draw
+ * below is the only caller in the game and ::wpview_emblem_quad the only one in
+ * the tests, so there is one copy of the arithmetic and the check cannot pass
+ * against maths the frame does not use.
+ *
+ * `cx` is the held object's centre and `cy` its bottom, in the 1x1 ortho box --
+ * the caller's bob, sway and punch are already in them. `spin` turns the ring;
+ * pass 0 for the stone.
+ *
+ * *그리기에서 꺼냈습니다.* 그래야 GL 문맥 없이 검사가 이 수식을 걸을 수 있습니다. 게임에서는
+ * 아래의 그리기가 유일한 호출자이고 검사에서는 ::wpview_emblem_quad가 유일하므로, 산술의
+ * 사본은 하나이며 검사가 프레임이 쓰지 않는 수식에 대해 통과할 수 없습니다.
+ * `cx`는 쥔 물건의 가운데, `cy`는 그 바닥이며 1x1 직교 상자 기준입니다. 호출자의 보브와
+ * 스웨이와 펀치가 이미 그 안에 있습니다. `spin`은 고리를 돌립니다. 돌에는 0을 넘기십시오. */
+static void emblem_quad(float aspect, float spin, float cx, float cy,
+                        float out[4][2]) {
+    float R[4];
+    art_rect(aspect, cx, cy, R);
+    float x0 = R[0], y1 = R[3];
+    float aw = R[2] - R[0], ah = R[3] - R[1];
+    float ew = aw * ((float)EMB_CW / WPN_CW);
+    float eh = ah * ((float)EMB_CH / WPN_CH);
+    float mx = x0 + aw * ((float)EMB_ON_WAND_X / WPN_CW) + ew * 0.5f;
+    float my = y1 - ah * ((float)EMB_ON_WAND_Y / WPN_CH) - eh * 0.5f;
+
+    /* ROTATE FIRST, THEN SCALE, and the order is the whole bug that was here.
+       The quad lives in a 1x1 ortho box stretched over a viewport that is not
+       square, so one unit of x and one unit of y are different numbers of
+       pixels. Scaling the corner offsets before rotating mixes those two scales
+       inside the rotation, and a rotation matrix fed unequal axes is a SHEAR --
+       measured over a full turn, the ring's sides reached a 3.15:1 ratio and
+       its corners leaned 31 degrees off square. Turning the unit square first
+       and applying the extents after holds it to 1.003 and 0.18 degrees.
+       *먼저 회전하고 그다음 배율이며*, 그 순서가 이곳에 있던 결함의 전부입니다. 사각형은
+       정사각형이 아닌 뷰포트에 늘여진 1x1 직교 상자 안에 있으므로, x 한 단위와 y 한 단위는
+       서로 다른 픽셀 수입니다. 회전 전에 모서리 오프셋에 배율을 주면 그 두 배율이 회전 안에서
+       섞이고, 축이 서로 다른 회전 행렬은 *전단*입니다. 한 바퀴를 재면 고리의 변이 3.15:1까지
+       가고 모서리가 직각에서 31도 기울었습니다. 단위 정사각형을 먼저 돌리고 크기를 나중에
+       적용하면 1.003과 0.18도로 잡힙니다. */
+    const float DX[4] = { -0.5f,  0.5f,  0.5f, -0.5f };
+    const float DY[4] = { -0.5f, -0.5f,  0.5f,  0.5f };
+    float c = cosf(spin), s = sinf(spin);
+    for (int k = 0; k < 4; k++) {
+        float rx = DX[k] * c - DY[k] * s;
+        float ry = DX[k] * s + DY[k] * c;
+        out[k][0] = mx + rx * ew;
+        out[k][1] = my + ry * eh;
+    }
+}
+
 static void draw_view_sprite(WeaponView *v, const Weapon *w, float aspect) {
     /* A 1x1 box with y up, so every offset below is a fraction of the screen
        and none of them has to know the pixel size.
@@ -285,19 +423,6 @@ static void draw_view_sprite(WeaponView *v, const Weapon *w, float aspect) {
        아트가 지니고 온 오프셋이 엉뚱한 곳에 떨어집니다. Doom의 320x200은 4:3으로
        표시되었으므로 창의 모양과 무관하게 화면 너비는 높이의 4/3이며, 무기 레이어는
        와이드스크린 뷰포트에 늘어나지 않고 레터박스로 들어갑니다. */
-    /* The viewport IS Doom's 3D view, so the cell's share of it is the cell's
-       share of those 168 rows. Width follows from the 320x200 screen being
-       displayed at 4:3: our height covers VIEW rows, so the full screen is
-       (4/3)*FULL/VIEW of it across. Matching FULL instead of VIEW is what left
-       the shotgun a fifth too small with its bottom balanced on the edge.
-       뷰포트가 곧 Doom의 3D 뷰이므로, 셀이 차지하는 비율은 그 168행 중 셀의 비율입니다.
-       너비는 320x200 화면이 4:3으로 표시된다는 사실에서 나옵니다. 우리 높이가 VIEW행을
-       담으므로 화면 전체는 그 (4/3)*FULL/VIEW배만큼 넓습니다. VIEW가 아니라 FULL에
-       맞춘 것이 샷건을 5분의 1만큼 작게, 아래를 가장자리에 걸터앉게 만든 원인입니다. */
-    const float SH = (float)(WPN_DOOM_VIEW - WPN_DOOM_TOP) / (float)WPN_DOOM_VIEW;
-    float sw = (4.0f / 3.0f) * (float)WPN_DOOM_FULL / (float)WPN_DOOM_VIEW
-             / (aspect > 0.01f ? aspect : 1.0f);
-
     /* The weapon's own motion, as screen fractions. The scales are small
        because a viewmodel that swings a visible fraction of the screen reads
        as the camera being loose rather than as a held weapon.
@@ -309,8 +434,13 @@ static void draw_view_sprite(WeaponView *v, const Weapon *w, float aspect) {
     float cx = 0.5f + bx + w->sway_x * 0.9f;
     float cy = 0.0f + by + w->sway_y * 0.9f - w->punch * 0.35f;
 
-    float x0 = cx - sw * 0.5f, x1 = cx + sw * 0.5f;
-    float y0 = cy,             y1 = cy + SH;
+    /* Where the art lands, and its four numbers come back in ::art_rect --
+       the emblem layers below need the same rectangle to sit on.
+       아트가 놓이는 곳이며, 네 수는 ::art_rect에서 돌아옵니다. 아래의 문양 레이어들이 같은
+       사각형 위에 앉아야 합니다. */
+    float R[4];
+    art_rect(aspect, cx, cy, R);
+    float x0 = R[0], y0 = R[1], x1 = R[2], y1 = R[3];
 
     int frame = wp_sprite_frame(w);
     float u0, v0, u1, v1;
@@ -334,6 +464,64 @@ static void draw_view_sprite(WeaponView *v, const Weapon *w, float aspect) {
     glBindTexture(GL_TEXTURE_2D, weapon_atlas());
     glDisable(GL_CULL_FACE);
     mesh_draw(&v->fx_mesh);
+
+    /* --- the emblem: a ring that turns and a stone that does not ---------
+       THREE LAYERS, TWO OF THEM HERE. The wand above is one quad for every
+       weapon; what says which weapon is held is drawn over it from the emblem
+       atlas, in the place the artist's reference put it (::EMB_ON_WAND_X/Y in
+       the wand cell), so it rides the same bob, sway and punch as the wand
+       does -- the numbers below are the same cx/cy the wand quad was built
+       from, so the three can never drift apart.
+       THE RING IS ROTATED ABOUT ITS OWN CENTRE and the stone is not, which is
+       the whole reason they are two drawings: a turning ring is the fire cue
+       and a stone that turned with it would read as the whole wand spinning.
+       `spin` is that angle; nothing sets it yet, so it is zero, and the layer
+       exists before the motion does so the motion is a number and not a
+       rewrite.
+       NEARER THAN THE WAND, not merely after it: the depth buffer is live here
+       and GL_LESS would drop a quad at the same z, so each layer steps a little
+       toward the eye. Ortho z runs -1 near to 1 far.
+       *세 레이어이고 그중 둘이 이곳입니다.* 위의 지팡이는 모든 무기에 대해 사각형 하나이고,
+       어느 무기를 쥐었는지를 말하는 것은 문양 아틀라스에서 그 위에 그려집니다. 작가의 참고
+       그림이 둔 자리(지팡이 셀의 ::EMB_ON_WAND_X/Y)에 그리므로 지팡이와 같은 보브·스웨이·
+       펀치를 탑니다. 아래 수치는 지팡이 사각형을 만든 것과 같은 cx/cy라 셋이 어긋날 수
+       없습니다.
+       *고리는 자기 중심으로 회전하고 돌은 하지 않으며*, 그것이 둘이 별개 그림인 이유의
+       전부입니다. 도는 고리가 발사의 단서이고, 함께 도는 돌은 지팡이 전체가 도는 것으로
+       읽힙니다. `spin`이 그 각도입니다. 아직 아무것도 설정하지 않으므로 0이고, 움직임보다
+       레이어가 먼저 있어서 움직임은 다시 쓰기가 아니라 수 하나가 됩니다.
+       *지팡이보다 가까이*, 단지 나중이 아닙니다. 이곳은 깊이 버퍼가 살아 있고 GL_LESS는 같은
+       z의 사각형을 버리므로 레이어마다 눈 쪽으로 조금씩 나옵니다. 직교 z는 -1이 가깝고
+       1이 멉니다. */
+    {
+        int cell = wpview_emblem_cell(w);
+        float tint[3];
+        wpview_emblem_tint(w, tint);
+        rd_color(tint[0], tint[1], tint[2], 0.0f);
+        glBindTexture(GL_TEXTURE_2D, emblem_atlas());
+        for (int layer = 0; layer < EMB_ROWS; layer++) {
+            /* Row 0 turns, row 1 does not -- see ::EMB_SMEAR. */
+            float a = layer == 0 ? w->spin : 0.0f;
+            float z = -0.2f - 0.2f * layer;
+            float Q[4][2];
+            emblem_quad(aspect, a, cx, cy, Q);
+            float eu0, ev0, eu1, ev1;
+            emblem_uv(layer, cell, &eu0, &ev0, &eu1, &ev1);
+            const float U[4] = { eu0, eu1, eu1, eu0 };
+            const float V[4] = { ev0, ev0, ev1, ev1 };
+            v3 P[4];
+            for (int k = 0; k < 4; k++) P[k] = v3f(Q[k][0], Q[k][1], z);
+            mb_reset(&v->fx_buf);
+            mb_vtx(&v->fx_buf, P[0], n, U[0], V[0]);
+            mb_vtx(&v->fx_buf, P[1], n, U[1], V[1]);
+            mb_vtx(&v->fx_buf, P[2], n, U[2], V[2]);
+            mb_vtx(&v->fx_buf, P[0], n, U[0], V[0]);
+            mb_vtx(&v->fx_buf, P[2], n, U[2], V[2]);
+            mb_vtx(&v->fx_buf, P[3], n, U[3], V[3]);
+            mesh_upload(&v->fx_mesh, &v->fx_buf, 1);
+            mesh_draw(&v->fx_mesh);
+        }
+    }
     glEnable(GL_CULL_FACE);
 
     /* --- the muzzle flash, at the point the DRAWING marked ---
@@ -501,7 +689,7 @@ void wpview_draw_hud(WeaponView *v, const Weapon *w, float aspect, int hook_read
 
     /* --- the hook's range indicator --------------------------------------
        Four corner brackets around the crosshair, drawn only when a throw
-       right now would connect. HOOK_RANGE is 40m and nothing else on screen
+       right now would connect. HOOK_RANGE is 20m and nothing else on screen
        says where that ends, so without this the only way to learn the range
        is to throw and miss -- and a miss costs the cooldown.
 
@@ -517,7 +705,7 @@ void wpview_draw_hud(WeaponView *v, const Weapon *w, float aspect, int hook_read
        훅의 사거리 표시입니다.
 
        조준점 주위의 네 모서리 괄호이며, 지금 발사하면 명중하는 경우에만 그려집니다.
-       HOOK_RANGE는 40m인데 화면의 어떤 요소도 그 끝이 어디인지 알려 주지 않으므로, 이
+       HOOK_RANGE는 20m인데 화면의 어떤 요소도 그 끝이 어디인지 알려 주지 않으므로, 이
        표시가 없으면 사거리를 아는 유일한 방법은 던져서 빗맞히는 것뿐이며 빗나감은
        쿨다운을 소모합니다.
 
@@ -553,3 +741,19 @@ void wpview_draw_hud(WeaponView *v, const Weapon *w, float aspect, int hook_read
     glDisable(GL_BLEND);
     glEnable(GL_DEPTH_TEST);
 }
+
+#ifdef HOT_RELOAD
+/* --- Exposed for the headless tests / 헤드리스 테스트를 위한 노출 --- */
+
+void wpview_art_rect(float aspect, float out[4]) {
+    art_rect(aspect, 0.5f, 0.0f, out);
+}
+
+void wpview_emblem_quad(float aspect, float spin, float out[4][2]) {
+    /* At the rest position: the caller's bob, sway and punch only translate the
+       quad, and a translation cannot make a rotation any less rigid.
+       휴지 위치입니다. 호출자의 보브와 스웨이와 펀치는 사각형을 옮길 뿐이고, 평행이동은
+       회전을 덜 강체로 만들 수 없습니다. */
+    emblem_quad(aspect, spin, 0.5f, 0.0f, out);
+}
+#endif

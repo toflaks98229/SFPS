@@ -613,14 +613,25 @@ static void digest_print(const Digest *d) {
    이것은 총 하나를 걷습니다.
    *그래서 유탄 조율을 잡는 것은* weapontest이고, 체력 사다리의 모양은 enemytest의
    check_health_ladder입니다. 어느 쪽도 이 파일의 일이 아닙니다. */
+/* RE-BLESSED FOR THE PER-SPAWNER CEILING. ::Spawner::max_alive used to count the
+   whole room, so one spawner's number was every spawner's and the largest won every
+   tick; it now counts what that spawner has out. The demo's arena runs spawners, so
+   the monsters the run meets, the damage it takes and every RNG draw downstream all
+   moved -- health 96 to 82, the enemy and fx generators to new values. The player's
+   own physics is untouched; the run simply met a different fight.
+   *스포너별 상한으로 다시 축복했습니다.* ::Spawner::max_alive는 방 전체를 셌으므로 한 스포너의
+   수가 모든 스포너의 수였고 매 틱마다 가장 큰 것이 이겼습니다. 이제는 그 스포너가 내보낸 수를
+   셉니다. 데모의 아레나는 스포너를 돌리므로, 플레이가 만나는 몬스터와 받는 피해와 그 하류의 모든
+   난수 추출이 함께 움직였습니다. 체력 96에서 82로, 적과 효과 생성기가 새 값으로 갔습니다.
+   플레이어 자신의 물리는 그대로입니다. 플레이가 다른 전투를 만났을 뿐입니다. */
 static const Digest GOLDEN = {
-    /* px py pz */ -1.2484479f, 10.1944284f, -16.661293f,
-    /* vx vy vz */ 1.41563582f, -7.84683609f, -3.07291222f,
-    /* yaw pitch */ -0.347599864f, 0.387200117f,
-    /* health keys grounded */ 97, 0, 0,
+    /* px py pz */ 17.882988f, 7.99384737f, -1.77865076f,
+    /* vx vy vz */ -2.36687756f, -20.837986f, 2.84812903f,
+    /* yaw pitch */ 0.105600186f, 0.307999939f,
+    /* health keys grounded */ 82, 0, 0,
     /* cur ammo */ 0, 0,
-    /* wrng srng erng frng */ 3867911461u, 3888997821u, 286724173u, 3550271801u,
-    /* enemies hp */ 1, 30,
+    /* wrng srng erng frng */ 3867911461u, 3888997821u, 2548106953u, 206654317u,
+    /* enemies hp */ 1, 60,
     /* proj marks */ 0, 0,
     /* world_time */ 29.9002438f
 };

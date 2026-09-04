@@ -458,6 +458,24 @@ typedef struct {
     int   boss_line;    /**< A ::BossLine, or 0 for nothing. / ::BossLine 값. 없으면 0. */
     float boss_line_t;  /**< Seconds this line has left. / 이 대사에 남은 시간(초). */
 
+    /* --- what was just picked up --------------------------------------------
+     *
+     * A NAME AND A LINE UNDER IT, for a few seconds, centred. An artifact is
+     * thirty seconds of a rule the player cannot otherwise read: the screen
+     * tint says one is running, but not which or what it does. This says both,
+     * once, at the moment it is picked up -- and then gets out of the way.
+     *
+     * The kind rather than the strings, so scene.c owns the wording the way it
+     * owns every other word on screen. 0 is nothing.
+     *
+     * *이름과 그 아래 한 줄*을 몇 초 동안 화면 가운데에 띄웁니다. 아티팩트는 플레이어가 달리
+     * 읽을 수 없는 규칙 30초입니다. 화면 색조는 무언가 돌고 있다고 말할 뿐 어느 것인지도
+     * 무엇을 하는지도 말하지 않습니다. 이것이 주운 순간에 한 번 둘 다 말하고 물러납니다.
+     * 문자열이 아니라 종류를 담습니다. 화면의 다른 모든 낱말과 마찬가지로 문구는 scene.c가
+     * 소유합니다. 0이면 없음입니다. */
+    int   pickup_line;    /**< ::PW_* + 1 of what was taken, or 0. / 주운 ::PW_* + 1. 없으면 0. */
+    float pickup_line_t;  /**< Seconds it has left. / 남은 시간(초). */
+
     /* --- the cutscene / 컷신 ------------------------------------------------
      *
      * ENGLISH
@@ -680,6 +698,19 @@ typedef enum {
  * 그 뒤에 줄을 서야 할 만큼 길지는 않습니다.
  */
 #define BOSS_LINE_TIME 3.2f
+
+/**
+ * @brief Seconds an artifact's name and description stay on screen.
+ *
+ * Longer than ::BOSS_LINE_TIME because this one is two lines, and the second
+ * is a sentence rather than a shout. Short enough that it is gone before the
+ * thirty seconds it describes are half spent.
+ *
+ * @brief 아티팩트의 이름과 설명이 화면에 머무는 시간(초).
+ * ::BOSS_LINE_TIME보다 긴 이유는 이것이 두 줄이고 둘째 줄이 외침이 아니라 문장이기
+ * 때문입니다. 설명하는 30초의 절반이 지나기 전에 사라질 만큼은 짧습니다.
+ */
+#define PICKUP_LINE_TIME 4.0f
 
 /**
  * @brief Seconds a groggy window must run before ::BOSS_LINE_HIT may replace

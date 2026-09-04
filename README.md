@@ -22,7 +22,7 @@ Models, materials, sounds and levels are all authored as text and hot-reload
 into the running game.
 
 ```
-1,073,152 / 1,474,560 bytes   (72.78% used)
+1,046,528 / 1,474,560 bytes   (70.97% used)
 ```
 
 ## Build
@@ -546,7 +546,7 @@ brightly it announces itself are all integers in
 
 ```
 d brute                # a monster's drop table
-  chance 62            # percent of kills that leave anything at all
+  chance 52            # percent of kills that leave anything at all
   item held   3        # weights, not counts -- a kill drops exactly one thing
   item health 2
 
@@ -702,7 +702,7 @@ drops rather than reading as nothing, and that a name the file got wrong
 produces no entry rather than entry zero, which is `PK_AMMO` and would have
 every monster in the level quietly dropping shells.
 
-What it does **not** assert is the shipped numbers. `chance 26` for a water spirit is a
+What it does **not** assert is the shipped numbers. `chance 22` for a water spirit is a
 design decision somebody will move next week, and a test that names it goes red
 on that edit while proving nothing.
 
@@ -822,6 +822,10 @@ approximation of the answer; it is the answer.
 | `arena` | 10.76 µs | 0.98 µs | **11.0×** |
 | `vault` | 5.03 µs | 0.58 µs | **8.7×** |
 | `dm03` (converted Doom map) | 16.65 µs | 6.01 µs | **2.8×** |
+
+Measured on a 40 m ray, which is what `HOOK_RANGE` was when `levelbench` was
+last run against it. The range is 20 m now and the tool prints whatever the
+constant says, so a fresh run will report shorter rays and smaller numbers.
 
 `levelbench` reports what that is as a share of a frame rather than in
 microseconds, because a microbenchmark is not a decision: at full monster load
@@ -957,10 +961,12 @@ careful choice and is exactly why it almost never fired: of the walls standing
 beside a spot you can stand on in `lqdm4`, 48% have their top within 1.5m and
 then there is *nothing* until 4.5m. A player at the foot of a wall is usually at
 the foot of the second kind, and a 1.30m reach reaches into the gap between
-them. The budget puts the ceiling at 3.00m — the hook's arrival launch to the
-centimetre, so the cheap way up and the expensive one agree about how tall the
-world is, and it lands inside that empty band so it opens no route the map never
-drew.
+them. The budget puts the ceiling at **9.20m**, measured — a jump held into a
+wall mounts that and fails at 9.25m. It was 3.00m, the hook's arrival launch to
+the centimetre and inside that empty band, so the cheap way up and the expensive
+one agreed about how tall the world is and neither opened a route the map never
+drew. Tripling the climb speed gave both of those up: the free move now beats the
+grapple for height and reaches the 4.5m storey.
 
 `build\movetest.exe` steps the simulation headlessly and checks all of it,
 including 4000 randomised frames that must never end inside a box.

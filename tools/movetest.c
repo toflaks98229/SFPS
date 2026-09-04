@@ -29,13 +29,13 @@ static void check(int ok, const char *what, float got, float want) {
 
 static void run(Player *p, v3 wish, float speed, int jump, int frames) {
     for (int i = 0; i < frames; i++)
-        player_move(p, &L, 0, 0, wish, speed, jump, DT);
+        player_move(p, &L, 0, 0, wish, speed, jump, 1, DT);
 }
 
 static void run_past(Player *p, const Blocker *b, int n, v3 wish, float speed,
                      int frames) {
     for (int i = 0; i < frames; i++)
-        player_move(p, &L, b, n, wish, speed, 0, DT);
+        player_move(p, &L, b, n, wish, speed, 0, 1, DT);
 }
 
 static float flat_gap(v3 a, v3 b) {
@@ -241,18 +241,22 @@ int main(void) {
      * nothing until 4.5m. A reach of 1.30m is a reach into a gap.
      *
      * SO THE CEILING IS THE THING TO TEST, not a probe. The climb looks at
-     * nothing, so what it can be wrong about is only how far it goes: too
-     * little and the complaint that started this is unfixed, too much and it
-     * reaches the 4.5m storey and opens routes the map never drew.
+     * nothing, so what it can be wrong about is only how far it goes.
      *
      * FOUR CASES, AND THREE OF THEM SAY NO. A rule that only ever says yes is
-     * not a rule. 3.00m is the mount, which is the hook's arrival launch to
-     * the centimetre; 3.25m is a wall and stays one; standing against a wall
-     * climbs nothing, because the climb needs air under the feet; and a second
-     * press in mid-air buys nothing, because the budget refills on the floor
-     * and nowhere else. That last one is what keeps a wall from being a
-     * ladder, and it is the only case that would still pass if the budget were
-     * merely large.
+     * not a rule. 9.20m is the mount and 9.25m is a wall -- measured, not
+     * derived, because the rise ::PLAYER_CLIMB_SPEED buys is only part of what
+     * carries the body over an edge; standing against a wall climbs nothing,
+     * because the climb needs air under the feet; and a second press in mid-air
+     * buys nothing, because the budget refills on the floor and nowhere else.
+     * That last one is what keeps a wall from being a ladder, and it is the only
+     * case that would still pass if the budget were merely large.
+     *
+     * THE MOUNT WAS 3.00m, the hook's arrival launch to the centimetre and inside
+     * the empty band between the map's 2.5m storeys and its 4.5m ones. Tripling
+     * the climb speed tripled it. It now clears the 4.5m storey, so the third
+     * paragraph above is no longer a property this test defends -- it is a
+     * consequence somebody chose.
      *
      * *무엇을 대체했는가.* 첫 시도는 손 닿는 거리 안에서 설 수 있는 꼭대기를 탐사하고 찾았을
      * 때만 상승했으며, 이것과 매우 비슷해 보이는 검사(정면에서 접근하는 무한한 평평한 선반)를
@@ -271,12 +275,12 @@ int main(void) {
      * 되지 않게 막는 것이며, 예산이 그저 크기만 해도 여전히 통과할 유일한 경우입니다. */
     {
         struct { float shelf; int jump; int want_on; const char *what; } CASE[] = {
-            { 3.00f, 1, 1, "a jump and a climb mount a 3.00m wall" },
-            { 3.25f, 1, 0, "and a quarter-metre higher is still a wall" },
+            { 9.00f, 1, 1, "a jump and a climb mount a 9.00m wall" },
+            { 9.25f, 1, 0, "and a quarter-metre higher is still a wall" },
             { 1.20f, 0, 0, "and standing against one climbs nothing" },
         };
 
-        for (int k = 0; k < 3; k++) {
+        for (int k = 0; k < (int)(sizeof CASE / sizeof CASE[0]); k++) {
             Level z = {0};
             L = z;
             box(&L, -2000, -2000, 2000, 2000, 0, 3000);
@@ -287,7 +291,7 @@ int main(void) {
             p.grounded = 1;
             for (int i = 0; i < 180; i++)
                 player_move(&p, &L, 0, 0, v3f(1, 0, 0), PLAYER_WALK,
-                            CASE[k].jump && i == 0, DT);
+                            CASE[k].jump && i == 0, 1, DT);
 
             float feet = p.pos.y - PLAYER_EYE;
             int on = feet > CASE[k].shelf - 0.1f;
@@ -323,14 +327,14 @@ int main(void) {
                    release is placed after the first climb has been spent. */
                 int hold = !(i >= 40 && i < 44);
                 player_move(&p, &L, 0, 0, hold ? v3f(1, 0, 0) : v3f(0, 0, 0),
-                            PLAYER_WALK, i == 0, DT);
+                            PLAYER_WALK, i == 0, hold, DT);
                 float f = p.pos.y - PLAYER_EYE;
                 if (f > peak) peak = f;
             }
             printf("      12m wall, forward tapped twice -> peaked at %.2f\n",
                    (double)peak);
-            check(peak < 3.2f, "and letting go in mid-air does not buy a second climb",
-                  peak, 3.2f);
+            check(peak < 8.8f, "and letting go in mid-air does not buy a second climb",
+                  peak, 8.8f);
         }
     }
 

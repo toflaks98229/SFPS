@@ -93,7 +93,7 @@ float player_spawn(Player *p, const Level *l) {
 
 void player_move(Player *p, const Level *l,
                  const Blocker *solid, int n_solid,
-                 v3 wish, float speed, int jump, float dt) {
+                 v3 wish, float speed, int jump, int forward, float dt) {
     /* The climb budget refills on the flag as it ARRIVES, before the jump
        clears it and before the vertical pass derives it afresh. Refilling
        later -- from the flag this frame ends with -- would mean the frame you
@@ -169,10 +169,18 @@ void player_move(Player *p, const Level *l,
      * something that refused the step, which is what `walked` reports and the
      * only reason ::move_axis returns anything. And budget left.
      *
+     * THE KEY IS FORWARD AND ONLY FORWARD. This used to read "any movement at
+     * all", as `dir.x != 0 || dir.z != 0`, which is not the same rule: a player
+     * strafing along a wall or backing into one had a non-zero `dir` and climbed
+     * it. The caller knows which key was pressed and `wish` does not -- it is a
+     * world-space direction by the time it arrives here, with forward, back and
+     * both strafes already summed into it -- so the flag is passed rather than
+     * inferred.
+     *
      * IT ENDS THREE WAYS AND ALL OF THEM ARE THE SAME LINE. The budget runs
      * out; or the wall does, and ::can_stand accepts the step so `walked` is
      * true and the ordinary walk carries the player over the top; or forward
-     * is released, `dir` is zero, and gravity has them back. There is no
+     * is released and gravity has them back. There is no
      * separate hop at the lip because ::move_axis already performs one -- its
      * "walked up onto something: rise with it" is the top-out, and a second
      * impulse there would throw the player off the far side of the ledge they
@@ -195,8 +203,7 @@ void player_move(Player *p, const Level *l,
      * 이유는 ::move_axis가 이미 하나를 수행하기 때문입니다. 그것의 "무언가 위로 올라섰다.
      * 함께 올린다"가 곧 정상 넘기이며, 그곳의 두 번째 충격량은 방금 닿은 턱의 반대쪽으로
      * 플레이어를 던져 버립니다. */
-    if (!walked && !p->grounded && p->climb > 0.0f &&
-        (dir.x != 0.0f || dir.z != 0.0f)) {
+    if (!walked && !p->grounded && p->climb > 0.0f && forward) {
         p->vel.y = PLAYER_CLIMB_SPEED;
         p->climb -= dt;
     }

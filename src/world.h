@@ -82,168 +82,27 @@
  * 화면이 그 결과입니다. */
 #define WORLD_BETWEEN_TIME 2.6f
 
-/**
- * @brief Seconds a wave lasts before the clock advances it.
- *
- * ENGLISH
- * -------
- * A WAVE IS A LENGTH OF TIME NOW, not a room to empty. The break this constant
- * replaced (::WORLD_WAVE_BREAK, six seconds) went with the model that had one:
- * spawners were handed a quota, the wave ended when the room went quiet, and
- * the break was the quiet. Nothing goes quiet any more -- spawners run
- * continuously and pressure only steps up -- so there is nothing to pause
- * between and nothing to pause for.
- *
- * FORTY-FIVE, and the number is doing three jobs at once. It is long enough
- * that a step in the ceiling is felt as a change rather than as noise; short
- * enough that the boss every ::WORLD_BOSS_EVERY waves lands under four minutes
- * apart; and it puts the ceiling's climb -- eight at wave one, twenty-eight by
- * eleven -- across about eight minutes, which is the length of a run this
- * arena can hold without repeating itself.
- *
- * WHAT IT IS NOT is Vampire Survivors' minute. That game escalates for thirty
- * minutes against a player who is also escalating; nothing here levels up, so
- * the same slope has to arrive faster or the middle of a run is flat.
- *
- * 한국어
- * ------
- * @brief 시계가 웨이브를 넘기기까지의 초.
- *
- * *이제 웨이브는 비워야 할 방이 아니라 시간의 길이입니다.* 이 상수가 대신한 휴식
- * (::WORLD_WAVE_BREAK, 6초)은 그것을 가졌던 모델과 함께 사라졌습니다. 스포너가 할당량을 받고,
- * 방이 조용해지면 웨이브가 끝나고, 그 조용함이 휴식이었습니다. 이제 조용해지는 것이 없으므로
- * 사이를 둘 것도 없고 둘 이유도 없습니다.
- *
- * *45이며, 이 수는 한꺼번에 세 가지 일을 합니다.* 천장의 한 단이 잡음이 아니라 변화로 느껴질
- * 만큼 길고, ::WORLD_BOSS_EVERY 웨이브마다의 보스가 4분 안쪽 간격으로 오도록 짧으며,
- * 천장의 상승(웨이브 1에 8, 11에 28)을 약 8분에 걸쳐 놓습니다. 그것이 이 아레나가 스스로를
- * 반복하지 않고 버틸 수 있는 한 판의 길이입니다.
- *
- * *이것이 아닌 것은* 뱀파이어 서바이버즈의 1분입니다. 그 게임은 함께 성장하는 플레이어를
- * 상대로 30분을 상승합니다. 이곳에서는 아무것도 레벨업하지 않으므로, 같은 경사가 더 빨리
- * 도착하지 않으면 한 판의 중반이 평평해집니다.
- */
+/** @brief Seconds the clock takes to advance a wave. The clock is the only thing that does.
+ *  / 시계가 웨이브를 넘기기까지의 초. 웨이브를 넘기는 것은 시계뿐입니다. */
 #define WORLD_WAVE_TIME 45.0f
 
 /**
  * @brief How much slower the spawners run while a boss stands.
- *
- * ENGLISH
- * -------
- * A SLOWDOWN ADDED TO 1, so 2.0 is a third of the rate. See
- * ::EnemyPool::spawn_slow for why it is expressed that way and why it is read
- * every tick rather than saved and restored.
- *
- * THE PRESSURE DOES NOT DROP, IT MOVES. A boss fight suppresses the arena's own
- * spawners because during it the monsters come from somewhere else: shooting a
- * ward is what fills the room. That is what lets the player set the pace of
- * their own fight -- burst the wards and meet the crowd during the groggy
- * window, or clear as you go and spend longer at it -- and it is why leaving
- * the spawners at full rate would make the fight the sum of two unrelated
- * pressures rather than one the player is steering.
- *
- * 한국어
- * ------
- * @brief 보스가 서 있는 동안 스포너가 얼마나 느려지는가.
- *
- * *1에 더해지는 감속*이므로 2.0은 3분의 1 속도입니다. 왜 그렇게 표현하는지와 왜 저장했다
- * 되돌리지 않고 매 틱 읽는지는 ::EnemyPool::spawn_slow를 참조하십시오.
- *
- * *압박이 줄어드는 것이 아니라 옮겨 갑니다.* 보스전이 아레나 자신의 스포너를 억제하는 이유는,
- * 그동안 몬스터가 다른 곳에서 오기 때문입니다. 결계핵을 쏘는 행위가 방을 채웁니다. 그것이
- * 플레이어가 자기 전투의 박자를 정하게 하는 것이고(결계핵을 몰아쳐 터뜨리고 그로기 창에 무리를
- * 상대하거나, 정리해 가며 나아가고 더 오래 걸리거나), 스포너를 온전한 속도로 두면 이 전투가
- * 플레이어가 조종하는 하나가 아니라 무관한 두 압박의 합이 되는 이유입니다.
- */
+ *        / 보스가 서 있는 동안 스포너가 얼마나 느려지는가.
+ * @note Added to 1 and multiplied into the interval, so 2.0 is a third of the rate.
+ *       Raised and cleared by ::step_boss; see ::EnemyPool::spawn_slow.
+ *       / 1에 더해져 간격에 곱해지므로 2.0은 3분의 1 속도입니다.
+ *       ::step_boss가 세우고 지웁니다. ::EnemyPool::spawn_slow를 참조하십시오. */
 #define WORLD_BOSS_SPAWN_SLOW 2.0f
 
-/**
- * @brief Endless mode: waves after a maw dies before the next one is due.
- *
- * ENGLISH
- * -------
- * COUNTED FROM THE DEATH, not from a multiple of itself. A fight that outlasts
- * this many waves would, on a multiple, schedule the next maw into a wave that
- * has already passed -- so the moment the player finally won, the next one
- * would arrive. Counting from the death makes a long fight push its own next
- * appointment out, which is the behaviour a player would describe as "you get a
- * breather".
- *
- * 한국어
- * ------
- * @brief 무한 모드에서 아귀가 죽은 뒤 다음 아귀까지의 웨이브 수.
- *
- * *자기 자신의 배수가 아니라 사망 시점에서부터 셉니다.* 배수로 하면 이만큼의 웨이브보다 오래
- * 끄는 전투가 다음 아귀를 *이미 지나간* 웨이브에 예약하게 되고, 플레이어가 마침내 이긴 그
- * 순간 다음 아귀가 도착합니다. 사망 시점에서부터 세면 긴 전투가 자신의 다음 약속을 밀어내며,
- * 그것이 플레이어가 "한숨 돌릴 틈을 준다"고 말할 동작입니다.
- */
+/** @brief Endless mode: waves from the wave a maw DIED on to the next one being due.
+ *  / 무한 모드에서 아귀가 *죽은* 웨이브로부터 다음 아귀까지의 웨이브 수. */
 #define WORLD_BOSS_EVERY 5
 
-/**
- * @brief Story mode: the wave the first maw is allowed to arrive on.
- *
- * ENGLISH
- * -------
- * ONE WAVE, AND THE REASON IT IS NOT ZERO IS THAT THE ARENA CHANGED.
- *
- * This gate did not exist. ::step_boss raised the story maw on the first
- * unfrozen frame, and the comment there argued for it: "the story arena IS the
- * boss fight, and a player who has to survive to wave five to meet it is
- * playing endless mode with a cutscene." That was exact reasoning about
- * `glasstower` -- seven brushes, a ring of ward slots around a tower, nothing
- * else in it. There was no room to be dropped into. The room WAS the fight.
- *
- * ::WORLD_BOSS_ARENA is `lqdm4` now: 1,149 brushes, three wave spawners,
- * thirty-two pickups and 1,616 x 1,200 units of floor the entities stand on.
- * MORE BRUSHES OVER LESS GROUND than the `lqdm1` it replaced, which had 807
- * over 2,614 x 2,016 -- the arena got denser and smaller at once, and for a
- * wave shooter that is the direction worth moving: what a big room buys a
- * deathmatch is somewhere to run to, and what it costs this game is a fight
- * you can walk away from. Measured on that older, wider room, the
- * maw stood up one frame after the intro cutscene ended, at wave 1, with four
- * wards already placed and five monsters already walking -- so the player met
- * the boss before reaching a single weapon the map lays out, in a room they had
- * not seen. The old comment's premise died with the old arena, and this is what
- * replaces it.
- *
- * STILL NOT A WAVE GATE IN THE ENDLESS SENSE. Two is one wave, not five: long
- * enough to pick up a gun and learn where the walls are, short enough that the
- * story arena is still the boss fight rather than a survival mode with a
- * cutscene. The sentence that rejected five is still right; it just was not
- * about one.
- *
- * @note Compared against ::RunState::wave, which starts at 1 and becomes 2 when
- *       the first wave is cleared and its breather has run out. So this reads
- *       as "after the opening wave", not "two waves in".
- *
- * 한국어
- * ------
- * @brief 스토리 모드에서 첫 아귀가 도착할 수 있는 웨이브.
- *
- * *한 웨이브이며, 0이 아닌 이유는 아레나가 바뀌었기 때문입니다.*
- *
- * 이 관문은 없었습니다. ::step_boss는 정지가 풀린 첫 프레임에 스토리의 아귀를 세웠고, 그곳의
- * 주석이 그것을 옹호했습니다. "스토리 아레나가 곧 보스전이며, 그것을 만나기 위해 5웨이브를
- * 버텨야 하는 플레이어는 컷신이 붙은 무한 모드를 하고 있는 것이다." 그것은 `glasstower`에
- * 대한 정확한 추론이었습니다. 브러시 일곱 개, 탑을 둘러싼 결계핵 자리의 고리, 그 밖에는
- * 아무것도 없었습니다. 떨어질 방이라는 것이 없었습니다. 방이 *곧* 전투였습니다.
- *
- * ::WORLD_BOSS_ARENA는 이제 `lqdm4`입니다. 브러시 1,149개, 웨이브 스포너 셋, 획득물 서른둘,
- * 엔티티가 서 있는 바닥 1,616 x 1,200입니다. *더 좁은 땅 위에 더 많은 브러시*이며, 이것이
- * 대신한 `lqdm1`은 2,614 x 2,016 위에 807개였습니다. 아레나가 동시에 조밀해지고 작아진
- * 것이며, 웨이브 슈터에게 그것은 움직일 값어치가 있는 방향입니다. 큰 방이 데스매치에게
- * 사 주는 것은 달아날 곳이고, 이 게임에게서 앗아가는 것은 걸어서 벗어날 수 없는
- * 전투이기 때문입니다. 그 더 넓던 옛 방에서 재어 보니 아귀는 인트로 컷신이 끝난 *한 프레임 뒤*에
- * 일어섰습니다. 웨이브 1, 이미 배치된 결계핵 넷, 이미 걷고 있는 몬스터 다섯. 플레이어는 맵이
- * 깔아 둔 무기 하나에 닿기도 전에, 본 적 없는 방에서 보스를 만났습니다. 옛 주석의 전제는 옛
- * 아레나와 함께 죽었고, 이것이 그것을 대신합니다.
- *
- * *여전히 무한 모드적 의미의 웨이브 관문은 아닙니다.* 둘은 다섯이 아니라 한 웨이브입니다.
- * 총 하나를 줍고 벽이 어디 있는지 익히기에는 충분하고, 스토리 아레나가 컷신 붙은 생존 모드가
- * 아니라 여전히 보스전이기에는 짧습니다. 다섯을 거부한 그 문장은 여전히 옳습니다. 다만 그것은
- * 하나에 대한 말이 아니었습니다.
- */
+/** @brief Story mode: the wave the one maw is allowed to arrive on. Compared against
+ *         ::RunState::wave, which starts at 1, so 2 reads as "after the opening wave".
+ *  / 스토리 모드에서 아귀가 도착할 수 있는 웨이브. ::RunState::wave는 1에서 시작하므로
+ *  2는 "첫 웨이브 다음"을 뜻합니다. */
 #define WORLD_BOSS_STORY_WAVE 2
 
 /* --- what a cleared wave pays -------------------------------------------

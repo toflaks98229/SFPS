@@ -624,6 +624,26 @@ static void digest_print(const Digest *d) {
    셉니다. 데모의 아레나는 스포너를 돌리므로, 플레이가 만나는 몬스터와 받는 피해와 그 하류의 모든
    난수 추출이 함께 움직였습니다. 체력 96에서 82로, 적과 효과 생성기가 새 값으로 갔습니다.
    플레이어 자신의 물리는 그대로입니다. 플레이가 다른 전투를 만났을 뿐입니다. */
+/* RE-BLESSED FOR THE WAVE LADDER COMING OUT, AND ONE FIELD MOVED. `enemies hp`
+   went 60 to 30 and that is the entire diff -- `health`, all four generators,
+   `px`, `world_time`, every one of them bit-for-bit what it was.
+   THAT IS THE REPORT AND IT IS A STRONGER ONE THAN IT LOOKS. The change took a
+   health multiplier out of ::make_monster and shortened ::WAVE_INTERVAL_MIN,
+   and it put the water spirit back on Quake's grunt at 30. If the multiplier
+   had still been reachable, wave 1 would have delivered 30 and a later wave
+   something else, and this row would have disagreed with the table. If the
+   shorter interval had leaked into the first thirty seconds, `erng` would have
+   moved with it and the run would have met a different fight. Neither did:
+   the demo meets one monster, at the health the bestiary now writes down.
+   *웨이브 사다리를 들어내면서 다시 축복했고, 움직인 필드는 하나입니다.* `enemies hp`가 60에서
+   30이 되었고 그것이 차이의 전부입니다. `health`도, 생성기 넷 전부도, `px`도, `world_time`도
+   전부 비트 단위로 그대로입니다.
+   *그것이 보고이며, 보이는 것보다 강한 보고입니다.* 이 변경은 ::make_monster에서 체력 배수를
+   들어내고 ::WAVE_INTERVAL_MIN을 짧게 했으며, 물의 정령을 Quake의 병졸인 30으로 되돌렸습니다.
+   배수에 아직 닿을 수 있었다면 웨이브 1은 30을, 나중 웨이브는 다른 값을 배달했을 것이고 이 행이
+   표와 어긋났을 것입니다. 짧아진 간격이 첫 30초로 새어 들어갔다면 `erng`가 함께 움직이며 플레이가
+   다른 전투를 만났을 것입니다. 둘 다 일어나지 않았습니다. 데모는 몬스터 하나를 만나며, 그 체력은
+   이제 도감이 적어 둔 값입니다. */
 static const Digest GOLDEN = {
     /* px py pz */ 17.882988f, 7.99384737f, -1.77865076f,
     /* vx vy vz */ -2.36687756f, -20.837986f, 2.84812903f,
@@ -631,7 +651,7 @@ static const Digest GOLDEN = {
     /* health keys grounded */ 82, 0, 0,
     /* cur ammo */ 0, 0,
     /* wrng srng erng frng */ 3867911461u, 3888997821u, 2548106953u, 206654317u,
-    /* enemies hp */ 1, 60,
+    /* enemies hp */ 1, 30,
     /* proj marks */ 0, 0,
     /* world_time */ 29.9002438f
 };

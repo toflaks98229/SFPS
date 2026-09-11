@@ -1358,6 +1358,21 @@ int sprite_wall(const char *name, unsigned char *rgba) {
  */
 static unsigned char g_png[PNG_MAX_SIDE * PNG_MAX_SIDE * 4];
 
+/* THE MAGENTA MARKER, and the threshold is the same one bake.ps1 used when it
+   owned this, kept to the number: a marker recognised differently by the two
+   would be a muzzle that moves when the art is reloaded. One function rather
+   than the test written out twice, because ::fit_to_cell has to recognise the
+   pixel for the opposite reason ::blit_rgba does -- one paints everything
+   except it, the other averages everything except it.
+   *마젠타 표식*이며, 임계값은 bake.ps1이 이것을 소유했을 때 쓰던 것과 숫자까지 같습니다.
+   둘이 다르게 알아보는 표식은 아트를 다시 읽을 때 움직이는 총구입니다. 검사를 두 번 적지
+   않고 함수 하나로 두는 이유는, ::fit_to_cell이 ::blit_rgba와 정반대의 이유로 이 픽셀을
+   알아보아야 하기 때문입니다. 한쪽은 그것만 빼고 칠하고, 다른 쪽은 그것만 빼고
+   평균을 냅니다. */
+static int is_marker(const unsigned char *q) {
+    return q[3] >= 128 && q[0] > 240 && q[1] < 16 && q[2] > 240;
+}
+
 /**
  * @brief Paints a decoded drawing into its atlas cell, finding the muzzle.
  *
@@ -1392,12 +1407,7 @@ static void blit_rgba(const unsigned char *px, int sw, int sh,
             const unsigned char *q = px + (y * sw + x) * 4;
             int r = q[0], g = q[1], b = q[2], a = q[3];
 
-            /* The same threshold bake.ps1 used when it owned this, kept to the
-               number: a marker recognised differently by the two would be a
-               muzzle that moves when the art is reloaded.
-               bake.ps1이 이것을 소유했을 때 쓰던 것과 같은 임계값이며 숫자까지 그대로입니다.
-               둘이 다르게 알아보는 표식은 아트를 다시 읽을 때 움직이는 총구입니다. */
-            if (a >= 128 && r > 240 && g < 16 && b > 240) {
+            if (is_marker(q)) {
                 if (muz_x) *muz_x = x;
                 if (muz_y) *muz_y = y;
                 continue;                       /* recorded, never painted */
@@ -1412,6 +1422,178 @@ static void blit_rgba(const unsigned char *px, int sw, int sh,
             o[2] = (unsigned char)b; o[3] = 255;
         }
     }
+}
+
+/**
+ * @brief Shrinks a drawing too big for its cell down into it, in place.
+ *
+ * ENGLISH
+ * -------
+ * WHAT AN OVERSIZED DRAWING USED TO MEAN WAS "CROPPED", and nobody decided
+ * that. Every picture this project shipped was authored at exactly its cell,
+ * so ::blit_rgba's bounds check was only ever a safety net; the first drawing
+ * that was not -- a 160x688 column in a 64x96 monster cell -- walked into it
+ * and what reached the atlas was the top-left 64x96 of the file. On screen
+ * that was the gem on top of the column and none of the column, on every frame
+ * the art claimed. A blit clipping is not a policy about art that is too big.
+ *
+ * ONE SCALE FOR BOTH AXES, so nothing is squashed. Filling the cell instead --
+ * x and y reduced by different amounts -- stores a picture that is not the one
+ * anybody drew, and it only looks right at all if that creature's `aspect`
+ * happens to undo exactly the squash this function put in. Two numbers in two
+ * files that have to cancel is not a proportion, it is a coincidence waiting
+ * for somebody to redraw the art. A uniform fit costs cell width and nothing
+ * else: the column lands 22 pixels across in a 64-wide cell, and the empty
+ * third either side is transparent.
+ *
+ * WHAT THE CELL'S OWN SHAPE THEN MEANS. A cell is drawn onto a quad
+ * ::MonType::height tall and `height * aspect` wide, so a drawing is undistorted
+ * on screen exactly when `aspect` is the cell's own ratio -- ::SPR_CW over
+ * ::SPR_CH, two thirds. A creature whose art should arrive unsquashed says so
+ * there; one whose `aspect` is something else is asking to be stretched, which
+ * is what every 64x96 drawing in this project has always been doing.
+ *
+ * UNDERSIZED ART IS LEFT ALONE, deliberately. That case is a HALF-DRAWN
+ * creature rather than a differently-proportioned one -- see the placement
+ * note in ::decode_sprites -- and blowing a 32x32 sprite up to fill a 64x96
+ * cell would be a blurrier version of the same mistake.
+ *
+ * The box average is over OPAQUE samples only, so a shrinking edge takes the
+ * colour of the ink beside it instead of a blend with whatever is behind the
+ * transparent pixels. A destination pixel is opaque when at least half of what
+ * it covers was, which is the threshold that keeps a silhouette the size it
+ * was drawn.
+ *
+ * THE MARKER IS LIFTED OUT AND PUT BACK, because averaging a magenta dot with
+ * its neighbours destroys the one property it has and ::blit_rgba reads it out
+ * of the pixels. It is found at full resolution, excluded from every average,
+ * and written into the pixel it scaled to.
+ *
+ * 한국어
+ * ------
+ * @brief 셀보다 큰 그림을 셀 안으로 줄입니다. 제자리에서 수행합니다.
+ *
+ * *셀보다 큰 그림이 뜻하던 것은 "잘림"이었고*, 아무도 그렇게 정하지 않았습니다. 이
+ * 프로젝트가 출하한 모든 그림은 정확히 자기 셀로 저작되었으므로 ::blit_rgba의 경계 검사는
+ * 언제나 안전망일 뿐이었습니다. 그렇지 않은 첫 그림(64x96 몬스터 셀 안의 160x688 기둥)이
+ * 그 안으로 걸어 들어갔고, 아틀라스에 도착한 것은 파일의 좌상단 64x96이었습니다. 화면에서
+ * 그것은 기둥 위의 보석이었고 기둥은 없었으며, 그 아트가 차지한 모든 프레임에서 그랬습니다.
+ * 블릿이 잘라 내는 것은 너무 큰 그림에 대한 방침이 아닙니다.
+ *
+ * *두 축에 같은 배율을 씁니다.* 그래야 아무것도 일그러지지 않습니다. 대신 셀을 채우면,
+ * 곧 x와 y를 서로 다른 만큼 줄이면, 아무도 그리지 않은 그림이 저장됩니다. 그리고 그것이
+ * 제대로 보이는 경우는 그 생물의 `aspect`가 이 함수가 넣은 찌그러짐을 정확히 되돌릴 때뿐입니다.
+ * 서로 상쇄해야 하는 두 파일의 두 숫자는 비율이 아니라, 누군가 아트를 다시 그리기를 기다리는
+ * 우연입니다. 균등 맞춤이 치르는 것은 셀의 너비뿐입니다. 기둥은 64폭 셀 안에 22픽셀로 놓이고,
+ * 양옆에 남는 3분의 1은 투명합니다.
+ *
+ * *그러면 셀 자신의 모양이 뜻하는 것.* 셀은 ::MonType::height 높이와 `height * aspect` 너비의
+ * 사각형에 그려지므로, 그림이 화면에서 일그러지지 않는 것은 `aspect`가 셀 자신의 비율,
+ * 곧 ::SPR_CW 대 ::SPR_CH인 3분의 2일 때뿐입니다. 아트가 찌그러지지 않고 도착해야 하는 생물은
+ * 그곳에 그렇게 적습니다. `aspect`가 다른 값인 생물은 늘어나기를 요청하는 것이며, 이
+ * 프로젝트의 모든 64x96 그림이 지금껏 해 온 일이 바로 그것입니다.
+ *
+ * *셀보다 작은 그림은 의도적으로 그대로 둡니다.* 그것은 비율이 다른 그림이 아니라 *절반만
+ * 그려진* 생물이며(::decode_sprites의 배치 설명을 참조하십시오), 32x32 스프라이트를 64x96
+ * 셀에 맞춰 늘리는 것은 같은 실수의 더 흐릿한 판본일 뿐입니다.
+ *
+ * 상자 평균은 *불투명한* 표본만 취합니다. 그래야 줄어드는 가장자리가 투명 픽셀 뒤의 무엇과
+ * 섞이지 않고 곁에 있는 잉크의 색을 가져갑니다. 목적지 픽셀은 자기가 덮는 것의 절반 이상이
+ * 불투명했을 때 불투명하며, 그것이 실루엣을 그려진 크기 그대로 두는 임계값입니다.
+ *
+ * *표식은 들어냈다가 되돌려 놓습니다.* 마젠타 점을 이웃과 평균 내면 그것이 가진 단 하나의
+ * 성질이 사라지고, ::blit_rgba는 그것을 픽셀에서 읽기 때문입니다. 원래 해상도에서 찾고, 모든
+ * 평균에서 제외하고, 그것이 축소된 픽셀에 써 넣습니다.
+ *
+ * @param[in,out] px RGBA pixels, rewritten in place. / RGBA 픽셀. 제자리에서 다시 씁니다.
+ * @param[in,out] sw In: the decoded width. Out: what it became. / 입력은 디코딩된 너비, 출력은 바뀐 너비.
+ * @param[in,out] sh Likewise the height. / 높이도 마찬가지입니다.
+ * @param[in]     cw Cell width. / 셀의 너비.
+ * @param[in]     ch Cell height. / 셀의 높이.
+ */
+static void fit_to_cell(unsigned char *px, int *sw, int *sh, int cw, int ch) {
+    int w = *sw, h = *sh;
+    if (w <= 0 || h <= 0 || cw <= 0 || ch <= 0) return;
+    if (w <= cw && h <= ch) return;
+
+    /* The axis that runs out of room first decides the scale, and the other one
+       is derived from it in integers: `w * ch` against `h * cw` is `w/h`
+       against `cw/ch` with no division and no float. Rounding is to nearest so
+       a 160x688 drawing in a 64x96 cell lands 22 across rather than 22.83
+       truncated somewhere it was not meant to be.
+       자리가 먼저 부족해지는 축이 배율을 정하고, 다른 축은 그것에서 정수로 유도합니다.
+       `w * ch` 대 `h * cw`는 나눗셈도 부동소수점도 없이 `w/h`를 `cw/ch`와 견주는 것입니다.
+       반올림은 가장 가까운 값으로 합니다. 그래야 64x96 셀 안의 160x688 그림이 22.83이
+       의도치 않은 곳에서 잘린 값이 아니라 22로 놓입니다. */
+    int dw, dh;
+    if (w * ch > h * cw) { dw = cw; dh = (h * cw + w / 2) / w; }
+    else                 { dh = ch; dw = (w * ch + h / 2) / h; }
+    if (dw < 1) dw = 1;
+    if (dh < 1) dh = 1;
+    if (dw > cw) dw = cw;
+    if (dh > ch) dh = ch;
+    /* Neither axis may come out bigger than it went in: the in-place walk below
+       is only safe while both shrink, and rounding is the one thing that could
+       push a derived side back up.
+       어느 축도 들어올 때보다 커져서는 안 됩니다. 아래의 제자리 순회는 두 축이 모두 줄어드는
+       동안에만 안전하며, 유도된 변을 다시 키울 수 있는 것은 반올림뿐입니다. */
+    if (dw > w) dw = w;
+    if (dh > h) dh = h;
+
+    int mx = -1, my = -1;
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++)
+            if (is_marker(px + (y * w + x) * 4)) { mx = x; my = y; }
+
+    /* IN PLACE IS SAFE BECAUSE BOTH AXES ONLY SHRINK. The pixel written for
+       destination (x, y) sits at `y * dw + x`, and the first source pixel its
+       own box reads sits at `y0 * w + x0` with `y0 >= y` and `x0 >= x` -- so
+       the write is never past the box being read, and every box still to come
+       starts later than that. A scratch buffer would be another 2MB of .bss
+       for a rule that holds by arithmetic.
+       *두 축이 줄어들기만 하므로 제자리 수행이 안전합니다.* 목적지 (x, y)에 쓰는 픽셀은
+       `y * dw + x`에 있고, 그 상자가 읽는 첫 원본 픽셀은 `y0 >= y`, `x0 >= x`인
+       `y0 * w + x0`에 있습니다. 그러므로 쓰기는 읽고 있는 상자를 결코 앞지르지 않으며,
+       앞으로 올 모든 상자는 그보다 뒤에서 시작합니다. 별도 버퍼는 산술로 성립하는 규칙을
+       위해 .bss 2MB를 더 쓰는 일입니다. */
+    for (int y = 0; y < dh; y++) {
+        int y0 = y * h / dh, y1 = (y + 1) * h / dh;
+        if (y1 <= y0) y1 = y0 + 1;
+        for (int x = 0; x < dw; x++) {
+            int x0 = x * w / dw, x1 = (x + 1) * w / dw;
+            if (x1 <= x0) x1 = x0 + 1;
+
+            int r = 0, g = 0, b = 0, ink = 0, cov = 0;
+            for (int sy = y0; sy < y1; sy++)
+                for (int sx = x0; sx < x1; sx++) {
+                    const unsigned char *q = px + (sy * w + sx) * 4;
+                    cov++;
+                    if (is_marker(q) || q[3] < 128) continue;
+                    r += q[0]; g += q[1]; b += q[2]; ink++;
+                }
+
+            unsigned char *o = px + (y * dw + x) * 4;
+            if (ink > 0 && ink * 2 >= cov) {
+                o[0] = (unsigned char)(r / ink);
+                o[1] = (unsigned char)(g / ink);
+                o[2] = (unsigned char)(b / ink);
+                o[3] = 255;
+            } else {
+                o[0] = o[1] = o[2] = o[3] = 0;
+            }
+        }
+    }
+
+    if (mx >= 0) {
+        int dmx = mx * dw / w, dmy = my * dh / h;
+        if (dmx >= dw) dmx = dw - 1;
+        if (dmy >= dh) dmy = dh - 1;
+        unsigned char *o = px + (dmy * dw + dmx) * 4;
+        o[0] = 255; o[1] = 0; o[2] = 255; o[3] = 255;
+    }
+
+    *sw = dw;
+    *sh = dh;
 }
 
 static int decode_sprites(const char *p, unsigned char *buf, int W, int H,
@@ -1447,6 +1629,18 @@ static int decode_sprites(const char *p, unsigned char *buf, int W, int H,
         for (int t = 0; t < MON_TYPES; t++)
             g_mon_anchor[t][0] = g_mon_anchor[t][1] = -1;
     }
+
+    /* Which cells a drawing NAMED, so a bare `_idle` can fill the rest of its
+       subject's row without painting over one somebody drew. See the spill
+       note further down. A local rather than a static: it describes this walk
+       of the stream and a reload starts a new one.
+       어떤 칸을 그림이 *지목했는지*이며, 홑 `_idle`이 누군가 그린 칸을 덮지 않고 자기 주제의
+       나머지 줄을 채울 수 있게 합니다. 아래의 번짐 설명을 참조하십시오. static이 아니라
+       지역 변수인 이유는 이것이 이번 스트림 순회를 서술하기 때문이며, 다시 읽으면 새
+       순회가 시작됩니다. */
+    unsigned char named[MON_TYPES][SPR_FRAMES];
+    for (int t = 0; t < MON_TYPES; t++)
+        for (int f = 0; f < SPR_FRAMES; f++) named[t][f] = 0;
 
     for (;;) {
         int len;
@@ -1507,6 +1701,12 @@ static int decode_sprites(const char *p, unsigned char *buf, int W, int H,
         if (!png_decode(png, bytes, g_png, (int)sizeof g_png, &sw, &sh))
             continue;                    /* png.c has already raised DIAG_PNG */
 
+        /* Before anything below looks at the picture, so the placement, the
+           wall's tiling and the marker are all reasoning about one that fits.
+           아래의 무엇도 그림을 보기 전에 수행합니다. 그래야 배치와 벽의 타일링과 표식이
+           모두 셀에 들어가는 그림 하나에 대해 계산합니다. */
+        fit_to_cell(g_png, &sw, &sh, cell_w, cell_h);
+
         /* -1 is "every frame", which is what a creature that has been drawn
            once but not yet animated says. See ::name_frame.
            -1은 "모든 프레임"이며, 한 번 그려졌지만 아직 애니메이션되지 않은 생물이 하는
@@ -1514,11 +1714,51 @@ static int decode_sprites(const char *p, unsigned char *buf, int W, int H,
         int f0 = (frame < 0) ? 0 : frame;
         int f1 = (frame < 0) ? frames_in(dest) : frame + 1;
         /* ::SPR_WALK_BOTH is the one negative that is not "everything": a
-           single `_idle` drawing fills the walk cycle and leaves the attack
-           and the corpse to whatever else claims them.
+           single `_idle` drawing fills the walk cycle, AND THEN SPILLS INTO
+           EVERY FRAME NOBODY ELSE DREW.
+           IT USED TO LEAVE THE REST TO THE GENERATED CREATURE, and the ward is
+           what that cost. It ships an `_idle` and a `_down` and no `_attack`,
+           so its attack cell stayed the SDF pillar underneath -- and a ward is
+           in ::E_ATTACK for the whole wind-up every time it pays out a summon.
+           The one moment the player is watching it, the drawn column turned
+           into a generated one and back. That is the same defect scene.c
+           already wrote up for ::SPR_HURT, arriving through the other door: it
+           dropped the frame because no creature had the art, and this fills the
+           frame because one creature has some.
+           A HALF-DRAWN BESTIARY STILL FALLS BACK. `_idle` spilling is a
+           statement about a subject somebody HAS drawn -- its own standing
+           picture is a better answer for a frame than another creature's
+           generated body -- and a subject with no art at all reaches none of
+           this and keeps every generated cell it had.
+           WHY `named` AND NOT JUST PAINTING. The spill must not overwrite a
+           frame somebody drew. Name order makes that nearly free: bake.ps1
+           emits in name order and `_attack` < `_down` < `_hurt` < `_idle`, so
+           every drawing that names a frame has already been laid down by the
+           time an `_idle` arrives. `named` is what makes that an invariant this
+           loop enforces rather than one a directory listing happens to satisfy.
            ::SPR_WALK_BOTH는 "전부"가 아닌 유일한 음수입니다. 홑 `_idle` 그림은 걷기 주기를
-           채우고 공격과 시체는 그것을 차지하는 다른 것에 맡깁니다. */
-        if (frame == SPR_WALK_BOTH) { f0 = SPR_WALK0; f1 = SPR_WALK1 + 1; }
+           채우고, *그다음 아무도 그리지 않은 모든 프레임으로 번집니다.*
+           *예전에는 나머지를 생성된 생물에게 맡겼고*, 그 값을 치른 것이 결계핵입니다.
+           결계핵은 `_idle`과 `_down`을 싣고 `_attack`은 싣지 않으므로, 공격 칸이 그 아래의
+           SDF 기둥으로 남아 있었습니다. 그리고 결계핵은 소환을 지급할 때마다 준비동작 내내
+           ::E_ATTACK에 있습니다. 플레이어가 그것을 보고 있는 바로 그 순간에, 그려진 기둥이
+           생성된 기둥으로 바뀌었다가 돌아왔습니다. scene.c가 ::SPR_HURT에 대해 이미 적어 둔
+           것과 같은 결함이 반대쪽 문으로 들어온 것입니다. 그쪽은 어느 생물에도 아트가 없어서
+           프레임을 버렸고, 이쪽은 한 생물에게 아트가 있어서 프레임을 채웁니다.
+           *절반만 그려진 도감은 여전히 폴백을 씁니다.* `_idle`의 번짐은 누군가 *그린* 주제에
+           대한 진술입니다. 자기 서 있는 그림이 다른 생물의 생성된 몸보다 그 프레임에 나은
+           답이기 때문입니다. 아트가 전혀 없는 주제는 이곳에 닿지 않으며 가지고 있던 생성된
+           칸을 그대로 지킵니다.
+           *왜 그냥 칠하지 않고 `named`인가.* 번짐이 누군가 그린 프레임을 덮어써서는 안 됩니다.
+           이름 순서가 그것을 거의 공짜로 만듭니다. bake.ps1은 이름 순으로 내보내고
+           `_attack` < `_down` < `_hurt` < `_idle`이므로, 프레임을 지목하는 모든 그림은
+           `_idle`이 도착할 때 이미 놓여 있습니다. `named`는 그것을 디렉터리 나열이 우연히
+           만족시키는 성질이 아니라 이 루프가 강제하는 불변식으로 만듭니다. */
+        int spill = 0;
+        if (frame == SPR_WALK_BOTH) {
+            f0 = SPR_WALK0; f1 = SPR_WALK1 + 1;
+            if (dest == SPR_DEST_MONSTER) { f1 = SPR_FRAMES; spill = SPR_WALK1 + 1; }
+        }
         placed++;
 
         /* One row, or every row for the wand's sentinel -- see the WEAPON
@@ -1531,6 +1771,14 @@ static int decode_sprites(const char *p, unsigned char *buf, int W, int H,
         if (dest == SPR_DEST_WEAPON && type == WP_TYPES) { t0 = 0; t1 = WP_TYPES; }
         for (int t = t0; t < t1; t++)
         for (int f = f0; f < f1; f++) {
+        /* The spill yields; a named frame never does. `spill` is 0 for every
+           drawing that is not an `_idle` filling a monster row, and no frame
+           index is below zero, so this costs one comparison everywhere else.
+           번짐은 양보하고 지목된 프레임은 양보하지 않습니다. 몬스터 줄을 채우는 `_idle`이
+           아닌 모든 그림에 대해 `spill`은 0이고 프레임 색인은 0보다 작을 수 없으므로,
+           다른 곳에서는 비교 한 번의 비용입니다. */
+        if (spill && f >= spill && named[t][f]) continue;
+
         int ox = (dest == SPR_DEST_WALL)   ? 0
                : (dest == SPR_DEST_PICKUP) ? t * cell_w
                : (dest == SPR_DEST_EMBLEM) ? t * cell_w : f * cell_w;
@@ -1639,6 +1887,20 @@ static int decode_sprites(const char *p, unsigned char *buf, int W, int H,
             g_mon_anchor[t][0] = place_x + muz_x;
             g_mon_anchor[t][1] = place_y + muz_y;
         }
+
+        /* Claimed by NAME. A subject-wide drawing (`maw`) claims nothing: it is
+           a base layer for a creature nobody has animated yet, not a statement
+           about any one frame, and a later `maw_attack` should be free to land
+           on top of it the same way `brute0` lands on `brute`. A spilled frame
+           claims nothing either, for the same reason -- it is standing in.
+           *이름으로* 차지합니다. 주제 전체 그림(`maw`)은 아무것도 차지하지 않습니다. 그것은
+           아직 아무도 애니메이션하지 않은 생물의 바탕 층이지 어느 한 프레임에 대한 진술이
+           아니며, 나중의 `maw_attack`은 `brute0`이 `brute` 위에 놓이는 것과 같은 방식으로 그
+           위에 놓일 수 있어야 합니다. 번져 간 프레임도 같은 이유로 아무것도 차지하지
+           않습니다. 그것은 대신 서 있는 것입니다. */
+        if (dest == SPR_DEST_MONSTER && t < MON_TYPES && frame != -1 &&
+            !(spill && f >= spill))
+            named[t][f] = 1;
         }
     }
     return placed;

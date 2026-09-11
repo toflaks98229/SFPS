@@ -357,6 +357,25 @@ $toolVariants = @{
         @{ Defines = @('-DMAX_CACHED=4'); Suffix = '_tinycache' }
     )
 
+    # A malloc that says no, which no forced constant can arrange. mb_init's
+    # out-of-memory branch is reached by an allocation FAILING, and the fixture
+    # used to reach it by asking for 88 GB -- which a 64-bit machine with a
+    # large commit limit grants. `--wrap=malloc` routes render.c's call through
+    # a shim in diagtest.c instead, so the branch is reached by decision rather
+    # than by the size of the machine. The Defines list carries a linker flag
+    # because Invoke-ToolBuild compiles and links in one gcc call; nothing in
+    # src\ knows this variant exists.
+    #
+    # 어떤 강제 상수로도 마련할 수 없는, *아니라고 답하는 malloc*입니다. mb_init의 메모리 부족
+    # 분기는 할당이 *실패해야* 도달하며, 픽스처는 88GB를 요구해서 그곳에 닿으려 했습니다.
+    # 커밋 한도가 넉넉한 64비트 기계는 그것을 내줍니다. `--wrap=malloc`은 대신 render.c의
+    # 호출을 diagtest.c의 대역 함수로 보내므로, 분기에 도달하는 것은 기계의 크기가 아니라
+    # 결정입니다. Invoke-ToolBuild가 gcc 한 번으로 컴파일과 링크를 모두 하므로 Defines 목록이
+    # 링커 플래그를 싣습니다. src\의 무엇도 이 변형의 존재를 알지 못합니다.
+    'diagtest' = @(
+        @{ Defines = @('-DMB_OOM', '-Wl,--wrap=malloc'); Suffix = '_oom' }
+    )
+
     # The baked-light cache, forced smaller than the level that fills it needs.
     # That level is arena, not the much larger dm03: the cache only ever holds
     # vertices a lamp reached, and dm03 has no lamps at all. arena wants 353

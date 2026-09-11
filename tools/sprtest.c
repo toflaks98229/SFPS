@@ -110,7 +110,14 @@ static void blob_str(const char *t) {
 static void blob_png(const char *name, int w, int h,
                      const unsigned char rgba[4],
                      int mx, int my, const unsigned char mark[4]) {
-    static unsigned char px[64 * 64 * 4 + 64];   /* filtered rows */
+    /* Big enough for a fixture that OVERFLOWS a cell, which is what the fitting
+       check needs: the largest cell here is the weapon's 192x104, so a drawing
+       past it has to fit in this buffer before ::fit_to_cell can be asked what
+       it does with one.
+       셀을 *넘치는* 픽스처를 담을 만큼 큽니다. 맞춤 검사가 필요로 하는 것이 그것입니다.
+       이곳에서 가장 큰 셀은 무기의 192x104이므로, 그것을 넘는 그림이 먼저 이 버퍼에 들어가야
+       ::fit_to_cell이 그런 그림을 어떻게 다루는지 물을 수 있습니다. */
+    static unsigned char px[208 * 208 * 4 + 208];   /* filtered rows */
     int stride = w * 4, raw = h * (stride + 1), n = 0;
 
     for (int y = 0; y < h; y++) {
@@ -246,10 +253,18 @@ int main(void) {
     /* --- 4. how many frames a name asks for -------------------------------
      *
      * THREE ANSWERS AND THE NAME IS THE ONLY THING THAT SAYS WHICH. A trailing
-     * digit is one frame; a `_idle` suffix is the two walk frames and nothing
-     * else; a name that is just the creature is every frame it has. All three
-     * are decided in ::sprite_slot_for, and none of them is visible anywhere
-     * but in the atlas afterwards.
+     * digit is one frame; a `_idle` suffix is the two walk frames AND every
+     * frame no other drawing named; a name that is just the creature is every
+     * frame it has. All three are decided in ::sprite_slot_for, and none of
+     * them is visible anywhere but in the atlas afterwards.
+     *
+     * THE MIDDLE ONE USED TO STOP AT THE WALK CYCLE, and the ward paid for it.
+     * It ships an `_idle` and a `_down` and no `_attack`, so its attack cell
+     * stayed the generated pillar -- and a ward is in ::E_ATTACK for the whole
+     * wind-up every time a hit makes it summon. The drawn column turned into a
+     * generated one at the one moment anybody was looking at it. So the spill
+     * is asserted here, and so is the thing that makes it safe: a frame some
+     * drawing NAMED is not something the spill may paint over.
      *
      * THIS EXISTS BECAUSE THE MIDDLE ONE SILENTLY DID NOTHING. ::name_state
      * answers ::SPR_WALK_BOTH -- which is -2 -- when it matches `_idle`, and
@@ -266,9 +281,15 @@ int main(void) {
      * atlas stays wrong.
      *
      * *답은 셋이고 어느 것인지를 말하는 것은 이름뿐입니다.* 끝의 숫자는 한 프레임,
-     * `_idle` 접미사는 걷기 두 프레임과 그 외 아무것도 아님, 생물 이름만 있는 것은 그것이
-     * 가진 모든 프레임입니다. 셋 다 ::sprite_slot_for에서 결정되며, 어느 것도 이후의
-     * 아틀라스 말고는 어디에서도 보이지 않습니다.
+     * `_idle` 접미사는 걷기 두 프레임과 *다른 어떤 그림도 지목하지 않은 모든 프레임*, 생물
+     * 이름만 있는 것은 그것이 가진 모든 프레임입니다. 셋 다 ::sprite_slot_for에서 결정되며,
+     * 어느 것도 이후의 아틀라스 말고는 어디에서도 보이지 않습니다.
+     * *가운데 것은 예전에 걷기 주기에서 멈췄고* 그 값을 결계핵이 치렀습니다. 결계핵은
+     * `_idle`과 `_down`을 싣고 `_attack`은 싣지 않으므로 공격 칸이 생성된 기둥으로 남았습니다.
+     * 그리고 결계핵은 피격이 소환을 일으킬 때마다 준비동작 내내 ::E_ATTACK에 있습니다. 그려진
+     * 기둥이, 누군가 그것을 보고 있는 단 한 순간에 생성된 기둥으로 바뀌었습니다. 그래서 번짐을
+     * 이곳에서 단언하며, 그것을 안전하게 만드는 것도 함께 단언합니다. 어떤 그림이 *지목한*
+     * 프레임은 번짐이 덮어써도 되는 것이 아닙니다.
      * *이것이 존재하는 이유는 가운데 것이 조용히 아무 일도 하지 않았기 때문입니다.*
      * ::name_state는 `_idle`에 일치하면 -2인 ::SPR_WALK_BOTH로 답하는데, 호출자는 "접미사
      * 없음"을 `f < 0`으로 검사했으므로 일치한 `_idle`이 전부 버려지고 이름 전체가 몬스터
@@ -280,8 +301,9 @@ int main(void) {
      * 통과합니다. */
     printf("\na name says how many frames it fills\n");
     {
-        static const unsigned char RED[4]  = { 255,   0,   0, 255 };
-        static const unsigned char BLUE[4] = {   0,   0, 255, 255 };
+        static const unsigned char RED[4]   = { 255,   0,   0, 255 };
+        static const unsigned char BLUE[4]  = {   0,   0, 255, 255 };
+        static const unsigned char GREEN[4] = {   0, 255,   0, 255 };
 
         /* Filled with a stand-in for the generated creature, so a cell the
            drawing did not claim is visibly the one it did not claim.
@@ -292,8 +314,14 @@ int main(void) {
             g_atlas[i*4+2] = 9; g_atlas[i*4+3] = 255;
         }
         blob_reset();
-        blob_png("water_spirit_idle", 2, 1, RED,  -1, -1, 0);
-        blob_png("brute",             2, 1, BLUE, -1, -1, 0);
+        /* IN THE ORDER bake.ps1 EMITS, which is name order: `_down` before
+           `_idle` because `d` sorts before `i`. The ward's two files arrive
+           exactly this way round.
+           bake.ps1이 내보내는 순서, 곧 이름 순서입니다. `d`가 `i`보다 앞서므로 `_down`이
+           `_idle`보다 먼저입니다. 결계핵의 두 파일이 정확히 이 순서로 도착합니다. */
+        blob_png("water_spirit_down", 2, 1, GREEN, -1, -1, 0);
+        blob_png("water_spirit_idle", 2, 1, RED,   -1, -1, 0);
+        blob_png("brute",             2, 1, BLUE,  -1, -1, 0);
         sprite_decode_blob(blob(), g_atlas, AW, AH, 0);
 
         int idle_hit = 0, idle_kept = 0, all_hit = 0;
@@ -304,13 +332,16 @@ int main(void) {
             if (a[0] == 9   && a[3] == 255) idle_kept++;
             if (b[2] == 255 && b[3] == 255) all_hit++;
         }
+        const unsigned char *corpse = at(0, SPR_DEAD, 2, 1, 0, 0);
         printf("      `_idle` filled %d of %d frames and left %d generated; "
                "the bare name filled %d\n",
                idle_hit, SPR_FRAMES, idle_kept, all_hit);
 
-        ok(idle_hit == 2, "a single `_idle` fills the two walk frames");
-        ok(idle_kept == SPR_FRAMES - 2,
-           "and leaves the attack, the flinch and the corpse alone");
+        ok(idle_hit == SPR_FRAMES - 1,
+           "a single `_idle` fills every frame no other drawing named");
+        ok(idle_kept == 0, "and leaves no generated cell behind on a drawn row");
+        ok(corpse[1] == 255 && corpse[0] == 0,
+           "while the corpse is still the drawing that named it");
         ok(all_hit == SPR_FRAMES,
            "a name with no suffix at all fills every frame it has");
     }
@@ -456,6 +487,67 @@ int main(void) {
         ok(sprite_anchor(0, &u, &v) && v > 0.0f && v < 0.05f && u > 0.4f && u < 0.6f,
            "as a fraction: near the feet and across the middle");
         ok(!sprite_anchor(1, &u, &v), "a kind with no marker has no anchor");
+    }
+
+    /* --- 7. a drawing bigger than its cell is fitted, not cropped ----------
+     *
+     * WHAT OVERSIZED ART USED TO MEAN WAS "CROPPED", and nobody decided that.
+     * Every picture this project had shipped was authored at exactly its cell,
+     * so the blit's bounds check was only ever a safety net -- until the ward
+     * was redrawn 160x688 for a 64x96 cell and walked into it. What reached the
+     * atlas was the top-left corner of the file: the gem on top of the column
+     * and none of the column.
+     * ONE SCALE FOR BOTH AXES is the half that has to be asserted. Filling the
+     * cell instead would also have got the whole drawing in, and would have
+     * stored a picture nobody drew -- right only while some creature's `aspect`
+     * happened to undo the squash exactly. So this asks the shape: a 128x96
+     * drawing is 4:3, and 4:3 in a 64-wide cell is 48 tall and not 96.
+     *
+     * 한국어
+     * ------
+     * *셀보다 큰 그림이 뜻하던 것은 "잘림"이었고* 아무도 그렇게 정하지 않았습니다. 이
+     * 프로젝트가 출하한 모든 그림은 정확히 자기 셀로 저작되었으므로 블릿의 경계 검사는 언제나
+     * 안전망일 뿐이었습니다. 결계핵이 64x96 셀을 위해 160x688로 다시 그려져 그 안으로 걸어
+     * 들어가기 전까지는 그랬습니다. 아틀라스에 도착한 것은 파일의 좌상단, 곧 기둥 위의 보석이었고
+     * 기둥은 없었습니다.
+     * *두 축에 같은 배율*이 단언해야 하는 나머지 절반입니다. 셀을 채워도 그림 전체는 들어갔을
+     * 것이고, 아무도 그리지 않은 그림을 저장했을 것입니다. 어느 생물의 `aspect`가 그 찌그러짐을
+     * 정확히 되돌릴 때에만 옳은 그림입니다. 그래서 이곳에서는 *모양*을 묻습니다. 128x96 그림은
+     * 4:3이고, 64폭 셀 안의 4:3은 96이 아니라 48 높이입니다. */
+    printf("\na drawing bigger than its cell is fitted, not cropped\n");
+    {
+        static const unsigned char RED[4] = { 255, 0, 0, 255 };
+        clear(g_atlas, AW * AH);
+
+        blob_reset();
+        blob_png("water_spirit0", 128, 96, RED, -1, -1, 0);
+        sprite_decode_blob(blob(), g_atlas, AW, AH, 0);
+
+        /* The ink's own box inside cell (0,0), measured rather than assumed:
+           what is under test is where the decoder put it.
+           (0,0) 칸 안 잉크의 상자이며, 가정하지 않고 측정합니다. 검사 대상은 디코더가 그것을
+           어디에 두었는가입니다. */
+        int x0 = SPR_CW, x1 = -1, y0 = SPR_CH, y1 = -1;
+        for (int y = 0; y < SPR_CH; y++)
+            for (int x = 0; x < SPR_CW; x++) {
+                const unsigned char *p = &g_atlas[(y * AW + x) * 4];
+                if (p[3] == 0) continue;
+                if (x < x0) x0 = x;
+                if (x > x1) x1 = x;
+                if (y < y0) y0 = y;
+                if (y > y1) y1 = y;
+            }
+        int iw = x1 - x0 + 1, ih = y1 - y0 + 1;
+        printf("      a 128x96 drawing landed %dx%d at (%d,%d) in a %dx%d cell\n",
+               iw, ih, x0, y0, SPR_CW, SPR_CH);
+
+        okd(iw == SPR_CW, "it is as wide as the cell, so nothing was cropped away",
+            iw, SPR_CW);
+        okd(ih == SPR_CH / 2,
+            "and half as tall, which is the 4:3 it was drawn at", ih, SPR_CH / 2);
+        okd(y1 == SPR_CH - 1,
+            "standing on the cell floor rather than floating at the top",
+            y1, SPR_CH - 1);
     }
 
     /* --- 3. the muzzle comes out of the pixels ----------------------------

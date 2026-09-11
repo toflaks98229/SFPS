@@ -137,7 +137,30 @@ typedef struct BrushStore BrushStore;
 #ifndef LVL_MAX_PTS
 #define LVL_MAX_PTS     48     ///< @brief Maximum vertices per sector. / 섹터당 최대 정점 수.
 #endif
-#define LVL_MAX_ENTS    64     ///< @brief Maximum entities per level. / 레벨당 최대 엔티티 수.
+/* RAISED FROM 64 WHEN A SHIPPED MAP WAS COUNTED AGAINST IT. lqdm4 places 83
+   markers; 64 arrived and 19 were refused, which tools/mapcap.c reported as
+   `ent=19` beside a failing "no level entity was refused". What went over the
+   edge was whatever the importer happened to emit last -- BOTH `item_axe`
+   markers, four ward positions and thirteen spawners -- so the symptom was a
+   weapon that is nowhere in the level and a boss fight missing most of the
+   guards and spawners it was built around. Nothing in the game says so: an
+   entity past the cap is counted and dropped, and a map that quietly holds
+   three quarters of what its author placed looks like a design decision.
+   128 RATHER THAN 83, for the reason ::LVL_MAX_PTS gives about its own
+   number: a slot is 44 bytes of .bss and nothing else, and a cap set to
+   exactly what today's map needs is a cap that fails on tomorrow's.
+   *출하되는 맵 하나를 이 값과 대조하면서 64에서 올렸습니다.* lqdm4는 표식 83개를
+   배치하는데 64개만 도착하고 19개가 거절되었습니다. tools/mapcap.c가 그것을 `ent=19`로,
+   그리고 실패하는 "no level entity was refused"로 보고했습니다. 가장자리를 넘어간 것은
+   가져오기 도구가 마지막에 내보낸 것들이었습니다. `item_axe` *둘 다*와 결계핵 자리 넷과
+   스포너 열셋입니다. 그래서 증상은 레벨 어디에도 없는 무기 하나와, 그것을 중심으로 지어진
+   호위와 스포너 대부분이 빠진 보스전이었습니다. 게임은 그렇다고 말하지 않습니다. 상한을
+   넘은 엔티티는 세어지고 버려지며, 제작자가 배치한 것의 4분의 3만 조용히 담고 있는 맵은
+   설계 결정처럼 보입니다.
+   *83이 아니라 128인 이유*는 ::LVL_MAX_PTS가 자기 숫자에 대해 말하는 것과 같습니다.
+   슬롯 하나는 .bss 44바이트일 뿐이고, 오늘의 맵에 정확히 맞춘 상한은 내일의 맵에서
+   실패합니다. */
+#define LVL_MAX_ENTS    128    ///< @brief Maximum entities per level. / 레벨당 최대 엔티티 수.
 
 /* HOW MANY NUMBERS AN ENTITY MAY CARRY beyond its position. Three because that
    is what the gimmicks being brought over need at their widest -- a teleporter

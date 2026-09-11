@@ -22,7 +22,7 @@ Models, materials, sounds and levels are all authored as text and hot-reload
 into the running game.
 
 ```
-1,046,528 / 1,474,560 bytes   (70.97% used)
+1,054,208 / 1,474,560 bytes   (71.49% used)
 ```
 
 ## Build
@@ -1434,7 +1434,15 @@ five. Each row now takes the health of the Quake creature it answers to.
 | water spirit | grunt (army) | 30 | 1 | — |
 | caster | scrag (wizard) | 80 | 2 | 2.67 |
 | brute | **ogre** | 200 | 3 | 2.50 |
-| maw | shambler | 600 | 9 | 3.00 |
+| maw | shambler (600) | 990 | 15 | 4.95 |
+
+The maw is the one row that leaves its anchor, and the fight is why: it spends its
+health in `BOSS_CYCLES` equal thirds and now arrives **open**, fighting through the
+first of them instead of standing shielded. 990 is 330 a third, it still divides by
+`BOSS_CYCLES`, and it is the only row with a reason to be larger than the creature it
+was mapped to. The other three drifted off their anchors once — the water spirit to 60
+and the caster to 90 — which put two rungs within 1.5× of each other and is exactly the
+flattening `enemytest` exists to catch. They are back.
 
 The mapping is by ladder position and role, not silhouette. The grunt is what
 you kill without thinking; the scrag flies and shoots, so it is worth two of the
@@ -1496,13 +1504,61 @@ few seconds of any wave: the rate was never the binding constraint.
 
 | wave | clock | alive | interval | burst |
 |---|---|---|---|---|
-| 1 | 0:45 | 8 | 9.0 s | 1 |
-| 5 | 3:45 | 16 | 7.6 s | 2 |
-| 11 | 8:15 | 28 | 5.5 s | 4 |
-| 20 | 15:00 | 46 | 2.4 s | 5 |
-| 29 | 21:45 | **64** (`ENEMY_MAX`) | 1.2 s | 5 |
+| 1 | 0:45 | 8 | 9.00 s | 1 |
+| 5 | 3:45 | 16 | 5.28 s | 2 |
+| 11 | 8:15 | 28 | 2.37 s | 4 |
+| 20 | 15:00 | 46 | 0.80 s | 5 |
+| 29 | 21:45 | **64** (`ENEMY_MAX`) | 0.80 s | 5 |
 
+The interval column is the arena's nine-second caster spawner; its six- and
+eleven-second neighbours run the same 12.5%-a-wave decay from their own starts.
 `ENEMY_MAX` is a cap that binds now rather than a number nothing could reach.
+
+**And the curve is only ever rate and count — there is no stat on it.** There used to
+be a sixth line: `hp_mul`, +5% health a wave to a ceiling of 1.5. It is gone, and
+`WAVE_INTERVAL_MIN` went 1.2 s → 0.8 s in the same edit, which is **the same 1.5**
+moved from how much each monster takes to how fast the next one arrives. The floor now
+lands three waves later for every spawner in the map — 14, 17, 18 became 17, 20, 21.
+
+That is the side of the line the reference games put it on. **Gauntlet**'s dungeons get
+harder by generating monsters faster: its difficulty climbs in score chunks and what
+climbs is the generation rate, while a monster stays a monster. **Serious Sam** is
+renowned for one thing and it is the count — its hardest setting makes waves denser and
+longer and swaps in stronger *kinds*, not stronger copies. The two that do it the other
+way show what it costs: **CoD Zombies** multiplies health by 1.1 a round and has to hand
+the player Pack-a-Punch and three friends to answer it, and **Painkiller**'s difficulty
+sliders move only damage dealt and taken, which its own reviewers call the lazy one.
+
+The arsenal is the reason. A health multiplier is a bet that the player's damage grows
+too, and nothing here grows: the shotgun is 66.7 DPS on wave 1 and 66.7 DPS on wave 40,
+with no upgrade, no armour pool and no second player. CoD Zombies runs the rate axis as
+well and much further — a 2 s spawn delay at round 1 down to 0.1 s by round 60 — and
+what makes a tenth of a second safe to write there is a hard cap of 24 alive. It is the
+same cap doing the same job here.
+
+**The ward's summon rate was set by the player's gun, not by anybody.** A ward — and
+the maw, which pays the same way — books a summon for every `WARD_SUMMON_DMG` of damage
+it survives. A damage threshold is the better idea than a clock: it rewards shooting the
+thing rather than waiting it out. It is also the one that was never priced, because a
+threshold's *rate* is whatever DPS the player brings. At 30 damage a payment worth two
+monsters, a shotgun held on a ward paid out every 0.45 s — **4.4 monsters a second**.
+
+The only other boss in either reference game that does this is **DOOM II's Icon of Sin**,
+and it spawns on a clock: one cube every 150 tics, **4.3 seconds**, halved again on the
+two easy skills, for a fight that runs minutes. The ward was nineteen times that, and got
+worse the harder you shot.
+
+`WARD_SUMMON_DMG` is 40 now and `WARD_SUMMON_COUNT` is 1, so:
+
+| | health | payments | monsters |
+|---|---|---|---|
+| ward | 200 | 5 | 5 |
+| maw | 990 | 24 | 24 |
+| a shield round (4 wards) | 800 | 20 | 20 |
+
+Two shield rounds and the maw is **64 monsters across the whole fight**, which is still
+the generous side of the Icon's clock — right for a threshold, and paced anyway by
+`SPAWN_WARN_TIME`, which delivers one arrival every 0.55 s however much is owed.
 
 **What this leaves open.** The brute is Quake's ogre by health and by name, but
 it does not yet throw the ogre's grenade — that is the half of the pattern that
@@ -2714,12 +2770,12 @@ rings on a `med_csl_brk18b` shaft, every face a texture the arena already ships.
 Its shaft is stretched down into the lava slab so it reads as rising *out* of the
 sea, and its cap sits at −8 m, flat and standable.
 
-**The spacing was the hook's, and the hook is about to get shorter.** The
+**The spacing was the hook's, and the hook has since got shorter.** The
 placement put twenty-eight columns **ten metres apart** around the ring — far
-under the grapple's current forty-metre reach on purpose, because the reach is
-being cut and a ring that only crosses at forty metres is a ring the cut would
-strand a player on. Ten-metre hops leave the loop crossable down to about a
-twelve-metre hook.
+under the grapple's forty-metre reach of the day on purpose, because the reach
+was being cut and a ring that only crosses at forty metres is a ring the cut
+would strand a player on. `HOOK_RANGE` is **20 m** now, and the ten-metre hops
+cross it with the whole of the margin the spacing was bought for.
 
 `steptest` reads that off the map rather than trusting anybody's word for it: it
 scans the courtyard for standable, dry caps out over the lava, clusters them into
@@ -2728,23 +2784,53 @@ distance**. The fortress's own underbelly supports are ignored — a column coun
 only if it has lava on all four sides, which the ring has and an attached ledge
 does not.
 
-**And that check is red as this is written, which is the check doing its job.**
-The ring was afterwards edited in TrenchBroom down to **thirteen columns**, moved,
-with a longest gap of **twenty metres**. That crosses fine at the hook's present
-forty and is exactly what the planned cut would break, so the assertion is
-reporting a real conflict between the layout as saved and the reason the spacing
-was chosen — not a stale number. Either the columns come back together or the
-cut has to stop above twenty metres; the check is what makes that a decision
-rather than a surprise.
+**That check was red for a while, which was the check doing its job.** The ring
+had been edited in TrenchBroom afterwards down to **thirteen columns**, moved,
+with a longest gap of **twenty metres** — fine at the forty-metre hook of the
+day and exactly what the planned cut would break. The assertion was reporting a
+real conflict between the layout as saved and the reason the spacing was chosen,
+not a stale number, and it named the decision: either the columns come back
+together or the cut stops above twenty metres. **The cut landed at twenty, so
+the columns came back.** The ring is regenerated from the map's own pier — the
+five-brush stack the import left at the south-west corner, copied with its
+Valve-220 texture offsets shifted by the same translation, so every column is
+the same drawing and not a lookalike — onto the **28-slot, ten-metre perimeter
+lattice** the original placement used.
 
-**Four of them carry a caster spawner, because only a caster can stand there.**
-The lava refuses a walking monster its footing — `make_monster` will not place
-one on a hazard floor — so a ground spawner on a lava column would spawn nothing.
-The caster is the one monster that flies, so the four corner columns get caster
-spawners and the sea becomes a place the fight reaches rather than scenery. Seven
-spawners now, under the cap of eight; `steptest` asserts every authored spawner
-is a running spawner and that the cap counter stayed silent, the same shape that
-went unread when the effect table filled.
+**And then it was broken back out of that lattice, because a correct ring is
+not the same thing as a good one.** Twenty-eight identical columns, evenly
+spaced, all capped at −8 m, is a loop the hook can cross and a thing nobody
+looks at twice — a fence around a courtyard. Each column now carries three
+offsets, all of them from one integer hash of its index so the map regenerates
+the same way every time:
+
+| | range | why that much |
+|---|---|---|
+| along the ring | ±0.8 m | a 10 m gap never passes 11.7, under the 12 m link |
+| across it | −0.5 to +3.0 m | inward only: outward runs into the courtyard wall |
+| cap height | ±3.0 m | −10.75 m to −5.50 m, over nine distinct levels |
+
+The lift is a **stretched shaft**, not a moved column. Translating the stack
+would take its base ring out of the lava slab and leave it hanging; stretching
+the lower shaft and riding the four brushes above it up keeps the column rising
+*out of the sea*, which is the whole reason the base ring is buried in it.
+
+One slot is pinned: brushes above it continue that column up past the courtyard
+and are not part of what the generator rewrites. `steptest` reads **49 dry caps
+over the lava, 47 of them in one chain** at the twelve-metre link, and it now
+asserts the spread as well as the loop — the caps must span at least 3 m over at
+least six levels, so a ring quietly regenerated flat goes red the same way a
+ring with a hole in it does.
+
+**The caster spawners are the ones authored out over the sea, because only a
+caster can be there.** The lava refuses a walking monster its footing —
+`make_monster` will not place one on a hazard floor — so a ground spawner over
+the sea would spawn nothing, and ten of the map's thirteen caster spawners hang
+over it on purpose. That asymmetry is the whole gameplay consequence of a lava
+floor: the flyer owns the open sea and the ground monsters own the ring and the
+fortress. Twenty-two spawners now, under a cap of thirty-two; `steptest` asserts
+every authored spawner is a running spawner and that the cap counter stayed
+silent, the same shape that went unread when the effect table filled.
 
 **How a DM map is picked, twice, and why the second answer is different.** All
 thirteen LibreQuake deathmatch maps were run through the importer and measured

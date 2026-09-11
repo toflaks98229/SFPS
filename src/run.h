@@ -655,6 +655,53 @@ typedef struct {
      *       위상을 어긋나지 않게 합니다.
      */
     float shake;
+
+    /**
+     * @brief Which gun the next ::LOOT_HELD box is for; the cursor ::loot_held_kind advances.
+     *
+     * ENGLISH
+     * -------
+     * IT LIVED ON THE STACK AND THAT IS WHY GRENADE AMMO NEVER DROPPED.
+     * ::loot_held_kind walks the roster from this cursor and returns the first
+     * owned gun with a belt, so a cursor that starts at zero every time always
+     * answers with the FIRST one -- and the player always owns the shotgun.
+     * `step_drops` declared it as a local, reset every frame, and a corpse drop
+     * lands on its own frame: every `held` box a kill ever produced was for the
+     * shotgun, for the whole run. The wave purse never had the bug, because it
+     * resolves a whole purse in one pass and carries one cursor across it.
+     *
+     * loot.h's note on that function names the failure exactly -- "three boxes
+     * for the first gun you own is the same failure spread over the belt you
+     * already filled" -- and the drop path was that failure spread over a run
+     * instead of over a purse.
+     *
+     * ON ::RunState BECAUSE A RESTART MUST CLEAR IT, which is this struct's
+     * whole charter: a field added here is zeroed by ::run_reset by
+     * construction, rather than by somebody remembering it in two places. It is
+     * also simulation state -- a demo replays the drops it recorded -- so it
+     * cannot be a file-scope static in loot.c.
+     *
+     * 한국어
+     * ------
+     * @brief 다음 ::LOOT_HELD 상자가 어느 총의 것인가. ::loot_held_kind가 전진시키는 커서입니다.
+     *
+     * *이것이 스택에 있었고, 그래서 유탄 탄약이 결코 드롭되지 않았습니다.* ::loot_held_kind는
+     * 이 커서에서부터 보유 목록을 훑어 탄띠가 있는 첫 총으로 답하므로, 매번 0에서 시작하는
+     * 커서는 언제나 *첫* 총으로 답합니다. 그리고 플레이어는 언제나 샷건을 보유합니다.
+     * `step_drops`는 이것을 지역 변수로 선언했고 매 프레임 초기화되었으며, 시체의 드롭은 각자
+     * 자기 프레임에 떨어집니다. 처치가 만들어 낸 모든 `held` 상자가 플레이 내내 샷건의
+     * 것이었습니다. 웨이브 몫에는 이 결함이 없었습니다. 한 몫 전체를 한 번에 해석하며 커서
+     * 하나를 그 전체에 걸쳐 나르기 때문입니다.
+     * loot.h의 그 함수 설명이 실패를 정확히 이름 붙입니다. "보유한 첫 무기의 상자 세 개는 이미
+     * 채운 탄띠에 같은 실패를 펼쳐 놓은 것입니다." 드롭 경로는 그 실패를 한 몫이 아니라 한
+     * 플레이에 걸쳐 펼쳐 놓은 것이었습니다.
+     *
+     * *::RunState에 두는 이유는 재시작이 이것을 지워야 하기 때문이며*, 그것이 이 구조체의 헌장
+     * 전부입니다. 이곳에 추가된 필드는 누가 두 곳에서 기억해서가 아니라 구조적으로
+     * ::run_reset이 0으로 만듭니다. 또한 시뮬레이션 상태이기도 합니다. 데모는 기록된 드롭을
+     * 그대로 재생하므로, loot.c의 파일 스코프 static일 수 없습니다.
+     */
+    int drop_gun;
 } RunState;
 
 /** @brief Seed ::RunState::smoke_rng starts every run from. / ::RunState::smoke_rng가 매 플레이마다 시작하는 시드. */

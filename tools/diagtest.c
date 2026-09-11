@@ -24,6 +24,55 @@
 #include "render.h"
 #include "world.h"   /* for the wiring check at the end: world_step drives the clock */
 
+/* --- making malloc fail on purpose, in the one binary that needs it ---------
+ *
+ * THE OLD WAY WAS TO ASK FOR TOO MUCH, AND THE MACHINE STOPPED SAYING NO.
+ * The out-of-memory fixture below used to call `mb_init(&b, 0x7fffffff)` with
+ * the note "~94 GB of Vtx: this cannot succeed". On 64-bit Windows with a
+ * large commit limit it succeeds: measured on this tree, that malloc returns a
+ * usable pointer and the byte at offset zero writes fine. So the fixture was
+ * not testing the failure path, it was testing the allocator -- and reporting
+ * the machine's answer as three failed checks.
+ *
+ * NO `int` CAPACITY CAN BE MADE TO FAIL. `mb_init` takes an `int`, so the
+ * largest request it can express is 2^31-1 vertices, and on a 64-bit address
+ * space that is 88 GB of reservation rather than an impossibility. The size of
+ * the request was never the lever; it only looked like one on smaller machines.
+ *
+ * SO THE LEVER IS THE LINKER. `-Wl,--wrap=malloc` sends every call that
+ * crosses a translation unit -- which is exactly what render.c's `malloc` in
+ * ::mb_init is -- through the function below, and the flag says whether it
+ * answers. Nothing in src/ knows about it, so the shipped build carries no
+ * test seam, and this is the same arrangement `$toolVariants` already makes
+ * for a forced-small cache: one more binary, built from this source, that can
+ * reach a branch the ordinary one cannot.
+ *
+ * 한국어
+ * ------
+ * *예전 방법은 너무 많이 요구하는 것이었고, 기계가 거절하기를 그만두었습니다.* 아래의
+ * 메모리 부족 픽스처는 `mb_init(&b, 0x7fffffff)`를 "Vtx 약 94GB이므로 성공할 수 없다"는
+ * 주석과 함께 호출했습니다. 커밋 한도가 넉넉한 64비트 Windows에서는 성공합니다. 이 트리에서
+ * 재어 보니 그 malloc은 쓸 수 있는 포인터를 돌려주고 오프셋 0의 바이트도 정상적으로 써집니다.
+ * 그러므로 픽스처는 실패 경로가 아니라 할당자를 검사하고 있었고, 기계의 대답을 실패한 검사
+ * 셋으로 보고했습니다.
+ * *어떤 `int` 용량도 실패하게 만들 수 없습니다.* ::mb_init은 `int`를 받으므로 표현할 수 있는
+ * 최대 요구가 정점 2^31-1개이고, 64비트 주소 공간에서 그것은 불가능이 아니라 88GB의 예약입니다.
+ * 요구의 크기는 애초에 지렛대가 아니었고, 더 작은 기계에서만 그렇게 보였을 뿐입니다.
+ * *그래서 지렛대는 링커입니다.* `-Wl,--wrap=malloc`은 번역 단위를 넘는 모든 호출을, 곧
+ * ::mb_init 안 render.c의 `malloc`이 바로 그것인데, 아래 함수로 보냅니다. 그리고 플래그가
+ * 그것이 응답할지를 정합니다. src/의 무엇도 이것을 알지 못하므로 출하 빌드는 검사용 이음매를
+ * 지니지 않으며, 이것은 `$toolVariants`가 강제로 작게 만든 캐시에 대해 이미 하고 있는 것과
+ * 같은 방식입니다. 이 소스로 빌드되어 보통 바이너리가 닿을 수 없는 분기에 닿는 바이너리 하나를
+ * 더 만드는 것입니다. */
+#ifdef MB_OOM
+#include <stdlib.h>
+static int g_malloc_fails;
+void *__real_malloc(size_t n);
+void *__wrap_malloc(size_t n) {
+    return g_malloc_fails ? 0 : __real_malloc(n);
+}
+#endif
+
 static int fails;
 static void ok(int cond, const char *what) {
     printf("  %-58s %s\n", what, cond ? "ok" : "FAIL");
@@ -216,23 +265,35 @@ int main(void) {
        an out-of-memory condition, which is exactly the condition nobody
        reproduces by hand.
 
-       A capacity no allocator can satisfy is how that is reached on purpose.
-       The buffer must then behave as one that is already full: every vertex
-       dropped, every drop counted, and no dereference. Failing this test is a
-       hard crash rather than a wrong number, so it is worth its cost.
+       A malloc that answers NULL is how that is reached on purpose, and the
+       shim at the top of this file is what makes it answer. The buffer must
+       then behave as one that is already full: every vertex dropped, every
+       drop counted, and no dereference. Failing this is a hard crash rather
+       than a wrong number, so it is worth a second binary to reach.
 
        할당하지 못한 버퍼는 용량을 속이는 것이 아니라 *가득 찬* 것입니다. mb_init은 이전에
        HeapAlloc의 반환값과 무관하게 요청 용량을 기록했으므로, 실패한 할당은 널 포인터 위에
        cap=N을 만들어 냈습니다. mb_vtx의 유일한 방어선은 `count >= cap`이므로 그 조합은
        검사를 통과해 첫 정점에서 널에 기록했습니다. 메모리 부족 상황을 기다리는 크래시이며,
-       그것은 아무도 손으로 재현하지 않는 조건입니다. 어떤 할당자도 만족시킬 수 없는 용량이
-       그 상황에 의도적으로 도달하는 방법입니다. */
+       그것은 아무도 손으로 재현하지 않는 조건입니다. NULL로 답하는 malloc이 그 상황에
+       의도적으로 도달하는 방법이고, 이 파일 맨 위의 대역 함수가 그렇게 답하게 만듭니다. */
+    printf("\nthe buffer that could not be allocated\n");
+#ifdef MB_OOM
     {
         MeshBuf b;
-        mb_init(&b, 0x7fffffff);   /* ~94 GB of Vtx: this cannot succeed */
+
+        /* The flag is up for this one call and nothing else. Anything between
+           these two lines that allocates -- a printf, an ok() -- would get the
+           NULL meant for mb_init.
+           플래그는 이 한 번의 호출 동안만 올라가 있습니다. 이 두 줄 사이에서 할당하는 무엇이든,
+           printf든 ok()든, mb_init에게 갈 NULL을 대신 받게 됩니다. */
+        g_malloc_fails = 1;
+        mb_init(&b, 500);
+        g_malloc_fails = 0;
 
         okd(b.cap == 0, "an allocation that failed leaves a capacity of zero",
             b.cap, 0);
+        ok(b.v == 0, "and no pointer to write through");
 
         int before = diag_count(DIAG_VERTEX_BUF);
         v3 p = v3f(0, 0, 0), n = v3f(0, 1, 0);
@@ -249,6 +310,16 @@ int main(void) {
         mb_free(&b);   /* must tolerate a buffer that never owned anything */
         ok(b.v == 0 && b.cap == 0, "and frees cleanly having owned nothing");
     }
+#else
+    /* SAID OUT LOUD RATHER THAN LEFT OUT. A block that vanishes under an
+       #ifdef is a block nobody notices has stopped running; this binary cannot
+       make malloc fail, and the line says which one can.
+       빠뜨리지 않고 소리 내어 말합니다. #ifdef 아래로 사라지는 블록은 아무도 그것이 더 이상
+       실행되지 않는다는 것을 알아채지 못하는 블록입니다. 이 바이너리는 malloc을 실패시킬 수
+       없으며, 이 줄이 그렇게 할 수 있는 바이너리를 지목합니다. */
+    printf("  %-58s %s\n",
+           "(needs a malloc that fails: see diagtest_oom)", "skipped");
+#endif
 
     /* --- THE SAME POINT, for the clock -------------------------------------
        The block above tests the stamps in isolation, driving the clock by

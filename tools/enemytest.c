@@ -182,6 +182,48 @@ static float climb(int t, float rise, int risers) {
     return enemy_at(&g_pools, 0)->pos.y;
 }
 
+/* --- the control wall, derived from the table rather than written down ------
+ *
+ * IT WAS 0.85 AND THE TABLE WALKED OUT FROM UNDER IT. The number was picked to
+ * clear "the largest limit there is, the brute's 0.783m", and then the water
+ * spirit was resized to twice what it had been -- 3.40m tall, so a third of it
+ * is 1.133m and it strolled over the wall that nothing was supposed to climb.
+ * Two checks went red and neither of them was about stepping.
+ *
+ * SO THE FIXTURE READS THE SAME COLUMN THE ENGINE DOES. ::mon_step is
+ * `max(height/3, PLAYER_STEP)`, and the wall is the tallest ground kind's limit
+ * plus a tenth. Resize any row and the control resizes with it; that is the
+ * property the block's own comment already claims for the kinds it walks, now
+ * true of the number it walks them against.
+ *
+ * IT IS STILL A CONTROL. Deriving it from `height` rather than from mon_step
+ * keeps the two independent: a step limit changed to `height/2` would be a
+ * monster that climbs this wall, which is exactly what the control is for.
+ *
+ * 한국어
+ * ------
+ * *0.85였고 표가 그 밑에서 걸어 나갔습니다.* 그 수는 "가장 큰 상한인 브루트의 0.783m"을 넘도록
+ * 골랐고, 그 뒤 물의 정령이 예전의 두 배로 커졌습니다. 3.40m이므로 그 3분의 1은 1.133m이고,
+ * 아무것도 오르지 못해야 할 벽을 걸어 넘었습니다. 검사 둘이 빨개졌는데 어느 것도 걸음에 관한
+ * 것이 아니었습니다.
+ * *그래서 픽스처가 엔진과 같은 열을 읽습니다.* ::mon_step은 `max(height/3, PLAYER_STEP)`이고,
+ * 벽은 가장 키 큰 지상 종류의 상한에 10분의 1을 더한 값입니다. 어느 행을 resize하든 대조군이
+ * 함께 따라옵니다. 이 블록의 주석이 자기가 훑는 종류들에 대해 이미 주장하는 성질이며, 이제
+ * 그것들을 대는 기준이 되는 수에 대해서도 참입니다.
+ * *여전히 대조군입니다.* mon_step이 아니라 `height`에서 유도하므로 둘은 독립입니다. 단차
+ * 상한이 `height/2`로 바뀌면 이 벽을 오르는 몬스터가 되고, 그것이 바로 대조군이 있는 이유입니다.
+ */
+static float control_wall(void) {
+    float worst = PLAYER_STEP;
+    for (int t = 0; t < MON_TYPES; t++) {
+        const MonType *M = mon_stats(t);
+        if (M->flags & (MON_FLIES | MON_ANCHORED)) continue;
+        float own = M->height / 3.0f;
+        if (own > worst) worst = own;
+    }
+    return worst * 1.10f;
+}
+
 /* The two heights must straddle every kind's limit, or the pair proves nothing.
    두 높이는 모든 종류의 상한을 사이에 두고 갈라져야 합니다. 그러지 않으면 이 쌍은 아무것도
    증명하지 않습니다. */
@@ -192,11 +234,25 @@ static void check_step_fixture(float riser, float wall) {
         const MonType *M = mon_stats(t);
         if (M->flags & (MON_FLIES | MON_ANCHORED)) continue;
         if (wall <= M->height / 3.0f || wall <= PLAYER_STEP) {
-            ok(0, "fixture: the control wall is out of everything's reach");
+            okf(0, "fixture: the control wall is out of everything's reach",
+                wall, M->height / 3.0f);
+            return;
+        }
+        /* AND LOW ENOUGH TO SEE OVER, which is the other half and the half the
+           old hand-picked number was really protecting. A monster whose eye is
+           under the wall never notices the player, and "did not climb" would
+           stop meaning "could not".
+           *그리고 넘어다볼 수 있을 만큼 낮아야 하며*, 그것이 나머지 절반이자 손으로 고른 옛
+           숫자가 실제로 지키고 있던 절반입니다. 눈이 벽보다 아래인 몬스터는 플레이어를 결코
+           알아채지 못하고, "오르지 않았다"가 "오르지 못했다"를 뜻하기를 그만둡니다. */
+        if (wall >= M->eye) {
+            okf(0, "fixture: the control wall is out of everything's reach",
+                wall, M->eye);
             return;
         }
     }
-    ok(1, "fixture: the control wall is out of everything's reach");
+    okf(1, "fixture: the control wall is out of everything's reach",
+        wall, PLAYER_STEP);
 }
 
 /* --- the approach is not a line, and it is fast enough to matter -----------
@@ -1992,26 +2048,27 @@ int main(void) {
     printf("\nevery ground kind climbs a 0.5m riser\n");
     {
         /* 0.50m is the canonical riser tracetest calls climbable, and it is
-           under PLAYER_STEP by design. 1.20m is over every kind's limit and is
+           under PLAYER_STEP by design. ::control_wall is over every kind's limit and is
            the control: without it this block would still pass if the step limit
            had become unbounded, which fixes stairs by deleting the walls.
 
            ONE riser for the control, not two: the top of a second one blocks
            the sight line, and a monster that cannot see the player does not
            walk at all -- so "did not climb" would stop meaning "could not" and
-           the control would control nothing. 0.85m clears the largest limit
-           there is (the brute's 0.783m) and not much more, because anything
-           taller cannot be seen over.
+           the control would control nothing. The wall's height is ::control_wall
+           now rather than a number typed here; the note on that function is why.
            0.50m는 tracetest가 오를 수 있다고 부르는 표준 단 높이이며, 설계상 PLAYER_STEP
-           아래입니다. 0.85m는 모든 종류의 상한을 넘으며 대조군입니다. 이것이 없으면 단차
+           아래입니다. ::control_wall은 모든 종류의 상한을 넘으며 대조군입니다. 이것이 없으면 단차
            상한이 무한이 되어도 이 블록은 통과하는데, 그것은 벽을 지워서 계단을 고치는
            것입니다.
 
            대조군은 단이 *하나*입니다. 두 개면 두 번째 단의 윗면이 시야를 막아 몬스터가
            플레이어를 아예 보지 못하고, 그러면 "오르지 않았다"가 오르지 못해서가 아니라
-           올라갈 이유를 몰라서가 되어 대조군이 아무것도 통제하지 않게 됩니다. 그리고 0.85m는
-           가장 큰 상한(브루트의 0.783m)보다 겨우 넘습니다. 더 높이면 그 너머를 볼 수 없습니다. */
-        const float RISER = 0.50f, WALL = 0.85f;
+           올라갈 이유를 몰라서가 되어 대조군이 아무것도 통제하지 않게 됩니다. 벽의 높이는 이제
+           이곳에 적은 수가 아니라 ::control_wall이며, 그 함수의 설명이 이유입니다. */
+        const float RISER = 0.50f, WALL = control_wall();
+        printf("      riser %.2fm, control wall %.2fm\n",
+               (double)RISER, (double)WALL);
         check_step_fixture(RISER, WALL);
 
         for (int t = 0; t < MON_TYPES; t++) {

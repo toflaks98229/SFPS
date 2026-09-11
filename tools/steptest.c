@@ -27,6 +27,7 @@
 #include "hook.h"
 #include "enemy.h"    /* enemy_reset -- the monster pool is global, and shared */
 #include "pickup.h"   /* pickup_spawn_level -- also takes the World's pool now */
+#include "loot.h"     /* LOOT_HELD -- the one item every drop table names */
 #include "proj.h"     /* proj_reset -- now takes the World's own pool */
 #include "door.h"     /* door_reset, and the DOOR_* axes */
 #include "brush.h"    /* Brush::min/max and brush_point_in -- standing on a hazard */
@@ -708,6 +709,87 @@ static void check_score(void) {
        RunState에 사는 이유 전부입니다. */
     run_reset(&w.run, 0);
     ok(w.run.kills == 0 && w.run.alive_time == 0.0f, "a restart clears both");
+
+    /* --- and the boxes it drops are not all for the same gun ---------------
+     *
+     * ENGLISH
+     * -------
+     * `held` IS THE ONLY ITEM IN THE DROP TABLES, so this is what a kill pays
+     * with. ::loot_held_kind walks the roster from a cursor and answers with
+     * the first owned gun that has a belt; the cursor is the caller's, and
+     * ::step_drops used to declare it as a LOCAL, reset every frame. A corpse
+     * drop lands on its own frame, so the answer was always the first gun --
+     * the shotgun, which the player always owns. Grenade and rapid ammo never
+     * dropped at all, for the whole of a run, and the only symptom was a belt
+     * that never filled.
+     *
+     * TWO CORPSES ON TWO FRAMES, which is the case the old code got wrong and
+     * the purse path never could: the purse resolves its whole ring in one pass
+     * and so carried one cursor across it all along.
+     *
+     * The drop is SET rather than rolled. `chance` is a percentage and this is
+     * a statement about the cursor, not about the die -- a fixture that killed
+     * monsters until two of them paid would be measuring loot.txt.
+     *
+     * 한국어
+     * ------
+     * *드롭 표에 있는 항목은 `held`뿐이므로*, 처치가 지급하는 것이 이것입니다.
+     * ::loot_held_kind는 커서에서부터 보유 목록을 훑어 탄띠가 있는 첫 보유 총으로 답합니다.
+     * 커서는 호출자의 것인데, ::step_drops는 그것을 매 프레임 초기화되는 *지역 변수*로
+     * 선언했습니다. 시체의 드롭은 각자 자기 프레임에 떨어지므로 답은 언제나 첫 총, 곧
+     * 플레이어가 언제나 가진 샷건이었습니다. 유탄과 연사의 탄약은 한 플레이 내내 한 번도
+     * 드롭되지 않았고, 유일한 증상은 채워지지 않는 탄띠였습니다.
+     * *두 프레임에 걸친 시체 둘*이며, 옛 코드가 틀린 경우이자 몫 경로는 틀릴 수 없던 경우입니다.
+     * 몫은 고리 전체를 한 번에 해석하므로 처음부터 커서 하나를 그 전체에 걸쳐 날랐습니다.
+     * 드롭은 굴리지 않고 *설정합니다.* `chance`는 확률이고 이것은 주사위가 아니라 커서에 대한
+     * 진술입니다. 둘이 지급할 때까지 몬스터를 죽이는 픽스처는 loot.txt를 재게 됩니다. */
+    printf("\nwhat a corpse pays with rotates across the belt\n");
+    {
+        World d;
+        fixture(&d, 0);
+        d.weapon.owned[WP_SHOTGUN] = 1;
+        d.weapon.owned[WP_GRENADE] = 1;
+
+        for (int k = 0; k < 2; k++) {
+            Entity *e = &d.level.ents[d.level.n_ents++];
+            e->kind[0]='s'; e->kind[1]='p'; e->kind[2]='a'; e->kind[3]='w';
+            e->kind[4]='n'; e->kind[5]=0;
+            e->x = (short)(-1500 + k * 200); e->z = -1500;
+        }
+        enemy_spawn_level(&d.pools, &d.level);
+        okf(enemy_count(&d.pools) == 2, "two monsters are standing in the room",
+            (float)enemy_count(&d.pools), 2.0f);
+
+        int before = pickup_count(&d.pools);
+        int got[2] = { -1, -1 };
+        Input di = idle();
+
+        for (int k = 0; k < 2; k++) {
+            enemy_hurt(&d.pools, k, 10000, v3f(0.0f, 0.0f, 1.0f));
+            d.pools.enemy.m[k].drop = LOOT_HELD;
+            world_step(&d, &di, ASPECT, DT);
+            int n = pickup_count(&d.pools);
+            if (n > before) {
+                const Pickup *p = pickup_at(&d.pools, n - 1);
+                got[k] = p ? PK_AMMO_WEAPON(p->kind) : -1;
+                before = n;
+            }
+        }
+
+        printf("      first corpse paid weapon %d, second paid weapon %d\n",
+               got[0], got[1]);
+        okf(got[0] == WP_SHOTGUN, "the first box is for the gun you start with",
+            (float)got[0], (float)WP_SHOTGUN);
+        okf(got[1] == WP_GRENADE,
+            "and the next one is for the other gun, not the same one again",
+            (float)got[1], (float)WP_GRENADE);
+
+        /* And it is the RUN's cursor, so a restart starts the rotation over.
+           그리고 그것은 *플레이의* 커서이므로 재시작이 순환을 처음부터 다시 시작합니다. */
+        run_reset(&d.run, 0);
+        okf(d.run.drop_gun == 0, "and a restart puts the rotation back",
+            (float)d.run.drop_gun, 0.0f);
+    }
 }
 
 /* --- a teleporter actually moves the player ------------------------------
@@ -1010,19 +1092,38 @@ static void check_lava(void) {
      * 것으로 보는 사거리입니다. 현재 사거리에서만 건널 수 있는 링은 계획된 너프가 플레이어를
      * 고립시킬 링입니다. */
     {
-        /* Engine y of the columns' tops (map z=-256 / 32) and the widest hop a
-           shortened hook must still make. Both are metres. */
-        const float PILLAR_TOP = -8.0f, RING_HOP_MAX = 12.0f;
+        /* THE CAPS ARE A BAND NOW, NOT A HEIGHT. They all sat at -8 m and this
+           read `fabsf(f - PILLAR_TOP) > 0.1f`, which is a scan that finds a
+           ring only while the ring is flat -- break the heights up for the look
+           of the place and the check stops seeing most of it. What a column is
+           has nothing to do with being level with its neighbour: it is a dry
+           standable cap out in the sea, at whatever height the map gave it.
+           The band is the plan's own -10.75..-5.50 with a metre of slack each
+           way, so a cap outside it is a column somebody moved by accident
+           rather than one this scan cannot see.
+           *꼭대기는 이제 높이가 아니라 대역입니다.* 전부 -8m에 있었고 이 줄은
+           `fabsf(f - PILLAR_TOP) > 0.1f`이었는데, 그것은 고리가 평평한 동안에만 고리를 찾는
+           스캔입니다. 장소의 모양을 위해 높낮이를 흐트러뜨리면 검사가 그 대부분을 보지 못하게
+           됩니다. 기둥이 무엇인가는 이웃과 수평인지와 아무 상관이 없습니다. 바다 한가운데 있는,
+           마르고 설 수 있는 꼭대기이며, 높이는 맵이 준 그대로입니다.
+           대역은 계획 자신의 -10.75~-5.50에 양쪽으로 1미터씩 여유를 준 것입니다. 그래서 이
+           대역 밖의 꼭대기는 스캔이 못 보는 기둥이 아니라 누군가 실수로 옮긴 기둥입니다. */
+        const float CAP_HI = -4.5f, CAP_LO = -11.75f, RING_HOP_MAX = 12.0f;
         /* A column's cap is 3 m across, so grid hits 1 m apart must fold into
            one; neighbours are ~10 m apart, so a 5 m fold radius merges a cap
            without ever joining two columns. Averaged in, so a centre lands in
            the middle of its cap rather than on the first cell scanned. */
-        float cx[128], cz[128]; int cn[128], nc = 0;
+        float cx[128], cz[128], cy[128]; int cn[128], nc = 0;
         for (float x = -44.0f; x <= 44.0f; x += 1.0f)
             for (float z = -44.0f; z <= 44.0f; z += 1.0f) {
                 float f, c;
-                if (!level_ground(&w.level, x, z, PILLAR_TOP + 0.3f, 0.6f, &f, &c)) continue;
-                if (fabsf(f - PILLAR_TOP) > 0.1f) continue;      /* not a cap */
+                /* From above the tallest cap and with no step limit, so the
+                   trace answers with whatever is under the column rather than
+                   refusing a drop it was not told to expect.
+                   가장 높은 꼭대기보다 위에서, 단차 제한 없이 찾습니다. 그래야 예상하라고
+                   일러 주지 않은 낙차를 거절하지 않고 기둥 아래에 있는 것으로 답합니다. */
+                if (!level_ground(&w.level, x, z, CAP_HI + 0.5f, 1e9f, &f, &c)) continue;
+                if (f > CAP_HI || f < CAP_LO) continue;          /* not a cap */
                 if (c - f < PLAYER_EYE) continue;                /* no headroom */
                 if (level_hazard_at(&w.level, x, f + 0.1f, z) > 0) continue;
                 /* FREESTANDING IN THE SEA: lava on all four sides three metres
@@ -1039,10 +1140,12 @@ static void check_lava(void) {
                     float mx = cx[k] / cn[k], mz = cz[k] / cn[k];
                     if ((mx-x)*(mx-x) + (mz-z)*(mz-z) < 25.0f) { hit = k; break; }
                 }
-                if (hit < 0 && nc < 128) { hit = nc; cx[nc] = 0; cz[nc] = 0; cn[nc] = 0; nc++; }
-                if (hit >= 0) { cx[hit] += x; cz[hit] += z; cn[hit]++; }
+                if (hit < 0 && nc < 128) {
+                    hit = nc; cx[nc] = 0; cz[nc] = 0; cy[nc] = 0; cn[nc] = 0; nc++;
+                }
+                if (hit >= 0) { cx[hit] += x; cz[hit] += z; cy[hit] += f; cn[hit]++; }
             }
-        for (int k = 0; k < nc; k++) { cx[k] /= cn[k]; cz[k] /= cn[k]; }
+        for (int k = 0; k < nc; k++) { cx[k] /= cn[k]; cz[k] /= cn[k]; cy[k] /= cn[k]; }
 
         /* CONNECTIVITY, NOT NEAREST-NEIGHBOUR. Two columns are linked if a hook
            of RING_HOP_MAX could span them; the ring is the largest set of
@@ -1075,6 +1178,44 @@ static void check_lava(void) {
         okf(best_comp >= 24,
             "and they form one loop a shortened hook can still cross",
             (float)best_comp, 24.0f);
+
+        /* --- AND IT IS NOT A FENCE ---------------------------------------
+           Twenty-eight identical columns on a 10 m lattice at one height is a
+           loop the hook can cross and a thing nobody looks at twice. The ring
+           is drifted off its lattice and its caps are spread through a band,
+           and both of those are the kind of change that survives right up
+           until somebody regenerates the ring from a formula and quietly gets
+           the tidy version back. So the spread is asserted the same way the
+           loop is.
+           MEASURED AS A RANGE AND A COUNT, not as a list of heights. A ring
+           rebuilt at different heights should leave this green; a ring rebuilt
+           flat should not, and no number here is one the map has to match.
+           *그리고 그것은 울타리가 아닙니다.* 10m 격자 위 한 높이에 놓인 똑같은 기둥 스물여덟은
+           훅이 건널 수 있는 고리이자 아무도 두 번 보지 않는 것입니다. 고리는 격자에서 밀려나
+           있고 꼭대기는 대역에 걸쳐 흩어져 있는데, 둘 다 누군가 공식으로 고리를 다시 만들어
+           단정한 판본을 조용히 되돌려 놓기 전까지만 살아남는 종류의 변경입니다. 그래서 흩어짐도
+           고리와 같은 방식으로 단언합니다.
+           *높이 목록이 아니라 범위와 개수로 잽니다.* 다른 높이로 다시 만든 고리는 이것을
+           초록으로 두어야 하고, 평평하게 다시 만든 고리는 그러지 않아야 하며, 이곳의 어떤 수도
+           맵이 맞춰야 하는 수가 아닙니다. */
+        {
+            float lo = cy[0], hi = cy[0];
+            int levels = 0;
+            for (int k = 0; k < nc; k++) {
+                if (cy[k] < lo) lo = cy[k];
+                if (cy[k] > hi) hi = cy[k];
+                int seen = 0;
+                for (int j = 0; j < k; j++)
+                    if (fabsf(cy[j] - cy[k]) < 0.30f) { seen = 1; break; }
+                if (!seen) levels++;
+            }
+            printf("      caps span %.2f m, from %.2f to %.2f, over %d level(s)\n",
+                   (double)(hi - lo), (double)lo, (double)hi, levels);
+            okf(hi - lo >= 3.0f, "and they are not all at one height",
+                hi - lo, 3.0f);
+            okf((float)levels >= 6.0f, "with enough of them to read as broken up",
+                (float)levels, 6.0f);
+        }
     }
 
     /* --- every spawner the map wrote is a spawner that runs ----------------
@@ -1157,7 +1298,8 @@ static void check_lava(void) {
        The air slots are deliberately not checked. A flyer never asks
        ::floor_safe -- that asymmetry is the whole gameplay consequence of a
        lava floor -- so a ward slot hanging over the sea is exactly what an air
-       slot is for.
+       slot is for. A FLYER'S SPAWNER IS AN AIR SLOT TOO, which the loop below
+       reads off the kind rather than off the prefix; see the note on it.
        *아레나가 지상 몬스터를 놓는 모든 자리는 지상 몬스터가 쓸 수 있는 땅입니다.*
        ::make_monster는 이제 위험한 바닥을 거절하므로, 바다 위에 선 스포너나 지상 결계핵
        자리는 조용히 생산을 멈추는 가구입니다. 오지 않는 웨이브이며, 그것은 표식이 잘못된
@@ -1169,7 +1311,7 @@ static void check_lava(void) {
        비대칭이 용암 바닥이 낳는 게임플레이 결과의 전부이므로, 바다 위에 걸린 결계핵 자리는
        정확히 공중 자리가 존재하는 이유입니다. */
     {
-        int checked = 0, over_lava = 0;
+        int checked = 0, over_lava = 0, flyers = 0;
         for (int i = 0; i < w.level.n_ents; i++) {
             const Entity *e = &w.level.ents[i];
             int ground = txt_eq(e->kind, "wardground") ||
@@ -1177,14 +1319,51 @@ static void check_lava(void) {
                          (e->kind[0] == 's' && e->kind[1] == 'p'); /* spawner* */
             if (!ground) continue;
 
+            /* A SPAWNER IS ONLY A GROUND MARKER IF WHAT IT MAKES STANDS ON THE
+               GROUND, and the name after `spawner_` is the only thing that
+               says which. ::make_monster exempts MON_FLIES and MON_ANCHORED
+               from the hazard floor by the same reading, so asking anything
+               else here is asserting against a rule the engine does not have.
+               THIS IS WHAT THE CHECK USED TO GET WRONG. Every `sp*` kind was
+               treated as a ground marker, which swept in the caster spawners --
+               and lqdm4 hangs ten of its thirteen over the sea on purpose,
+               because a flyer's spawner over lava is a flyer's spawner and the
+               lava is the reason it is there. The check reported ten markers
+               standing a monster on the sea and not one of them did.
+               *스포너가 지상 표식인 것은 그것이 만드는 것이 땅에 설 때뿐이며*, `spawner_`
+               뒤의 이름만이 그것을 말합니다. ::make_monster도 같은 독법으로 MON_FLIES와
+               MON_ANCHORED를 위험 바닥에서 면제하므로, 이곳에서 그 밖의 것을 묻는 것은
+               엔진에 없는 규칙을 단언하는 일입니다.
+               *예전 검사가 틀린 지점이 이것입니다.* `sp*` 종류를 전부 지상 표식으로
+               취급했고, 그래서 캐스터 스포너가 쓸려 들어왔습니다. lqdm4는 열셋 중 열을
+               일부러 바다 위에 걸어 둡니다. 용암 위의 비행체 스포너는 비행체 스포너이고,
+               용암이야말로 그것이 그곳에 있는 이유이기 때문입니다. 검사는 몬스터를 바다에
+               세우는 표식 열 개를 보고했고 그중 하나도 그러지 않았습니다. */
+            if (e->kind[0] == 's' && e->kind[1] == 'p') {
+                static const char PRE[] = "spawner_";
+                int n = 0;
+                while (PRE[n] && e->kind[n] == PRE[n]) n++;
+                int mt = PRE[n] ? -1 : mon_type_for(e->kind + n);
+                if (mt >= 0 &&
+                    (mon_stats(mt)->flags & (MON_FLIES | MON_ANCHORED))) {
+                    flyers++;
+                    continue;
+                }
+            }
+
             float ex = e->x * 0.01f, ey = e->y * 0.01f, ez = e->z * 0.01f;
             float gf, gc;
             if (!level_ground(&w.level, ex, ez, ey, 1e9f, &gf, &gc)) continue;
             checked++;
-            if (level_hazard_at(&w.level, ex, gf, ez) > 0) over_lava++;
+            if (level_hazard_at(&w.level, ex, gf, ez) > 0) {
+                over_lava++;
+                printf("        over lava: %-22s at (%.1f, %.1f, %.1f) floor %.1f\n",
+                       e->kind, (double)ex, (double)ey, (double)ez, (double)gf);
+            }
         }
-        printf("      %d ground markers, %d of them standing on lava\n",
-               checked, over_lava);
+        printf("      %d ground markers, %d of them standing on lava "
+               "(%d marker(s) skipped: what they make holds its height)\n",
+               checked, over_lava, flyers);
         ok(checked > 0, "the arena has ground markers to check");
         okf(over_lava == 0,
             "and none of them stands a monster on the sea",

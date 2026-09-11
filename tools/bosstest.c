@@ -142,12 +142,15 @@ static int boss_hp(void) {
 }
 
 /* Destroy every standing ward, one blow each, so nothing accrues a summon.
-   A ward has WARD_SUMMON_DMG*3 health, so a single blow of all of it kills
-   without crossing a threshold on the way -- the accrual is deliberately after
-   the death branch.
+   A ward's health is a whole multiple of WARD_SUMMON_DMG -- five of them at the
+   table's 200 -- so a single blow of all of it kills without crossing a
+   threshold on the way: the accrual is deliberately after the death branch.
+   The blow is read off the type rather than written out, so retuning either
+   number leaves this fixture correct.
    서 있는 모든 결계핵을 한 방씩에 파괴하여 아무것도 소환을 누적하지 않게 합니다. 결계핵의
-   체력은 WARD_SUMMON_DMG*3이므로, 그 전부를 한 방에 넣으면 도중에 문턱을 넘지 않고 죽습니다.
-   누적은 의도적으로 사망 분기 뒤에 있습니다. */
+   체력은 WARD_SUMMON_DMG의 정수배이고 표의 200에서는 다섯 배이므로, 그 전부를 한 방에 넣으면
+   도중에 문턱을 넘지 않고 죽습니다. 누적은 의도적으로 사망 분기 뒤에 있습니다. 타격량은 적어
+   두지 않고 종류에서 읽으므로, 두 수 중 무엇을 조율해도 이 픽스처는 옳게 남습니다. */
 static void smash_wards(void) {
     for (int i = 0; i < enemy_count(&g_pools); i++) {
         const Enemy *m = enemy_at(&g_pools, i);

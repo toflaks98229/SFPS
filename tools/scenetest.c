@@ -776,16 +776,42 @@ int main(void) {
        are more than three to choose between and cannot churn when there are
        not, so a map that never offers a fourth never exercises the sort at
        all. This walks the markers the map puts a player at -- item drops, ward
-       posts, the start -- and asks how many lamps reach each one. The arena
-       draws twenty lamp faces and at the shipped reach some markers have seven
-       of them in range; the eight that were placed leave no marker with more
-       than three, which is the whole reason the count is eight.
+       posts, the start -- and asks how many lamps reach each one.
+       IT WAS EIGHT LAMPS AT 400 UNITS AND IS SIXTEEN AT 160. The first answer
+       chose the COUNT: eight of the map's twenty lamp faces, spread by
+       farthest-point sampling, left no marker with more than three in range at
+       the shipped reach. Editing in TrenchBroom afterwards put eleven and then
+       sixteen lamps in, and the sampling that made eight work does not survive
+       being added to -- at sixteen the worst marker had EIGHT lamps on it and
+       twenty-four markers were over the cap.
+       THE SECOND ANSWER CHOOSES THE REACH INSTEAD, and keeps every lamp the
+       author placed. Sixteen at 160 units leaves the worst marker with two. The
+       reason it is not merely the arithmetic that worked is that these lamps
+       sit where the map's own `med_tmpl_lit3` faces are -- they are FIXTURES on
+       walls, and a five-metre pool around a wall fixture reads as a lamp where
+       a twelve-metre wash reads as ambient the room happens to have.
+       160 AND NOT 184, which is the largest reach that still clears. 184 leaves
+       the worst marker at exactly three, and a rule satisfied exactly at its cap
+       breaks again on the next marker somebody places -- this map went from 55
+       markers to 83 while nobody was looking at this line.
        *맵은 붐비지 않아야 하며*, 그것은 상한이 *제공하는* 성질이 아니라 상한이 *견딜 만하게
        만드는* 성질입니다. 가장 가까운 셋은 고를 것이 셋보다 많을 때 요동치고 많지 않으면
        요동칠 수 없으므로, 넷째를 내밀지 않는 맵은 정렬을 아예 쓰지 않습니다. 맵이 플레이어를
-       두는 표식들을 걸으며 각각에 몇 개의 등이 닿는지 묻습니다. 투기장은 램프 면 스무 개를
-       그리며 출하 도달거리에서 어떤 표식에는 그중 일곱이 들어옵니다. 놓인 여덟은 어떤
-       표식에도 셋을 넘기지 않으며, 그것이 개수가 여덟인 이유의 전부입니다. */
+       두는 표식들을 걸으며 각각에 몇 개의 등이 닿는지 묻습니다.
+       *400 단위에 등 여덟이었고 지금은 160 단위에 열여섯입니다.* 첫 답은 *개수*를 골랐습니다.
+       맵의 램프 면 스무 개 중 여덟을 최원점 표집으로 퍼뜨렸고, 출하 도달거리에서 어떤 표식에도
+       셋을 넘기지 않았습니다. 그 뒤 TrenchBroom 편집이 등을 열하나로, 다시 열여섯으로 만들었고,
+       여덟을 성립시킨 표집은 더해지는 것을 견디지 못합니다. 열여섯에서 최악의 표식에는 여덟이
+       닿았고 표식 스물넷이 상한을 넘었습니다.
+       *두 번째 답은 개수 대신 도달거리를 고르며*, 제작자가 놓은 등을 하나도 버리지 않습니다.
+       160 단위의 열여섯은 최악의 표식에 둘을 남깁니다. 이것이 그저 맞아떨어진 산술이 아닌
+       이유는, 이 등들이 맵 자신의 `med_tmpl_lit3` 면이 있는 자리에 놓여 있기 때문입니다.
+       그것들은 벽에 달린 *조명기구*이고, 벽 기구 둘레의 5미터 웅덩이는 등으로 읽히지만
+       12미터 얼룩은 방이 원래 가진 환경광으로 읽힙니다.
+       *184가 아니라 160인 이유*는, 184가 규칙을 통과하는 가장 큰 도달거리이지만 최악의 표식을
+       정확히 셋에 남기기 때문입니다. 자기 상한에 정확히 걸쳐 만족되는 규칙은 누군가 표식을
+       하나 더 놓는 순간 다시 깨집니다. 이 맵은 아무도 이 줄을 보지 않는 사이에 표식 55개에서
+       83개가 되었습니다. */
     int worst = 0, worst_at = -1;
     for (int i = 0; i < w.level.n_ents; i++) {
         const Entity *E = &w.level.ents[i];

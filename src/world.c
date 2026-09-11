@@ -456,15 +456,37 @@ static void step_look_move(World *w, const Input *in, float aspect, float dt) {
  * 이미 보고 있는 자리이기도 합니다.
  */
 static void step_drops(World *w) {
-    int gun = 0;
-
     for (int i = 0, n = enemy_count(&w->pools); i < n; i++) {
         v3 at;
         int kind = enemy_take_drop(&w->pools, i, &at);
-        if (kind < 0) continue;
+        /* == -1 AND NOT < 0, the second of the two guards that swallowed
+           ::LOOT_HELD on the way here. This one sat directly above the branch
+           written to handle it: a corpse owing a `held` box returned -2, this
+           line read "negative, so nothing", and the four lines below never ran.
+           Fixing ::enemy_take_drop alone changed nothing, because the value it
+           was finally allowed to return died on this line instead.
+           *0보다 작음이 아니라 -1과 같음*이며, ::LOOT_HELD를 이곳까지 오는 길에 삼킨 두
+           방어선 중 두 번째입니다. 이것은 그것을 처리하려고 쓴 분기 바로 위에 있었습니다.
+           `held` 상자를 빚진 시체가 -2를 반환하면 이 줄이 "음수이니 없음"으로 읽었고, 아래 네
+           줄은 한 번도 실행되지 않았습니다. ::enemy_take_drop만 고쳐서는 아무것도 달라지지
+           않았습니다. 마침내 반환될 수 있게 된 값이 이번에는 이 줄에서 죽었기 때문입니다. */
+        if (kind == -1) continue;
 
+        /* THE CURSOR IS THE RUN'S, NOT THIS FRAME'S, and it used to be a local
+           declared above this loop. A corpse drop lands on its own frame, so a
+           cursor reset every frame always answered with the first owned gun --
+           the shotgun, which the player always has. Grenade and rapid ammo
+           never dropped for the whole of a run, and the only `held` box that
+           ever reached another belt came from the wave purse, which resolves
+           its whole ring in one pass. See ::RunState::drop_gun.
+           *커서는 이 프레임의 것이 아니라 플레이의 것이며*, 예전에는 이 루프 위에 선언된 지역
+           변수였습니다. 시체의 드롭은 각자 자기 프레임에 떨어지므로, 프레임마다 초기화되는
+           커서는 언제나 보유한 첫 총으로 답했습니다. 플레이어가 언제나 가진 샷건입니다. 유탄과
+           연사의 탄약은 플레이 내내 한 번도 드롭되지 않았고, 다른 탄띠에 닿은 유일한 `held`
+           상자는 고리 전체를 한 번에 해석하는 웨이브 몫에서 온 것뿐이었습니다.
+           ::RunState::drop_gun을 참조하십시오. */
         if (kind == LOOT_HELD) {
-            kind = loot_held_kind(&w->weapon, &gun);
+            kind = loot_held_kind(&w->weapon, &w->run.drop_gun);
             if (kind < 0) continue;
         }
         pickup_toss(&w->pools, kind, at, v3f(0, PICKUP_TOSS_UP * 0.55f, 0));

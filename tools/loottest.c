@@ -248,10 +248,21 @@ int main(void) {
         int second = loot_held_kind(&w, &gun);
         ok(first != second, "two guns owned are fed in turn");
 
-        /* And the cursor is the caller's: a fresh one starts over, which is what
-           makes one corpse's drop independent of the last one's.
-           그리고 커서는 호출자의 것입니다. 새 커서는 처음부터 시작하며, 그것이 시체 하나의
-           드롭을 이전 것과 독립적으로 만듭니다. */
+        /* And the cursor is the caller's: a fresh one starts over.
+           THIS USED TO CARRY A CLAIM THAT WAS THE BUG. It read "which is what
+           makes one corpse's drop independent of the last one's" -- and that
+           independence is precisely how every corpse in a run came to drop
+           shotgun ammo, because `step_drops` handed it a fresh zero every
+           frame. The function's behaviour here is right and unchanged; what was
+           wrong was a caller taking it as licence. ::RunState::drop_gun is
+           where that caller's cursor lives now.
+           그리고 커서는 호출자의 것입니다. 새 커서는 처음부터 시작합니다.
+           *이 자리에 결함 그 자체인 주장이 실려 있었습니다.* "그것이 시체 하나의 드롭을 이전
+           것과 독립적으로 만듭니다"라고 적혀 있었는데, 그 독립성이야말로 한 플레이의 모든
+           시체가 샷건 탄약을 떨어뜨리게 된 방식입니다. `step_drops`가 매 프레임 새 0을
+           건넸기 때문입니다. 이곳 함수의 동작은 옳고 바뀌지 않았습니다. 틀린 것은 그것을
+           면허로 받아들인 호출자였습니다. 그 호출자의 커서는 이제 ::RunState::drop_gun에
+           있습니다. */
         int fresh = 0;
         ok(loot_held_kind(&w, &fresh) == first,
            "and a fresh cursor starts from the first gun again");

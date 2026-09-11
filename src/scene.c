@@ -1390,6 +1390,71 @@ static v3 pickup_centre(const Pickup *p) {
    프레임이며, 그 위에 그냥 존재하는 이름은 시작하는 게임이 아니라 스크린숏으로 읽힙니다. */
 #define TITLE_FADE      0.9f
 
+/* --- the sigil behind the name ---------------------------------------------
+ *
+ * ENGLISH
+ * -------
+ * THE GAME IS CALLED 마법소녀 대소동 AND THE TITLE SCREEN WAS TWO LINES OF
+ * TEXT. A name is not a concept; what says "magical girl" on a screen is a
+ * summoning circle, and this game already draws one four times a second -- the
+ * emblem atlas is the ring and stone that ride the wand, and ::EMB_SMEAR is the
+ * neutral column of it whose own cell is white so a tint decides its colour.
+ * So the sigil is NOT NEW ART. Not one byte is added to the floppy: the same
+ * two cells the view model has always drawn, at title size, behind the name.
+ *
+ * THREE LAYERS, AND THE MIDDLE ONE TURNS THE OTHER WAY. One ring alone reads
+ * as a spinning decal; a second inside it running against the first reads as
+ * something being held open, which is what a summoning circle is. The stone at
+ * the centre does not turn at all -- the same division ::wpview_emblem_cell
+ * makes on the wand, and for the same reason: the thing that turns is the
+ * mechanism and the thing that does not is the object.
+ *
+ * IT FADES BY GOING DARK RATHER THAN CLEAR. ::RD_SPRITE2D is alpha-TESTED and
+ * writes `1.0` into alpha by construction, so there is no blend to fade with.
+ * Multiplying the tint by the same `k` the text uses takes the sigil from black
+ * to gold against a dimmed room, which is the same arrival the name makes.
+ *
+ * 한국어
+ * ------
+ * *게임 이름이 마법소녀 대소동인데 타이틀 화면은 글자 두 줄이었습니다.* 이름은 컨셉이
+ * 아닙니다. 화면에서 "마법소녀"라고 말하는 것은 소환진이고, 이 게임은 이미 그것을 초당 네 번씩
+ * 그리고 있습니다. 문양 아틀라스가 지팡이에 얹히는 고리와 돌이며, ::EMB_SMEAR는 그중 중립
+ * 열로서 자기 칸이 희기 때문에 색을 색조가 정합니다.
+ * 그러므로 이 소환진은 *새 아트가 아닙니다.* 플로피에 한 바이트도 더하지 않습니다. 뷰 모델이
+ * 늘 그려 오던 바로 그 두 칸을, 타이틀 크기로, 이름 뒤에 놓은 것입니다.
+ * *세 겹이며 가운데 것이 반대로 돕니다.* 고리 하나만으로는 돌아가는 스티커로 읽힙니다. 그
+ * 안쪽에서 반대로 도는 두 번째가 있으면 무언가를 *열어 붙들고 있는 것*으로 읽히고, 소환진이란
+ * 그런 것입니다. 한가운데의 돌은 전혀 돌지 않습니다. ::wpview_emblem_cell이 지팡이 위에서 하는
+ * 것과 같은 구분이고 이유도 같습니다. 도는 것은 기구이고 돌지 않는 것은 물건입니다.
+ * *투명해지는 것이 아니라 어두워지며 사라집니다.* ::RD_SPRITE2D는 알파 *테스트*이고 구조적으로
+ * 알파에 1.0을 씁니다. 섞어서 사라지게 할 것이 없습니다. 글자가 쓰는 것과 같은 `k`를 색조에
+ * 곱하면 어두워진 방을 배경으로 검정에서 금색으로 갑니다. 이름이 하는 것과 같은 도착입니다. */
+/* ONE SEAL BEHIND THE NAME WAS THE FIRST TRY AND IT WAS THE WRONG SHAPE.
+   The emblem is a diamond -- a square stood on its point, filling its cell --
+   so it is as tall as it is wide. The name is the opposite: 558 glyph pixels
+   across and 72 tall. A seal big enough to frame that name is 558 tall as
+   well, which is taller than the window it would be framing it in, and one
+   small enough to fit sat in the middle of 소녀 looking like a smudge.
+   SO THEY FLANK IT, which also puts them in the only space the screen has
+   going spare. The name leaves about 200 pixels at each margin and needs none
+   of it; a seal on each side turns the title into a card rather than a line.
+   *하나를 이름 뒤에 두는 것이 첫 시도였고 모양이 틀렸습니다.* 문양은 마름모, 곧 자기 칸을
+   채우며 꼭짓점으로 선 정사각형이므로 높이와 너비가 같습니다. 이름은 반대입니다. 글리프
+   픽셀로 가로 558에 세로 72입니다. 그 이름을 감쌀 만큼 큰 문장은 세로도 558이 되는데 그것은
+   감쌀 창보다 큽니다. 그리고 들어갈 만큼 작은 것은 소녀 한가운데에 앉아 얼룩처럼 보였습니다.
+   *그래서 양옆에 둡니다.* 그러면 화면에서 유일하게 남아도는 자리에 놓이기도 합니다. 이름은
+   양쪽 여백을 200픽셀쯤 남기고 그중 아무것도 쓰지 않습니다. 양옆의 문장 하나씩이 타이틀을
+   한 줄이 아니라 한 장의 카드로 만듭니다. */
+#define TITLE_SIGIL_SIZE  128.0f  /* each seal, pixels across / 문장 하나의 지름(픽셀) */
+#define TITLE_SIGIL_INNER   0.54f /* the counter-turning one, as a fraction / 반대로 도는 것의 비율 */
+#define TITLE_SIGIL_STONE   0.42f /* and the stone / 그리고 돌 */
+#define TITLE_SIGIL_RATE    0.22f /* rad/s, slow enough to read as held open / 열어 붙든 것으로 읽힐 만큼 느리게 */
+#define TITLE_SIGIL_GAP    46.0f  /* clear of the name's own edge / 이름의 가장자리에서 띄우는 거리 */
+#define TITLE_SIGIL_DY     34.0f  /* below the name's top edge: the name's middle / 이름 위 모서리 아래. 이름의 한가운데 */
+#define TITLE_SIGIL_OUT_L   0.78f /* how bright each layer is against the name / 이름 대비 각 겹의 밝기 */
+#define TITLE_SIGIL_IN_L    0.52f
+#define TITLE_SIGIL_STN_L   0.95f
+
 /* --- the cutscene / 컷신 --- */
 
 /* Darker than the menu and lighter than nothing. A cutscene is read rather
@@ -2306,6 +2371,64 @@ static void text_run(Scene *s, float x, float y, float size, const char *str,
  * @param[in]     vh 뷰포트 높이 (픽셀).
  * @param[in]     r,g,b,a 채울 색상.
  */
+/**
+ * @brief One layer of the title's sigil: an emblem cell as a turned screen quad.
+ *
+ * ENGLISH: The caller has already set ::RD_SPRITE2D and bound the emblem
+ * atlas, because all three layers share both and a mode change per layer would
+ * be three state changes for one picture.
+ * `ang` IS THE QUAD'S ROTATION, not the texture's. The atlas has no turned
+ * copies and does not need any -- a square is rotated by rotating its corners,
+ * which is how ::emblem_quad already turns the ring on the wand.
+ *
+ * 한국어
+ * ------
+ * @brief 타이틀 소환진의 한 겹. 문양 칸 하나를 돌려 놓은 화면 사각형입니다.
+ *
+ * 호출자가 이미 ::RD_SPRITE2D를 설정하고 문양 아틀라스를 묶어 두었습니다. 세 겹이 둘 다
+ * 공유하며, 겹마다 모드를 바꾸면 그림 하나에 상태 변경이 셋이 되기 때문입니다.
+ * *`ang`은 텍스처가 아니라 사각형의 회전입니다.* 아틀라스에는 돌려 놓은 사본이 없고 필요하지도
+ * 않습니다. 정사각형은 네 귀퉁이를 돌려서 돌리며, ::emblem_quad가 지팡이 위의 고리를 이미 그렇게
+ * 돌립니다.
+ *
+ * @param[in,out] s    Scene supplying the HUD buffer and mesh. / HUD 버퍼와 메시를 공급하는 장면.
+ * @param[in]     cx,cy Centre, pixels. / 중심(픽셀).
+ * @param[in]     half  Half the width of the square. / 정사각형 너비의 절반.
+ * @param[in]     ang   Rotation, radians. / 회전(라디안).
+ * @param[in]     row   ::EMB_ROWS index: 0 the ring, 1 the stone. / 0번 고리, 1번 돌.
+ * @param[in]     r,g,b Tint; ::EMB_SMEAR's cell is white, so this is the colour. / 색조. ::EMB_SMEAR의 칸이 희므로 이것이 곧 색입니다.
+ */
+static void title_sigil(Scene *s, float cx, float cy, float half, float ang,
+                        int row, float r, float g, float b) {
+    float c = cosf(ang), sn = sinf(ang);
+    float rx = c * half, ry = sn * half;      /* the quad's own right */
+    float ux = -sn * half, uy = c * half;     /* and its up */
+
+    float u0, v0, u1, v1;
+    emblem_uv(row, EMB_SMEAR, &u0, &v0, &u1, &v1);
+
+    v3 n = v3f(0, 0, 1);
+    const v3 P[4] = {
+        v3f(cx - rx - ux, cy - ry - uy, 0.0f),
+        v3f(cx + rx - ux, cy + ry - uy, 0.0f),
+        v3f(cx + rx + ux, cy + ry + uy, 0.0f),
+        v3f(cx - rx + ux, cy - ry + uy, 0.0f),
+    };
+    const float U[4] = { u0, u1, u1, u0 };
+    const float V[4] = { v0, v0, v1, v1 };
+
+    mb_reset(&s->hud_buf);
+    mb_vtx(&s->hud_buf, P[0], n, U[0], V[0]);
+    mb_vtx(&s->hud_buf, P[1], n, U[1], V[1]);
+    mb_vtx(&s->hud_buf, P[2], n, U[2], V[2]);
+    mb_vtx(&s->hud_buf, P[0], n, U[0], V[0]);
+    mb_vtx(&s->hud_buf, P[2], n, U[2], V[2]);
+    mb_vtx(&s->hud_buf, P[3], n, U[3], V[3]);
+    mesh_upload(&s->hud_mesh, &s->hud_buf, 1);
+    rd_color(r, g, b, 0.0f);
+    mesh_draw(&s->hud_mesh);
+}
+
 static void full_screen_wash(Scene *s, int vw, int vh,
                              float r, float g, float b, float a) {
     mb_reset(&s->hud_buf);
@@ -2870,10 +2993,6 @@ void scene_draw_title(Scene *s, int vw, int vh, float t, int best) {
        읽힙니다. */
     if (!menu_is_open()) full_screen_wash(s, vw, vh, 0.0f, 0.0f, 0.0f, TITLE_DIM);
 
-    rd_mode(RD_TEXT);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, font_texture());
-
     /* Arrives rather than appears. Clamped both ways because `t` is a clock the
        caller owns and a negative one would make the first frame brighter than
        full.
@@ -2892,6 +3011,65 @@ void scene_draw_title(Scene *s, int vw, int vh, float t, int best) {
 
     const char *title = "마법소녀 대소동";
     float tw = font_width(TITLE_SIZE, title);
+
+    /* --- a seal at each end of the name -----------------------------------
+       Drawn BEFORE the text so the name is never behind anything, and placed
+       off the name's measured width so the pair moves with it: retitle the
+       game and the seals still sit clear of the last glyph.
+       IT DOES NOT TOUCH CULLING, and the first cut of it did. ::ui_begin turns
+       face culling off for the whole overlay -- every quad in every UI pass is
+       a screen rectangle whose winding nobody has had to think about -- so a
+       block that disables it and then politely puts it back has enabled it for
+       everything drawn afterwards. The title's own name went invisible: the
+       seals appeared, the three lines of text did not, and nothing said why.
+       A turned quad is exactly the shape that would have needed the disable if
+       the pass had not already made it.
+       글자보다 먼저 그립니다. 그래야 이름이 무엇인가의 뒤에 놓이지 않습니다. 그리고 측정된 이름 너비에서
+       떨어뜨려 배치하므로 둘이 이름을 따라움직입니다. 게임 이름을 바꿔도 문장은 여전히 마지막
+       글자에서 비켜 서 있습니다.
+       *컴링은 건드리지 않으며*, 첫 판은 건드렸습니다. ::ui_begin이 오버레이 전체에 대해 면
+       컴링을 끔니다. 모든 UI 패스의 모든 사각형은 아무도 감기 순서를 고민할 필요가 없던 화면
+       사각형이기 때문입니다. 그러므로 그것을 끄고 공손히 되돌려 놓는 블록은 *그 뒤에 그려지는
+       모든 것*에 대해 컴링을 켜 놓은 것입니다. 타이틀 자신의 이름이 보이지 않게 되었습니다.
+       문장은 나타났고 글자 세 줄은 나타나지 않았으며, 아무것도 이유를 말해 주지 않았습니다.
+       돌려 놓은 사각형은, 패스가 이미 꺼 두지 않았다면 바로 그 끄기가 필요했을 모양입니다. */
+    {
+        float half = TITLE_SIGIL_SIZE * 0.5f;
+        float dx   = tw * 0.5f + TITLE_SIGIL_GAP + half;
+        float mid  = top + TITLE_SIGIL_DY;
+        float a    = t * TITLE_SIGIL_RATE;
+
+        rd_mode(RD_SPRITE2D);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, emblem_atlas());
+
+        float o = k * TITLE_SIGIL_OUT_L, i = k * TITLE_SIGIL_IN_L,
+              n = k * TITLE_SIGIL_STN_L;
+
+        /* MIRRORED, so the pair reads as two halves of one title rather than
+           as the same sticker printed twice: the left seal turns one way and
+           the right the other, and each one's inner ring runs against its own
+           outer. The stones do not turn at all.
+           거울상입니다. 그래야 둘이 같은 스티커를 두 번 찍은 것이 아니라 한 타이틀의 두
+           절반으로 읽힙니다. 왼쪽 문장은 한 쪽으로, 오른쪽은 반대로 도며, 각자의 안쪽 고리는
+           자기 바깥 고리에 맞서 됩니다. 돌은 전혀 돌지 않습니다. */
+        for (int side = 0; side < 2; side++) {
+            float sx = cx + (side ? dx : -dx);
+            float sa = side ? -a : a;
+
+            title_sigil(s, sx, mid, half, sa, 0,
+                        1.00f * o, 0.82f * o, 0.28f * o);
+            title_sigil(s, sx, mid, half * TITLE_SIGIL_INNER, -sa * 1.7f, 0,
+                        1.00f * i, 0.82f * i, 0.28f * i);
+            title_sigil(s, sx, mid, half * TITLE_SIGIL_STONE, 0.0f, 1,
+                        1.00f * n, 0.88f * n, 0.44f * n);
+        }
+    }
+
+    rd_mode(RD_TEXT);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, font_texture());
+
     text_run(s, cx - tw * 0.5f, top, TITLE_SIZE, title,
              1.0f, 0.82f, 0.28f, k);
 

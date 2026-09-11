@@ -89,14 +89,14 @@ static const MonType TYPES[MON_TYPES] = {
        64x96 스프라이트 자신의 비율이고 크기가 *아닙니다*. enemy.h의 치수 블록을 참조하십시오. */
     {"water_spirit", /* name       entity name a level places it by / 레벨이 배치할 때 쓰는 이름 */
      AI_CASTER,      /* behaviour  AI_CASTER holds range, AI_BRAWLER closes / 사거리 유지 · 접근 */
-     60,             /* hp         starting health / 시작 체력 */
+     30,             /* hp         Quake's grunt -- the thing you kill without thinking / Quake의 병졸. 생각 없이 잡는 것 */
      7.0f,           /* speed      walking, m/s / 이동 속도 */
      0.62f,          /* weave      how far off a straight line it closes, rad / 갈지자 폭 */
      1.04f,          /* radius     collision and hitscan, m / 충돌·히트스캔 반경 */
      3.40f,          /* height     standing, and what is drawn, m / 신장이자 그려지는 높이 */
      2.60f,          /* eye        above the feet, m -- looks and shoots from here / 시선 높이 */
      34.0f,          /* sight      first notices the player at, m / 인지 거리 */
-     0.70f,          /* aspect     sprite width / height -- the 64x96 art's own ratio / 스프라이트 가로세로 비율 */
+     0.6667f,        /* aspect     the 64x96 cell's own ratio, so the art is not stretched / 64x96 셀 자신의 비율. 아트가 늘어나지 않음 */
      260.0f,         /* yaw_speed  turning, deg/s / 회전 속도 */
      0.6f,           /* pain_lock  flinch immunity after a hit, s / 피격 경직 면역 시간 */
      12,             /* cap        alive at once; 0 is no limit / 동시 생존 상한 */
@@ -115,7 +115,19 @@ static const MonType TYPES[MON_TYPES] = {
      2.35f,            /* height     m */
      1.80f,            /* eye        m */
      34.0f,            /* sight      m */
-     1.2f,             /* aspect */
+     /* WAS 1.20, WHICH DREW IT 1.8x WIDER THAN ANYBODY PAINTED IT. The cell is
+        64x96 and the billboard is `height * aspect` wide, so 1.20 put a 2.35m
+        creature on a 2.82m-wide quad -- wider than it is tall, for a drawing of
+        an upright figure. It also buried 42% of the sprite in any wall it stood
+        against, against a body only 1.61m across, which is what enemytest
+        measures. Two thirds is the cell, and the drawn body comes out 1.35m
+        wide inside a 1.61m collision cylinder.
+        *1.20이었고, 그것은 누가 칠한 것보다 1.8배 넓게 그렸습니다.* 셀은 64x96이고 빌보드는
+        `height * aspect` 너비이므로, 1.20은 2.35m 생물을 2.82m 너비 사각형에 올렸습니다.
+        똑바로 선 인물의 그림인데 높이보다 넓습니다. 기대선 벽에 스프라이트의 42%를 묻기도
+        했고 몸통은 1.61m밖에 되지 않는데 그렇습니다. enemytest가 재는 것이 그것입니다.
+        3분의 2가 셀이며, 그리면 몸이 1.61m 충돌 원기둥 안쪽인 1.35m 너비로 나옵니다. */
+     0.6667f,          /* aspect */
      130.0f,           /* yaw_speed  deg/s */
      2.5f,             /* pain_lock  s -- MON_UNFLINCHING never flinches anyway / 어차피 경직 없음 */
      5,                /* cap */
@@ -125,14 +137,14 @@ static const MonType TYPES[MON_TYPES] = {
        접근하지 않고 사거리를 지키며, 공중에서 그렇게 합니다. MON_FLIES | MON_FLOATS. */
     {"caster",                /* name */
      AI_CASTER,               /* behaviour  holds its range / 사거리 유지 */
-     90,                      /* hp */
+     80,                      /* hp         Quake's scrag / Quake의 스크래그 */
      5.8f,                    /* speed      m/s */
      0.46f,                   /* weave      rad */
      0.546f,                  /* radius     m */
      1.90f,                   /* height     m */
      1.45f,                   /* eye        m */
      40.0f,                   /* sight      m -- reaches across the arena / 아레나를 가로지름 */
-     1.20f,                   /* aspect */
+     0.6667f,                 /* aspect     the cell's, like the brute's -- see that row / 셀의 비율. 브루트의 행을 보십시오 */
      180.0f,                  /* yaw_speed  deg/s */
      1.2f,                    /* pain_lock  s */
      7,                       /* cap */
@@ -151,7 +163,24 @@ static const MonType TYPES[MON_TYPES] = {
      3.60f,                                    /* height     m -- leaves room for the wards above / 위쪽 결계핵 자리를 남김 */
      2.00f,                                    /* eye        m */
      60.0f,                                    /* sight      m */
-     3.00f,                                    /* aspect */
+     /* WAS 3.00, THE WORST OF THE FOUR. The drawing is a horned skull 60x83 in
+        a 64x96 cell -- taller than it is wide -- and 3.00 put it on a quad
+        10.80m across against a 2.40m body, stretching it 4.5x and hanging four
+        metres of sprite through the wall on either side. enemytest never said
+        so because ::MON_ANCHORED rows are excluded from the wall standoff, on
+        the argument that a ward IS the wall; the maw inherited the exemption
+        without inheriting the reason.
+        Two thirds is the cell, so the skull arrives at the shape it was drawn:
+        2.40m across, exactly its own collision cylinder. `height` is what
+        resizes a boss proportionally if it should be bigger than that.
+        *3.00이었고 넷 중 가장 심했습니다.* 그림은 64x96 셀 안의 60x83 뿔 달린 해골이며 높이가
+        너비보다 큽니다. 그런데 3.00은 그것을 2.40m 몸통에 대해 10.80m 너비 사각형에 올려 4.5배로
+        늘이고, 양옆으로 4미터씩 스프라이트를 벽 밖으로 내보냈습니다. enemytest가 그렇다고 말하지
+        않은 것은 ::MON_ANCHORED 행이 벽 이격 검사에서 제외되기 때문이며, 그 근거는 결계핵이
+        곧 벽이라는 것이었습니다. 아귀는 그 면제를 물려받으면서 그 이유는 물려받지 않았습니다.
+        3분의 2가 셀이므로 해골이 그려진 모양 그대로 도착합니다. 2.40m 너비이고 정확히 자기
+        충돌 원기둥입니다. 보스가 그보다 커야 한다면 비례 확대를 하는 것은 `height`입니다. */
+     0.6667f,                                  /* aspect */
      90.0f,                                    /* yaw_speed  deg/s */
      99.0f,                                    /* pain_lock  s -- effectively never flinches / 사실상 경직 없음 */
      1,                                        /* cap */
@@ -163,14 +192,34 @@ static const MonType TYPES[MON_TYPES] = {
        rad는 그려진 기둥보다 의도적으로 넓고, sight 40은 투기장을 가로지릅니다. */
     {"ward",                                    /* name */
      AI_CASTER,                                 /* behaviour */
-     200,                                       /* hp         WARD_SUMMON_DMG x 13 summons / 소환 13회분 */
+     200,                                       /* hp         WARD_SUMMON_DMG x 5 summons / 소환 5회분 */
      0.0f,                                      /* speed      anchored / 고정 */
      0.0f,                                      /* weave */
      0.50f,                                     /* radius     m -- wider than the drawn pillar / 그려진 기둥보다 넓음 */
      4.00f,                                     /* height     m */
      2.70f,                                     /* eye        m -- fires from the gem / 보석에서 발사 */
      40.0f,                                     /* sight      m */
-     0.5f,                                      /* aspect     a narrow pillar / 좁은 기둥 */
+     /* THE CELL'S OWN 64:96, WHICH IS HOW A ROW ASKS FOR ITS ART UNSQUASHED.
+        Every other kind here is stretched: a 64x96 drawing on a quad `height *
+        aspect` wide is squeezed or pulled by whatever this number is against
+        two thirds, and that is fine for creatures drawn to be squeezed. The
+        ward's column is not. It is authored 160x688, ::fit_to_cell puts it in
+        the cell at ONE scale so nothing is distorted on the way in, and two
+        thirds here is what keeps it undistorted on the way out.
+        0.5 pulled it a third wider than it was drawn. What the number stops
+        deciding is how WIDE the pillar looks -- the drawing decides that now,
+        22 of the cell's 64 columns, which is 0.92m against a 1.00m body and
+        what the note above means by rad being wider than the drawn pillar.
+        *셀 자신의 64:96이며, 줄이 자기 아트를 찌그러지지 않은 채로 요구하는 방법입니다.*
+        이곳의 다른 모든 종류는 늘어납니다. `height * aspect` 너비 사각형 위의 64x96 그림은
+        이 숫자가 3분의 2에 대해 어떤 값인지에 따라 눌리거나 당겨지며, 눌리도록 그려진
+        생물에게는 그것으로 괜찮습니다. 결계핵의 기둥은 그렇지 않습니다. 160x688로 저작되었고,
+        ::fit_to_cell이 배율 하나로 셀에 넣어 들어오는 길에 아무것도 일그러지지 않게 하며,
+        이곳의 3분의 2가 나가는 길에도 일그러지지 않게 합니다.
+        0.5는 그것을 그려진 것보다 3분의 1 넓게 당겼습니다. 이 숫자가 더 이상 정하지 않는 것은
+        기둥이 얼마나 *넓어 보이는가*입니다. 이제는 그림이 정합니다. 셀의 64열 중 22열이며,
+        1.00m 몸통에 대해 0.92m이고, 위의 설명이 rad가 그려진 기둥보다 넓다고 말하는 것입니다. */
+     0.6667f,                                   /* aspect     the cell's, so the drawing is not squashed / 셀의 비율. 그림이 찌그러지지 않음 */
      180.0f,                                    /* yaw_speed  deg/s */
      99.0f,                                     /* pain_lock  s */
      0,                                         /* cap        no limit -- the fight places them / 제한 없음. 전투가 배치 */
@@ -316,7 +365,23 @@ static const MonAttack ATTACKS[MON_TYPES][MON_MAX_ATTACKS] = {
          18.0f,            /* max        half the arena's floor diagonal / 아레나 바닥 대각선의 절반 */
          18.0f,            /* reach */
          0.0f,             /* close */
-         24,               /* damage     one aimed bolt / 조준한 한 발 */
+         /* DOOM'S IMP FIREBALL, which is the same monster doing the same job: the
+            common flying thing you meet in numbers and answer with movement. The imp
+            rolls 3d8, three to twenty-four, and averages 13.5. This was a FLAT 24 --
+            the imp's worst roll, every single time, from up to seven of them at once.
+            Five of those killed a full-health player, and this game has no armour pool
+            where both reference games hand one out.
+            14 is that average rounded up. It is still the heaviest single ranged hit
+            below the boss, and it is a hit the player can eat twice while deciding
+            what to do about it.
+            *DOOM의 임프 화염구입니다.* 같은 일을 하는 같은 몬스터입니다. 수로 만나고 움직임으로
+            답하는 흔한 비행체입니다. 임프는 3d8, 곧 3에서 24를 굴리고 평균은 13.5입니다. 이곳은
+            *고정* 24였습니다. 임프의 최악의 굴림을 매번, 그것도 동시에 최대 일곱에게서 받는
+            것입니다. 그중 다섯 발이면 체력이 가득한 플레이어가 죽고, 두 참조작이 모두 주는
+            방어구 통을 이 게임은 주지 않습니다.
+            14는 그 평균을 올림한 값입니다. 여전히 보스 아래에서 가장 무거운 단발 원거리
+            공격이며, 플레이어가 어떻게 할지 정하는 동안 두 번은 맞아 줄 수 있는 값입니다. */
+         14,               /* damage     one aimed bolt / 조준한 한 발 */
          0.85f,            /* windup */
          1.40f,            /* cooldown */
          11.0f,            /* shot_speed */
@@ -491,7 +556,6 @@ void enemy_reset(Pools *pl)
     pl->enemy.spawn_slow = 0.0f;
     pl->enemy.spawn_rate = 1.0f;
     pl->enemy.lull = 0.0f;
-    pl->enemy.hp_mul = 1.0f;
 }
 
 void enemy_spawn_level(Pools *pl, const Level *l)
@@ -559,15 +623,6 @@ void enemy_wave_arm(Pools *pl, int wave)
        휴지기입니다. 롤오버 뒤 모든 스포너가 ::WAVE_LULL 동안 멈추므로, 웨이브는 올라서기 전에
        골짜기를 가집니다. 첫 웨이브는 어차피 온전한 간격을 가지므로 제외합니다. */
     pl->enemy.lull = step > 0 ? WAVE_LULL : 0.0f;
-
-    /* The health ladder, and it STOPS. See ::WAVE_HP_MAX for the arithmetic the ceiling
-       comes from; past it the curve is carried by the interval and the alive ceiling below.
-       체력 사다리이며 *멈춥니다.* 천장이 어떤 계산에서 나왔는지는 ::WAVE_HP_MAX를 보십시오.
-       그 뒤로 곡선을 이어 가는 것은 아래의 간격과 생존 천장입니다. */
-    float hp = 1.0f + (float)step * WAVE_HP_STEP;
-    if (hp > WAVE_HP_MAX)
-        hp = WAVE_HP_MAX;
-    pl->enemy.hp_mul = hp;
 
     for (int i = 0; i < pl->enemy.n_spawners; i++)
     {
@@ -1602,7 +1657,29 @@ int enemy_take_drop(Pools *pl, int idx, v3 *out_at)
     if (idx < 0 || idx >= pl->enemy.count)
         return -1;
     Enemy *m = &pl->enemy.m[idx];
-    if (!m->active || m->drop < 0)
+    /* == -1 AND NOT < 0, because ::Enemy::drop has two different negatives to
+       say and only one of them means "owes nothing". ::LOOT_HELD is -2, and
+       `< 0` threw every one of them away: this function's own header promises
+       to return it, ::step_drops has a branch waiting for it, and that branch
+       was unreachable. loot.txt names `held` in all three drop tables, so what
+       that cost was EVERY ammo box a kill has ever owed -- a corpse paid a
+       medkit or nothing at all, for the whole life of the drop system, and the
+       only symptom was belts that never filled from kills.
+       THE SAME SHAPE sprite.c wrote up one file over: ::name_state also answers
+       with two negatives, ::SPR_WALK_BOTH was -2, and `f < 0` dropped two
+       creatures out of the shipped atlas. A sentinel that is "negative" rather
+       than a VALUE is how a second negative comes to be swallowed silently.
+       *0보다 작음이 아니라 -1과 같음입니다.* ::Enemy::drop이 할 말은 서로 다른 음수 둘이고
+       그중 하나만이 "빚진 것 없음"을 뜻하기 때문입니다. ::LOOT_HELD는 -2인데 `< 0`이 그것을
+       전부 버렸습니다. 이 함수 자신의 헤더가 그것을 반환하겠다고 약속하고, ::step_drops에 그것을
+       기다리는 분기가 있는데, 그 분기에 도달할 수 없었습니다. loot.txt는 드롭 표 셋 모두에서
+       `held`를 지목하므로, 그 대가는 처치가 빚진 *모든* 탄약 상자였습니다. 시체는 구급상자를
+       주거나 아무것도 주지 않았고, 드롭 체계가 살아 있는 내내 그랬으며, 유일한 증상은 처치로는
+       결코 채워지지 않는 탄띠였습니다.
+       한 파일 건너 sprite.c가 적어 둔 것과 *같은 모양*입니다. ::name_state도 음수 둘로 답하고
+       ::SPR_WALK_BOTH가 -2였으며, `f < 0`이 출하되는 아틀라스에서 생물 둘을 떨어뜨렸습니다.
+       *값*이 아니라 "음수"인 감시값은 두 번째 음수가 조용히 삼켜지게 되는 경위입니다. */
+    if (!m->active || m->drop == -1)
         return -1;
 
     int kind = m->drop;
@@ -1838,18 +1915,24 @@ static int make_monster(Pools *pl, const Level *l, int type,
         y = from_y;
 
     m->pos = v3f(x, y, z);
-    /* THE WAVE LADDER, and never on a boss or a ward. ::step_boss reads the maw's cycle
-       boundaries off ::MonType::hp -- the TABLE value -- so a scaled instance would cross
-       them in the wrong places; and a ward's health is a whole multiple of
-       ::WARD_SUMMON_DMG, which a multiplier does not preserve.
-       *웨이브 사다리이며, 보스와 결계핵에는 결코 적용하지 않습니다.* ::step_boss는 아귀의
-       사이클 경계를 ::MonType::hp, 즉 *표의* 값에서 읽으므로 배율이 적용된 개체는 엉뚱한
-       곳에서 경계를 넘습니다. 그리고 결계핵의 체력은 ::WARD_SUMMON_DMG의 정수배인데
-       배율은 그것을 보존하지 않습니다. */
-    if (S->flags & (MON_BOSS | MON_GUARD))
-        m->health = S->hp;
-    else
-        m->health = (int)((float)S->hp * pl->enemy.hp_mul + 0.5f);
+    /* THE TABLE'S HEALTH, WHATEVER WAVE IT IS. A wave multiplier used to sit here and
+       climb 5% a wave; the curve is arrival rate and count now, and the note above
+       ::WAVE_INTERVAL_MIN carries the argument for which axis a fixed arsenal can
+       answer. What that leaves is one line: a monster is what the bestiary says it is.
+       It also removes two exceptions this branch had to carry. ::step_boss reads the
+       maw's cycle boundaries off ::MonType::hp -- the TABLE value -- so a scaled boss
+       crossed them in the wrong places, and a ward's health is a whole multiple of
+       ::WARD_SUMMON_DMG, which a multiplier does not preserve. Neither is a special
+       case any more because there is nothing left to be special about.
+       *어느 웨이브든 표의 체력입니다.* 웨이브마다 5%씩 오르는 배수가 이 자리에 있었습니다.
+       이제 곡선은 도착 속도와 수이며, 고정된 무기고가 어느 축에 답할 수 있는지에 대한 논거는
+       ::WAVE_INTERVAL_MIN 위의 설명에 있습니다. 그래서 남는 것은 한 줄입니다. 몬스터는 도감이
+       말하는 그것입니다.
+       이 분기가 지고 있던 예외 둘도 함께 사라집니다. ::step_boss는 아귀의 사이클 경계를
+       ::MonType::hp, 곧 *표의* 값에서 읽으므로 배율이 걸린 보스는 엉뚱한 곳에서 경계를
+       넘었고, 결계핵의 체력은 ::WARD_SUMMON_DMG의 정수배인데 배율은 그것을 보존하지 않습니다.
+       이제 둘 다 특별할 것이 없으므로 특별한 경우가 아닙니다. */
+    m->health = S->hp;
     m->state = E_IDLE;
     m->active = 1;
     m->anim = frand(&pl->enemy) * 6.28f;

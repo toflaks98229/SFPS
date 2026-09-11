@@ -1151,8 +1151,32 @@ typedef struct {
      * (where it looks and shoots from), and a melee attack's reach. None of
      * them follow height.
      *
-     * Leave `aspect` alone: it is the drawing's shape, not a size, and the
-     * sprite is already stretched to it.
+     * Leave `aspect` alone when resizing: it is the drawing's shape, not a
+     * size, and the sprite is already stretched to it.
+     *
+     * WHAT THE NUMBER MEANS, because three rows had it wrong and nothing said
+     * so. Every drawing is stored in a 64x96 cell, so the billboard shows that
+     * cell UNDISTORTED exactly when `aspect` is the cell's own ratio, two
+     * thirds. Anything else stretches the art by `aspect / 0.6667`: the brute
+     * and the caster sat at 1.20, which is 1.8x wider than anybody drew them,
+     * and it is not a look somebody chose -- it is a column nobody reread after
+     * the art arrived.
+     * A ROW MAY STILL DEPART FROM IT, deliberately, for a creature drawn to be
+     * squeezed. What bounds that is enemytest's wall standoff: the billboard is
+     * `height * aspect` wide and the body is `radius`, so a wide enough aspect
+     * puts half a creature through whatever it stands against. The check reads
+     * the table and says how much is buried.
+     *
+     * *그 숫자가 뜻하는 것.* 세 행이 이것을 틀리게 갖고 있었고 아무것도 그렇다고 말하지
+     * 않았습니다. 모든 그림은 64x96 셀에 저장되므로, 빌보드가 그 셀을 *찌그러뜨리지 않고*
+     * 보여 주는 것은 `aspect`가 셀 자신의 비율인 3분의 2일 때뿐입니다. 다른 값은 아트를
+     * `aspect / 0.6667`만큼 늘립니다. 브루트와 캐스터가 1.20에 있었고, 그것은 누가 그린
+     * 것보다 1.8배 넓습니다. 누군가 고른 모양이 아니라 아트가 도착한 뒤 아무도 다시 읽지 않은
+     * 열입니다.
+     * *한 행이 의도적으로 그것을 벗어날 수는 있습니다.* 눌리도록 그려진 생물을 위해서입니다.
+     * 그것을 제한하는 것은 enemytest의 벽 이격 검사입니다. 빌보드는 `height * aspect` 너비이고
+     * 몸은 `radius`이므로, 충분히 넓은 aspect는 생물의 절반을 기대선 것 안으로 밀어 넣습니다.
+     * 그 검사가 표를 읽고 얼마나 묻혔는지 말합니다.
      *
      * types_check looks at none of this.
      *
@@ -1638,8 +1662,27 @@ typedef struct {
     short owner;
 } Shot;
 
+/* RAISED FROM 8 WITH ::LVL_MAX_ENTS, because that cap was hiding this one.
+   lqdm4 authors twenty-two spawners -- seven water spirits, thirteen casters
+   and two brutes. Only nine ever reached the loader while the entity cap was
+   refusing nineteen markers, and eight of those nine ran. Giving the level its
+   markers back without this would have turned one silent drop into fourteen,
+   which is the same failure further down the pipe rather than a fixed one.
+   32 rather than 22, for the reason ::LVL_MAX_PTS gives about its own number: a
+   slot is 40 bytes of .bss and nothing else. What still limits the fight is
+   ::ENEMY_MAX and each spawner's own `max_alive`, which is where a ceiling on
+   monsters belongs -- this number only says how many MARKERS a map may place.
+   *::LVL_MAX_ENTS와 함께 8에서 올렸습니다.* 그 상한이 이 상한을 가리고 있었기 때문입니다.
+   lqdm4는 스포너 스물둘을 제작합니다. 물의 정령 일곱, 캐스터 열셋, 브루트 둘입니다. 엔티티
+   상한이 표식 열아홉을 거절하는 동안 로더에 도착한 것은 아홉뿐이었고 그중 여덟이 돌았습니다.
+   이것 없이 레벨에 표식을 돌려주면 조용한 누락 하나가 열넷이 될 뿐이며, 그것은 고쳐진 실패가
+   아니라 관 아래쪽으로 옮겨 간 같은 실패입니다.
+   22가 아니라 32인 이유는 ::LVL_MAX_PTS가 자기 숫자에 대해 말하는 것과 같습니다. 슬롯 하나는
+   .bss 40바이트일 뿐입니다. 전투를 제한하는 것은 여전히 ::ENEMY_MAX와 각 스포너 자신의
+   `max_alive`이며, 몬스터 수의 천장은 그곳에 있어야 합니다. 이 숫자는 맵이 *표식*을 몇 개
+   놓을 수 있는지만 말합니다. */
 /** @brief Spawner markers one level may run. / 한 레벨이 돌릴 수 있는 스포너 표식 수. */
-#define ENEMY_MAX_SPAWNERS 8
+#define ENEMY_MAX_SPAWNERS 32
 
 /**
  * @struct Spawner
@@ -1808,10 +1851,50 @@ typedef struct {
  *   burst     = min(1 + step / WAVE_BURST_EVERY, WAVE_BURST_MAX)
  *   interval  = max(base_interval * WAVE_INTERVAL_DECAY ^ step, WAVE_INTERVAL_MIN)
  *   lull      = WAVE_LULL seconds of held spawners at every rollover after the first
- *   hp_mul    = min(1 + step * WAVE_HP_STEP, WAVE_HP_MAX)   -- not on a boss or a ward
  *
  * max_alive is a LEVEL-WIDE count, not a per-spawner one.
- * max_alive는 스포너별이 아니라 *레벨 전체* 수입니다. */
+ * max_alive는 스포너별이 아니라 *레벨 전체* 수입니다.
+ *
+ * EVERY LINE IS A RATE OR A COUNT. NOT ONE OF THEM IS A STAT.
+ * -----------------------------------------------------------
+ * There was a sixth line and it multiplied health: `hp_mul` climbed 5% a wave to a
+ * ceiling of 1.5. It is gone, and what replaced it is on the line above it --
+ * ::WAVE_INTERVAL_MIN went from 1.2s to 0.8s, which is the same 1.5 moved from how
+ * much each monster takes to how fast the next one arrives.
+ *
+ * WHICH IS THE SIDE THE REFERENCE GAMES PUT IT ON. Gauntlet's dungeons get harder by
+ * generating monsters faster -- its difficulty rises in score chunks and what rises is
+ * the generation rate, while a monster stays a monster. Serious Sam is renowned for
+ * one thing and it is the count: its hardest setting makes waves denser and longer and
+ * swaps in stronger KINDS, not stronger copies. The two games that do it the other way
+ * are the two that show the cost -- CoD Zombies multiplies health by 1.1 a round and
+ * has to hand the player Pack-a-Punch and three friends to answer it, and Painkiller's
+ * sliders move only damage dealt and taken, which its own reviewers call the lazy one.
+ *
+ * THE ARSENAL IS WHY. A health multiplier is a bet that the player's damage grows too.
+ * Nothing here grows: the shotgun is 66.7 DPS on wave 1 and 66.7 DPS on wave 40, there
+ * is no upgrade, no armour pool and no second player. A curve made of arrival rate is
+ * one a fixed arsenal can answer by shooting better; a curve made of health is one it
+ * can only answer by having brought more shells.
+ *
+ * *모든 줄이 속도 아니면 수이며, 어느 것도 능력치가 아닙니다.*
+ * 여섯 번째 줄이 있었고 그것은 체력에 곱하는 값이었습니다. `hp_mul`이 웨이브마다 5%씩
+ * 올라 1.5에서 멈췄습니다. 그것은 사라졌고, 대신한 것은 바로 윗줄입니다.
+ * ::WAVE_INTERVAL_MIN이 1.2초에서 0.8초가 되었으며, 같은 1.5를 "한 마리가 얼마나 많이
+ * 견디는가"에서 "다음 한 마리가 얼마나 빨리 오는가"로 옮긴 것입니다.
+ *
+ * *참조작들이 그것을 놓는 쪽이 이쪽입니다.* Gauntlet의 던전은 몬스터를 *더 빨리 만들어서*
+ * 어려워집니다. 난이도가 점수 단위로 오르고 오르는 것은 생성 속도이며, 몬스터는 그냥
+ * 몬스터로 남습니다. Serious Sam이 유명한 것은 한 가지이고 그것은 *수*입니다. 가장 높은
+ * 난이도는 웨이브를 더 빽빽하고 길게 만들고 더 강한 *종류*로 바꿔 놓지, 같은 것을 더 강하게
+ * 만들지 않습니다. 반대로 하는 두 게임이 그 대가를 보여 줍니다. CoD 좀비는 라운드마다
+ * 체력에 1.1을 곱하고 그것에 답할 팩어펀치와 동료 셋을 함께 쥐여 주어야 하며, Painkiller의
+ * 난이도 슬라이더는 주고받는 피해만 움직여서 그쪽 리뷰가 게으르다고 부릅니다.
+ *
+ * *무기고가 그 이유입니다.* 체력 배수는 플레이어의 화력도 함께 자란다는 내기입니다. 이곳에는
+ * 자라는 것이 없습니다. 샷건은 웨이브 1에서도 40에서도 66.7 DPS이고, 강화도 방어구 통도 두
+ * 번째 플레이어도 없습니다. 도착 속도로 만든 곡선은 고정된 무기고가 더 잘 쏘아서 답할 수
+ * 있는 곡선이고, 체력으로 만든 곡선은 탄약을 더 들고 왔어야만 답할 수 있는 곡선입니다. */
 
 /** @brief Monsters added to the level ceiling each wave. / 웨이브마다 레벨 천장에 더해지는 몬스터 수. */
 #define WAVE_ALIVE_STEP 2
@@ -1822,56 +1905,37 @@ typedef struct {
 /** @brief What the interval is multiplied by each wave. 0.875 is Devil Daggers' 12.5% per loop.
  *  / 웨이브마다 간격에 곱해지는 값. 0.875는 Devil Daggers의 루프당 12.5%입니다. */
 #define WAVE_INTERVAL_DECAY 0.875f
-/** @brief Shortest the interval ever gets, seconds. / 간격이 도달할 수 있는 최솟값 (초). */
-#define WAVE_INTERVAL_MIN  1.2f
+/**
+ * @brief Shortest the interval ever gets, seconds. / 간격이 도달할 수 있는 최솟값 (초).
+ *
+ * 1.2 BECAME 0.8 WHEN THE HEALTH LADDER CAME OUT, and the two numbers are the same
+ * number: 1.2/0.8 is 1.5, which is exactly the ceiling the health multiplier used to
+ * climb to. The curve's top end did not get smaller, it changed axis.
+ * WHAT IT COSTS AND WHAT IT DOES NOT. Three more waves of slope, exactly three whatever
+ * the spawner was authored at: the arena's 6s, 9s and 11s spawners used to flatten out
+ * on waves 14, 17 and 18 and now do it on 17, 20 and 21. What it does not do is uncap
+ * the room: ::Spawner::max_alive is a level-wide ceiling and a shorter interval only
+ * refills a room faster once the player has emptied part of it. A spawner firing into a
+ * full room does nothing at any interval.
+ * CoD Zombies runs the same axis and much further -- a 2s spawn delay at round 1 down
+ * to 0.1s by round 60, against a hard cap of 24 alive. The cap is what makes a tenth of
+ * a second safe to write, and it is the same cap doing the same job here.
+ * *체력 사다리를 들어내면서 1.2가 0.8이 되었고*, 두 숫자는 같은 숫자입니다. 1.2/0.8은 1.5이며,
+ * 체력 배수가 올라가던 천장과 정확히 같습니다. 곡선의 꼭대기는 낮아진 것이 아니라 축을
+ * 바꿨습니다.
+ * *무엇을 치르고 무엇은 치르지 않는가.* 경사가 세 웨이브 더 갑니다. 스포너가 어떤 값으로
+ * 제작되었든 정확히 셋입니다. 아레나의 6초, 9초, 11초 스포너는 웨이브 14, 17, 18에서 평평해졌고
+ * 이제 17, 20, 21에서 그렇게 됩니다. 하지 *않는* 것은 방의 상한을 푸는 일입니다.
+ * ::Spawner::max_alive는 레벨 전체의 천장이고, 짧아진 간격은 플레이어가 비운 만큼을 더 빨리
+ * 채울 뿐입니다. 가득 찬 방에 쏘는 스포너는 어떤 간격에서도 아무 일도 하지 않습니다.
+ * CoD 좀비도 같은 축을 훨씬 멀리까지 씁니다. 1라운드 2초 간격이 60라운드에 0.1초까지 내려가고
+ * 동시 생존 상한은 24입니다. 0.1초를 적어도 되게 만드는 것이 그 상한이며, 이곳에서도 같은
+ * 상한이 같은 일을 합니다.
+ */
+#define WAVE_INTERVAL_MIN  0.8f
 /** @brief Seconds every spawner holds its timer after a wave rolls over. 0 for none.
  *  / 웨이브가 넘어간 뒤 모든 스포너가 타이머를 멈추는 초. 0이면 없음. */
 #define WAVE_LULL 6.0f
-
-/**
- * @brief Fraction of its table health a monster gains per wave, before ::WAVE_HP_MAX clamps it.
- *  / 몬스터가 웨이브마다 표의 체력에서 얻는 비율. ::WAVE_HP_MAX가 자르기 전까지입니다. */
-#define WAVE_HP_STEP 0.05f
-
-/**
- * @brief THE CEILING ON THE HEALTH LADDER, and the reason there is one.
- *
- * ENGLISH
- * -------
- * A compounding health curve has no ceiling by construction, and this game cannot carry
- * one: nothing the player holds gets stronger. CoD Zombies multiplies health by 1.1 a
- * round and pairs that with Pack-a-Punch and four players sharing the load; here the
- * shotgun is 66.7 DPS on wave 1 and 66.7 DPS on wave 40.
- *
- * MEASURED AGAINST THE ROOM, not against a feeling. At the type caps the arena holds
- * 12 water spirits, 7 casters and 5 brutes -- 1,920 health standing. One 45 s wave of
- * sustained shotgun fire is 3,000 damage, so a multiplier past 1.56 is a room the
- * player cannot clear inside the wave that sent it, whatever they do. 1.5 sits just
- * under that line and is where the ladder stops.
- *
- * WHAT CARRIES THE CURVE AFTER THIS is the spawn rate and the alive ceiling, which are
- * the two dimensions a fixed arsenal can actually answer: more of them, arriving faster,
- * rather than the same ones taking more shells than the belt holds.
- *
- * 한국어
- * ------
- * @brief 체력 사다리의 상한, 그리고 상한이 있는 이유.
- *
- * 복리로 오르는 체력 곡선은 구조상 천장이 없으며, 이 게임은 그것을 감당할 수 없습니다.
- * 플레이어가 든 것 중 강해지는 것이 없기 때문입니다. CoD 좀비는 라운드마다 체력에 1.1을
- * 곱하지만 팩어펀치와 4인이 나눠 지는 화력이 함께 있습니다. 이곳의 샷건은 웨이브 1에서도
- * 66.7 DPS, 웨이브 40에서도 66.7 DPS입니다.
- *
- * *느낌이 아니라 방에 대고 재었습니다.* 종류 상한에서 아레나는 물의 정령 12, 캐스터 7,
- * 브루트 5를 담으며 서 있는 체력이 1,920입니다. 45초 웨이브 하나를 샷건으로 계속 쏘면
- * 3,000이므로, 1.56을 넘는 배수는 무엇을 하든 그것을 보낸 웨이브 안에 정리할 수 없는
- * 방입니다. 1.5는 그 선 바로 아래이고, 사다리는 그곳에서 멈춥니다.
- *
- * *그 뒤로 곡선을 이어 가는 것은* 스폰 속도와 생존 천장입니다. 고정된 무기고가 실제로
- * 답할 수 있는 두 축이며, 같은 것이 탄띠보다 많은 탄약을 먹는 대신 더 많이 더 빨리
- * 오는 쪽입니다.
- */
-#define WAVE_HP_MAX 1.5f
 
 _Static_assert(WAVE_BURST_MAX <= ENEMY_MAX,
                "one group must fit the pool it spawns into");
@@ -1879,8 +1943,6 @@ _Static_assert(WAVE_INTERVAL_MIN > 0.0f,
                "a zero interval is a spawner that fires every frame");
 _Static_assert(WAVE_INTERVAL_DECAY > 0.0f && WAVE_INTERVAL_DECAY <= 1.0f,
                "the decay must shrink the interval, or leave it alone");
-_Static_assert(WAVE_HP_MAX >= 1.0f,
-               "the ladder may not take health away from a monster");
 
 /**
  * @struct EnemyPool
@@ -1984,12 +2046,37 @@ _Static_assert(WAVE_HP_MAX >= 1.0f,
 /** @brief Seconds the sink takes. / 가라앉는 데 걸리는 시간(초). */
 #define COLLAPSE_SINK_TIME 2.0f
 
-/** @brief Damage a ward takes per summon payment. Its hp is a whole multiple of this.
- *  / 결계핵이 한 번 소환하기까지 받는 피해량. 결계핵의 hp는 이 값의 정수배입니다. */
-#define WARD_SUMMON_DMG 30
+/**
+ * @brief Damage a ward takes per summon payment. Its hp is a whole multiple of this.
+ *        / 결계핵이 한 번 소환하기까지 받는 피해량. 결계핵의 hp는 이 값의 정수배입니다.
+ *
+ * PRICED AGAINST THE ONE OTHER BOSS THAT DOES THIS. Doom II's Icon of Sin spawns on a
+ * CLOCK -- one cube every 150 tics, 4.3 seconds, halved again on the two easy skills --
+ * and that is the whole of its output for a fight that runs minutes. This pays on a
+ * DAMAGE THRESHOLD instead, which is the better idea and was also the unpriced one: a
+ * threshold's rate is set by the player's gun, not by the designer. At 30 damage a
+ * payment worth two monsters, a shotgun on a ward paid out every 0.45 s -- 4.4 monsters
+ * a second, nineteen times the Icon's rate, and the harder the player shot the worse it
+ * got.
+ * 40 AND ONE, so a 200 hp ward is exactly five monsters over its whole life and the
+ * 990 hp maw is twenty-four over the fight. Against the Icon's clock that is still the
+ * generous side, which is right: a threshold should reward shooting the thing, and
+ * ::SPAWN_WARN_TIME already paces the queue at one arrival every 0.55 s however much is
+ * owed.
+ * *이것을 하는 다른 하나의 보스에 값을 맞췄습니다.* Doom II의 죄악의 아이콘은 *시계*로
+ * 소환합니다. 150틱, 곧 4.3초마다 큐브 하나이고 낮은 난이도 둘에서는 다시 절반입니다. 몇 분씩
+ * 가는 전투에서 그것이 산출의 전부입니다. 이쪽은 대신 *피해 문턱*으로 지급하며, 그 편이 더 나은
+ * 발상이고 동시에 값이 매겨지지 않은 발상이었습니다. 문턱의 속도는 설계자가 아니라 플레이어의
+ * 총이 정합니다. 피해 30에 한 번, 한 번에 두 마리였을 때 결계핵에 샷건을 겨눈 플레이어는 0.45초마다
+ * 지급을 받았습니다. 초당 4.4마리이고 아이콘의 19배이며, 세게 쏠수록 나빠졌습니다.
+ * *40과 1입니다.* 그래서 체력 200인 결계핵은 평생에 걸쳐 정확히 다섯 마리, 체력 990인 아귀는
+ * 전투 내내 스물넷입니다. 아이콘의 시계에 견주면 여전히 후한 쪽이고 그것이 맞습니다. 문턱은
+ * 그것을 쏘는 일에 보답해야 하며, 빚이 얼마든 ::SPAWN_WARN_TIME이 이미 0.55초에 하나씩으로
+ * 도착을 조절합니다. */
+#define WARD_SUMMON_DMG 40
 
 /** @brief Monsters one payment is worth. / 한 번의 지급이 내놓는 마리 수. */
-#define WARD_SUMMON_COUNT 2
+#define WARD_SUMMON_COUNT 1
 
 /** @brief Live monsters past which a ward's summon is skipped. Kept well under ::ENEMY_MAX.
  *  / 이 수를 넘으면 결계핵의 소환을 건너뜁니다. ::ENEMY_MAX보다 한참 아래로 둡니다. */
@@ -2192,14 +2279,6 @@ typedef struct {
      *  / 스포너 타이머가 돌지 않는 남은 초. ::enemy_wave_arm이 첫 웨이브 이후의 모든 롤오버에
      *  ::WAVE_LULL로 세우고 ::spawners_update가 감소시킵니다. */
     float    lull;
-
-    /** @brief What a spawned monster multiplies its table health by. ::enemy_wave_arm sets it
-     *         from the wave; ::make_monster applies it to everything that is not a boss or a
-     *         ward, because those two have their health read off the TABLE by the fight.
-     *  / 스폰된 몬스터가 표의 체력에 곱하는 값. ::enemy_wave_arm이 웨이브에서 정하고
-     *  ::make_monster가 보스와 결계핵을 뺀 모두에게 적용합니다. 그 둘은 전투가 체력을
-     *  *표에서* 읽기 때문입니다. */
-    float    hp_mul;
 
     Spawner spawner[ENEMY_MAX_SPAWNERS]; /**< Markers that keep making monsters. / 몬스터를 계속 만들어 내는 표식. */
     int     n_spawners;                  /**< How many are in use. / 사용 중인 개수. */

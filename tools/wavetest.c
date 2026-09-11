@@ -421,8 +421,25 @@ int main(void) {
         ok(enemy_alive(&w.pools) > 0, "and the first wave starts without one");
     }
 
-    /* --- the health ladder --------------------------------------------- */
-    printf("\nthe health ladder climbs and then stops\n");
+    /* --- a monster is what the table says, on every wave -------------------
+     *
+     * THIS USED TO ASSERT THE OPPOSITE. There was a health ladder: 5% a wave to a
+     * ceiling of 1.5, and this block pinned wave 1 at the table value and wave 40 at
+     * the clamp. The ladder is gone -- see the note above ::WAVE_INTERVAL_MIN for the
+     * axis it moved to and why -- so what is worth pinning is that it did not come back
+     * by accident. Wave 40 delivering a monster at its table health is a one-line
+     * property, and it is the line a reintroduced multiplier would break first.
+     * ASKED AT A WAVE NO CLAMP WOULD HAVE REACHED. 40 was chosen when there was a
+     * ceiling to be past; it stays because a multiplier small enough to hide at wave 2
+     * is still 2.9x at wave 40.
+     * *예전에는 반대를 단언했습니다.* 체력 사다리가 있었습니다. 웨이브마다 5%씩 1.5까지였고,
+     * 이 블록은 웨이브 1을 표 값에, 웨이브 40을 고정점에 못 박았습니다. 사다리는 사라졌습니다.
+     * 어느 축으로 옮겼고 왜인지는 ::WAVE_INTERVAL_MIN 위의 설명에 있습니다. 그래서 못 박을
+     * 값어치가 있는 것은 *그것이 어쩌다 돌아오지 않았는가*입니다. 웨이브 40이 몬스터를 표의
+     * 체력으로 배달한다는 것은 한 줄짜리 성질이고, 다시 들어온 배수가 가장 먼저 깨뜨릴 줄입니다.
+     * *어떤 고정점도 닿지 못했을 웨이브에서 묻습니다.* 40은 넘어설 천장이 있던 시절에 골랐고,
+     * 웨이브 2에서는 숨을 만큼 작은 배수도 웨이브 40에서는 2.9배이므로 그대로 둡니다. */
+    printf("\na monster is what the table says on every wave\n");
     {
         const int BASE = mon_stats(MON_WATER_SPIRIT)->hp;
 
@@ -434,21 +451,21 @@ int main(void) {
         int first = enemy_alive(&w.pools) ? enemy_at(&w.pools, 0)->health : -1;
         oki(first == BASE, "wave 1 delivers a monster at the table's health", first, BASE);
 
-        /* A wave far past the clamp: the ladder must be AT the ceiling, not above it.
-           고정점보다 한참 깊은 웨이브입니다. 사다리는 천장을 넘지 않고 천장에 있어야 합니다. */
         enemy_spawn_level(&w.pools, &w.level);
         enemy_wave_arm(&w.pools, 40);
         step_n(&w, (int)(WAVE_LULL * 60.0f) + 61 + (int)(SPAWN_WARN_TIME * 60.0f) + 8);
-        int deep   = enemy_alive(&w.pools) ? enemy_at(&w.pools, 0)->health : -1;
-        int capped = (int)((float)BASE * WAVE_HP_MAX + 0.5f);
-        oki(deep == capped, "and wave 40 is capped at WAVE_HP_MAX, not compounded",
-            deep, capped);
+        int deep = enemy_alive(&w.pools) ? enemy_at(&w.pools, 0)->health : -1;
+        oki(deep == BASE, "and so does wave 40, because nothing multiplies it",
+            deep, BASE);
 
-        /* The boss and its wards are read off the table by the fight, so they never scale.
-           보스와 결계핵은 전투가 표에서 읽으므로 결코 배율을 받지 않습니다. */
-        ok((mon_stats(MON_MAW)->flags & MON_BOSS) &&
-           (mon_stats(MON_WARD)->flags & MON_GUARD),
-           "and the two kinds the ladder skips are still flagged as such");
+        /* WHAT DOES CLIMB, asked in the same fixture so the two cannot drift apart:
+           the interval the wave arms a spawner with. Wave 40 is far past the floor.
+           *올라가는 쪽*을 같은 픽스처에서 묻습니다. 둘이 어긋날 수 없게 하기 위해서입니다.
+           웨이브가 스포너에 물려 주는 간격이며, 웨이브 40은 바닥을 한참 지납니다. */
+        printf("      wave 40 arms the spawner at %.2fs (floor %.2fs)\n",
+               (double)w.pools.enemy.spawner[0].interval, (double)WAVE_INTERVAL_MIN);
+        ok(w.pools.enemy.spawner[0].interval <= WAVE_INTERVAL_MIN + 0.001f,
+           "and the curve is in the interval instead, down at its floor");
     }
 
     /* --- the spawner under your feet -------------------------------------

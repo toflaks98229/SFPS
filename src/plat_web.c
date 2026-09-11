@@ -140,11 +140,16 @@ int plat_save_dir(char *out, int cap) {
            실패가 그것입니다. */
         int ok = EM_ASM_INT({
             var dir = UTF8ToString($0);
-            try {
-                FS.mkdir(dir);
-            } catch (e) {
-                if (!e || e.errno !== 20 /* EEXIST */) { /* keep going anyway */ }
-            }
+            /* EEXIST on every launch after the first, which is the normal
+               result rather than a failure -- the same thing plat_win32.c says
+               about CreateDirectory. Swallowed wholesale because the next call
+               reports the only failure that matters: if the directory is not
+               there, FS.mount throws and that is what is returned on.
+               첫 실행 이후의 모든 실행에서 EEXIST이며, 실패가 아니라 정상 결과입니다.
+               plat_win32.c가 CreateDirectory에 대해 말하는 것과 같습니다. 통째로 삼키는 이유는
+               다음 호출이 중요한 유일한 실패를 보고하기 때문입니다. 디렉토리가 없으면
+               FS.mount가 던지고, 반환은 그것을 근거로 합니다. */
+            try { FS.mkdir(dir); } catch (e) {}
             try {
                 FS.mount(IDBFS, { autoPersist: true }, dir);
                 return 1;

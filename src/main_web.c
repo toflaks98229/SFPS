@@ -238,6 +238,22 @@ static EM_BOOL on_mouse_move(int t, const EmscriptenMouseEvent *e, void *u) {
 static EM_BOOL on_mouse_down(int t, const EmscriptenMouseEvent *e, void *u) {
     (void)t; (void)u;
 
+    /* THE CLICK CARRIES ITS OWN POSITION, and reading the one a previous move
+       left behind was wrong. Found by clicking STORY in a browser and watching
+       nothing happen: the pointer had never MOVED over the canvas, so
+       ::g_mouse_x was still 0 and the menu was asked what is at the top-left
+       corner, which is nothing. A person nudges the mouse before clicking and
+       would never have seen it; a synthetic click does not, and neither does
+       anybody who tabs to the page and clicks without moving.
+       *클릭은 자기 위치를 지니고 있으며*, 이전 이동이 남긴 것을 읽는 것은 틀렸습니다.
+       브라우저에서 STORY를 클릭했는데 아무 일도 일어나지 않는 것을 보고 찾았습니다. 포인터가
+       캔버스 위에서 *움직인* 적이 없어 ::g_mouse_x가 여전히 0이었고, 메뉴는 좌상단 모서리에
+       무엇이 있는지 질문받았으며 그곳에는 아무것도 없습니다. 사람은 클릭 전에 마우스를 조금
+       움직이므로 결코 보지 못했을 것입니다. 합성된 클릭은 그러지 않으며, 페이지에 탭으로 들어와
+       움직이지 않고 클릭하는 사람도 마찬가지입니다. */
+    g_mouse_x = (float)e->targetX;
+    g_mouse_y = (float)e->targetY;
+
     if (menu_is_open()) {
         menu_click(g_mouse_x, g_mouse_y, g_vw, g_vh, e->button == 2);
         return EM_TRUE;
@@ -314,7 +330,29 @@ static void input_gather(Input *in) {
     in->left    = g_keys[K_LEFT];
     in->right   = g_keys[K_RIGHT];
     in->jump    = g_keys[K_JUMP];
-    in->fire    = g_locked && g_mouse_down;
+    /* NOT GATED ON POINTER LOCK, and it was. The lock is how the camera is
+       steered, not how the trigger is pulled, and hanging the trigger off it
+       means an embedding that refuses the lock gets a game that cannot shoot at
+       all -- unplayable rather than awkward. Measured: this project's own
+       preview browser answers requestPointerLock with "WrongDocumentError: the
+       root document of this element is not valid for pointer lock", which is
+       not something the page did wrong and not something it can fix.
+       WHAT IS LOST WITHOUT THE LOCK is aiming, and only aiming: look_dx stays
+       zero above because there are no deltas to have. The game degrades to one
+       that shoots where it is already pointing, which is a bad game and a long
+       way better than a dead one. The menu and the screens are already guarded
+       further up, so a click that lands here is a click during play.
+       *포인터 락에 걸지 않으며*, 걸려 있었습니다. 락은 카메라를 조종하는 방법이지 방아쇠를
+       당기는 방법이 아닙니다. 방아쇠를 그것에 매달면, 락을 거부하는 임베딩은 아예 쏠 수 없는
+       게임을 받습니다. 어색한 것이 아니라 플레이 불가입니다. 실제로 재어 보니 이 프로젝트의
+       미리 보기 브라우저가 requestPointerLock에 "WrongDocumentError: 이 요소의 루트 문서는
+       포인터 락에 유효하지 않습니다"로 답합니다. 페이지가 잘못한 것도 아니고 페이지가 고칠 수
+       있는 것도 아닙니다.
+       *락 없이 잃는 것은 조준이며 조준뿐입니다.* 위의 look_dx는 가질 변화량이 없으므로 0으로
+       남습니다. 게임은 이미 향하고 있는 곳을 쏘는 게임으로 내려앉으며, 그것은 나쁜 게임이고
+       죽은 게임보다는 한참 낫습니다. 메뉴와 화면들은 위쪽에서 이미 걸러졌으므로, 이곳에 닿는
+       클릭은 플레이 중의 클릭입니다. */
+    in->fire    = g_mouse_down;
     in->hook    = g_hook_down;
 
     in->confirm     = g_edge.confirm;

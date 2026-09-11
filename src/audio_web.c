@@ -124,7 +124,18 @@ int audio_init(void) {
         A.ctx   = ctx;
         A.next  = 0;
         A.timer = 0;
-        Module.__sfps_audio = A;
+        /* BRACKETED so Closure leaves the name alone. It renames dotted
+           properties, consistently enough that the code keeps working -- but
+           the handle then cannot be found from a console, and that is exactly
+           the state somebody debugging silent audio in a browser wants to look
+           at. Measured: `__sfps_audio` appears nowhere in the built JS when it
+           is written with a dot.
+           *대괄호로 씁니다.* 그래야 Closure가 이름을 건드리지 않습니다. Closure는 점으로 접근한
+           속성의 이름을 바꾸며, 코드가 계속 동작할 만큼 일관되게 바꿉니다. 다만 그러면 콘솔에서
+           그 핸들을 찾을 수 없게 되는데, 브라우저에서 소리가 나지 않는 것을 디버깅하는 사람이
+           보고 싶어 할 상태가 바로 그것입니다. 실제로 재어 보니, 점으로 쓰면 `__sfps_audio`는
+           빌드된 JS 어디에도 나타나지 않습니다. */
+        Module['__sfps_audio'] = A;
 
         /* THE GESTURE GATE. A page may not make noise until somebody has
            touched it, so the context starts suspended and these bring it back.
@@ -194,7 +205,7 @@ void audio_shutdown(void) {
     g_ready = 0;
 
     EM_ASM({
-        var A = Module.__sfps_audio;
+        var A = Module['__sfps_audio'];
         if (!A) return;
         if (A.timer) clearInterval(A.timer);
         /* Chunks already scheduled keep their start times and would play on
@@ -204,7 +215,7 @@ void audio_shutdown(void) {
            Windows에서 waveOutReset이 막는 것이 그것입니다. close()가 이 호스트의
            waveOutReset입니다. */
         if (A.ctx && A.ctx.state !== 'closed') A.ctx.close();
-        Module.__sfps_audio = null;
+        Module['__sfps_audio'] = null;
     });
 }
 

@@ -1,0 +1,69 @@
+<!doctype html>
+<!--
+  The page SFPS is served on. Deliberately almost nothing.
+
+  A shell file is emscripten's hook for replacing its default page, and the
+  default one is a demo harness: a textarea logging stdout, a progress bar, a
+  fullscreen button, a table of build options. None of that belongs in front of
+  a game, and every line of it is bytes over the wire on a project that counts
+  them.
+
+  WHAT IS HERE AND WHY:
+    - one canvas, filling the window, with no border and no margin;
+    - a black page behind it, so the letterboxing at a ratio the canvas does
+      not fill reads as part of the game rather than as the browser showing
+      through;
+    - a line of text that the runtime replaces, so a slow connection says
+      something rather than nothing;
+    - tabindex on the canvas, so it can hold keyboard focus.
+
+  {{{ SCRIPT }}} is where emscripten splices its loader in. It must stay.
+
+  SFPS가 서빙되는 페이지입니다. 의도적으로 거의 아무것도 없습니다.
+
+  shell 파일은 emscripten이 자기 기본 페이지를 대체하도록 열어 둔 고리이며, 그 기본 페이지는
+  데모용 장치입니다. stdout을 찍는 textarea, 진행 막대, 전체화면 버튼, 빌드 옵션 표. 그중 어느
+  것도 게임 앞에 있을 것이 아니고, 바이트를 세는 프로젝트에서 그 모든 줄이 전송량입니다.
+-->
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MAGICIAN GIRL MAYHEM</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; outline: none; background: #000; }
+  #status {
+    position: fixed; inset: 0; display: flex; align-items: center;
+    justify-content: center; color: #8a8a94; font: 14px monospace;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
+<div id="status">loading…</div>
+<script>
+  var statusEl = document.getElementById('status');
+  var Module = {
+    canvas: document.getElementById('canvas'),
+    /* Cleared once the runtime is up. The game paints from its first frame, so
+       there is nothing to fade -- the line simply stops being the only thing on
+       the page.
+       런타임이 서면 지웁니다. 게임은 첫 프레임부터 그리므로 페이드할 것이 없고, 이 줄이
+       페이지의 유일한 내용이기를 그만둘 뿐입니다. */
+    onRuntimeInitialized: function () { if (statusEl) statusEl.remove(); },
+    setStatus: function (t) { if (statusEl && t) statusEl.textContent = t; },
+    print: function () {},
+    printErr: function (t) { console.error(t); }
+  };
+  /* The canvas takes the keyboard as soon as the page has it, so the first
+     WASD does not go to the document and scroll something.
+     페이지가 키보드를 갖는 즉시 캔버스가 그것을 가져갑니다. 그래야 첫 WASD가 문서로 가서
+     무언가를 스크롤하지 않습니다. */
+  window.addEventListener('load', function () { Module.canvas.focus(); });
+  Module.canvas.addEventListener('click', function () { Module.canvas.focus(); });
+</script>
+{{{ SCRIPT }}}
+</body>
+</html>

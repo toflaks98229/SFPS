@@ -180,6 +180,20 @@ static int px_changed(void) {
     return n;
 }
 
+/* Changed pixels in one column. A straight segment in the world projects to a
+   straight segment on screen, so a column count is proportional to the strip's
+   thickness there -- which is what makes comparing the two ends a measurement
+   of the taper rather than of the projection. */
+static int col_changed(int x) {
+    int n = 0;
+    for (int y = 0; y < VH; y++) {
+        int i = (y * VW + x) * 3;
+        if (g_px[i] != g_prev[i] || g_px[i+1] != g_prev[i+1] ||
+            g_px[i+2] != g_prev[i+2]) n++;
+    }
+    return n;
+}
+
 static float lean(int ch) {
     double acc = 0.0;
     for (int i = 0; i < VW * VH; i++) {
@@ -512,6 +526,178 @@ int main(void) {
        플레이어가 죽는 순간 뷰 모델이 사라지며, 화면 아래쪽을 차지하는 것은 그것뿐이므로
        두 프레임은 그곳에서 달라야 합니다. death_time을 쓰러짐 이후로 두어 카메라가 안착한
        뒤이므로, 차이는 넘어짐이 아니라 총입니다. */
+    /* --- the tracers a shot leaves ---------------------------------------
+       WHAT PIXELS CAN SAY HERE, AND WHAT THEY CANNOT. The tracers stopped
+       being GL_LINES and became two triangles apiece, because WebGL draws every
+       line one pixel wide whatever width is asked for. That rewrite can fail in
+       ways a vertex test cannot see: triangles wound the wrong way and culled,
+       a strip collapsed to nothing, the wrong primitive, or the draw loop
+       reading six vertices that belong to a different tracer. Every one of
+       those ends with pixels missing from the frame, so the frame is where they
+       are checked.
+       WHAT IS NOT CHECKED HERE IS THE WIDTH, deliberately. A tracer is one ART
+       pixel across, and by the time it reaches glReadPixels it has been through
+       a POST_SUPERSAMPLE resolve and an ordered dither -- so the pixels that
+       differ are a band wider than the strip, and how much wider depends on
+       where the quantiser happened to land. Counting them would be measuring
+       the dither. The width and the taper are exact integer-free arithmetic on
+       the CPU, and hooktest reads those vertices back directly, which is the
+       instrument that can actually hold them.
+       THE THRESHOLDS ARE WELL UNDER WHAT A CLEAR SHOT WOULD GIVE. Part of this
+       streak is behind level geometry -- measured here, 219 of the 500 columns
+       it spans survive the depth test -- and that is fine for what is being
+       asked. A number tuned to the exact occlusion of one spawn point would be
+       a test about the level.
+       *이곳에서 픽셀이 말할 수 있는 것과 말할 수 없는 것.* 예광탄은 GL_LINES이기를 그만두고
+       각각 삼각형 둘이 되었습니다. 브라우저는 어떤 폭을 요청하든 모든 선을 1픽셀로 그리기
+       때문입니다. 그 재작성은 정점 검사가 볼 수 없는 방식으로 실패할 수 있습니다. 삼각형이
+       반대로 감겨 컬링되거나, 띠가 아무것도 아닌 것으로 무너지거나, 프리미티브가 틀리거나,
+       그리기 반복문이 다른 예광탄의 정점 여섯을 읽거나. 그 전부가 프레임에서 픽셀이 사라지는
+       것으로 끝나므로, 프레임이 그것을 검사할 자리입니다.
+       *여기서 검사하지 않는 것은 폭이며 의도적입니다.* 예광탄은 *아트* 픽셀 하나 두께이고,
+       glReadPixels에 닿을 때쯤이면 POST_SUPERSAMPLE 해상과 정렬 디더를 거친 뒤입니다. 그래서
+       달라지는 픽셀은 띠보다 넓은 띠이며, 얼마나 넓은지는 양자화기가 어디에 놓였는지에
+       달려 있습니다. 그것을 세는 것은 디더를 재는 일입니다. 폭과 테이퍼는 CPU에서의 정확한
+       산술이고 hooktest가 그 정점을 직접 읽어 내며, 그것이 실제로 그것들을 붙잡을 수 있는
+       계측기입니다.
+       *임계값은 시야가 트인 사격이 줄 값보다 한참 아래입니다.* 이 줄기의 일부는 레벨
+       지오메트리 뒤에 있습니다. 이곳에서 재어 보니 걸쳐 있는 500개 열 중 219개가 깊이 검사를
+       통과합니다. 그리고 그것은 묻고 있는 것에 대해서는 문제가 되지 않습니다. 한 스폰 지점의
+       정확한 가림 정도에 맞춘 수는 레벨에 대한 테스트가 될 것입니다. */
+    printf("\n  --- a shot's tracer reaches the frame ---\n");
+    {
+        clear_state(&w);
+        decal_reset(&w.pools);
+        frame_hash(&w, &scene, 0);
+        keep_frame();
+        float warm_before = lean(0);
+
+        /* Spawned straight through decal_tracer rather than fired, for the
+           reason the hand-placed bolt below gives: reaching it through the
+           weapon would mean a trace, a spread roll and an impact, three things
+           that can fail for reasons belonging to weapontest.
+           발사하지 않고 손으로 놓습니다. 아래의 손으로 놓은 볼트와 같은 이유입니다. 무기를
+           거쳐 decal_tracer에 닿으려면 트레이스와 산포 굴림과 명중이 필요한데, 그 셋은
+           weapontest의 몫인 이유로 실패할 수 있습니다. */
+        float cyt = cosf(w.yaw), syt = sinf(w.yaw);
+        v3 fwd   = v3f(-syt, 0.0f, -cyt);
+        v3 right = v3f( cyt, 0.0f, -syt);
+
+        /* ACROSS the view as well as away from it. Straight down the forward
+           axis a tracer projects to a point and there is no streak to measure;
+           the offset is what gives it a length on screen.
+           시선에서 멀어지는 동시에 시야를 *가로지릅니다*. 전방 축을 따라 곧장 놓으면 예광탄은
+           점으로 투영되어 잴 줄기가 없습니다. 화면에서 길이를 갖게 하는 것이 이 옆으로의
+           치우침입니다. */
+        v3 muzzle = v3add(v3add(w.player.pos, v3scale(fwd,  1.0f)), v3scale(right, -0.6f));
+        v3 hit    = v3add(v3add(w.player.pos, v3scale(fwd, 12.0f)), v3scale(right,  2.5f));
+        decal_tracer(&w.pools, muzzle, hit);
+        frame_hash(&w, &scene, 0);
+
+        int one_px = px_changed();
+        int cols = 0;
+        for (int x = 0; x < VW; x++) if (col_changed(x) > 0) cols++;
+        float warm_after = lean(0);
+
+        printf("      one tracer: %d pixels over %d columns, warmth %.3f -> %.3f\n",
+               one_px, cols, (double)warm_before, (double)warm_after);
+
+        ok(one_px > 200, "a tracer reaches the frame at all");
+        ok(cols > 100, "and reads as a streak rather than a blob");
+        ok(warm_after > warm_before, "in a colour warmer than the room it crosses");
+
+        /* --- the one after a tracer that drew nothing --------------------
+           THIS IS THE CHECK FOR THE LOCKSTEP. The draw loop addresses tracer
+           `k` as the six vertices at `k * 6`, and a ribbon -- unlike the
+           GL_LINES pair it replaced -- can append none: mb_ribbon_taper refuses
+           a zero-length segment, and a pellet that stops at the muzzle is one.
+           If such a tracer were still counted, every tracer behind it would
+           read six vertices that belong to somebody else, or run off the end of
+           the buffer entirely. So a zero-length one is placed FIRST and the
+           real one behind it has to come out byte for byte the same as it does
+           alone.
+           WHAT THIS DOES NOT CATCH, said here rather than left to be assumed: a
+           stride that is merely WRONG rather than desynchronised. Measured by
+           breaking it on purpose, `k * 2` in place of `k * 6` still paints
+           1,046 pixels over 302 columns against the right answer's 1,425 over
+           369 -- overlapping garbage, close enough to the truth that no
+           threshold separates them without becoming a threshold about this
+           level. The stride is one literal beside the six it has to match, and
+           the comment there is what guards it.
+           *이것이 보조 맞춤에 대한 검사입니다.* 그리기 반복문은 예광탄 `k`를 `k * 6` 위치의
+           정점 여섯으로 지정하는데, 띠는 그것이 대체한 GL_LINES 한 쌍과 달리 하나도 덧붙이지
+           않을 수 있습니다. mb_ribbon_taper는 길이 0인 선분을 거절하며, 총구에서 멈춘 탄이
+           그것입니다. 그런 예광탄이 여전히 세어진다면 그 뒤의 모든 예광탄이 남의 정점 여섯을
+           읽거나 버퍼 끝을 아예 넘어갑니다. 그래서 길이 0인 것을 *먼저* 놓고, 그 뒤의 진짜
+           하나가 혼자 있을 때와 똑같이 나와야 합니다.
+           *이것이 잡지 못하는 것*을 가정에 맡기지 않고 여기 적습니다. 어긋난 것이 아니라 그저
+           *틀린* 보폭입니다. 일부러 깨뜨려 재어 보니 `k * 6` 대신 `k * 2`는 여전히 1,046개
+           픽셀을 302개 열에 칠하며, 옳은 답은 1,425개를 369개 열에 칠합니다. 겹쳐진 쓰레기이고,
+           이 레벨에 대한 임계값이 되지 않고서는 어떤 임계값도 둘을 가르지 못할 만큼 참에
+           가깝습니다. 보폭은 그것이 맞춰야 할 여섯 옆의 리터럴 하나이며, 그곳의 주석이 그것을
+           지킵니다. */
+        v3 muzzle2 = v3add(v3add(w.player.pos, v3scale(fwd,  1.0f)), v3scale(right,  0.6f));
+        v3 hit2    = v3add(v3add(w.player.pos, v3scale(fwd, 12.0f)), v3scale(right, -2.5f));
+
+        /* PLACED BY HAND AND GIVEN DIFFERENT LIVES, and the second half of that
+           is what makes the check able to fail. A tracer's alpha is its life
+           over ::DECAL_TRACER_LIFE, so two tracers with the same life draw the
+           same colour -- and a frame where the real one was drawn under the
+           blank one's entry would then be pixel for pixel the frame where it
+           was drawn under its own. Measured before the lives were split: 786
+           pixels either way, and the check passed against code with the guard
+           taken out. One bright, one dim, and the mix-up has somewhere to show.
+           *손으로 놓고 서로 다른 수명을 줍니다.* 그 후반부가 이 검사를 실패할 수 있게 만드는
+           것입니다. 예광탄의 알파는 수명을 ::DECAL_TRACER_LIFE로 나눈 값이므로, 수명이 같은 두
+           예광탄은 같은 색으로 그려집니다. 그러면 진짜 하나가 빈 것의 항목 아래에서 그려진
+           프레임이 자기 항목 아래에서 그려진 프레임과 픽셀 단위로 같아집니다. 수명을 나누기
+           전에 재어 보니 어느 쪽도 786픽셀이었고, 보호 장치를 들어낸 코드에 대해 검사가
+           통과했습니다. 하나는 밝게 하나는 어둡게 두면 뒤바뀜이 드러날 자리가 생깁니다. */
+        decal_reset(&w.pools);
+        w.pools.decal.tracers[1].a    = muzzle2;
+        w.pools.decal.tracers[1].b    = hit2;
+        w.pools.decal.tracers[1].life = DECAL_TRACER_LIFE * 0.35f;
+
+        unsigned alone = frame_hash(&w, &scene, 0);
+        int alone_px = px_changed();
+
+        /* Slot 0 now, in front of it in the walk: zero length, so the ribbon
+           appends nothing, and a full life so it would draw the geometry behind
+           it at the wrong brightness if it were counted.
+           이제 슬롯 0이며 순회에서 그 앞입니다. 길이가 0이라 띠가 아무것도 덧붙이지 않고,
+           수명은 가득 차 있어 세어진다면 그 뒤의 지오메트리를 틀린 밝기로 그리게 됩니다. */
+        w.pools.decal.tracers[0].a    = muzzle;
+        w.pools.decal.tracers[0].b    = muzzle;
+        w.pools.decal.tracers[0].life = DECAL_TRACER_LIFE;
+
+        unsigned behind = frame_hash(&w, &scene, 0);
+
+        printf("      mirrored tracer: %d pixels, %08x alone / %08x behind a blank\n",
+               alone_px, alone, behind);
+        ok(alone_px > 200, "the mirrored tracer reaches the frame too");
+        ok(behind == alone,
+           "a tracer that drew nothing does not shift the one behind it");
+
+        /* --- and two of them are two streaks ----------------------------- */
+        decal_reset(&w.pools);
+        decal_tracer(&w.pools, muzzle,  hit);
+        decal_tracer(&w.pools, muzzle2, hit2);
+        frame_hash(&w, &scene, 0);
+
+        int two_cols = 0;
+        for (int x = 0; x < VW; x++) if (col_changed(x) > 0) two_cols++;
+        printf("      two tracers: %d pixels over %d columns\n", px_changed(), two_cols);
+        ok(two_cols > cols + 60, "two tracers cover more of the screen than one");
+
+        /* Cleared before leaving. Nothing ages a tracer here -- decal_update is
+           world_step's, and this file calls scene_frame directly -- so one left
+           behind would sit in every frame the checks below compare.
+           떠나기 전에 지웁니다. 이곳에서는 무엇도 예광탄을 늙게 하지 않습니다. decal_update는
+           world_step의 것이고 이 파일은 scene_frame을 직접 부릅니다. 그래서 남겨진 하나는
+           아래의 검사들이 비교하는 모든 프레임에 앉아 있게 됩니다. */
+        decal_reset(&w.pools);
+    }
+
     printf("\n  --- the gun, and who is holding it ---\n");
 
     clear_state(&w);

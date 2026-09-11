@@ -47,6 +47,36 @@ if (-not (Test-Path $gcc)) {
 $devkitBin = Join-Path $devkit 'bin'
 if ($env:PATH -notlike "*$devkitBin*") { $env:PATH = "$devkitBin;$env:PATH" }
 
+# The other host's platform files. They live in src/ because that is where a
+# platform file lives -- plat_win32.c does -- but they are compiled by emcc and
+# nothing else, so every path here that walks src\*.c has to step over them.
+#
+# NAMED ONCE, because there are two such paths and they had drifted apart the
+# moment there were. The release build links them into game.exe and fails on a
+# missing emscripten.h; -Portable compiles them against a poisoned windows.h and
+# reports a regression for a header neither of them mentions. Both failures are
+# the same mistake and neither is about portability.
+#
+# A file added here is invisible to the desktop build. That is the point, and it
+# is also the risk: nothing on this side will ever tell you it is broken. What
+# checks them is build_web.ps1 and emcc, and until that script exists the check
+# is running emcc by hand -- which is how they got here.
+#
+# 다른 호스트의 플랫폼 파일들입니다. src/에 있는 이유는 플랫폼 파일이 사는 곳이 그곳이기
+# 때문이며 plat_win32.c가 그러합니다. 다만 이것들을 컴파일하는 것은 emcc뿐이므로, src\*.c를
+# 훑는 이곳의 모든 경로가 이것들을 넘어가야 합니다.
+#
+# *한 번만 이름 붙입니다.* 그런 경로가 둘이고, 둘이 생긴 순간 이미 서로 어긋나 있었기
+# 때문입니다. 릴리스 빌드는 이것들을 game.exe에 링크하려다 없는 emscripten.h에서 실패하고,
+# -Portable은 독을 탄 windows.h에 대고 컴파일해서는 둘 다 언급한 적 없는 헤더 때문에 후퇴를
+# 보고합니다. 두 실패는 같은 실수이며 어느 쪽도 이식성에 관한 것이 아닙니다.
+#
+# 이곳에 추가된 파일은 데스크톱 빌드에 보이지 않습니다. 그것이 요점이고 동시에 위험입니다. 이쪽의
+# 무엇도 그것이 깨졌다고 말해 주지 않습니다. 그것들을 검사하는 것은 build_web.ps1과 emcc이며,
+# 그 스크립트가 생기기 전까지 검사는 emcc를 손으로 돌리는 일입니다. 이것들이 이곳에 오게 된
+# 경위가 그것입니다.
+$webOnly = @('plat_web.c', 'gl_web.c', 'audio_web.c', 'main_web.c')
+
 # ---------------------------------------------------------------- -Portable --
 #
 # Which translation units still need windows.h, checked by a compiler rather
@@ -107,6 +137,17 @@ if ($Portable) {
 
     Write-Host "`nPortability check (windows.h poisoned)" -ForegroundColor Cyan
     foreach ($f in (Get-ChildItem (Join-Path $root 'src') -Filter *.c | Sort-Object Name)) {
+        # Another host's platform file. This check asks "does it reach
+        # windows.h", and the answer for a file that reaches emscripten.h
+        # instead is not interesting -- it fails for a reason that has nothing
+        # to do with the line being held here.
+        # 다른 호스트의 플랫폼 파일입니다. 이 검사는 "windows.h에 닿는가"를 묻는데, 대신
+        # emscripten.h에 닿는 파일에 대한 답은 흥미롭지 않습니다. 이곳에서 지키는 선과 아무
+        # 관련 없는 이유로 실패하기 때문입니다.
+        if ($webOnly -contains $f.Name) {
+            Write-Host ("  {0,-16} other host (emcc)" -f $f.Name) -ForegroundColor DarkGray
+            continue
+        }
         # -DHOT_RELOAD because that path holds the file I/O, and it is the half
         # that would otherwise go unchecked -- the release build simply has no
         # file reading in it to be unportable.
@@ -155,7 +196,9 @@ if (-not (Test-Path $outDir)) { New-Item -ItemType Directory $outDir | Out-Null 
 # assets\*.txt are the source of truth; bake them into src\gen_assets.h first.
 & (Join-Path $root 'bake.ps1')
 
-$sources = Get-ChildItem (Join-Path $root 'src') -Filter *.c | ForEach-Object { $_.FullName }
+$sources = Get-ChildItem (Join-Path $root 'src') -Filter *.c |
+           Where-Object { $webOnly -notcontains $_.Name } |
+           ForEach-Object { $_.FullName }
 
 # Tool-side shared libraries: tools\*.c with no entry point of their own. These
 # are linked INTO tools rather than built AS tools, so the -Tools sweep has to

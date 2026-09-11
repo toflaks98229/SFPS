@@ -121,9 +121,9 @@ int audio_init(void) {
            undeclared identifier 'next'"로 도착합니다. 자바스크립트 실수처럼 읽히지만 아닙니다.
            이 네 줄을 한 줄로 정돈하는 것이 떠오르는 편집이고, 그것은 컴파일되지 않습니다. */
         var A = {};
-        A.ctx   = ctx;
-        A.next  = 0;
-        A.timer = 0;
+        A['ctx']   = ctx;
+        A['next']  = 0;
+        A['timer'] = 0;
         /* BRACKETED so Closure leaves the name alone. It renames dotted
            properties, consistently enough that the code keeps working -- but
            the handle then cannot be found from a console, and that is exactly
@@ -134,7 +134,20 @@ int audio_init(void) {
            속성의 이름을 바꾸며, 코드가 계속 동작할 만큼 일관되게 바꿉니다. 다만 그러면 콘솔에서
            그 핸들을 찾을 수 없게 되는데, 브라우저에서 소리가 나지 않는 것을 디버깅하는 사람이
            보고 싶어 할 상태가 바로 그것입니다. 실제로 재어 보니, 점으로 쓰면 `__sfps_audio`는
-           빌드된 JS 어디에도 나타나지 않습니다. */
+           빌드된 JS 어디에도 나타나지 않습니다.
+           AND THE FIELDS, NOT JUST THE HANDLE. Bracketing only the outer name
+           was half a fix and it looked like a whole one. Measured in a browser:
+           the handle was reachable and `A.ctx` was `undefined`, because Closure
+           had renamed the field to `gd` -- so the object read as a broken one
+           and the audio it was driving was working perfectly. A rename that is
+           consistent everywhere is invisible to the program and ruinous to the
+           person looking at it.
+           *그리고 핸들만이 아니라 필드까지입니다.* 바깥 이름만 대괄호로 싼 것은 절반짜리
+           수정이었고 온전한 것처럼 보였습니다. 브라우저에서 재어 보니 핸들에는 닿는데
+           `A.ctx`가 `undefined`였습니다. Closure가 그 필드를 `gd`로 바꿨기 때문입니다. 그래서
+           객체는 고장 난 것으로 읽혔고 그것이 구동하던 오디오는 완벽히 동작하고 있었습니다.
+           모든 곳에서 일관된 이름 변경은 프로그램에게는 보이지 않고 그것을 들여다보는
+           사람에게는 파괴적입니다. */
         Module['__sfps_audio'] = A;
 
         /* THE GESTURE GATE. A page may not make noise until somebody has
@@ -168,11 +181,11 @@ int audio_init(void) {
            멈추는 오디오는 모든 끊김에서 소리가 끊기고, 백그라운드 탭은 rAF를 0으로 조이면서도
            타이머는 계속 돌립니다. */
         var ahead = (nbuf * frames) / rate;
-        A.timer = setInterval(function () {
+        A['timer'] = setInterval(function () {
             if (ctx.state !== 'running') return;
             var now = ctx.currentTime;
-            if (A.next < now) A.next = now;
-            while (A.next < now + ahead) {
+            if (A['next'] < now) A['next'] = now;
+            while (A['next'] < now + ahead) {
                 _audio_web_fill();
                 var ptr = _audio_web_chunk() >> 1;
                 var buf = ctx.createBuffer(1, frames, rate);
@@ -181,8 +194,8 @@ int audio_init(void) {
                 var src = ctx.createBufferSource();
                 src.buffer = buf;
                 src.connect(ctx.destination);
-                src.start(A.next);
-                A.next += frames / rate;
+                src.start(A['next']);
+                A['next'] += frames / rate;
             }
         }, 1000 * frames / rate);
 
@@ -207,14 +220,14 @@ void audio_shutdown(void) {
     EM_ASM({
         var A = Module['__sfps_audio'];
         if (!A) return;
-        if (A.timer) clearInterval(A.timer);
+        if (A['timer']) clearInterval(A['timer']);
         /* Chunks already scheduled keep their start times and would play on
            after this returns, which on Windows is what waveOutReset prevents.
            close() is this host's waveOutReset.
            이미 예약된 덩어리들은 시작 시각을 지닌 채 이 함수가 반환한 뒤에도 재생될 것이며,
            Windows에서 waveOutReset이 막는 것이 그것입니다. close()가 이 호스트의
            waveOutReset입니다. */
-        if (A.ctx && A.ctx.state !== 'closed') A.ctx.close();
+        if (A['ctx'] && A['ctx'].state !== 'closed') A['ctx'].close();
         Module['__sfps_audio'] = null;
     });
 }

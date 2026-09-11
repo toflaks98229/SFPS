@@ -965,6 +965,51 @@ int main(void) {
         mb_ribbon(&b, a, a, cam, 0.2f, 1.0f);   /* zero-length: a to a */
         ok(b.count == 0, "a zero-length segment degrades to nothing, not a crash");
 
+        /* --- and the tapering one, which the tracers draw with --------------
+           A tracer is a screen-constant thickness, which is a world thickness
+           that grows with distance, so its two ends have different widths. What
+           has to hold is that each END gets ITS OWN width -- a taper that
+           averaged the two, or applied one to both, would still look like a
+           strip and would still pass every check above. */
+        mb_reset(&b);
+        mb_ribbon_taper(&b, a, c, cam, 0.2f, 0.6f, 1.0f);
+        ok(b.count == 6, "a tapered ribbon is also one quad");
+
+        float dev_near = 0.0f, dev_far = 0.0f;
+        for (int i = 0; i < b.count; i++) {
+            v3 p = v3f(b.v[i].px, b.v[i].py, b.v[i].pz);
+            float t = p.x / 4.0f;
+            float dev = v3len(v3sub(p, v3f(t * 4.0f, 0, 0)));
+            /* Which end a vertex belongs to is its position along the segment;
+               the quad has no vertices anywhere between. */
+            if (t < 0.5f) { if (dev > dev_near) dev_near = dev; }
+            else          { if (dev > dev_far)  dev_far  = dev; }
+        }
+        okf(fabsf(dev_near - 0.1f) < 1e-4f,
+            "the near end is half of width_a across", dev_near, 0.1f);
+        okf(fabsf(dev_far - 0.3f) < 1e-4f,
+            "and the far end is half of width_b, not the same number",
+            dev_far, 0.3f);
+
+        /* mb_ribbon is mb_ribbon_taper with one width twice, and this is what
+           says so: the two must produce identical vertices, or the parallel
+           straight ribbon everything else draws has quietly become a second
+           implementation. */
+        {
+            MeshBuf b2;
+            mb_init(&b2, 8);
+            mb_reset(&b);
+            mb_ribbon(&b, a, c, cam, 0.2f, 3.0f);
+            mb_ribbon_taper(&b2, a, c, cam, 0.2f, 0.2f, 3.0f);
+            int same = (b.count == b2.count);
+            for (int i = 0; same && i < b.count; i++)
+                same = (b.v[i].px == b2.v[i].px && b.v[i].py == b2.v[i].py &&
+                        b.v[i].pz == b2.v[i].pz && b.v[i].u  == b2.v[i].u  &&
+                        b.v[i].v  == b2.v[i].v);
+            ok(same, "an even taper is the plain ribbon, vertex for vertex");
+            mb_free(&b2);
+        }
+
         mb_free(&b);
     }
 

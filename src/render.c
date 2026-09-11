@@ -428,6 +428,11 @@ void mb_billboard_uv(MeshBuf *b, v3 centre, v3 right, v3 up, float w, float h,
 }
 
 void mb_ribbon(MeshBuf *b, v3 a, v3 bpt, v3 cam_pos, float width, float utile) {
+    mb_ribbon_taper(b, a, bpt, cam_pos, width, width, utile);
+}
+
+void mb_ribbon_taper(MeshBuf *b, v3 a, v3 bpt, v3 cam_pos,
+                     float width_a, float width_b, float utile) {
     v3 axis = v3sub(bpt, a);
     float len = v3len(axis);
     if (len < 1e-5f) return;                 /* zero-length segment: nothing to draw */
@@ -447,11 +452,22 @@ void mb_ribbon(MeshBuf *b, v3 a, v3 bpt, v3 cam_pos, float width, float utile) {
         side = v3cross(axis, hint);
         sl = v3len(side);
     }
-    side = v3scale(side, (width * 0.5f) / sl);
+    /* ONE side DIRECTION, TWO LENGTHS. The axis a strip widens along is a
+       property of the segment and the eye, so both ends share it; only how far
+       each reaches along it differs. Normalising once and scaling twice is also
+       what keeps a taper from twisting -- two side vectors derived separately
+       would disagree by rounding and crease a strip that should be flat.
+       측면 *방향*은 하나이고 *길이*가 둘입니다. 띠가 넓어지는 축은 선분과 눈의 성질이므로 양
+       끝이 공유하며, 각 끝이 그 축을 따라 얼마나 뻗는지만 다릅니다. 한 번 정규화하고 두 번
+       스케일하는 것은 테이퍼가 비틀리지 않게 하는 방법이기도 합니다. 따로 구한 두 측면 벡터는
+       반올림만큼 어긋나며, 평평해야 할 띠에 접힘을 만듭니다. */
+    side = v3scale(side, 1.0f / sl);
 
     v3 n = v3norm(v3cross(axis, side));
-    v3 pa0 = v3sub(a, side),   pa1 = v3add(a, side);
-    v3 pb0 = v3sub(bpt, side), pb1 = v3add(bpt, side);
+    v3 side_a = v3scale(side, width_a * 0.5f);
+    v3 side_b = v3scale(side, width_b * 0.5f);
+    v3 pa0 = v3sub(a, side_a),   pa1 = v3add(a, side_a);
+    v3 pb0 = v3sub(bpt, side_b), pb1 = v3add(bpt, side_b);
 
     mb_vtx(b, pa0, n, 0.0f,  0.0f); mb_vtx(b, pa1, n, 0.0f,  1.0f); mb_vtx(b, pb1, n, utile, 1.0f);
     mb_vtx(b, pa0, n, 0.0f,  0.0f); mb_vtx(b, pb1, n, utile, 1.0f); mb_vtx(b, pb0, n, utile, 0.0f);

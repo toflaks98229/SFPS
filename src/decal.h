@@ -97,6 +97,47 @@
 #define DECAL_TRACER_LIFE 0.055f
 
 /**
+ * @brief How thick a tracer is, in ART pixels.
+ *
+ * ENGLISH
+ * -------
+ * IN ART PIXELS, NOT WORLD UNITS, and the distinction is the whole reason this
+ * constant exists rather than a width in metres. A tracer runs from the muzzle,
+ * half a metre from the eye, to an impact that may be twenty metres away. Any
+ * fixed world width is wrong at one end or the other by the ratio between them:
+ * a width that reads at twenty metres is a slab across the middle of the screen
+ * at half a metre. What is constant about a tracer is how thick it looks, so
+ * that is what is written down; ::decal_draw is handed the scale that turns it
+ * into two world widths.
+ *
+ * ONE, BECAUSE THAT IS WHAT IT ALREADY WAS. This used to be `glLineWidth(2.0f)`
+ * and 2.0 looks like two art pixels, but the world pass rasterises at
+ * POST_SUPERSAMPLE times the art resolution -- so those were two SAMPLES, which
+ * the resolve averages down to one art pixel. Reading that as "2" and writing
+ * 2.0 here would have doubled the tracer while replacing the call that drew it,
+ * and it would have looked like a deliberate change to somebody comparing
+ * screenshots.
+ *
+ * 한국어
+ * ------
+ * @brief 예광탄의 두께. *아트 픽셀* 단위입니다.
+ *
+ * *월드 단위가 아니라 아트 픽셀 단위이며*, 그 구분이 이 상수가 미터 단위의 폭 대신 존재하는
+ * 이유 전부입니다. 예광탄은 눈에서 반 미터 떨어진 총구에서 스무 미터 밖일 수도 있는 명중
+ * 지점까지 이어집니다. 고정된 월드 폭은 어느 한쪽 끝에서 그 비율만큼 틀립니다. 스무 미터에서
+ * 알맞은 폭은 반 미터에서 화면 한가운데를 가로지르는 판자입니다. 예광탄에서 일정한 것은 *얼마나
+ * 두꺼워 보이는가*이므로 그것을 적어 두며, ::decal_draw가 그것을 두 개의 월드 폭으로 바꾸는
+ * 배율을 건네받습니다.
+ *
+ * *1인 이유는 원래 그것이었기 때문입니다.* 이것은 `glLineWidth(2.0f)`였고 2.0은 아트 픽셀 둘처럼
+ * 보이지만, 월드 패스는 아트 해상도의 POST_SUPERSAMPLE배로 래스터화합니다. 즉 그것은 *샘플* 둘
+ * 이었고 해상 패스가 그것을 아트 픽셀 하나로 평균 냅니다. 그것을 "2"로 읽고 여기에 2.0을 썼다면
+ * 그것을 그리던 호출을 대체하면서 예광탄을 두 배로 만들었을 것이고, 스크린샷을 비교하는 사람에게는
+ * 의도된 변경으로 보였을 것입니다.
+ */
+#define DECAL_TRACER_PX 1.0f
+
+/**
  * @brief Seconds the additive flare on a fresh mark lasts.
  *
  * ENGLISH: A dark bullet hole 30m down a fogged corridor is invisible on its
@@ -354,6 +395,13 @@ void decal_update(Pools *pl, const Level *l, float dt);
  * @param[in] cam_pos   Camera position; the sparks scale with distance from it.
  * @param[in] cam_right Screen right, from ::cam_basis.
  * @param[in] cam_up    Screen up, from ::cam_basis.
+ * @param[in] px_world  World units one ART pixel spans at one unit of distance
+ *                      from the eye. The tracers are the only thing here that
+ *                      needs it: their thickness is stated on screen (see
+ *                      ::DECAL_TRACER_PX) and has to be turned into a world
+ *                      width per end. Only the caller knows the buffer the
+ *                      world is being rasterised into, which is not the window
+ *                      and changes with the pixel preset.
  *
  * @note Belongs on the WORLD side of the pass boundary -- these are part of the
  *       scene's lighting and must be pixelised and dithered with it. Expects
@@ -367,13 +415,19 @@ void decal_update(Pools *pl, const Level *l, float dt);
  * @param[in] cam_pos   카메라 위치. 스파크가 이 지점으로부터의 거리에 따라 크기를 조정합니다.
  * @param[in] cam_right ::cam_basis가 만든 화면 우측 축.
  * @param[in] cam_up    ::cam_basis가 만든 화면 상향 축.
+ * @param[in] px_world  눈으로부터 거리 1에서 *아트* 픽셀 하나가 차지하는 월드 단위.
+ *                      이것을 필요로 하는 것은 예광탄뿐입니다. 그 두께는 화면 기준으로
+ *                      적혀 있고(::DECAL_TRACER_PX 참조) 끝마다 월드 폭으로 바뀌어야
+ *                      합니다. 월드가 어떤 버퍼에 래스터화되는지는 호출자만 알며, 그것은
+ *                      창이 아니고 픽셀 프리셋에 따라 달라집니다.
  *
  * @note 패스 경계의 *월드* 쪽에 속합니다. 이것들은 장면 조명의 일부이며 함께 픽셀화되고
  *       디더링되어야 합니다. 면 컬링이 꺼져 있어야 합니다. 자국은 감김 방향이 하나인
  *       빌보드입니다.
  * @note ::decal_init 이전에는 아무 동작도 하지 않습니다.
  */
-void decal_draw(const Pools *pl, mat4 view_proj, v3 cam_pos, v3 cam_right, v3 cam_up);
+void decal_draw(const Pools *pl, mat4 view_proj, v3 cam_pos, v3 cam_right,
+                v3 cam_up, float px_world);
 
 /**
  * @brief How many marks are still alive.

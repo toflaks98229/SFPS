@@ -657,7 +657,52 @@ void wpview_draw_view(WeaponView *v, const Weapon *w, float aspect) {
 
 /* ------------------------------------------------------------------- HUD */
 
-void wpview_draw_hud(WeaponView *v, const Weapon *w, float aspect, int hook_ready) {
+/**
+ * @brief One thick stroke of the crosshair, as two triangles in clip space.
+ *
+ * ENGLISH: The crosshair used to be GL_LINES at `glLineWidth(2.0f)`, and WebGL
+ * reports a supported width range of [1, 1] on every major browser -- the call
+ * is accepted and ignored. A stroke that has to be two pixels wide has to be
+ * two pixels of geometry.
+ *
+ * THE SPACE IS ISOTROPIC, which is what makes one thickness enough for arms
+ * that run both ways. The caller's uMVP scales x by 1/aspect precisely so a
+ * square here is a square on screen, so `w` means the same thing horizontally
+ * and vertically and the perpendicular below needs no correction.
+ *
+ * 한국어: 조준점은 `glLineWidth(2.0f)`의 GL_LINES였고, WebGL은 주요 브라우저 전부에서 지원
+ * 폭 범위를 [1, 1]로 보고합니다. 호출은 받아들여지고 무시됩니다. 2픽셀이어야 하는 획은
+ * 2픽셀의 지오메트리여야 합니다.
+ *
+ * *이 공간은 등방성이며*, 그것이 양방향으로 뻗는 팔에 두께 하나로 충분한 이유입니다. 호출자의
+ * uMVP는 이곳의 정사각형이 화면에서도 정사각형이 되도록 x를 1/aspect로 스케일하므로, `w`는
+ * 가로와 세로에서 같은 것을 뜻하고 아래의 수직 벡터에는 보정이 필요 없습니다.
+ */
+static void hud_stroke(MeshBuf *b, float x0, float y0, float x1, float y1, float w) {
+    float dx = x1 - x0, dy = y1 - y0;
+    float len = sqrtf(dx * dx + dy * dy);
+    if (len < 1e-6f) return;
+    float px = -dy / len * w * 0.5f, py = dx / len * w * 0.5f;
+    v3 n = v3f(0, 0, 1);
+
+    /* WOUND COUNTER-CLOCKWISE, in the same corner order ::mb_billboard uses:
+       the two corners at the start, then the two at the end, going round. The
+       caller disables culling and so would draw this either way, which is the
+       reason to get it right here rather than to find out when somebody moves
+       the call and the crosshair vanishes with no error anywhere.
+       *반시계 방향으로 감으며*, ::mb_billboard가 쓰는 것과 같은 모서리 순서입니다. 시작 쪽 두
+       모서리, 그다음 끝 쪽 두 모서리를 돌아갑니다. 호출자가 컬링을 끄므로 어느 쪽으로 감아도
+       그려지며, 바로 그것이 여기서 제대로 해 두어야 할 이유입니다. 그러지 않으면 누군가
+       호출 위치를 옮겼을 때, 어디에도 오류 없이 조준점이 사라지는 것으로 알게 됩니다. */
+    v3 s0 = v3f(x0 - px, y0 - py, 0), e0 = v3f(x1 - px, y1 - py, 0);
+    v3 e1 = v3f(x1 + px, y1 + py, 0), s1 = v3f(x0 + px, y0 + py, 0);
+
+    mb_vtx(b, s0, n, 0, 0); mb_vtx(b, e0, n, 1, 0); mb_vtx(b, e1, n, 1, 1);
+    mb_vtx(b, s0, n, 0, 0); mb_vtx(b, e1, n, 1, 1); mb_vtx(b, s1, n, 0, 1);
+}
+
+void wpview_draw_hud(WeaponView *v, const Weapon *w, float aspect, int hook_ready,
+                     int win_h) {
     /* The crosshair belongs to the UI pass: a dithered, magnified reticle is
        unreadable, and the range brackets are one pixel wide.
        조준점은 *UI* 패스에 속합니다. 디더링되고 확대된 조준선은 읽을 수 없으며, 사거리
@@ -673,19 +718,26 @@ void wpview_draw_hud(WeaponView *v, const Weapon *w, float aspect, int hook_read
     float gap = 0.012f + w->spread * 1.1f;
     float len = 0.022f;
 
+    /* Two window pixels, said in clip units. Clip y spans 2.0 over the window's
+       whole height, so one pixel is 2/win_h and the stroke is twice that. A
+       minimised window reports zero and would divide by it.
+       창 픽셀 둘을 클립 단위로 말한 것입니다. 클립 y는 창 높이 전체에 걸쳐 2.0이므로 픽셀
+       하나는 2/win_h이고 획은 그 두 배입니다. 최소화된 창은 0을 보고하며 그것으로 나누게
+       됩니다. */
+    float stroke = 4.0f / (float)(win_h > 0 ? win_h : 1);
+
     mb_reset(&v->line_buf);
-    mb_line(&v->line_buf, v3f(-gap - len, 0, 0), v3f(-gap, 0, 0));
-    mb_line(&v->line_buf, v3f( gap, 0, 0),       v3f( gap + len, 0, 0));
-    mb_line(&v->line_buf, v3f(0, -gap - len, 0), v3f(0, -gap, 0));
-    mb_line(&v->line_buf, v3f(0,  gap, 0),       v3f(0,  gap + len, 0));
+    hud_stroke(&v->line_buf, -gap - len, 0, -gap, 0, stroke);
+    hud_stroke(&v->line_buf,  gap, 0,  gap + len, 0, stroke);
+    hud_stroke(&v->line_buf, 0, -gap - len, 0, -gap, stroke);
+    hud_stroke(&v->line_buf, 0,  gap, 0,  gap + len, stroke);
     mesh_upload(&v->line_mesh, &v->line_buf, 1);
 
     glDisable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glLineWidth(2.0f);
     rd_color(0.95f, 0.97f, 1.0f, 0.75f);
-    mesh_draw_lines(&v->line_mesh);
+    mesh_draw(&v->line_mesh);
 
     /* --- the hook's range indicator --------------------------------------
        Four corner brackets around the crosshair, drawn only when a throw
@@ -733,6 +785,20 @@ void wpview_draw_hud(WeaponView *v, const Weapon *w, float aspect, int hook_read
         mb_line(&v->line_buf, v3f( r, -r, 0), v3f( r, -r + a, 0));
         mesh_upload(&v->line_mesh, &v->line_buf, 1);
 
+        /* STILL GL_LINES, and deliberately. These are one pixel wide, which is
+           the one width every implementation including WebGL actually gives, so
+           there is nothing here for a browser to quietly drop. Rebuilding them
+           as quads would not be free either: a quad exactly one pixel across
+           lands wherever it lands against the pixel centres and can thin or
+           break up, where a width-1 GL_LINES is defined to come out unbroken.
+           The crosshair above had to move because 2.0 was a lie on the web;
+           these never asked for anything a browser refuses.
+           *여전히 GL_LINES이며 의도적입니다.* 이것들은 1픽셀 폭이고, 그것은 WebGL을 포함한
+           모든 구현이 실제로 주는 유일한 폭이므로 브라우저가 조용히 버릴 것이 없습니다. 쿼드로
+           다시 만드는 것도 공짜가 아닙니다. 정확히 1픽셀인 쿼드는 픽셀 중심에 대해 놓이는 대로
+           놓여 가늘어지거나 끊길 수 있지만, 폭 1의 GL_LINES는 이어지도록 정의되어 있습니다.
+           위의 조준점이 옮겨 가야 했던 것은 2.0이 웹에서 거짓말이기 때문이고, 이것들은
+           브라우저가 거절하는 것을 요구한 적이 없습니다. */
         glLineWidth(1.0f);
         rd_color(0.45f, 0.95f, 0.60f, 0.85f);   /* green: the hook will bite */
         mesh_draw_lines(&v->line_mesh);

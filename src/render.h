@@ -850,6 +850,51 @@ void mb_billboard_uv(MeshBuf *b, v3 centre, v3 right, v3 up, float w, float h,
 void mb_ribbon(MeshBuf *b, v3 a, v3 bpt, v3 cam_pos, float width, float utile);
 
 /**
+ * @brief A ::mb_ribbon whose two ends have different widths.
+ *
+ * ENGLISH
+ * -------
+ * THE CASE THIS EXISTS FOR is a strip that must read as the same THICKNESS ON
+ * SCREEN along its whole length. Perspective divides world size by distance, so
+ * holding the screen width fixed means letting the world width grow with it --
+ * and a segment running away from the eye is at two distances at once. One
+ * width cannot do it: take the near end and the far end is a hairline, take the
+ * far end and the near end is a slab across the middle of the screen.
+ *
+ * @param[in,out] b       Buffer to append two triangles to.
+ * @param[in]     a       Start of the segment.
+ * @param[in]     bpt     End of the segment.
+ * @param[in]     cam_pos Eye position; the strip turns its widest face to it.
+ * @param[in]     width_a Full width at `a`, in world units.
+ * @param[in]     width_b Full width at `bpt`, in world units.
+ * @param[in]     utile   U repeats across the length, exactly as ::mb_ribbon.
+ * @note ::mb_ribbon is this with one width passed twice, so the two cannot
+ *       drift apart in how they face the camera or wind their triangles.
+ *
+ * 한국어
+ * ------
+ * @brief 양 끝의 폭이 다른 ::mb_ribbon입니다.
+ *
+ * *이것이 존재하는 경우*는 길이 전체에 걸쳐 **화면에서 같은 두께**로 읽혀야 하는 띠입니다.
+ * 원근은 월드 크기를 거리로 나누므로, 화면 폭을 고정한다는 것은 월드 폭이 거리를 따라
+ * 커지도록 둔다는 뜻입니다. 그리고 눈에서 멀어지는 선분은 한 번에 두 거리에 걸쳐 있습니다.
+ * 폭 하나로는 안 됩니다. 가까운 쪽에 맞추면 먼 쪽이 실오라기가 되고, 먼 쪽에 맞추면 가까운
+ * 쪽이 화면 한가운데를 가로지르는 판자가 됩니다.
+ *
+ * @param[in,out] b       삼각형 두 개를 덧붙일 버퍼.
+ * @param[in]     a       선분의 시작.
+ * @param[in]     bpt     선분의 끝.
+ * @param[in]     cam_pos 눈의 위치. 띠가 가장 넓은 면을 이쪽으로 돌립니다.
+ * @param[in]     width_a `a`에서의 전체 폭 (월드 단위).
+ * @param[in]     width_b `bpt`에서의 전체 폭 (월드 단위).
+ * @param[in]     utile   길이 방향의 U 반복. ::mb_ribbon과 정확히 같습니다.
+ * @note ::mb_ribbon은 폭 하나를 두 번 넘긴 이것이므로, 둘이 카메라를 향하는 방식이나
+ *       삼각형을 감는 방향에서 서로 어긋날 수 없습니다.
+ */
+void mb_ribbon_taper(MeshBuf *b, v3 a, v3 bpt, v3 cam_pos,
+                     float width_a, float width_b, float utile);
+
+/**
  * @brief Appends a single line segment (two vertices, for GL_LINES).
  *
  * ENGLISH

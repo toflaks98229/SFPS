@@ -4213,7 +4213,30 @@ void scene_frame(const World *w, Scene *sc, int vw, int vh, int frozen) {
        이유는 이 둘이 원래 한 함수 안에서 그 순서로 있었고, 작성된 순서가 곧 올바르게 블렌딩되는
        순서이기 때문입니다. */
     glDisable(GL_CULL_FACE);
-    decal_draw(&w->pools, vp, eye_pos, cam.right, cam.up);
+    /* WHAT ONE ART PIXEL IS WORTH IN WORLD UNITS, at one unit of distance.
+       The tracers state their thickness on screen and need this to turn it into
+       a width; ::decal_draw's note says why the thickness is written that way.
+       THE BUFFER, NOT THE WINDOW, for the same reason the vertex snap above
+       asks post_size rather than the client rect: the world is rasterised into
+       the offscreen buffer, and an art pixel is one of ITS pixels. post_size
+       reports 0 when the pass is off, and then the world really is going
+       straight to the window at its own resolution, so `vh` is the right answer
+       there and not a fallback.
+       거리 1에서 아트 픽셀 하나가 월드 단위로 얼마인가입니다. 예광탄은 두께를 화면 기준으로
+       진술하며 그것을 폭으로 바꾸려면 이 값이 필요합니다. 두께가 왜 그렇게 적혀 있는지는
+       ::decal_draw의 주석에 있습니다.
+       *창이 아니라 버퍼*이며, 위의 정점 스냅이 클라이언트 사각형이 아니라 post_size에 묻는 것과
+       같은 이유입니다. 월드는 오프스크린 버퍼에 래스터화되고, 아트 픽셀은 *그것의* 픽셀입니다.
+       패스가 꺼져 있으면 post_size가 0을 보고하며, 그때 월드는 정말로 자기 해상도로 창에 곧장
+       가므로 `vh`가 그곳에서는 폴백이 아니라 올바른 답입니다. */
+    float px_world;
+    {
+        int aw, ah;
+        post_size(&aw, &ah);
+        float art_h = (float)(ah > 0 ? ah : (vh > 0 ? vh : 1));
+        px_world = 2.0f * tanf(WORLD_FOV * 0.5f) / art_h;
+    }
+    decal_draw(&w->pools, vp, eye_pos, cam.right, cam.up, px_world);
     wpview_draw_world(&sc->wpview, &w->weapon, vp, eye_pos, cam.right, cam.up);
 
     /* --- the gun, over a cleared depth buffer ---
@@ -4257,7 +4280,7 @@ void scene_frame(const World *w, Scene *sc, int vw, int vh, int frozen) {
            수행합니다. wpview_draw_hud의 참고 사항을 확인하십시오. */
         int hook_ready = wp_hook_in_range(&w->weapon, &w->pools, &w->level,
                                           w->player.pos, w->yaw, w->pitch);
-        wpview_draw_hud(&sc->wpview, &w->weapon, aspect, hook_ready);
+        wpview_draw_hud(&sc->wpview, &w->weapon, aspect, hook_ready, vh);
         glEnable(GL_CULL_FACE);
     }
 

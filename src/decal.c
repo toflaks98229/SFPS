@@ -113,9 +113,9 @@ _Static_assert(DECAL_BLOOD_LIFE < DECAL_WALL_LIFE,
    ::Pools가 첫 번째의 자국을 공유하게 되었습니다. */
 
 /** @brief Reusable GPU meshes for the billboards and the tracer lines. / 빌보드와 예광탄 선을 위한 재사용 GPU 메시. */
-static Mesh    g_fx_mesh, g_line_mesh;
+static Mesh    g_fx_mesh, g_tracer_mesh;
 /** @brief CPU-side builders feeding the two meshes above, rebuilt every frame. / 위 두 메시에 데이터를 공급하는 CPU 측 빌더. 매 프레임 재구성됩니다. */
-static MeshBuf g_fx_buf,  g_line_buf;
+static MeshBuf g_fx_buf,  g_tracer_buf;
 /** @brief Non-zero once ::decal_init has run. / ::decal_init이 실행되었으면 0이 아닙니다. */
 static int     g_ready;
 
@@ -135,14 +135,20 @@ void decal_init(void) {
        키울 필요가 없습니다. 자국당 정점 6개는 빌보드당 삼각형 2개이고, 예광탄당 2개는 선
        하나입니다. 각각의 여유분은 빌더 자체의 기록 처리를 위한 자리입니다. */
     mb_init(&g_fx_buf,   DECAL_MAX_MARKS   * 6 + 64);
-    mb_init(&g_line_buf, DECAL_MAX_TRACERS * 2 + 32);
+    /* SIX vertices a tracer, not two: these are triangles now rather than
+       GL_LINES, because a browser draws every line one pixel wide whatever
+       width is asked for. See the note in ::decal_draw.
+       예광탄 하나당 정점 *여섯*이며 둘이 아닙니다. 이제 GL_LINES가 아니라 삼각형이기
+       때문입니다. 브라우저는 어떤 폭을 요청하든 모든 선을 1픽셀로 그립니다.
+       ::decal_draw의 주석을 참조하십시오. */
+    mb_init(&g_tracer_buf, DECAL_MAX_TRACERS * 6 + 32);
     g_ready = 1;
 }
 
 void decal_free(void) {
     if (!g_ready) return;
     mb_free(&g_fx_buf);
-    mb_free(&g_line_buf);
+    mb_free(&g_tracer_buf);
     g_ready = 0;
 }
 
@@ -268,7 +274,8 @@ void decal_update(Pools *pl, const Level *l, float dt) {
         if (pl->decal.tracers[i].life > 0.0f) pl->decal.tracers[i].life -= dt;
 }
 
-void decal_draw(const Pools *pl, mat4 view_proj, v3 cam_pos, v3 cam_right, v3 cam_up) {
+void decal_draw(const Pools *pl, mat4 view_proj, v3 cam_pos, v3 cam_right,
+                v3 cam_up, float px_world) {
     if (!g_ready) return;
 
     rd_mvp(view_proj);
@@ -371,23 +378,77 @@ void decal_draw(const Pools *pl, mat4 view_proj, v3 cam_pos, v3 cam_right, v3 ca
         }
     }
 
-    /* --- tracers: additive, very short lived --- */
-    mb_reset(&g_line_buf);
+    /* --- tracers: additive, very short lived ---
+       TRIANGLES RATHER THAN GL_LINES, AND THE REASON IS NOT TASTE. This was
+       `glLineWidth(2.0f)` and a GL_LINES pair. WebGL reports a supported line
+       width range of exactly [1, 1] on every major browser, so the request is
+       legal, silently ignored, and the tracer comes out half as thick as it was
+       drawn everywhere else. There is no flag for it and no error to catch; the
+       only way to have a width the machine agrees to is to build one.
+       WHAT IT COSTS AND WHAT IT BUYS. Six vertices a tracer instead of two, and
+       ::mb_ribbon_taper instead of ::mb_line. In exchange the thickness stops
+       being whatever the driver felt like -- the same 2.0 is a different number
+       of pixels on different drivers, which is not something a screenshot ever
+       told anybody -- and becomes ::DECAL_TRACER_PX, which is a number in this
+       file that means one thing.
+       WIDTH PER END. A tracer starts at the muzzle and ends wherever the pellet
+       stopped, so its two ends are at very different distances and a screen
+       thickness that does not change is a world thickness that does. Each end
+       gets `px_world * its own distance`; the taper between them is what a
+       constant-width line has always looked like in world space, and seeing it
+       written out is just the first time it has been visible.
+       *GL_LINES가 아니라 삼각형이며, 이유는 취향이 아닙니다.* 이것은 `glLineWidth(2.0f)`와
+       GL_LINES 한 쌍이었습니다. WebGL은 주요 브라우저 전부에서 지원 선폭 범위를 정확히
+       [1, 1]로 보고하므로, 그 요청은 합법이고 조용히 무시되며, 예광탄은 다른 모든 곳에서
+       그려진 것의 절반 두께로 나옵니다. 이를 위한 플래그도 없고 잡을 오류도 없습니다. 기계가
+       동의하는 폭을 갖는 유일한 방법은 그것을 만드는 것입니다.
+       *비용과 이득.* 예광탄당 정점이 둘이 아니라 여섯이고, ::mb_line이 아니라
+       ::mb_ribbon_taper입니다. 그 대가로 두께가 드라이버의 기분이기를 그만둡니다. 같은 2.0이
+       드라이버마다 다른 픽셀 수였고 그것은 스크린샷이 누구에게도 말해 준 적 없는 사실입니다.
+       그리고 ::DECAL_TRACER_PX가 되며, 그것은 이 파일 안에서 한 가지를 뜻하는 수입니다.
+       *끝마다의 폭.* 예광탄은 총구에서 시작해 탄이 멈춘 곳에서 끝나므로 두 끝의 거리가 크게
+       다르고, 변하지 않는 화면 두께는 곧 변하는 월드 두께입니다. 각 끝은
+       `px_world * 자기 거리`를 받습니다. 그 사이의 테이퍼는 폭이 일정한 선이 월드 공간에서
+       늘 가지고 있던 모습이며, 그것이 적혀 있는 것을 보는 것이 처음일 뿐입니다. */
+    mb_reset(&g_tracer_buf);
 
     int tn = 0;
     for (int i = 0; i < DECAL_MAX_TRACERS; i++) {
-        if (pl->decal.tracers[i].life <= 0.0f) continue;
-        mb_line(&g_line_buf, pl->decal.tracers[i].a, pl->decal.tracers[i].b);
+        const Tracer *t = &pl->decal.tracers[i];
+        if (t->life <= 0.0f) continue;
+        float wa = px_world * v3len(v3sub(t->a, cam_pos)) * DECAL_TRACER_PX;
+        float wb = px_world * v3len(v3sub(t->b, cam_pos)) * DECAL_TRACER_PX;
+
+        /* SIX OR NOTHING, and the loop below is why. It draws tracer `k` as the
+           six vertices at `k * 6`, so `order` and the buffer have to stay in
+           step -- and unlike ::mb_line, which always appended its two, a ribbon
+           can append none: ::mb_ribbon_taper refuses a zero-length segment, and
+           a pellet that stops at the muzzle is one. ::mb_vtx also drops
+           vertices rather than growing when the buffer is full, which would
+           leave a partial quad. Either way the entry is not counted, and a
+           partial one is rolled back, so `k * 6` keeps meaning what it says.
+           *여섯이거나 없거나*이며, 아래의 반복문이 그 이유입니다. 그것은 예광탄 `k`를 `k * 6`
+           위치의 정점 여섯으로 그리므로 `order`와 버퍼가 보조를 맞춰야 합니다. 그리고 언제나
+           둘을 덧붙이던 ::mb_line과 달리 띠는 하나도 덧붙이지 않을 수 있습니다.
+           ::mb_ribbon_taper는 길이 0인 선분을 거절하며, 총구에서 멈춘 탄이 그것입니다.
+           ::mb_vtx 역시 버퍼가 가득 차면 확장하는 대신 정점을 버리고, 그러면 반쪽짜리 쿼드가
+           남습니다. 어느 쪽이든 그 항목은 세지 않으며 반쪽은 되돌리므로, `k * 6`은 계속 그것이
+           말하는 바를 뜻합니다. */
+        int before = g_tracer_buf.count;
+        mb_ribbon_taper(&g_tracer_buf, t->a, t->b, cam_pos, wa, wb, 1.0f);
+        if (g_tracer_buf.count != before + 6) {
+            g_tracer_buf.count = before;
+            continue;
+        }
         order[tn++] = i;
     }
     if (tn) {
-        mesh_upload(&g_line_mesh, &g_line_buf, 1);
-        glBindVertexArray(g_line_mesh.vao);
-        glLineWidth(2.0f);
+        mesh_upload(&g_tracer_mesh, &g_tracer_buf, 1);
+        glBindVertexArray(g_tracer_mesh.vao);
         for (int k = 0; k < tn; k++) {
             float a = pl->decal.tracers[order[k]].life / DECAL_TRACER_LIFE;
             rd_color(1.0f, 0.82f, 0.42f, a * 0.9f);
-            glDrawArrays(GL_LINES, k * 2, 2);
+            glDrawArrays(GL_TRIANGLES, k * 6, 6);
         }
     }
 

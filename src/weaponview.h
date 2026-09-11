@@ -282,6 +282,11 @@ void wpview_emblem_quad(float aspect, float spin, float out[4][2]);
  * @param[in]     w          Weapon supplying spread and hook state.
  * @param[in]     aspect     Aspect ratio to draw against.
  * @param[in]     hook_ready Non-zero when something is in hook range.
+ * @param[in]     win_h      Height of the window, in pixels. The crosshair is
+ *                           built from quads rather than lines and so has to
+ *                           know what a pixel is worth in the clip space it is
+ *                           drawn in. This is the WINDOW, not the offscreen
+ *                           buffer: the UI pass runs after the resolve.
  * @note Belongs to the UI pass: drawn after the resolve so it stays sharp.
  *
  * 한국어
@@ -290,8 +295,13 @@ void wpview_emblem_quad(float aspect, float spin, float out[4][2]);
  * @param[in]     w          탄퍼짐과 훅 상태를 제공하는 무기.
  * @param[in]     aspect     그릴 대상 종횡비.
  * @param[in]     hook_ready 훅 사거리 안에 무언가 있으면 0이 아닙니다.
+ * @param[in]     win_h      창의 높이(픽셀). 조준점은 선이 아니라 쿼드로 만들어지므로,
+ *                           그것이 그려지는 클립 공간에서 픽셀 하나가 얼마인지를 알아야
+ *                           합니다. 오프스크린 버퍼가 아니라 *창*입니다. UI 패스는 리졸브
+ *                           이후에 돕니다.
  * @note *UI* 패스에 속합니다. 리졸브 이후에 그려지므로 선명하게 유지됩니다.
  */
-void wpview_draw_hud(WeaponView *v, const Weapon *w, float aspect, int hook_ready);
+void wpview_draw_hud(WeaponView *v, const Weapon *w, float aspect, int hook_ready,
+                     int win_h);
 
 #endif

@@ -27,6 +27,7 @@
  */
 
 #include "post.h"
+#include "glsl.h"   /* the #version line both shader programs open with */
 #include "gl.h"
 #include "render.h"
 #include "diag.h"      /* DIAG_PASS_WORLD/DIAG_PASS_UI -- this file is where the
@@ -101,7 +102,6 @@ static int    g_on = 1;
    삼각형은 gl_VertexID로부터 생성됩니다. UV 공간의 (0,0), (2,0), (0,2)는 *2-1 변환
    이후 [0,1] 정사각형 전체를 덮는 삼각형이 되며, 남는 부분은 뷰포트가 잘라 냅니다. */
 static const char *VS =
-"#version 330 core\n"
 "out vec2 vUV;\n"
 "void main(){\n"
 "  vUV = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);\n"
@@ -178,7 +178,6 @@ static const char *VS =
  * 게임은 정지해 있는 순간이 거의 없습니다.
  */
 static const char *FS =
-"#version 330 core\n"
 "in vec2 vUV;\n"
 "out vec4 FragColor;\n"
 "uniform sampler2D uTex;\n"
@@ -1231,8 +1230,15 @@ void post_shutdown(void) {
  *       그대로 포기하면 됩니다.
  */
 static GLuint compile(GLenum type, const char *src) {
+    /* Two parts, not one: GLSL_PROLOGUE carries the #version line, which has
+       to be the first line of the unit and so cannot be prepended to a body
+       that opens with a comment. See glsl.h.
+       하나가 아니라 둘입니다. GLSL_PROLOGUE가 #version 줄을 나르는데, 그것은 단위의 첫
+       줄이어야 하므로 주석으로 시작하는 본문 앞에 이어 붙일 수 없습니다. glsl.h를
+       참조하십시오. */
+    const char *parts[2] = {GLSL_PROLOGUE, src};
     GLuint s = glCreateShader(type);
-    glShaderSource(s, 1, &src, 0);
+    glShaderSource(s, 2, parts, 0);
     glCompileShader(s);
 
     GLint ok = 0;

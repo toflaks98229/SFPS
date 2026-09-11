@@ -26,6 +26,7 @@
  */
 
 #include "render.h"
+#include "glsl.h"   /* the #version line both shader programs open with */
 #include "plat.h"    /* a shader the driver refuses is not something to carry on from */
 #include <stdlib.h>   /* malloc/calloc/free: this file used to reach these through windows.h */
 #include "diag.h"
@@ -587,7 +588,6 @@ void mesh_draw_lines(const Mesh *m) {
  * 실행 중인 게임에서 바꿀 수 있어야 합니다.
  */
 static const char *VS_SRC =
-"#version 330 core\n"
 "layout(location=0) in vec3 aPos;\n"
 "layout(location=1) in vec3 aNrm;\n"
 "layout(location=2) in vec2 aUV;\n"
@@ -606,8 +606,8 @@ static const char *VS_SRC =
  * the era. `uSnap` and the dither pass already reproduce two of the other
  * three; this is the one that was missing.
  *
- * TWO VARYINGS RATHER THAN ONE, because the interpolation qualifier is fixed
- * at compile time and the strength has to be adjustable: a level built from
+ * THE UV TWICE RATHER THAN ONCE, because how a varying interpolates is settled
+ * when the shader is written and the strength has to be adjustable: a level built from
  * TrenchBroom brushes has faces far larger than anything the hardware being
  * imitated could draw, so full affine on this geometry warps more than it
  * evokes. The fragment shader mixes the two by `uAffine`, which is the only
@@ -621,15 +621,62 @@ static const char *VS_SRC =
  * 헤엄치고 삼각형이 나뉜 대각선을 따라 접힙니다) 그 시대의 가장 알아보기 쉬운 아티팩트입니다.
  * `uSnap`과 디더 패스가 나머지 셋 중 둘을 이미 재현하고 있으며, 이것이 빠져 있던 하나입니다.
  *
- * 하나가 아니라 *두 개*의 varying인 이유는 보간 한정자가 컴파일 시점에 고정되는데 강도는 조절
- * 가능해야 하기 때문입니다. TrenchBroom 브러시로 만든 레벨은 흉내 내려는 하드웨어가 그릴 수
+ * UV를 한 번이 아니라 *두 번* 나르는 이유는 varying이 어떻게 보간되는지가 셰이더를 쓰는
+ * 시점에 정해지는데 강도는 조절 가능해야 하기 때문입니다. TrenchBroom 브러시로 만든 레벨은 흉내 내려는 하드웨어가 그릴 수
  * 있던 것보다 훨씬 큰 면을 가지므로, 이 지오메트리에 전면 어파인을 적용하면 연상시키기보다
  * 일그러뜨립니다. 프래그먼트 셰이더가 `uAffine`으로 둘을 섞으며, 그것이 조절 손잡이를 갖는
  * 유일한 방법입니다. */
-"noperspective out vec2 vUVa;\n"
+"out vec2 vAffUV;\n"
+"out float vAffW;\n"
 "void main(){\n"
-"  vPos=aPos; vNrm=aNrm; vUV=aUV; vUVa=aUV; vLit=aLit;\n"
+"  vPos=aPos; vNrm=aNrm; vUV=aUV; vLit=aLit;\n"
 "  vec4 p=uMVP*vec4(aPos,1.0);\n"
+/* THE AFFINE UV, AND WHY IT IS TWO VARYINGS AND A DIVIDE RATHER THAN A
+   KEYWORD.
+   This used to be `noperspective out vec2 vUVa`, which says the same thing in
+   one word and is what GLSL 3.30 is for. GLSL ES 3.00 -- WebGL 2 -- does not
+   have that qualifier. It has `flat` and it has `smooth`; `noperspective` is
+   the one it left out, and it is the only GL feature this renderer uses that
+   a browser cannot give it.
+   The identity that replaces it. Hardware interpolates a varying as
+       V = SUM(L_i * V_i / w_i) / SUM(L_i / w_i)
+   where L is the screen-space barycentric and SUM(L_i) = 1. Feed it uv*w and
+   feed it w, and the two come back as
+       A = SUM(L_i * uv_i) / SUM(L_i / w_i)      B = 1 / SUM(L_i / w_i)
+   so A/B is SUM(L_i * uv_i) exactly -- and that sum IS screen-linear
+   interpolation, which is the definition of noperspective. Not an
+   approximation of it; the same number, by algebra.
+   ONE SHADER RATHER THAN TWO. The obvious alternative is an #ifdef with the
+   keyword on desktop and this on the web, and it is worse: only the branch
+   the local compiler sees gets checked, and the other one breaks first on
+   somebody else's machine. That is the exact shape of the `patch` reserved
+   word incident recorded above pRust, and once is enough.
+   The cost is one extra interpolated float and one divide per fragment.
+   p.w is read BEFORE the snap below only in reading order -- the snap touches
+   p.xy and never p.w, so the two are independent. And a fragment that is
+   rasterised at all has w > 0: everything at or behind the eye is clipped, so
+   the divide has no case to guard.
+   *어파인 UV, 그리고 그것이 왜 키워드 하나가 아니라 varying 둘과 나눗셈인가.*
+   이것은 원래 `noperspective out vec2 vUVa`였고, 같은 말을 한 단어로 하며 GLSL 3.30이
+   그러라고 있는 것입니다. GLSL ES 3.00, 즉 WebGL 2에는 그 한정자가 *없습니다*. `flat`도
+   있고 `smooth`도 있는데 `noperspective`만 빠졌으며, 이 렌더러가 쓰는 GL 기능 중 브라우저가
+   줄 수 없는 유일한 것입니다.
+   *그것을 대체하는 항등식.* 하드웨어는 varying을
+       V = SUM(L_i * V_i / w_i) / SUM(L_i / w_i)
+   로 보간하며 L은 화면 공간 무게중심 좌표이고 SUM(L_i) = 1입니다. uv*w를 하나 주고 w를 하나
+   주면 둘은
+       A = SUM(L_i * uv_i) / SUM(L_i / w_i),     B = 1 / SUM(L_i / w_i)
+   로 돌아오므로 A/B는 정확히 SUM(L_i * uv_i)입니다. 그리고 그 합이 곧 화면 선형 보간이며
+   noperspective의 정의입니다. 그것의 근사가 아니라 대수적으로 같은 수입니다.
+   *셰이더는 두 벌이 아니라 한 벌입니다.* 떠오르는 대안은 데스크톱에 키워드를, 웹에 이것을
+   두는 #ifdef이고 그쪽이 더 나쁩니다. 지역 컴파일러가 보는 가지만 검사되고 나머지 하나는 남의
+   기계에서 처음 깨집니다. 위 pRust에 적힌 `patch` 예약어 사고가 정확히 그 모양이며, 한 번이면
+   충분합니다.
+   비용은 보간되는 float 하나와 프래그먼트당 나눗셈 하나입니다.
+   p.w를 아래의 스냅보다 *먼저* 읽는 것은 읽는 순서일 뿐입니다. 스냅은 p.xy를 건드리고 p.w는
+   결코 건드리지 않으므로 둘은 독립입니다. 그리고 래스터화되는 프래그먼트는 w > 0입니다. 눈
+   위와 그 뒤는 전부 클리핑되므로 이 나눗셈에는 막을 경우가 없습니다. */
+"  vAffUV=aUV*p.w; vAffW=p.w;\n"
 /* w <= 0 is behind the eye, where NDC is meaningless and the division would
    mirror the vertex across the screen. Those vertices are clipped anyway, so
    they are passed through untouched.
@@ -1279,9 +1326,8 @@ static const char *FS_PROC =
 "}\n";
 
 static const char *FS_SRC =
-"#version 330 core\n"
 "in vec3 vPos; in vec3 vNrm; in vec2 vUV; in vec3 vLit;\n"
-"noperspective in vec2 vUVa;\n"
+"in vec2 vAffUV; in float vAffW;\n"
 /* 0 is the perspective-correct texturing every other engine does; 1 is the
  * PlayStation's. A uniform rather than a constant for the reason uSnap is one:
  * the two can be compared side by side while the game runs, which is most of
@@ -1530,6 +1576,7 @@ static const char *FS_MAIN =
    scene.c도 UI 패스 주변에서 uAffine을 0으로 설정하며, 그것은 이것과 중복이 아닙니다. 그 호출은
    "프레임의 이 구간은 왜곡되지 않는다"고 말하고, 이것은 "왜곡되는 구간 안에서도 레벨만
    왜곡된다"고 말합니다. 두 개의 입도이며, 어느 하나를 잃으면 서로 다른 것을 잃습니다. */
+"  vec2 vUVa = vAffUV / vAffW;\n"
 "  vec2 dUV = vUVa - vUV;\n"
 "  dUV *= AFF_LIMIT / (AFF_LIMIT + abs(dUV));\n"
 "  vec2 uv = vUV + dUV * ((uMode==0) ? uAffine : 0.0);\n"
@@ -2184,9 +2231,14 @@ void rd_init(void) {
        main()이 fogged()를 부르므로 FS_FOG가 FS_MAIN보다 앞입니다. GLSL은 정의가
        먼저여야 하며, 별도의 조각으로 이어 붙이면 그 상수 하나가 두 호출 지점
        어디에도 적히지 않습니다. */
-    const char *fs_parts[4] = {FS_SRC, FS_PROC, FS_FOG, FS_MAIN};
-    GLuint vs = compile(GL_VERTEX_SHADER, &VS_SRC, 1);
-    GLuint fs = compile(GL_FRAGMENT_SHADER, fs_parts, 4);
+    /* GLSL_PROLOGUE first in both, because #version has to be the first line
+       of a GLSL unit and these bodies begin with a comment. See glsl.h.
+       둘 다 GLSL_PROLOGUE가 먼저입니다. #version은 GLSL 단위의 첫 줄이어야 하는데 이
+       본문들은 주석으로 시작합니다. glsl.h를 참조하십시오. */
+    const char *vs_parts[2] = {GLSL_PROLOGUE, VS_SRC};
+    const char *fs_parts[5] = {GLSL_PROLOGUE, FS_SRC, FS_PROC, FS_FOG, FS_MAIN};
+    GLuint vs = compile(GL_VERTEX_SHADER, vs_parts, 2);
+    GLuint fs = compile(GL_FRAGMENT_SHADER, fs_parts, 5);
     g_prog = glCreateProgram();
     glAttachShader(g_prog, vs);
     glAttachShader(g_prog, fs);

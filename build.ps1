@@ -560,11 +560,28 @@ if ($Tool) {
 # 으로 재현되지 않으며, 재현할 수 있는 사람은 고칠 수 없습니다. C 주석을 먼저 벗겨
 # 내야 하고 줄 단위 정규식으로는 그럴 수 없습니다. 이 검사의 첫 판본은 자기 설명 주석을
 # 신고했습니다.
+# `noperspective` is the odd one on this list: it is not a reserved word in
+# desktop GLSL, it is a working QUALIFIER, and render.c used it deliberately
+# for years. It is here because GLSL ES 3.00 -- WebGL 2 -- does not have it and
+# reserves the spelling, so a shader that uses it cannot compile in a browser at
+# all. render.c now gets the same interpolation from arithmetic that both
+# dialects run; see the note above `vAffUV` for the identity. This line is what
+# stops the keyword coming back the next time somebody wants a screen-linear
+# varying and reaches for the obvious spelling, on a machine where the obvious
+# spelling works.
+# `noperspective`는 이 목록에서 이상한 항목입니다. 데스크톱 GLSL에서는 예약어가 아니라
+# 동작하는 *한정자*이며 render.c가 수년간 의도적으로 써 왔습니다. 여기 있는 이유는 GLSL ES
+# 3.00, 즉 WebGL 2에 그것이 없고 철자를 예약해 두었기 때문입니다. 그것을 쓰는 셰이더는
+# 브라우저에서 아예 컴파일되지 않습니다. render.c는 이제 두 방언이 모두 실행하는 산술에서
+# 같은 보간을 얻습니다. 항등식은 `vAffUV` 위의 주석에 있습니다. 이 줄은, 화면 선형 varying이
+# 필요해진 다음 사람이 뻔한 철자에 손을 뻗을 때, 그리고 그 기계에서 뻔한 철자가 동작할 때,
+# 그것이 돌아오는 것을 막습니다.
 $glslReserved = @(
     'active','asm','attribute','cast','class','common','enum','extern',
     'external','filter','fixed','goto','half','hvec2','hvec3','hvec4','fvec2',
     'fvec3','fvec4','inline','input','interface','long','namespace','noinline',
     'output','partition','patch','public','resource','sample','short','sizeof',
+    'noperspective',
     'static','subroutine','superp','template','this','typedef','union',
     'unsigned','using','varying','volatile'
 )

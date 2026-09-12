@@ -105,6 +105,21 @@ void player_move(Player *p, const Level *l,
        쓸 수 없게 됩니다. */
     if (p->grounded) p->climb = PLAYER_CLIMB_TIME;
 
+    /* THE PERMISSION, SPENT BY THE CLOCK RATHER THAN BY CLIMBING. It runs
+       whether the player is standing, walking, falling or rising, because
+       ::PLAYER_CLIMB_GRACE is a window on the landing and not an allowance of
+       climbing -- the allowance is ::climb above and it is untouched here.
+       Counted down before the climb below reads it, so a window that expires
+       this frame does not also grant this frame.
+       *권한이며, 등반이 아니라 시계로 소모됩니다.* 플레이어가 서 있든 걷든 떨어지든 오르든
+       흐릅니다. ::PLAYER_CLIMB_GRACE는 착지에 대한 창이지 등반의 할당량이 아니기 때문입니다.
+       할당량은 위의 ::climb이고 이곳에서 건드리지 않습니다. 아래의 등반이 읽기 전에 줄이므로,
+       이번 프레임에 만료되는 창이 이번 프레임을 허락하지는 않습니다. */
+    if (p->climb_grace > 0.0f) {
+        p->climb_grace -= dt;
+        if (p->climb_grace < 0.0f) p->climb_grace = 0.0f;
+    }
+
     /* Jump before gravity, so the upward velocity gets a full frame of
        travel before being pulled back.
        중력보다 점프를 먼저 처리하여, 상승 속도가 되돌아가기 전에 온전한 한
@@ -203,7 +218,17 @@ void player_move(Player *p, const Level *l,
      * 이유는 ::move_axis가 이미 하나를 수행하기 때문입니다. 그것의 "무언가 위로 올라섰다.
      * 함께 올린다"가 곧 정상 넘기이며, 그곳의 두 번째 충격량은 방금 닿은 턱의 반대쪽으로
      * 플레이어를 던져 버립니다. */
-    if (!walked && !p->grounded && p->climb > 0.0f && forward) {
+    /* A FOURTH CONDITION, AND IT IS THE ONE THAT MAKES THE OTHER THREE RARE.
+       The three above describe a player who is trying to climb; this one asks
+       whether they are allowed to, and the answer is no unless a grapple set
+       them down less than ::PLAYER_CLIMB_GRACE ago. Before it, every landing
+       refilled ::climb and every wall was a ladder with a cooldown of one jump.
+       *네 번째 조건이며, 앞의 셋을 드물게 만드는 것이 이것입니다.* 위의 셋은 등반하려는
+       플레이어를 서술하고, 이것은 그래도 되는지를 묻습니다. 답은, 갈고리가 ::PLAYER_CLIMB_GRACE
+       이내에 앉혀 주지 않았다면 아니오입니다. 이전에는 모든 착지가 ::climb을 채웠고 모든 벽이
+       점프 한 번을 쿨다운으로 하는 사다리였습니다. */
+    if (!walked && !p->grounded && p->climb > 0.0f && forward &&
+        p->climb_grace > 0.0f) {
         p->vel.y = PLAYER_CLIMB_SPEED;
         p->climb -= dt;
     }

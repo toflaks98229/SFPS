@@ -123,6 +123,56 @@
  */
 #define PLAYER_CLIMB_TIME 0.30f
 
+/**
+ * @brief Seconds after a hook landing during which the wall climb is available.
+ *
+ * ENGLISH
+ * -------
+ * WHAT THIS TOOK AWAY. The climb used to be refilled by every landing, which
+ * made it a permanent ability: walk anywhere, jump at anything, go up. With
+ * ::PLAYER_CLIMB_SPEED carrying a 4.05m rise that clears a 9.20m ledge, that
+ * is not a movement option, it is a key to the whole arena -- and it beat the
+ * hook at the hook's own job while costing nothing and needing no aim.
+ *
+ * SO THE HOOK LENDS IT NOW. Only a landing the hook put you in opens the
+ * window, and the window is this long. Miss it and the wall is a wall.
+ *
+ * THE CLOCK STARTS AT THE LANDING, not at the throw, because the landing is
+ * the moment the player can act on. It runs while they stand there deciding,
+ * so 0.8 seconds is the whole budget for "hook, land, turn, jump" rather than
+ * 0.8 seconds of climbing -- that is still ::PLAYER_CLIMB_TIME, and the shorter
+ * of the two is what ends the climb.
+ *
+ * 0.8 AND NOT 0.3. The obvious number is ::PLAYER_CLIMB_TIME itself, and it is
+ * too short to turn around in: a hook arrival usually faces the wall it came
+ * from, and a player who has to look before they leap spends most of a third
+ * of a second doing it. 0.8 leaves room to choose without leaving room to
+ * wander off and come back.
+ *
+ * 한국어
+ * ------
+ * @brief 훅으로 착지한 뒤 벽 등반을 쓸 수 있는 시간 (초).
+ *
+ * *이것이 빼앗은 것.* 등반은 모든 착지가 예산을 채워 주었고, 그래서 영구 능력이었습니다.
+ * 아무 데나 걸어가 아무거나 보고 점프하면 올라갑니다. ::PLAYER_CLIMB_SPEED가 4.05m 상승을
+ * 실어 9.20m 선반을 올라서는 마당에, 그것은 이동 선택지가 아니라 아레나 전체의 열쇠입니다.
+ * 그리고 아무 비용도 조준도 없이 훅의 본업에서 훅을 이겼습니다.
+ *
+ * *그래서 이제 훅이 빌려줍니다.* 훅이 앉혀 준 착지만이 창을 열고, 창의 길이가 이것입니다.
+ * 놓치면 벽은 벽입니다.
+ *
+ * *시계는 던진 순간이 아니라 착지에서 시작합니다.* 착지가 플레이어가 행동할 수 있는 순간이기
+ * 때문입니다. 서서 고민하는 동안에도 흐르므로, 0.8초는 등반 0.8초가 아니라 "걸고, 내리고,
+ * 돌아서고, 뛴다" 전체의 예산입니다. 등반 자체는 여전히 ::PLAYER_CLIMB_TIME이며, 둘 중 짧은
+ * 쪽이 등반을 끝냅니다.
+ *
+ * *0.3이 아니라 0.8인 이유.* 떠오르는 수는 ::PLAYER_CLIMB_TIME 자신이고, 그것은 돌아서기에
+ * 너무 짧습니다. 훅의 도달은 대개 그것이 온 벽을 향하고 있으며, 뛰기 전에 봐야 하는
+ * 플레이어는 3분의 1초의 대부분을 보는 데 씁니다. 0.8은 고를 여유는 주고 딴 데 갔다 올 여유는
+ * 주지 않습니다.
+ */
+#define PLAYER_CLIMB_GRACE 0.80f
+
 #define PLAYER_MAX_HP  100     ///< @brief Health at spawn and the cap pickups top up to. / 스폰 시 체력이자 아이템으로 회복 가능한 상한값.
 
 /**
@@ -464,6 +514,54 @@ typedef struct {
      *       채우는 것이 왜 규칙의 전부인지는 ::PLAYER_CLIMB_TIME을 보십시오.
      */
     float climb;
+
+    /**
+     * @brief Seconds of wall climb entitlement left, counting down from the
+     *        landing the hook put this player in.
+     *
+     * SEPARATE FROM ::climb ON PURPOSE. ::climb is how much climbing is left in
+     * this trip through the air; this is whether climbing is allowed at all.
+     * One is spent by rising, the other by the clock, and folding them into a
+     * single number would mean a player who stands still after a hook landing
+     * loses climb they never used -- or, the other way round, one who climbs
+     * for a moment keeps the permission forever.
+     *
+     * Zero is the ordinary state. Nothing but a hook landing sets it, and
+     * ::PLAYER_CLIMB_GRACE says why.
+     *
+     * @brief 훅이 앉혀 준 착지에서부터 세어 내려가는, 남은 벽 등반 권한의 초.
+     * @note *::climb과 일부러 별개입니다.* ::climb은 이번 체공에 등반이 얼마나 남았는지이고,
+     *       이것은 등반이 애초에 허락되는지입니다. 하나는 오르면서 소모되고 다른 하나는
+     *       시계로 소모되며, 둘을 한 수로 접으면 훅 착지 뒤 가만히 서 있던 플레이어가 쓰지도
+     *       않은 등반을 잃거나, 반대로 잠깐 오른 플레이어가 권한을 영원히 갖게 됩니다.
+     * @note 0이 평상시 상태입니다. 훅 착지 외에는 무엇도 이것을 세우지 않으며, 이유는
+     *       ::PLAYER_CLIMB_GRACE에 있습니다.
+     */
+    float climb_grace;
+
+    /**
+     * @brief The hook has had this player off the ground since they last stood.
+     *
+     * WHY IT HAS TO BE REMEMBERED. By the time the feet touch down the hook is
+     * long since idle -- it reels you in, launches you, and lets go while you
+     * are still in the air -- so the landing frame cannot look at the hook and
+     * ask whether it was responsible. This is that answer, carried from the
+     * moment the hook lifts to the moment the ground arrives.
+     *
+     * Set while the hook is pulling and the feet are off the floor, which is
+     * narrower than "the hook is out": a claw thrown at nothing, or one that
+     * drags a standing player along the floor, never lifted anybody.
+     *
+     * @brief 마지막으로 서 있던 이후로 훅이 이 플레이어를 땅에서 떼어 놓았습니다.
+     * @note *기억해야 하는 이유.* 발이 닿을 때쯤이면 훅은 이미 한참 전에 놀고 있습니다.
+     *       끌어당기고, 쏘아 보내고, 아직 공중에 있는 동안 손을 놓습니다. 그래서 착지 프레임은
+     *       훅을 보고 그것이 원인이었는지 물을 수 없습니다. 이것이 그 답이며, 훅이 들어 올린
+     *       순간부터 땅이 도착하는 순간까지 실려 옵니다.
+     * @note 훅이 *당기는 중이고* 발이 바닥에서 떨어져 있을 때 세워지며, 이는 "훅이 나가 있다"
+     *       보다 좁습니다. 허공에 던진 클로나, 서 있는 플레이어를 바닥으로 끄는 클로는 누구도
+     *       들어 올린 적이 없습니다.
+     */
+    int hook_air;
 } Player;
 
 /* --- Public function prototypes / 공개 함수 프로토타입 --- */

@@ -274,10 +274,24 @@ int main(void) {
      * 바닥에서 채워지고 다른 어디에서도 채워지지 않기 때문입니다. 마지막 것이 벽을 사다리가
      * 되지 않게 막는 것이며, 예산이 그저 크기만 해도 여전히 통과할 유일한 경우입니다. */
     {
-        struct { float shelf; int jump; int want_on; const char *what; } CASE[] = {
-            { 9.00f, 1, 1, "a jump and a climb mount a 9.00m wall" },
-            { 9.25f, 1, 0, "and a quarter-metre higher is still a wall" },
-            { 1.20f, 0, 0, "and standing against one climbs nothing" },
+        /* `grace` IS THE NEW COLUMN AND THE LAST ROW IS WHY IT EXISTS. The climb
+           is no longer something every landing grants; it is lent by a hook
+           landing for ::PLAYER_CLIMB_GRACE seconds. The first three rows say
+           how far it reaches WHEN IT IS ALLOWED, which is what this block has
+           always measured and is unchanged. The fourth says what happens when
+           it is not, against the same 9.00m wall the first row mounts -- so the
+           two differ in exactly one thing and the gate is what is being read.
+           `grace`가 새 열이고 마지막 행이 그것이 존재하는 이유입니다. 등반은 더 이상 모든
+           착지가 주는 것이 아니라, 훅 착지가 ::PLAYER_CLIMB_GRACE 초 동안 빌려주는 것입니다.
+           앞의 세 행은 *허락되었을 때* 얼마나 닿는지를 말하며, 이 블록이 늘 재어 온 것이고
+           바뀌지 않았습니다. 넷째 행은 허락되지 않았을 때를 말하며, 첫 행이 올라서는 바로 그
+           9.00m 벽에 대고 말합니다. 그래서 둘은 정확히 한 가지에서만 다르고, 읽히는 것은
+           그 문입니다. */
+        struct { float shelf; int jump; int grace; int want_on; const char *what; } CASE[] = {
+            { 9.00f, 1, 1, 1, "a jump and a climb mount a 9.00m wall" },
+            { 9.25f, 1, 1, 0, "and a quarter-metre higher is still a wall" },
+            { 1.20f, 0, 1, 0, "and standing against one climbs nothing" },
+            { 9.00f, 1, 0, 0, "and with no hook behind it the same wall is a wall" },
         };
 
         for (int k = 0; k < (int)(sizeof CASE / sizeof CASE[0]); k++) {
@@ -289,14 +303,23 @@ int main(void) {
             Player p = {0};
             p.pos = v3f(-2.0f, PLAYER_EYE, 0.0f);
             p.grounded = 1;
+            /* The real constant rather than a large number, so the window this
+               harness runs in is the window the game runs in. 180 frames is
+               three seconds and the grace is 0.8, which is ample: the jump is
+               on frame 0 and the climb is spent inside ::PLAYER_CLIMB_TIME.
+               큰 수가 아니라 실제 상수입니다. 그래야 이 하네스가 도는 창이 게임이 도는 창과
+               같습니다. 180프레임은 3초이고 권한은 0.8초이며 넉넉합니다. 점프는 0프레임이고
+               등반은 ::PLAYER_CLIMB_TIME 안에 소모됩니다. */
+            p.climb_grace = CASE[k].grace ? PLAYER_CLIMB_GRACE : 0.0f;
             for (int i = 0; i < 180; i++)
                 player_move(&p, &L, 0, 0, v3f(1, 0, 0), PLAYER_WALK,
                             CASE[k].jump && i == 0, 1, DT);
 
             float feet = p.pos.y - PLAYER_EYE;
             int on = feet > CASE[k].shelf - 0.1f;
-            printf("      %.2fm shelf, %s -> feet at %.2f, %s\n",
+            printf("      %.2fm shelf, %s, %s -> feet at %.2f, %s\n",
                    (double)CASE[k].shelf, CASE[k].jump ? "jumped" : "walked",
+                   CASE[k].grace ? "hooked" : "no hook",
                    (double)feet, on ? "on it" : "below it");
             check(on == CASE[k].want_on, CASE[k].what,
                   (float)on, (float)CASE[k].want_on);
@@ -320,6 +343,12 @@ int main(void) {
             Player p = {0};
             p.pos = v3f(-2.0f, PLAYER_EYE, 0.0f);
             p.grounded = 1;
+            /* Allowed, because what this asks is whether RELEASING buys a
+               second climb -- and a player who was never allowed one would
+               answer no for the wrong reason and the check would rot.
+               허락합니다. 이것이 묻는 것은 *손을 놓는 것*이 두 번째 등반을 사 주는가이며,
+               애초에 허락된 적 없는 플레이어는 틀린 이유로 아니오라고 답하고 검사는 썩습니다. */
+            p.climb_grace = PLAYER_CLIMB_GRACE;
 
             float peak = 0.0f;
             for (int i = 0; i < 240; i++) {

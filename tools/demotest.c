@@ -326,11 +326,46 @@ static Digest digest_of(const World *w) {
     return d;
 }
 
+/* `%#.9g` AND NOT `%.9g`, AND THE HASH IS LORD-BEARING.
+ *
+ * `%g` drops the decimal point when a value is exactly round, so a velocity
+ * that came to rest printed as `0` and the `f` suffix beside it made `0f` --
+ * an integer constant with a float suffix, which is not a literal and does not
+ * compile:
+ *
+ *     demotest.c:649:37: error: invalid suffix 'f' on integer constant
+ *
+ * FOUND BY BLESSING A DIGEST WITH A ZERO IN IT, which had never happened
+ * before: every previous golden was taken mid-fall, and a player mid-fall has
+ * no component of anything at rest. The first golden recorded with the player
+ * standing still had three, and -bless emitted a file that would not build.
+ * `1f` and `30f` are the same bug waiting for a different run.
+ *
+ * The `#` flag forces the decimal point and keeps the trailing zeros, which is
+ * the whole fix. It does not touch the DIGITS: `.9g` is FLT_DECIMAL_DIG and
+ * still round-trips a float exactly, which is the only property this output
+ * has to have.
+ *
+ * *`%.9g`가 아니라 `%#.9g`이며, 그 해시가 짐을 집니다.*
+ *
+ * `%g`는 값이 정확히 떨어지면 소수점을 버립니다. 그래서 멈춘 속도가 `0`으로 찍히고 옆의 `f`
+ * 접미사와 합쳐져 `0f`가 되었습니다. 정수 상수에 붙은 float 접미사이며, 리터럴이 아니고
+ * 컴파일되지 않습니다.
+ *
+ * *0이 들어간 다이제스트를 축복하다 찾았고*, 그런 일은 전에 없었습니다. 이전의 모든 골든은
+ * 낙하 도중에 채집되었고 낙하 중인 플레이어에게는 멈춰 있는 성분이 없습니다. 플레이어가 서
+ * 있는 채로 기록된 첫 골든에는 그것이 셋 있었고, -bless는 빌드되지 않는 파일을 내놓았습니다.
+ * `1f`와 `30f`도 다른 실행을 기다리는 같은 버그입니다.
+ *
+ * `#` 플래그가 소수점을 강제하고 뒤의 0을 남기며, 그것이 수정의 전부입니다. *자릿수*는 건드리지
+ * 않습니다. `.9g`는 FLT_DECIMAL_DIG이고 여전히 float를 정확히 왕복시키며, 이 출력이 가져야 할
+ * 유일한 성질이 그것입니다.
+ */
 static void digest_print(const Digest *d) {
     printf("static const Digest GOLDEN = {\n");
-    printf("    /* px py pz */ %.9gf, %.9gf, %.9gf,\n", d->px, d->py, d->pz);
-    printf("    /* vx vy vz */ %.9gf, %.9gf, %.9gf,\n", d->vx, d->vy, d->vz);
-    printf("    /* yaw pitch */ %.9gf, %.9gf,\n", d->yaw, d->pitch);
+    printf("    /* px py pz */ %#.9gf, %#.9gf, %#.9gf,\n", d->px, d->py, d->pz);
+    printf("    /* vx vy vz */ %#.9gf, %#.9gf, %#.9gf,\n", d->vx, d->vy, d->vz);
+    printf("    /* yaw pitch */ %#.9gf, %#.9gf,\n", d->yaw, d->pitch);
     printf("    /* health keys grounded */ %d, %d, %d,\n",
            d->health, d->keys, d->grounded);
     printf("    /* cur ammo */ %d, %d,\n", d->cur, d->ammo_shotgun);
@@ -338,7 +373,7 @@ static void digest_print(const Digest *d) {
            d->wrng, d->srng, d->erng, d->frng);
     printf("    /* enemies hp */ %d, %d,\n", d->enemies_alive, d->enemy_hp);
     printf("    /* proj marks */ %d, %d,\n", d->proj_live, d->marks_live);
-    printf("    /* world_time */ %.9gf\n", d->world_time);
+    printf("    /* world_time */ %#.9gf\n", d->world_time);
     printf("};\n");
 }
 
@@ -645,13 +680,13 @@ static void digest_print(const Digest *d) {
    다른 전투를 만났을 것입니다. 둘 다 일어나지 않았습니다. 데모는 몬스터 하나를 만나며, 그 체력은
    이제 도감이 적어 둔 값입니다. */
 static const Digest GOLDEN = {
-    /* px py pz */ 17.882988f, 7.99384737f, -1.77865076f,
-    /* vx vy vz */ -2.36687756f, -20.837986f, 2.84812903f,
-    /* yaw pitch */ 0.105600186f, 0.307999939f,
-    /* health keys grounded */ 82, 0, 0,
+    /* px py pz */ 17.5220051f, 1.70200002f, 14.4251308f,
+    /* vx vy vz */ 0.000167326507f, 0.00000000f, 0.00114485901f,
+    /* yaw pitch */ 0.25300014f, 0.490600169f,
+    /* health keys grounded */ 82, 0, 1,
     /* cur ammo */ 0, 0,
-    /* wrng srng erng frng */ 3867911461u, 3888997821u, 2548106953u, 206654317u,
-    /* enemies hp */ 1, 30,
+    /* wrng srng erng frng */ 3867911461u, 3888997821u, 3947023760u, 1700249031u,
+    /* enemies hp */ 1, 0,
     /* proj marks */ 0, 0,
     /* world_time */ 29.9002438f
 };

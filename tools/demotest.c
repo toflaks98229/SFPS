@@ -682,7 +682,7 @@ static void digest_print(const Digest *d) {
 static const Digest GOLDEN = {
     /* px py pz */ 17.5220051f, 1.70200002f, 14.4251308f,
     /* vx vy vz */ 0.000167326507f, 0.00000000f, 0.00114485901f,
-    /* yaw pitch */ 0.25300014f, 0.490600169f,
+    /* yaw pitch */ 0.253000140f, 0.490600169f,
     /* health keys grounded */ 82, 0, 1,
     /* cur ammo */ 0, 0,
     /* wrng srng erng frng */ 3867911461u, 3888997821u, 3947023760u, 1700249031u,

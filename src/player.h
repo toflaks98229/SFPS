@@ -149,6 +149,15 @@
  * of a second doing it. 0.8 leaves room to choose without leaving room to
  * wander off and come back.
  *
+ * @note IT PAUSES WITH THE WORLD, because it is counted down inside
+ *       ::player_move and world.c runs that behind `if (!frozen)`. A menu, a
+ *       cutscene, the title and the death screen all stop it -- exactly as they
+ *       stop the hook cooldown, the monster timers and the world clock. It is
+ *       worth writing down because "hook, land, pause, come back" sounds like a
+ *       way to hold the window open forever and is the same trick that holds
+ *       every other timer in the game, which is to say it is this project's
+ *       answer to pausing rather than this window's flaw.
+ *
  * 한국어
  * ------
  * @brief 훅으로 착지한 뒤 벽 등반을 쓸 수 있는 시간 (초).

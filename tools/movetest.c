@@ -367,6 +367,64 @@ int main(void) {
         }
     }
 
+    /* --- the hook's window closes on its own -----------------------------
+       WHAT THIS ANSWERS. The window was reported as never running down until a
+       climb started -- which would make it permanent, since a player who does
+       not climb would keep it. It is spent by the CLOCK and not by climbing, so
+       standing still has to close it, and standing still is all this does.
+       THREE POINTS RATHER THAN ONE. Only the end would pass against code that
+       dumped the whole window on one frame, or against code that took twice as
+       long and happened to be past zero by the time it was asked. The middle
+       reading is the one that says it drains at the rate it claims.
+       *이것이 답하는 것.* 이 창이 등반이 시작되기 전까지는 줄지 않는다고 보고되었습니다. 그렇다면
+       그것은 영구적입니다. 등반하지 않는 플레이어는 계속 갖고 있게 되니까요. 이것은 등반이 아니라
+       *시계*로 소모되므로 가만히 서 있는 것이 그것을 닫아야 하며, 이 검사가 하는 일은 가만히 서
+       있는 것뿐입니다.
+       *하나가 아니라 세 지점입니다.* 끝만 보면 창 전체를 한 프레임에 버리는 코드도, 두 배 느리게
+       줄지만 물어본 시점에 이미 0을 지난 코드도 통과합니다. 가운데 값이 그것이 주장하는 속도로
+       빠진다고 말하는 값입니다. */
+    {
+        Level z = {0};
+        L = z;
+        box(&L, -2000, -2000, 2000, 2000, 0, 3000);
+
+        Player p = {0};
+        p.pos = v3f(0.0f, PLAYER_EYE, 0.0f);
+        p.grounded = 1;
+        p.climb_grace = PLAYER_CLIMB_GRACE;
+
+        /* Nothing pressed: no wish, no jump, no forward. If the window needed a
+           climb to move, it would sit at 0.8 through all of this.
+           아무것도 누르지 않습니다. wish도 점프도 forward도 없습니다. 창이 움직이는 데 등반이
+           필요했다면 이 전부를 0.8로 앉아 있었을 것입니다. */
+        float at_half = -1.0f;
+        for (int i = 1; i <= 60; i++) {
+            player_move(&p, &L, 0, 0, v3f(0, 0, 0), 0.0f, 0, 0, DT);
+            if (i == 24) at_half = p.climb_grace;
+        }
+
+        printf("      standing still: 0.800 -> %.3f at 0.40s -> %.3f at 1.00s\n",
+               (double)at_half, (double)p.climb_grace);
+
+        check(fabsf(at_half - (PLAYER_CLIMB_GRACE - 24 * DT)) < 0.01f,
+              "the window drains while standing, at one second per second",
+              at_half, PLAYER_CLIMB_GRACE - 24 * DT);
+        check(p.climb_grace == 0.0f,
+              "and is closed once it has outlived PLAYER_CLIMB_GRACE",
+              p.climb_grace, 0.0f);
+
+        /* AND IT DOES NOT GO NEGATIVE, which matters because the climb tests
+           `> 0.0f`: a counter left running past zero would still be false, but
+           one that wrapped or drifted would not, and clamping is cheaper to
+           check than to reason about.
+           *그리고 음수로 가지 않습니다.* 등반이 `> 0.0f`로 검사하므로 중요합니다. 0을 지나 계속
+           도는 값은 여전히 거짓이지만, 감싸거나 흐르는 값은 그렇지 않으며, 고정은 추론하기보다
+           검사하기가 쌉니다. */
+        check(p.climb_grace >= 0.0f, "and never counts past zero",
+              p.climb_grace, 0.0f);
+    }
+
+
     printf(fails ? "\n%d FAILURE(S)\n" : "\nall movement checks passed\n", fails);
     return fails != 0;
 }

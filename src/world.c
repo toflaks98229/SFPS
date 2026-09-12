@@ -310,6 +310,17 @@ static void step_look_move(World *w, const Input *in, float aspect, float dt) {
     int   was_air = !w->player.grounded;
     float fall    = -w->player.vel.y;
 
+    /* THE HOOK HAS THEM OFF THE GROUND, remembered here because the landing
+       cannot ask later: the claw is idle again long before the feet arrive.
+       Narrower than "a hook is out" on purpose -- see ::Player::hook_air. This
+       reads the flags from BEFORE the move for the same reason `was_air` does,
+       so a pull that ends this frame still counts as having lifted them.
+       *훅이 그들을 땅에서 떼어 놓았고*, 착지가 나중에 물을 수 없으므로 이곳에서 기억합니다.
+       발이 도착하기 한참 전에 클로는 다시 놀고 있습니다. 의도적으로 "훅이 나가 있다"보다
+       좁습니다. ::Player::hook_air를 보십시오. 이동 *이전*의 플래그를 읽는 것은 `was_air`와
+       같은 이유이며, 그래야 이번 프레임에 끝나는 견인도 들어 올린 것으로 셉니다. */
+    if (hooked && was_air) w->player.hook_air = 1;
+
     /* Jump is suppressed only while actually being pulled. It would not fire
        mid-pull anyway (jumping needs `grounded`), but suppressing it keeps the
        intent explicit rather than relying on that coincidence. */
@@ -369,6 +380,22 @@ static void step_look_move(World *w, const Input *in, float aspect, float dt) {
        stair is not an impact.
        착지입니다. 하한은 ::WORLD_SHAKE_LAND_MIN의 것이며, 계단을 내려서는 것은 충격이
        아닙니다. */
+    /* THE WINDOW OPENS HERE, and on the plain landing edge rather than inside
+       the shake below: that one is gated on ::WORLD_SHAKE_LAND_MIN so a soft
+       arrival is not an impact, and a hook can set a player down gently. The
+       climb should not depend on how hard they hit.
+       Cleared whether or not it was earned, so a lift that ended in a landing
+       cannot be spent twice.
+       *창이 이곳에서 열리며*, 아래의 흔들림 안이 아니라 평범한 착지 엣지에서 열립니다. 그쪽은
+       부드러운 도착이 충격이 아니도록 ::WORLD_SHAKE_LAND_MIN으로 걸러져 있는데, 훅은
+       플레이어를 부드럽게 내려놓을 수 있습니다. 등반이 얼마나 세게 부딪혔는지에 달려서는
+       안 됩니다.
+       얻었든 아니든 지우므로, 착지로 끝난 들어 올림을 두 번 쓸 수 없습니다. */
+    if (was_air && w->player.grounded) {
+        if (w->player.hook_air) w->player.climb_grace = PLAYER_CLIMB_GRACE;
+        w->player.hook_air = 0;
+    }
+
     if (was_air && w->player.grounded && fall > WORLD_SHAKE_LAND_MIN) {
         world_shake(w, WORLD_SHAKE_LAND * (fall / WORLD_SHAKE_LAND_MIN - 1.0f));
 

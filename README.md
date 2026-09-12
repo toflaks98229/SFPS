@@ -22,7 +22,7 @@ Models, materials, sounds and levels are all authored as text and hot-reload
 into the running game.
 
 ```
-1,054,208 / 1,474,560 bytes   (71.49% used)
+1,054,720 / 1,474,560 bytes   (71.53% used)
 ```
 
 ## Build
@@ -953,20 +953,32 @@ Contact positions are placed a 2mm `SKIN` clear of the surface: feet landed
 cancels every step-up.
 
 **A wall is climbed without looking at its top.** Hold into a surface while
-airborne and you rise for `PLAYER_CLIMB_TIME`, spent from a budget that refills
-only when your feet are on a floor — Overwatch's rule, and the reason it works
-on geometry nobody authored for it. The version before it probed for a standable
-lip within a hand's reach and rose only when it found one, which sounds like the
-careful choice and is exactly why it almost never fired: of the walls standing
-beside a spot you can stand on in `lqdm4`, 48% have their top within 1.5m and
-then there is *nothing* until 4.5m. A player at the foot of a wall is usually at
-the foot of the second kind, and a 1.30m reach reaches into the gap between
-them. The budget puts the ceiling at **9.20m**, measured — a jump held into a
-wall mounts that and fails at 9.25m. It was 3.00m, the hook's arrival launch to
-the centimetre and inside that empty band, so the cheap way up and the expensive
-one agreed about how tall the world is and neither opened a route the map never
-drew. Tripling the climb speed gave both of those up: the free move now beats the
-grapple for height and reaches the 4.5m storey.
+airborne and you rise for `PLAYER_CLIMB_TIME` — Overwatch's rule, and the reason
+it works on geometry nobody authored for it. The version before it probed for a
+standable lip within a hand's reach and rose only when it found one, which
+sounds like the careful choice and is exactly why it almost never fired: of the
+walls standing beside a spot you can stand on in `lqdm4`, 48% have their top
+within 1.5m and then there is *nothing* until 4.5m. A player at the foot of a
+wall is usually at the foot of the second kind, and a 1.30m reach reaches into
+the gap between them. The budget puts the ceiling at **9.20m**, measured — a
+jump held into a wall mounts that and fails at 9.25m.
+
+**But you only get one if the hook just put you down.** The budget used to
+refill on every landing, and tripling the climb speed to reach that 9.20m turned
+it from a movement option into a key to the arena: no aim, no cooldown, no
+resource, and it beat the grapple at the grapple's own job. It is lent now
+rather than owned — a landing the hook lifted you into opens a
+`PLAYER_CLIMB_GRACE` window of **0.8 seconds**, and outside that window a wall
+is a wall. The clock starts at the landing rather than at the throw, because the
+landing is the moment you can act on, and it runs while you stand there
+deciding: 0.8 seconds is the whole budget for *hook, land, turn, jump*, not 0.8
+seconds of climbing. The climb itself is still `PLAYER_CLIMB_TIME` and the
+shorter of the two is what ends it.
+
+The two heights now say something they could not while the climb was free.
+3.00m was the hook's arrival launch to the centimetre, so the cheap way up and
+the expensive one agreed about how tall the world is; 9.20m is deliberately
+taller than the hook reaches, and the only way to it is through the hook.
 
 `build\movetest.exe` steps the simulation headlessly and checks all of it,
 including 4000 randomised frames that must never end inside a box.

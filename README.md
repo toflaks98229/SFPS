@@ -7,6 +7,17 @@ Inspired by [QUOD](https://daivuk.itch.io/quod), which did the same thing in
 64KB. Our budget is 22× that, so the extreme demoscene tricks are optional; the
 discipline is not.
 
+**▶ Play it in a browser: https://toflaks98229.github.io/SFPS/**
+
+The same game compiled to WebAssembly — same C, same baked assets, same look.
+Mouse and keyboard: `WASD`, mouse look, left click to fire, right click for the
+hook. 864KB over the wire, which is under the floppy the desktop build is named
+after, though nothing required that and section 3 of
+[docs/WEBGL_PROPOSAL.md](docs/WEBGL_PROPOSAL.md) says why it is a coincidence
+rather than a target. `build_web.ps1` builds it; `build_web.ps1 -Test` replays
+thirty seconds of recorded input under wasm and checks that 22 fields of the
+resulting world match the desktop build float for float.
+
 ## Status
 
 A small but complete FPS loop, start to finish. Win32 window → OpenGL 3.3 core

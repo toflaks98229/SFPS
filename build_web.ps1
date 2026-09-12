@@ -16,7 +16,8 @@
 
 param(
     [switch]$Debug,   # -O0 -g, assertions on, readable stack traces
-    [switch]$Serve    # start a local server and print the URL
+    [switch]$Serve,   # start a local server and print the URL
+    [switch]$Test     # build the demo regression for node and run it
 )
 
 $ErrorActionPreference = 'Stop'
@@ -68,6 +69,58 @@ $win32Only = @('main.c', 'gl.c', 'plat_win32.c', 'audio_win32.c')
 $sources = Get-ChildItem (Join-Path $root 'src') -Filter *.c |
            Where-Object { $win32Only -notcontains $_.Name } |
            ForEach-Object { $_.FullName }
+
+# ------------------------------------------------------------------- -Test --
+#
+# DOES THE SIMULATION COMPUTE THE SAME ANSWERS ON THE OTHER HOST? That is the
+# one question a web port can get wrong in a way no screenshot shows, and
+# tools\demotest.c was already built to answer it: it replays thirty seconds of
+# recorded input and compares 22 fields of the resulting World -- position,
+# velocity, yaw, health, four RNG states, enemy counts, world_time -- against a
+# GOLDEN digest, float for float with no tolerance.
+#
+# UNDER NODE RATHER THAN A BROWSER, because nothing about this needs a canvas.
+# demotest touches no GL, no audio and no save; it is the world and the clock.
+# Running it headless is what makes it a check somebody will run rather than a
+# thing somebody clicks through.
+#
+# main_web.c IS EXCLUDED HERE AND ONLY HERE: it has a main() of its own and
+# demotest has one too. Every other web platform file stays, so the link is the
+# same set of symbols the browser build resolves.
+#
+# *시뮬레이션이 다른 호스트에서 같은 답을 내는가?* 웹 이식이 틀릴 수 있으면서 어떤 스크린샷도
+# 보여 주지 않는 유일한 질문이 그것이며, tools\demotest.c가 이미 그것에 답하려고 만들어져
+# 있었습니다. 기록된 30초의 입력을 재생하고 그 결과 World의 22개 필드를 GOLDEN 다이제스트와
+# 비교합니다. 위치, 속도, yaw, 체력, RNG 상태 넷, 적 수, world_time을 부동소수점 단위로,
+# 허용 오차 없이.
+#
+# *브라우저가 아니라 node에서* 돌립니다. 이것의 어떤 부분도 캔버스를 필요로 하지 않기
+# 때문입니다. demotest는 GL도 오디오도 세이브도 건드리지 않으며 월드와 시계뿐입니다. 헤드리스로
+# 돌리는 것이, 누군가 클릭해 보는 것이 아니라 누군가 *돌릴* 검사로 만듭니다.
+if ($Test) {
+    $node = Join-Path $root 'tools\emsdk\node'
+    $nodeExe = Get-ChildItem $node -Filter node.exe -Recurse -ErrorAction SilentlyContinue |
+               Select-Object -First 1 -ExpandProperty FullName
+    if (-not $nodeExe) { $nodeExe = 'node' }
+
+    $testOut = Join-Path $outDir 'demotest.js'
+    if (-not (Test-Path $outDir)) { New-Item -ItemType Directory $outDir -Force | Out-Null }
+
+    $testSources = $sources | Where-Object { (Split-Path $_ -Leaf) -ne 'main_web.c' }
+
+    Write-Host "`nBuilding the demo regression for node..." -ForegroundColor Cyan
+    & $emcc '-std=gnu11' '-O2' '-I' (Join-Path $root 'src') '-I' (Join-Path $root 'tools') `
+            (Join-Path $root 'tools\demotest.c') @testSources `
+            '-sENVIRONMENT=node' '-sINITIAL_MEMORY=33554432' '-sSTACK_SIZE=1048576' `
+            '-sEXIT_RUNTIME=1' -o $testOut
+    if ($LASTEXITCODE -ne 0) { throw "emcc failed building demotest (exit $LASTEXITCODE)" }
+
+    & $nodeExe $testOut
+    if ($LASTEXITCODE -ne 0) { throw "the wasm build does NOT reproduce the golden digest (exit $LASTEXITCODE)" }
+
+    Write-Host "`n  the two hosts agree, float for float" -ForegroundColor Green
+    exit 0
+}
 
 Write-Host ("Compiling {0} file(s) for the web..." -f $sources.Count) -ForegroundColor Cyan
 foreach ($n in $webOnly) { Write-Host ("  platform: {0}" -f $n) -ForegroundColor DarkGray }

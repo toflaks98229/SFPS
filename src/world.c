@@ -2502,6 +2502,28 @@ int world_load_level(World *w, const char *name, WorldEnter how) {
     }
     world_progress_write(w, &start);
 
+    /* THE TRIP THROUGH THE AIR IS OVER, whatever it was. Neither of these is
+       carried by ::PlayerProgress and neither should be: they describe where
+       the player was a moment ago, not what they own.
+       THE BUG THIS CLOSES. ::Player::hook_air is set when the hook lifts and
+       cleared when the feet land -- and a lift that never reached a landing,
+       because the player died in the air or the stage ended first, left it set.
+       The next ordinary landing, a life or a level later, then read it and
+       granted a climb the hook had not earned. ::climb_grace is cleared beside
+       it for the milder version of the same thing: hook, land, walk through an
+       exit inside 0.8 seconds, and the window used to arrive in the next stage.
+       *체공은 그것이 무엇이었든 끝났습니다.* 둘 중 어느 것도 ::PlayerProgress가 나르지 않으며
+       나르지 않아야 합니다. 그것들은 플레이어가 조금 전에 어디 있었는지를 서술하며 무엇을
+       가졌는지가 아닙니다.
+       *이것이 닫는 버그.* ::Player::hook_air는 훅이 들어 올릴 때 세워지고 발이 닿을 때
+       지워집니다. 그리고 착지에 이르지 못한 들어 올림은, 플레이어가 공중에서 죽거나 스테이지가
+       먼저 끝나서, 그것을 세워진 채로 남겼습니다. 그러면 한 생명 뒤 또는 한 레벨 뒤의 평범한
+       착지가 그것을 읽고 훅이 벌지 않은 등반을 허락했습니다. ::climb_grace를 그 옆에서 지우는
+       것은 같은 일의 더 순한 판본을 위해서입니다. 걸고, 내리고, 0.8초 안에 출구를 걸어 나가면
+       그 창이 다음 스테이지에 도착하곤 했습니다. */
+    w->player.hook_air    = 0;
+    w->player.climb_grace = 0.0f;
+
     /* Whatever the arm above decided, the player is now standing in this stage
        holding it -- and THAT is the checkpoint a restart of this stage
        restores. Read back out of the world rather than copied from `start`,

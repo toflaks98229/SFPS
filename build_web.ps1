@@ -5,14 +5,14 @@
 # different C dialect, a different set of platform files, a different notion of
 # what "the output" even is (one file against three). Folding them together
 # would put an -if around every line of build.ps1 and leave neither readable.
-# What IS shared -- which files are the other host's -- lives in build.ps1 as
-# $webOnly and is read from here, because two lists is how they drift.
+# What IS shared -- which files belong to which host -- lives in hosts.ps1,
+# which both scripts dot-source, because two lists is how they drift.
 #
 # 왜 build.ps1의 스위치가 아니라 별도 스크립트인가. 두 빌드는 소스 목록만 공유하고 그 외에는
 # 아무것도 공유하지 않습니다. 컴파일러가 다르고, C 방언이 다르고, 플랫폼 파일 집합이 다르고,
 # "출력"이 무엇인지조차 다릅니다(하나 대 셋). 둘을 접어 넣으면 build.ps1의 모든 줄에 if가 붙고
-# 어느 쪽도 읽을 수 없게 됩니다. *공유되는 것*, 즉 어떤 파일이 다른 호스트의 것인가는
-# build.ps1에 $webOnly로 있고 이곳에서 읽어 옵니다. 목록이 둘이면 어긋나기 때문입니다.
+# 어느 쪽도 읽을 수 없게 됩니다. *공유되는 것*, 즉 어떤 파일이 어느 호스트의 것인가는
+# hosts.ps1에 있고 두 스크립트가 그것을 dot-source합니다. 목록이 둘이면 어긋나기 때문입니다.
 
 param(
     [switch]$Debug,   # -O0 -g, assertions on, readable stack traces
@@ -44,31 +44,62 @@ if (-not (Test-Path $emcc)) {
 
 # --- which files are the other host's ---------------------------------------
 #
-# Read out of build.ps1 rather than repeated. The regex is narrow on purpose: if
-# somebody rewrites that line into a different shape this throws instead of
-# silently compiling the Win32 files into a wasm, which fails a hundred lines
-# later with windows.h errors that look like a toolchain problem.
+# hosts.ps1 names both sides, and build.ps1 reads the same file. Everything in
+# src\ that is not the Win32 host's is compiled here.
 #
-# 반복하지 않고 build.ps1에서 읽어 옵니다. 정규식이 좁은 것은 의도적입니다. 누군가 그 줄을 다른
-# 형태로 고쳐 쓰면 이곳은 조용히 Win32 파일을 wasm에 컴파일해 넣는 대신 예외를 던집니다. 그러지
-# 않으면 백 줄 뒤에 툴체인 문제처럼 보이는 windows.h 오류로 실패합니다.
-$buildPs1 = Get-Content (Join-Path $root 'build.ps1') -Raw
-if ($buildPs1 -notmatch '(?m)^\$webOnly\s*=\s*@\(([^)]*)\)') {
-    throw 'build.ps1 no longer defines $webOnly in the shape this script reads.'
-}
-$webOnly = $matches[1] -split ',' | ForEach-Object { $_.Trim().Trim("'") } |
-           Where-Object { $_ }
-
-# The Win32 half, named here because this is the script that has to exclude it.
-# Kept as the complement of $webOnly rather than as a second hand-written list:
-# these four are what build.ps1's $platform hash already names, and asking that
-# hash would mean parsing a multi-line literal for no gain.
-# Win32 절반이며, 그것을 제외해야 하는 스크립트가 이곳이므로 이곳에서 이름 붙입니다.
-$win32Only = @('main.c', 'gl.c', 'plat_win32.c', 'audio_win32.c')
+# hosts.ps1이 양쪽을 이름 붙이며 build.ps1도 같은 파일을 읽습니다. src\에서 Win32 호스트의
+# 것이 아닌 전부를 이곳에서 컴파일합니다.
+. (Join-Path $root 'hosts.ps1')
 
 $sources = Get-ChildItem (Join-Path $root 'src') -Filter *.c |
-           Where-Object { $win32Only -notcontains $_.Name } |
+           Where-Object { -not $win32Only.ContainsKey($_.Name) } |
            ForEach-Object { $_.FullName }
+
+if (-not (Test-Path $outDir)) { New-Item -ItemType Directory $outDir -Force | Out-Null }
+
+# --- what both wasm builds share --------------------------------------------
+#
+# The browser build and -Test's node build are the same C for two environments,
+# and -Test answers for the browser only while they ARE the same. Named once so
+# a stack or memory change cannot reach one of them alone.
+#
+# 브라우저 빌드와 -Test의 node 빌드는 두 환경을 위한 같은 C이며, -Test는 둘이 *같은* 동안에만
+# 브라우저에 대해 답합니다. 스택이나 메모리 변경이 둘 중 하나에만 닿을 수 없도록 한 번만
+# 이름 붙입니다.
+
+# -std=gnu11 AND NOT c11, which is the one dialect difference between the two
+# hosts and it is forced: EM_ASM refuses to expand outside a GNU mode, and
+# plat_web.c, audio_web.c and main_web.c all need it to reach the browser at
+# all. gnu11 is c11 plus extensions, so nothing this project writes changes
+# meaning -- and the desktop build stays c11, which is the stricter of the two
+# and the one the 41 suites run, so an extension that crept into a portable
+# file fails there rather than shipping.
+#
+# *c11이 아니라 gnu11이며*, 두 호스트 사이의 유일한 방언 차이이고 강제된 것입니다. EM_ASM은
+# GNU 모드 밖에서 확장을 거부하며, plat_web.c와 audio_web.c와 main_web.c가 브라우저에 닿으려면
+# 전부 그것이 필요합니다. gnu11은 c11에 확장을 더한 것이므로 이 프로젝트가 쓰는 어떤 것도 의미가
+# 달라지지 않습니다. 그리고 데스크톱 빌드는 c11로 남으며, 그쪽이 더 엄격하고 41개 스위트가 도는
+# 쪽이므로, 이식 가능한 파일에 끼어든 확장은 배포되는 대신 그곳에서 실패합니다.
+$dialect = @('-std=gnu11', '-I', (Join-Path $root 'src'))
+
+$memory = @(
+    # 8,214,512 bytes of .bss on the desktop build, plus the heap. 32MB with no
+    # growth: growth costs a check on every access and this game's footprint is
+    # known at link time rather than discovered at run time.
+    # 데스크톱 빌드의 .bss가 8,214,512바이트이고 그 위에 힙이 얹힙니다. 증가 없이 32MB입니다.
+    # 증가는 모든 접근에 검사 비용을 물리며, 이 게임의 사용량은 실행 중에 발견되는 것이 아니라
+    # 링크 시점에 알려져 있습니다.
+    '-sINITIAL_MEMORY=33554432', '-sALLOW_MEMORY_GROWTH=0',
+
+    # world_progress_for_stage's frame is 33,424 bytes, measured with
+    # -Wstack-usage. Emscripten's default stack is 64KB and that is close enough
+    # to be a bad place to stand: an overflow here does not fault, it quietly
+    # writes over whatever is below.
+    # world_progress_for_stage의 프레임이 -Wstack-usage로 재어 33,424바이트입니다.
+    # Emscripten의 기본 스택은 64KB이며 서 있기에 나쁜 만큼 가깝습니다. 이곳의 넘침은 오류를
+    # 내지 않고 아래에 있는 것을 조용히 덮어씁니다.
+    '-sSTACK_SIZE=1048576'
+)
 
 # ------------------------------------------------------------------- -Test --
 #
@@ -104,15 +135,13 @@ if ($Test) {
     if (-not $nodeExe) { $nodeExe = 'node' }
 
     $testOut = Join-Path $outDir 'demotest.js'
-    if (-not (Test-Path $outDir)) { New-Item -ItemType Directory $outDir -Force | Out-Null }
 
     $testSources = $sources | Where-Object { (Split-Path $_ -Leaf) -ne 'main_web.c' }
 
     Write-Host "`nBuilding the demo regression for node..." -ForegroundColor Cyan
-    & $emcc '-std=gnu11' '-O2' '-I' (Join-Path $root 'src') '-I' (Join-Path $root 'tools') `
-            (Join-Path $root 'tools\demotest.c') @testSources `
-            '-sENVIRONMENT=node' '-sINITIAL_MEMORY=33554432' '-sSTACK_SIZE=1048576' `
-            '-sEXIT_RUNTIME=1' -o $testOut
+    & $emcc @dialect '-O2' '-I' (Join-Path $root 'tools') `
+            (Join-Path $root 'tools\demotest.c') @testSources @memory `
+            '-sENVIRONMENT=node' '-sEXIT_RUNTIME=1' -o $testOut
     if ($LASTEXITCODE -ne 0) { throw "emcc failed building demotest (exit $LASTEXITCODE)" }
 
     & $nodeExe $testOut
@@ -131,24 +160,8 @@ foreach ($n in $webOnly) { Write-Host ("  platform: {0}" -f $n) -ForegroundColor
 # 웹 빌드도 옆에 파일이 없기는 마찬가지입니다.
 & (Join-Path $root 'bake.ps1')
 
-if (-not (Test-Path $outDir)) { New-Item -ItemType Directory $outDir -Force | Out-Null }
-
 # --- flags ------------------------------------------------------------------
-#
-# -std=gnu11 AND NOT c11, which is the one dialect difference between the two
-# hosts and it is forced: EM_ASM refuses to expand outside a GNU mode, and
-# plat_web.c, audio_web.c and main_web.c all need it to reach the browser at
-# all. gnu11 is c11 plus extensions, so nothing this project writes changes
-# meaning -- and the desktop build stays c11, which is the stricter of the two
-# and the one the 41 suites run, so an extension that crept into a portable
-# file fails there rather than shipping.
-#
-# *c11이 아니라 gnu11이며*, 두 호스트 사이의 유일한 방언 차이이고 강제된 것입니다. EM_ASM은
-# GNU 모드 밖에서 확장을 거부하며, plat_web.c와 audio_web.c와 main_web.c가 브라우저에 닿으려면
-# 전부 그것이 필요합니다. gnu11은 c11에 확장을 더한 것이므로 이 프로젝트가 쓰는 어떤 것도 의미가
-# 달라지지 않습니다. 그리고 데스크톱 빌드는 c11로 남으며, 그쪽이 더 엄격하고 41개 스위트가 도는
-# 쪽이므로, 이식 가능한 파일에 끼어든 확장은 배포되는 대신 그곳에서 실패합니다.
-$flags = @('-std=gnu11', '-Wall', '-Wextra', '-I', (Join-Path $root 'src'))
+$flags = $dialect + @('-Wall', '-Wextra')
 
 if ($Debug) {
     $flags += @('-O0', '-g', '-sASSERTIONS=2', '-sSAFE_HEAP=1', '-DDEBUG_HUD')
@@ -164,23 +177,6 @@ $link = @(
     # 돌려주는 것을 막고, MAX는 아무도 가지 않을 WebGL 1 경로를 컴파일해 넣는 것을 막습니다.
     '-sMIN_WEBGL_VERSION=2', '-sMAX_WEBGL_VERSION=2',
 
-    # 8,214,512 bytes of .bss on the desktop build, plus the heap. 32MB with no
-    # growth: growth costs a check on every access and this game's footprint is
-    # known at link time rather than discovered at run time.
-    # 데스크톱 빌드의 .bss가 8,214,512바이트이고 그 위에 힙이 얹힙니다. 증가 없이 32MB입니다.
-    # 증가는 모든 접근에 검사 비용을 물리며, 이 게임의 사용량은 실행 중에 발견되는 것이 아니라
-    # 링크 시점에 알려져 있습니다.
-    '-sINITIAL_MEMORY=33554432', '-sALLOW_MEMORY_GROWTH=0',
-
-    # world_progress_for_stage's frame is 33,424 bytes, measured with
-    # -Wstack-usage. Emscripten's default stack is 64KB and that is close enough
-    # to be a bad place to stand: an overflow here does not fault, it quietly
-    # writes over whatever is below.
-    # world_progress_for_stage의 프레임이 -Wstack-usage로 재어 33,424바이트입니다.
-    # Emscripten의 기본 스택은 64KB이며 서 있기에 나쁜 만큼 가깝습니다. 이곳의 넘침은 오류를
-    # 내지 않고 아래에 있는 것을 조용히 덮어씁니다.
-    '-sSTACK_SIZE=1048576',
-
     # save.c writes with fopen and plat_web.c mounts IDBFS under it.
     # save.c는 fopen으로 쓰고 plat_web.c가 그 아래에 IDBFS를 마운트합니다.
     '-lidbfs.js',
@@ -195,7 +191,7 @@ $link = @(
 )
 
 $out = Join-Path $outDir 'index.html'
-& $emcc @flags @sources @link -o $out
+& $emcc @flags @sources @memory @link -o $out
 if ($LASTEXITCODE -ne 0) { throw "emcc failed (exit $LASTEXITCODE)" }
 
 # --- what it weighs ---------------------------------------------------------
@@ -209,9 +205,17 @@ if ($LASTEXITCODE -ne 0) { throw "emcc failed (exit $LASTEXITCODE)" }
 # says plainly that a web build has no reason to inherit it. Printed beside it
 # because it is interesting, not because it is a limit.
 #
+# THE index.* FILES AND NOTHING ELSE IN THE DIRECTORY, which also collects what
+# is never uploaded -- -Test's demotest.*, a zipped copy -- and counting those
+# would weigh a page nobody downloads.
+#
 # *중요한 수는 방문자가 내려받는 양*이며 디스크에 있는 양이 아닙니다. 그리고 정적 호스팅에서
 # 그것은 gzip입니다. 추측이 아니라 측정합니다. docs/WEBGL_PROPOSAL.md의 §3이 오랫동안 추정으로
 # 있었고 그것을 끝내는 것이 이 스크립트이기 때문입니다.
+#
+# index.* 파일만이며 디렉토리의 다른 것은 세지 않습니다. 그 디렉토리에는 업로드되지 않는
+# 것들도 쌓입니다. -Test의 demotest.*, 압축한 사본. 그것들을 세면 아무도 내려받지 않는 페이지의
+# 무게를 재게 됩니다.
 function Get-GzipSize([string]$path) {
     $raw = [System.IO.File]::ReadAllBytes($path)
     $ms  = New-Object System.IO.MemoryStream
@@ -223,7 +227,7 @@ function Get-GzipSize([string]$path) {
 
 Write-Host "`n  === WHAT A VISITOR DOWNLOADS ===`n" -ForegroundColor Cyan
 $totalRaw = 0; $totalGz = 0
-foreach ($f in (Get-ChildItem $outDir -File | Sort-Object Name)) {
+foreach ($f in (Get-ChildItem $outDir -File -Filter 'index.*' | Sort-Object Name)) {
     $gz = Get-GzipSize $f.FullName
     $totalRaw += $f.Length; $totalGz += $gz
     Write-Host ("  {0,-14} {1,12:N0}  ->{2,12:N0} gzip" -f $f.Name, $f.Length, $gz)
@@ -234,6 +238,6 @@ Write-Host ("`n  the floppy, for scale: {0:N0} bytes (the .exe's budget, not thi
 if ($Serve) {
     Write-Host "`n  http://localhost:8000/  (Ctrl+C to stop)" -ForegroundColor Green
     Push-Location $outDir
-    try { & (Join-Path $root 'tools\emsdk\upstream\emscripten\emrun.bat') --no_browser --port 8000 . }
+    try { & (Join-Path (Split-Path $emcc) 'emrun.bat') --no_browser --port 8000 . }
     finally { Pop-Location }
 }

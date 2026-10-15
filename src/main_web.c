@@ -28,8 +28,9 @@
  * 3. STARTING IS ASYNCHRONOUS, and that is the one real awkwardness. The save
  *    lives in IndexedDB and arrives through a callback, and ::save_init reads
  *    it during start-up -- so start-up cannot be a straight line. ::main asks
- *    for the load and ::boot is what happens when it lands. Everything else
- *    happens in the order app_start does it, which is the order it has to be.
+ *    for the load and ::sfps_boot is what happens when it lands. Everything
+ *    else happens in the order app_start does it, which is the order it has
+ *    to be.
  *
  * 한국어
  * ------
@@ -55,7 +56,7 @@
  *
  * 3. *시작이 비동기이며*, 그것이 유일한 진짜 껄끄러움입니다. 저장은 IndexedDB에 있고 콜백으로
  *    도착하는데 ::save_init이 시작 중에 그것을 읽습니다. 그래서 시작이 직선일 수 없습니다.
- *    ::main이 로드를 요청하고 ::boot이 그것이 도착했을 때 일어나는 일입니다. 나머지 전부는
+ *    ::main이 로드를 요청하고 ::sfps_boot이 그것이 도착했을 때 일어나는 일입니다. 나머지 전부는
  *    app_start가 하는 순서대로 일어나며, 그 순서여야만 합니다.
  */
 #include "world.h"
@@ -85,7 +86,6 @@ static Scene g_scene;
 
 static int   g_vw = 960, g_vh = 540;
 static double g_prev_ms;
-static int   g_started;
 
 /* --- input / 입력 --- */
 
@@ -99,7 +99,6 @@ static int g_keys[K_COUNT];
 
 static int   g_mouse_down, g_hook_down;
 static float g_look_dx, g_look_dy;
-static float g_mouse_x, g_mouse_y;
 static int   g_locked;
 
 /* The edges a window sees and a frame consumes, cleared by construction the
@@ -148,7 +147,7 @@ static void size_to_window(void) {
 
 static EM_BOOL on_resize(int t, const EmscriptenUiEvent *e, void *u) {
     (void)t; (void)e; (void)u;
-    if (g_started) size_to_window();
+    size_to_window();
     return EM_TRUE;
 }
 
@@ -227,10 +226,8 @@ static EM_BOOL on_mouse_move(int t, const EmscriptenMouseEvent *e, void *u) {
            느린 것보다 짧아집니다. */
         g_look_dx += (float)e->movementX;
         g_look_dy += (float)e->movementY;
-    } else {
-        g_mouse_x = (float)e->targetX;
-        g_mouse_y = (float)e->targetY;
-        if (menu_is_open()) menu_hover(g_mouse_x, g_mouse_y, g_vw, g_vh);
+    } else if (menu_is_open()) {
+        menu_hover((float)e->targetX, (float)e->targetY, g_vw, g_vh);
     }
     return EM_TRUE;
 }
@@ -240,22 +237,20 @@ static EM_BOOL on_mouse_down(int t, const EmscriptenMouseEvent *e, void *u) {
 
     /* THE CLICK CARRIES ITS OWN POSITION, and reading the one a previous move
        left behind was wrong. Found by clicking STORY in a browser and watching
-       nothing happen: the pointer had never MOVED over the canvas, so
-       ::g_mouse_x was still 0 and the menu was asked what is at the top-left
-       corner, which is nothing. A person nudges the mouse before clicking and
-       would never have seen it; a synthetic click does not, and neither does
-       anybody who tabs to the page and clicks without moving.
+       nothing happen: the pointer had never MOVED over the canvas, so the
+       position the last move left behind was still 0 and the menu was asked
+       what is at the top-left corner, which is nothing. A person nudges the
+       mouse before clicking and would never have seen it; a synthetic click
+       does not, and neither does anybody who tabs to the page and clicks
+       without moving.
        *클릭은 자기 위치를 지니고 있으며*, 이전 이동이 남긴 것을 읽는 것은 틀렸습니다.
        브라우저에서 STORY를 클릭했는데 아무 일도 일어나지 않는 것을 보고 찾았습니다. 포인터가
-       캔버스 위에서 *움직인* 적이 없어 ::g_mouse_x가 여전히 0이었고, 메뉴는 좌상단 모서리에
-       무엇이 있는지 질문받았으며 그곳에는 아무것도 없습니다. 사람은 클릭 전에 마우스를 조금
-       움직이므로 결코 보지 못했을 것입니다. 합성된 클릭은 그러지 않으며, 페이지에 탭으로 들어와
-       움직이지 않고 클릭하는 사람도 마찬가지입니다. */
-    g_mouse_x = (float)e->targetX;
-    g_mouse_y = (float)e->targetY;
-
+       캔버스 위에서 *움직인* 적이 없어 마지막 이동이 남긴 위치가 여전히 0이었고, 메뉴는
+       좌상단 모서리에 무엇이 있는지 질문받았으며 그곳에는 아무것도 없습니다. 사람은 클릭
+       전에 마우스를 조금 움직이므로 결코 보지 못했을 것입니다. 합성된 클릭은 그러지 않으며,
+       페이지에 탭으로 들어와 움직이지 않고 클릭하는 사람도 마찬가지입니다. */
     if (menu_is_open()) {
-        menu_click(g_mouse_x, g_mouse_y, g_vw, g_vh, e->button == 2);
+        menu_click((float)e->targetX, (float)e->targetY, g_vw, g_vh, e->button == 2);
         return EM_TRUE;
     }
     if (screen_takes_press()) { g_edge.confirm = 1; return EM_TRUE; }
@@ -453,7 +448,7 @@ static void frame(void) {
 
 /* --- start-up / 시작 --- */
 
-static void boot(void) {
+EMSCRIPTEN_KEEPALIVE void sfps_boot(void) {
     if (!glweb_make_context(CANVAS)) {
         plat_fatal("WebGL 2",
                    "This browser would not give a WebGL 2 context. "
@@ -486,16 +481,6 @@ static void boot(void) {
     emscripten_set_pointerlockchange_callback(EMSCRIPTEN_EVENT_TARGET_DOCUMENT, 0,
                                               EM_TRUE, on_lock_change);
 
-    /* The right mouse button is the meat hook, so the context menu has to go
-       or every throw opens one.
-       오른쪽 버튼은 고기 갈고리이므로 컨텍스트 메뉴는 사라져야 합니다. 그러지 않으면 던질
-       때마다 하나씩 열립니다. */
-    EM_ASM({
-        var c = document.querySelector(UTF8ToString($0));
-        if (c) c.addEventListener('contextmenu', function (e) { e.preventDefault(); });
-    }, CANVAS);
-
-    g_started = 1;
     g_prev_ms = emscripten_get_now();
 
     /* fps 0 means "whenever the browser is ready to paint", which is rAF and
@@ -507,8 +492,6 @@ static void boot(void) {
        때문입니다. 이곳에 1을 넘기면 있지도 않은 스택을 풀게 됩니다. */
     emscripten_set_main_loop(frame, 0, 0);
 }
-
-EMSCRIPTEN_KEEPALIVE void sfps_boot(void) { boot(); }
 
 int main(void) {
     /* THE MOUNT FIRST, THEN THE LOAD, THEN EVERYTHING. plat_save_dir creates

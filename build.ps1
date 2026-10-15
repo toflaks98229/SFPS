@@ -47,35 +47,13 @@ if (-not (Test-Path $gcc)) {
 $devkitBin = Join-Path $devkit 'bin'
 if ($env:PATH -notlike "*$devkitBin*") { $env:PATH = "$devkitBin;$env:PATH" }
 
-# The other host's platform files. They live in src/ because that is where a
-# platform file lives -- plat_win32.c does -- but they are compiled by emcc and
-# nothing else, so every path here that walks src\*.c has to step over them.
-#
-# NAMED ONCE, because there are two such paths and they had drifted apart the
-# moment there were. The release build links them into game.exe and fails on a
-# missing emscripten.h; -Portable compiles them against a poisoned windows.h and
-# reports a regression for a header neither of them mentions. Both failures are
-# the same mistake and neither is about portability.
-#
-# A file added here is invisible to the desktop build. That is the point, and it
-# is also the risk: nothing on this side will ever tell you it is broken. What
-# checks them is build_web.ps1 and emcc, and until that script exists the check
-# is running emcc by hand -- which is how they got here.
-#
-# 다른 호스트의 플랫폼 파일들입니다. src/에 있는 이유는 플랫폼 파일이 사는 곳이 그곳이기
-# 때문이며 plat_win32.c가 그러합니다. 다만 이것들을 컴파일하는 것은 emcc뿐이므로, src\*.c를
-# 훑는 이곳의 모든 경로가 이것들을 넘어가야 합니다.
-#
-# *한 번만 이름 붙입니다.* 그런 경로가 둘이고, 둘이 생긴 순간 이미 서로 어긋나 있었기
-# 때문입니다. 릴리스 빌드는 이것들을 game.exe에 링크하려다 없는 emscripten.h에서 실패하고,
-# -Portable은 독을 탄 windows.h에 대고 컴파일해서는 둘 다 언급한 적 없는 헤더 때문에 후퇴를
-# 보고합니다. 두 실패는 같은 실수이며 어느 쪽도 이식성에 관한 것이 아닙니다.
-#
-# 이곳에 추가된 파일은 데스크톱 빌드에 보이지 않습니다. 그것이 요점이고 동시에 위험입니다. 이쪽의
-# 무엇도 그것이 깨졌다고 말해 주지 않습니다. 그것들을 검사하는 것은 build_web.ps1과 emcc이며,
-# 그 스크립트가 생기기 전까지 검사는 emcc를 손으로 돌리는 일입니다. 이것들이 이곳에 오게 된
-# 경위가 그것입니다.
-$webOnly = @('plat_web.c', 'gl_web.c', 'audio_web.c', 'main_web.c')
+# Which src\*.c belong to one host only: $webOnly, emcc's, which every path
+# here that walks src\*.c steps over; and $win32Only, the files allowed to
+# need windows.h. In hosts.ps1 because build_web.ps1 needs both lists too.
+# 한 호스트에만 속하는 src\*.c입니다. $webOnly는 emcc의 것이며 이곳에서 src\*.c를 훑는 모든
+# 경로가 넘어가고, $win32Only는 windows.h가 필요해도 되는 파일들입니다. build_web.ps1도 두
+# 목록이 모두 필요하므로 hosts.ps1에 둡니다.
+. (Join-Path $root 'hosts.ps1')
 
 # ---------------------------------------------------------------- -Portable --
 #
@@ -89,7 +67,7 @@ $webOnly = @('plat_web.c', 'gl_web.c', 'audio_web.c', 'main_web.c')
 # through gl.h, which is exactly how a codebase stops being portable without
 # anyone deciding to.
 #
-# $platform below is the list of files that are ALLOWED to be Windows-only,
+# $win32Only (hosts.ps1) is the list of files that are ALLOWED to be Windows-only,
 # and it is checked in BOTH directions. A file not on the list that fails is a
 # regression. A file ON the list that now passes is a stale list -- somebody
 # did the work and left the entry behind, and the next reader would believe
@@ -105,19 +83,12 @@ $webOnly = @('plat_web.c', 'gl_web.c', 'audio_web.c', 'main_web.c')
 # 조용히 받아 오던 열한 개는 찾지 못합니다. 코드베이스가 아무도 그렇게 정하지 않았는데도
 # 이식성을 잃는 방식이 정확히 그것입니다.
 #
-# 아래 $platform은 Windows 전용이어도 되는 파일 목록이며 *양방향*으로 검사됩니다. 목록에
+# $win32Only(hosts.ps1)는 Windows 전용이어도 되는 파일 목록이며 *양방향*으로 검사됩니다. 목록에
 # 없는 파일이 실패하면 후퇴입니다. 목록에 *있는* 파일이 이제 통과하면 낡은 목록입니다.
 # 누군가 작업을 끝내고 항목을 남겨 둔 것이며, 다음 읽는 사람은 남은 이식 작업이 실제보다
 # 많다고 믿게 됩니다. 둘 다 이곳에서는 실패이며, 이 프로젝트의 다른 곳에 있는
 # _Static_assert가 옆의 열거형에서 조용히 멀어진 표에 반대하는 것과 같은 이유입니다.
 if ($Portable) {
-    $platform = @{
-        'main.c'        = 'the platform layer: window, input, frame loop, WinMM start-up'
-        'gl.c'          = 'WGL context creation'
-        'plat_win32.c'  = 'the Win32 side of plat.h, and meant to be the only one'
-        'audio_win32.c' = 'waveOut, the mixer thread, and the lock the voice table needs'
-    }
-
     $poison = Join-Path $root 'tools\nowin'
     $bad = @(); $stale = @(); $ok = 0
 
@@ -156,11 +127,11 @@ if ($Portable) {
         & $gcc '-std=c11' '-fsyntax-only' '-DHOT_RELOAD' '-I' $poison '-I' (Join-Path $root 'src') $f.FullName 2>$null | Out-Null
         $pure = ($LASTEXITCODE -eq 0)
 
-        if ($platform.ContainsKey($f.Name)) {
+        if ($win32Only.ContainsKey($f.Name)) {
             if ($pure) {
                 $stale += $f.Name
             } else {
-                Write-Host ("  {0,-16} platform  ({1})" -f $f.Name, $platform[$f.Name]) -ForegroundColor DarkGray
+                Write-Host ("  {0,-16} platform  ({1})" -f $f.Name, $win32Only[$f.Name]) -ForegroundColor DarkGray
             }
         } elseif ($pure) {
             $ok++
@@ -170,13 +141,13 @@ if ($Portable) {
     }
 
     $ErrorActionPreference = $prevEAP
-    Write-Host ("`n  {0} portable, {1} declared platform" -f $ok, $platform.Count)
+    Write-Host ("`n  {0} portable, {1} declared platform" -f $ok, $win32Only.Count)
 
     foreach ($f in $bad) {
         Write-Host ("  REGRESSION  {0} reaches windows.h and is not a declared platform file" -f $f) -ForegroundColor Red
     }
     foreach ($f in $stale) {
-        Write-Host ("  STALE LIST  {0} no longer needs windows.h -- remove it from `$platform" -f $f) -ForegroundColor Yellow
+        Write-Host ("  STALE LIST  {0} no longer needs windows.h -- remove it from `$win32Only in hosts.ps1" -f $f) -ForegroundColor Yellow
     }
 
     if ($bad.Count -or $stale.Count) {

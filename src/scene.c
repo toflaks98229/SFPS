@@ -4065,19 +4065,17 @@ void scene_frame(const World *w, Scene *sc, int vw, int vh, int frozen) {
        양자화가 이미지가 실제 래스터화되는 픽셀에 놓입니다. 패스가 꺼져 있으면 post_size가
        0,0을 보고하여 스냅이 비활성화되는데, 픽셀화가 없으면 맞출 격자도 없으므로 올바른
        동작입니다. */
-    {
-        int sw, sh;
-        post_size(&sw, &sh);
-        /* A grid of zero IS the disable, which render.c states of uSnap: "0
-           disables the whole thing". Guarded rather than divided by, because
-           PSX_SNAP_COARSE is 0 now and the division would be one.
-           격자 0이 곧 비활성화이며, render.c가 uSnap에 대해 그렇게 말합니다. 나누지 않고
-           분기하는 이유는 PSX_SNAP_COARSE가 이제 0이고 나눗셈이 성립하지 않기 때문입니다. */
-        if (PSX_SNAP_COARSE > 0.0f)
-            rd_snap((float)sw / PSX_SNAP_COARSE, (float)sh / PSX_SNAP_COARSE);
-        else
-            rd_snap(0.0f, 0.0f);
-    }
+    int sw, sh;
+    post_size(&sw, &sh);
+    /* A grid of zero IS the disable, which render.c states of uSnap: "0
+       disables the whole thing". Guarded rather than divided by, because
+       PSX_SNAP_COARSE is 0 now and the division would be one.
+       격자 0이 곧 비활성화이며, render.c가 uSnap에 대해 그렇게 말합니다. 나누지 않고
+       분기하는 이유는 PSX_SNAP_COARSE가 이제 0이고 나눗셈이 성립하지 않기 때문입니다. */
+    if (PSX_SNAP_COARSE > 0.0f)
+        rd_snap((float)sw / PSX_SNAP_COARSE, (float)sh / PSX_SNAP_COARSE);
+    else
+        rd_snap(0.0f, 0.0f);
 
     /* Set beside the snap and released beside it, because the two are halves of
        one look: the vertices wobble and the texture between them swims. Turning
@@ -4216,26 +4214,19 @@ void scene_frame(const World *w, Scene *sc, int vw, int vh, int frozen) {
     /* WHAT ONE ART PIXEL IS WORTH IN WORLD UNITS, at one unit of distance.
        The tracers state their thickness on screen and need this to turn it into
        a width; ::decal_draw's note says why the thickness is written that way.
-       THE BUFFER, NOT THE WINDOW, for the same reason the vertex snap above
-       asks post_size rather than the client rect: the world is rasterised into
-       the offscreen buffer, and an art pixel is one of ITS pixels. post_size
-       reports 0 when the pass is off, and then the world really is going
-       straight to the window at its own resolution, so `vh` is the right answer
-       there and not a fallback.
+       THE BUFFER, NOT THE WINDOW, and the same post_size answer the vertex
+       snap above used: the world is rasterised into the offscreen buffer, and
+       an art pixel is one of ITS pixels. post_size reports 0 when the pass is
+       off, and then the world really is going straight to the window at its
+       own resolution, so `vh` is the right answer there and not a fallback.
        거리 1에서 아트 픽셀 하나가 월드 단위로 얼마인가입니다. 예광탄은 두께를 화면 기준으로
        진술하며 그것을 폭으로 바꾸려면 이 값이 필요합니다. 두께가 왜 그렇게 적혀 있는지는
        ::decal_draw의 주석에 있습니다.
-       *창이 아니라 버퍼*이며, 위의 정점 스냅이 클라이언트 사각형이 아니라 post_size에 묻는 것과
-       같은 이유입니다. 월드는 오프스크린 버퍼에 래스터화되고, 아트 픽셀은 *그것의* 픽셀입니다.
-       패스가 꺼져 있으면 post_size가 0을 보고하며, 그때 월드는 정말로 자기 해상도로 창에 곧장
-       가므로 `vh`가 그곳에서는 폴백이 아니라 올바른 답입니다. */
-    float px_world;
-    {
-        int aw, ah;
-        post_size(&aw, &ah);
-        float art_h = (float)(ah > 0 ? ah : (vh > 0 ? vh : 1));
-        px_world = 2.0f * tanf(WORLD_FOV * 0.5f) / art_h;
-    }
+       *창이 아니라 버퍼*이며, 위의 정점 스냅이 쓴 것과 같은 post_size의 답입니다. 월드는
+       오프스크린 버퍼에 래스터화되고, 아트 픽셀은 *그것의* 픽셀입니다. 패스가 꺼져 있으면
+       post_size가 0을 보고하며, 그때 월드는 정말로 자기 해상도로 창에 곧장 가므로 `vh`가
+       그곳에서는 폴백이 아니라 올바른 답입니다. */
+    float px_world = 2.0f * tanf(WORLD_FOV * 0.5f) / (float)(sh > 0 ? sh : vh);
     decal_draw(&w->pools, vp, eye_pos, cam.right, cam.up, px_world);
     wpview_draw_world(&sc->wpview, &w->weapon, vp, eye_pos, cam.right, cam.up);
 

@@ -180,16 +180,16 @@ static int px_changed(void) {
     return n;
 }
 
-/* Changed pixels in one column. A straight segment in the world projects to a
-   straight segment on screen, so a column count is proportional to the strip's
-   thickness there -- which is what makes comparing the two ends a measurement
-   of the taper rather than of the projection. */
-static int col_changed(int x) {
+/* Columns with any changed pixel: how far across the screen a change reaches,
+   which tells a streak from a blob of the same pixel count. */
+static int cols_changed(void) {
     int n = 0;
-    for (int y = 0; y < VH; y++) {
-        int i = (y * VW + x) * 3;
-        if (g_px[i] != g_prev[i] || g_px[i+1] != g_prev[i+1] ||
-            g_px[i+2] != g_prev[i+2]) n++;
+    for (int x = 0; x < VW; x++) {
+        for (int y = 0; y < VH; y++) {
+            int i = (y * VW + x) * 3;
+            if (g_px[i] != g_prev[i] || g_px[i+1] != g_prev[i+1] ||
+                g_px[i+2] != g_prev[i+2]) { n++; break; }
+        }
     }
     return n;
 }
@@ -595,8 +595,7 @@ int main(void) {
         frame_hash(&w, &scene, 0);
 
         int one_px = px_changed();
-        int cols = 0;
-        for (int x = 0; x < VW; x++) if (col_changed(x) > 0) cols++;
+        int cols = cols_changed();
         float warm_after = lean(0);
 
         printf("      one tracer: %d pixels over %d columns, warmth %.3f -> %.3f\n",
@@ -684,8 +683,7 @@ int main(void) {
         decal_tracer(&w.pools, muzzle2, hit2);
         frame_hash(&w, &scene, 0);
 
-        int two_cols = 0;
-        for (int x = 0; x < VW; x++) if (col_changed(x) > 0) two_cols++;
+        int two_cols = cols_changed();
         printf("      two tracers: %d pixels over %d columns\n", px_changed(), two_cols);
         ok(two_cols > cols + 60, "two tracers cover more of the screen than one");
 

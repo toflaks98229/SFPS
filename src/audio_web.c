@@ -77,9 +77,12 @@ static int   g_ready;
 
 /* --- what the pump calls / 펌프가 부르는 것 --- */
 
-EMSCRIPTEN_KEEPALIVE short *audio_web_chunk(void) { return g_chunk; }
-
-EMSCRIPTEN_KEEPALIVE void audio_web_fill(void) { audio_mix(g_chunk, FRAMES); }
+/* Mixes the next chunk and says where it is.
+   다음 덩어리를 믹스하고 그것이 어디 있는지 알려 줍니다. */
+EMSCRIPTEN_KEEPALIVE short *audio_web_fill(void) {
+    audio_mix(g_chunk, FRAMES);
+    return g_chunk;
+}
 
 int audio_init(void) {
     if (g_ready) return 1;
@@ -186,8 +189,7 @@ int audio_init(void) {
             var now = ctx.currentTime;
             if (A['next'] < now) A['next'] = now;
             while (A['next'] < now + ahead) {
-                _audio_web_fill();
-                var ptr = _audio_web_chunk() >> 1;
+                var ptr = _audio_web_fill() >> 1;
                 var buf = ctx.createBuffer(1, frames, rate);
                 var out = buf.getChannelData(0);
                 for (var i = 0; i < frames; i++) out[i] = HEAP16[ptr + i] / 32768;
@@ -239,12 +241,12 @@ int audio_dev_lock(void) {
        it holds exactly. The first half describes WHY the only host that existed
        when it was written would answer 0; this host answers 0 for the other
        reason in the same sentence -- there is nothing to race with. See this
-       file's header, and the note added to audio_dev.h.
+       file's header.
        0이며, 헤더 자신의 말이 그것을 덮습니다. "장치가 없어 호출자가 락 없이 진행해도 되면 0...
        0이 반환된 뒤에 ::audio_dev_unlock을 호출하지 *마십시오*." 뒤의 절반이 호출자가 의존하는
        계약이고 정확히 성립합니다. 앞의 절반은 그것이 쓰일 때 존재하던 유일한 호스트가 왜 0으로
        답하는지를 서술합니다. 이 호스트는 같은 문장 안의 다른 이유로 0을 답합니다. 경쟁할 상대가
-       없다는 것입니다. 이 파일의 머리말과 audio_dev.h에 추가된 주석을 보십시오. */
+       없다는 것입니다. 이 파일의 머리말을 보십시오. */
     return 0;
 }
 

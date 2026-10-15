@@ -15,7 +15,14 @@
       through;
     - a line of text that the runtime replaces, so a slow connection says
       something rather than nothing;
-    - tabindex on the canvas, so it can hold keyboard focus.
+    - tabindex on the canvas, so it can hold keyboard focus;
+    - no context menu on the canvas: the right button is the meat hook, and
+      every throw would otherwise open one;
+    - a preload of index.wasm, so the download that is nearly all of the page
+      starts with the HTML instead of waiting for index.js to arrive, run, and
+      ask for it. `crossorigin` is what makes the preload match the loader's
+      own fetch -- credentials "same-origin" -- so it is reused rather than
+      fetched twice. The name is build_web.ps1's output name.
 
   {{{ SCRIPT }}} is where emscripten splices its loader in. It must stay.
 
@@ -30,6 +37,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>MAGICIAN GIRL MAYHEM</title>
+<link rel="preload" href="index.wasm" as="fetch" type="application/wasm" crossorigin>
 <style>
   html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
   canvas { display: block; width: 100vw; height: 100vh; outline: none; background: #000; }

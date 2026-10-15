@@ -657,50 +657,6 @@ void wpview_draw_view(WeaponView *v, const Weapon *w, float aspect) {
 
 /* ------------------------------------------------------------------- HUD */
 
-/**
- * @brief One thick stroke of the crosshair, as two triangles in clip space.
- *
- * ENGLISH: The crosshair used to be GL_LINES at `glLineWidth(2.0f)`, and WebGL
- * reports a supported width range of [1, 1] on every major browser -- the call
- * is accepted and ignored. A stroke that has to be two pixels wide has to be
- * two pixels of geometry.
- *
- * THE SPACE IS ISOTROPIC, which is what makes one thickness enough for arms
- * that run both ways. The caller's uMVP scales x by 1/aspect precisely so a
- * square here is a square on screen, so `w` means the same thing horizontally
- * and vertically and the perpendicular below needs no correction.
- *
- * 한국어: 조준점은 `glLineWidth(2.0f)`의 GL_LINES였고, WebGL은 주요 브라우저 전부에서 지원
- * 폭 범위를 [1, 1]로 보고합니다. 호출은 받아들여지고 무시됩니다. 2픽셀이어야 하는 획은
- * 2픽셀의 지오메트리여야 합니다.
- *
- * *이 공간은 등방성이며*, 그것이 양방향으로 뻗는 팔에 두께 하나로 충분한 이유입니다. 호출자의
- * uMVP는 이곳의 정사각형이 화면에서도 정사각형이 되도록 x를 1/aspect로 스케일하므로, `w`는
- * 가로와 세로에서 같은 것을 뜻하고 아래의 수직 벡터에는 보정이 필요 없습니다.
- */
-static void hud_stroke(MeshBuf *b, float x0, float y0, float x1, float y1, float w) {
-    float dx = x1 - x0, dy = y1 - y0;
-    float len = sqrtf(dx * dx + dy * dy);
-    if (len < 1e-6f) return;
-    float px = -dy / len * w * 0.5f, py = dx / len * w * 0.5f;
-    v3 n = v3f(0, 0, 1);
-
-    /* WOUND COUNTER-CLOCKWISE, in the same corner order ::mb_billboard uses:
-       the two corners at the start, then the two at the end, going round. The
-       caller disables culling and so would draw this either way, which is the
-       reason to get it right here rather than to find out when somebody moves
-       the call and the crosshair vanishes with no error anywhere.
-       *반시계 방향으로 감으며*, ::mb_billboard가 쓰는 것과 같은 모서리 순서입니다. 시작 쪽 두
-       모서리, 그다음 끝 쪽 두 모서리를 돌아갑니다. 호출자가 컬링을 끄므로 어느 쪽으로 감아도
-       그려지며, 바로 그것이 여기서 제대로 해 두어야 할 이유입니다. 그러지 않으면 누군가
-       호출 위치를 옮겼을 때, 어디에도 오류 없이 조준점이 사라지는 것으로 알게 됩니다. */
-    v3 s0 = v3f(x0 - px, y0 - py, 0), e0 = v3f(x1 - px, y1 - py, 0);
-    v3 e1 = v3f(x1 + px, y1 + py, 0), s1 = v3f(x0 + px, y0 + py, 0);
-
-    mb_vtx(b, s0, n, 0, 0); mb_vtx(b, e0, n, 1, 0); mb_vtx(b, e1, n, 1, 1);
-    mb_vtx(b, s0, n, 0, 0); mb_vtx(b, e1, n, 1, 1); mb_vtx(b, s1, n, 0, 1);
-}
-
 void wpview_draw_hud(WeaponView *v, const Weapon *w, float aspect, int hook_ready,
                      int win_h) {
     /* The crosshair belongs to the UI pass: a dithered, magnified reticle is
@@ -726,11 +682,24 @@ void wpview_draw_hud(WeaponView *v, const Weapon *w, float aspect, int hook_read
        됩니다. */
     float stroke = 4.0f / (float)(win_h > 0 ? win_h : 1);
 
+    /* QUADS, NOT GL_LINES. The crosshair used to be GL_LINES at
+       `glLineWidth(2.0f)`, and WebGL reports a supported width range of [1, 1]
+       on every major browser -- the call is accepted and ignored. Each arm is
+       a ::mb_ribbon seen by an eye straight out of the screen, which turns its
+       whole width to the viewer and winds it counter-clockwise. The space is
+       isotropic -- uMVP scales x by 1/aspect precisely so a square here is a
+       square on screen -- so one width serves the arms both ways.
+       *GL_LINES가 아니라 쿼드입니다.* 조준점은 `glLineWidth(2.0f)`의 GL_LINES였고, WebGL은 주요
+       브라우저 전부에서 지원 폭 범위를 [1, 1]로 보고합니다. 호출은 받아들여지고 무시됩니다. 각
+       팔은 화면에서 곧장 나오는 눈이 보는 ::mb_ribbon이며, 그 눈에 폭 전체를 돌리고 반시계
+       방향으로 감깁니다. 이 공간은 등방성이므로(uMVP가 이곳의 정사각형이 화면에서도 정사각형이
+       되도록 x를 1/aspect로 스케일합니다) 폭 하나가 양방향의 팔 모두에 맞습니다. */
+    v3 eye = v3f(0, 0, 1);
     mb_reset(&v->line_buf);
-    hud_stroke(&v->line_buf, -gap - len, 0, -gap, 0, stroke);
-    hud_stroke(&v->line_buf,  gap, 0,  gap + len, 0, stroke);
-    hud_stroke(&v->line_buf, 0, -gap - len, 0, -gap, stroke);
-    hud_stroke(&v->line_buf, 0,  gap, 0,  gap + len, stroke);
+    mb_ribbon(&v->line_buf, v3f(-gap - len, 0, 0), v3f(-gap, 0, 0),       eye, stroke, 1.0f);
+    mb_ribbon(&v->line_buf, v3f( gap, 0, 0),       v3f( gap + len, 0, 0), eye, stroke, 1.0f);
+    mb_ribbon(&v->line_buf, v3f(0, -gap - len, 0), v3f(0, -gap, 0),       eye, stroke, 1.0f);
+    mb_ribbon(&v->line_buf, v3f(0,  gap, 0),       v3f(0,  gap + len, 0), eye, stroke, 1.0f);
     mesh_upload(&v->line_mesh, &v->line_buf, 1);
 
     glDisable(GL_DEPTH_TEST);
@@ -799,7 +768,6 @@ void wpview_draw_hud(WeaponView *v, const Weapon *w, float aspect, int hook_read
            놓여 가늘어지거나 끊길 수 있지만, 폭 1의 GL_LINES는 이어지도록 정의되어 있습니다.
            위의 조준점이 옮겨 가야 했던 것은 2.0이 웹에서 거짓말이기 때문이고, 이것들은
            브라우저가 거절하는 것을 요구한 적이 없습니다. */
-        glLineWidth(1.0f);
         rd_color(0.45f, 0.95f, 0.60f, 0.85f);   /* green: the hook will bite */
         mesh_draw_lines(&v->line_mesh);
     }
